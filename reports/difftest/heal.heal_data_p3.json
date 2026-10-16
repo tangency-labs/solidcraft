@@ -1,0 +1,4643 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#0",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#1",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#2",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#3",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#4",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#5",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#6",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#7",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#8",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#9",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_10",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#10",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_11",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#11",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_12",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#12",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_13",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#13",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_14",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#14",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_15",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#15",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_16",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#16",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_17",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#17",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_18",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#18",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_19",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#19",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_20",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#20",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_21",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#21",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_22",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#22",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_23",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#23",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_24",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#24",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_25",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#25",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "empty_targets_through_26",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#26",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "box_cache_through_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#27",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "box_cache_through_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#28",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "box_cache_through_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#29",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "box_cache_through_3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#30",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "box_cache_through_4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#31",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_0_through_26",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#32",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_2_through_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#33",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_2_through_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#34",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_2_through_26",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#35",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_3_through_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#36",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_3_through_3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#37",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_3_through_26",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#38",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_4_through_4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#39",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_4_through_26",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#40",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "catch_up_done_5_through_26",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#41",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_False_through_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#42",
+      "values_compared": 2738
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_True_through_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#43",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_False_through_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#44",
+      "values_compared": 2738
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_True_through_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#45",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_False_through_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#46",
+      "values_compared": 2738
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_True_through_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#47",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_False_through_25",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#48",
+      "values_compared": 2738
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_True_through_25",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#49",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_False_through_26",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#50",
+      "values_compared": 2738
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tracker_True_through_26",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#51",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_repair_queues_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#52",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_repair_queues_1.0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#53",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_repair_queues_10000.0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#54",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_through_stage3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#55 (upstream tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep (HealTgts order))",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_through_stage3_faces_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#56 (upstream tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep (HealTgts order))",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_healbrep_all",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#57 (upstream tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep)",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_healbrep_all_faces_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#58 (upstream tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep)",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_fix_infinite_region",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#59 (upstream SmHealData::HealTgts last step)",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_fix_infinite_region_faces_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#60 (upstream SmHealData::HealTgts last step)",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_reset",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#61 (upstream SmHealData::HealBrep ReSet(TRUE))",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_heal_box_10_reset_faces_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#62 (upstream SmHealData::HealBrep ReSet(TRUE))",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_squeeze_edge_box_stage2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#63 (upstream tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal)",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_seams_squeeze_edge_box_stage2_faces_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#64 (upstream tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal)",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "replace_initialized_target_kind_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#65",
+      "values_compared": 2934
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "replace_initialized_target_kind_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#66",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "duplicate_unrelated_removals_are_valid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#67",
+      "values_compared": 2738
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "single_vertex_sphere_rebuild_swap_False",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#68 (upstream tests/prog_test/src/smTopoTest.cpp:4572 my_test_heal_single_vertex_sphere (Fix_DegenFaces target))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "single_vertex_sphere_rebuild_swap_True",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/boundaries.json#69 (upstream tests/prog_test/src/smTopoTest.cpp:4572 my_test_heal_single_vertex_sphere (Fix_DegenFaces target))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_forged_done_6_unsized_voxels",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#0 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_forged_done_8_unsized_voxels",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#1 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_forged_done_9_unsized_voxels",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#2 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_forged_done_16_unsized_voxels",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#3 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_forged_done_26_unsized_voxels",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#4 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_valid_initialized_voxels",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#5 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_valid_no_prior_targets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#6 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_valid_below_coin_through",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#7 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_valid_below_coin_done",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#8 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_valid_remove_all_prior_vertices",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#9 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_null_face_fix_degen_faces",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#10 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_null_face_fix_split_edges_at_seam",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#11 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_null_face_fix_split_face_at_seams",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#12 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_crossed_neither_updates_flags",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#13 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_wire_forged_done_6_unsized_voxels",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#14 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_wire_forged_done_8_unsized_voxels",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#15 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_wire_forged_done_9_unsized_voxels",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#16 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_wire_forged_done_16_unsized_voxels",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#17 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_wire_forged_done_26_unsized_voxels",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#18 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_wire_valid_below_coin_through_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review.json#19 (upstream PR #164 maintainer review; SmHealData.cpp UpdateTargetLists / Fix_SplitEdgesAtSeam)",
+      "values_compared": 2846
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_voxel_count_cancellation",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#0 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_face_hole_null_add",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#1 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "round2_degen_face_hole",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#2 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_vertex_add_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#3 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_vertex_add_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#4 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_vertex_add_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#5 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_prior_uncached_vertex_remove",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#6 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_prior_uncached_vertex_lookup_past_props",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#7 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_vertex_remove_only_is_valid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#8 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3394
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_edge_add_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#9 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_edge_add_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#10 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_edge_add_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#11 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_prior_uncached_edge_remove",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#12 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_prior_uncached_edge_lookup_past_props",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#13 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_edge_remove_only_is_valid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#14 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3384
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_face_add_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#15 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_face_add_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#16 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_face_add_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#17 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_prior_uncached_face_remove",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#18 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_prior_uncached_face_lookup_past_props",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#19 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_face_remove_only_is_valid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#20 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3380
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_null_add_without_remove_is_valid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#21 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3410
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "round2_uncached_vertex_add_without_remove_is_valid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#22 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 3428
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "round2_cached_face_remove_null_add_is_valid",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/review_round2.json#23 (upstream PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572278",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572279",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572280",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572281",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572282",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572283",
+      "values_compared": 2802
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572284",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572285",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572286",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572287",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572288",
+      "values_compared": 2973
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572289",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572290",
+      "values_compared": 2911
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572291",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572292",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572293",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572294",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572295",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572296",
+      "values_compared": 3713
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572297",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572298",
+      "values_compared": 2787
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572299",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572300",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572301",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572302",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572303",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572304",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572305",
+      "values_compared": 2821
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572306",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572307",
+      "values_compared": 3493
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572308",
+      "values_compared": 2747
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572309",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572310",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572311",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572312",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572313",
+      "values_compared": 2853
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572314",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572315",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572316",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572317",
+      "values_compared": 2963
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572318",
+      "values_compared": 2835
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572319",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572320",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572321",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572322",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572323",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572324",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572325",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572326",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572327",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572328",
+      "values_compared": 2765
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572329",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572330",
+      "values_compared": 2763
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572331",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572332",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572333",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572334",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572335",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572336",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572337",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572338",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572339",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572340",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572341",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572342",
+      "values_compared": 2881
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572343",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572344",
+      "values_compared": 2911
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572345",
+      "values_compared": 2853
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572346",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572347",
+      "values_compared": 2763
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572348",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572349",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572350",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572351",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572352",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572353",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572354",
+      "values_compared": 2787
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572355",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572356",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572357",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572358",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572359",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572360",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572361",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572362",
+      "values_compared": 2834
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572363",
+      "values_compared": 2787
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572364",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572365",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572366",
+      "values_compared": 3410
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572367",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572368",
+      "values_compared": 2835
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572369",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572370",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572371",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572372",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572373",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572374",
+      "values_compared": 2818
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572375",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572376",
+      "values_compared": 2963
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572377",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572378",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572379",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572380",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572381",
+      "values_compared": 3801
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572382",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572383",
+      "values_compared": 2909
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572384",
+      "values_compared": 2815
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572385",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572386",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572387",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572388",
+      "values_compared": 2765
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572389",
+      "values_compared": 2973
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572390",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572391",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572392",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572393",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572394",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572395",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572396",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572397",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572398",
+      "values_compared": 2775
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572399",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572400",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572401",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572402",
+      "values_compared": 2863
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572403",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572404",
+      "values_compared": 3801
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572405",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572406",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572407",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572408",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572409",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572410",
+      "values_compared": 2973
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572411",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572412",
+      "values_compared": 3713
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572413",
+      "values_compared": 3459
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572414",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572415",
+      "values_compared": 2973
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572416",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572417",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572418",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572419",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572420",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572421",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572422",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572423",
+      "values_compared": 3410
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572424",
+      "values_compared": 2816
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572425",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572426",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572427",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572428",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572429",
+      "values_compared": 3459
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572430",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572431",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572432",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572433",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572434",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572435",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572436",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572437",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572438",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572439",
+      "values_compared": 3459
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572440",
+      "values_compared": 3410
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572441",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572442",
+      "values_compared": 3410
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572443",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572444",
+      "values_compared": 2815
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572445",
+      "values_compared": 2793
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572446",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572447",
+      "values_compared": 2787
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572448",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572449",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572450",
+      "values_compared": 2765
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572451",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572452",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572453",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572454",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572455",
+      "values_compared": 2973
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572456",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572457",
+      "values_compared": 3459
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572458",
+      "values_compared": 2747
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572459",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572460",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572461",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572462",
+      "values_compared": 3341
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572463",
+      "values_compared": 2834
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572464",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572465",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572466",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572467",
+      "values_compared": 2954
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572468",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572469",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572470",
+      "values_compared": 3410
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572471",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572472",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572473",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572474",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572475",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572476",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572477",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572478",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572479",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572480",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572481",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572482",
+      "values_compared": 2853
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572483",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572484",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572485",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572486",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572487",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572488",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572489",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572490",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572491",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572492",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572493",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572494",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572495",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572496",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572497",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572498",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572499",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572500",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572501",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572502",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572503",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572504",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572505",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572506",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572507",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572508",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572509",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572510",
+      "values_compared": 2787
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572511",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572512",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572513",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572514",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572515",
+      "values_compared": 3410
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572516",
+      "values_compared": 2815
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572517",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572518",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572519",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572520",
+      "values_compared": 3459
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572521",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572522",
+      "values_compared": 2863
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572523",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572524",
+      "values_compared": 2835
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572525",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572526",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572527",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572528",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572529",
+      "values_compared": 3459
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572530",
+      "values_compared": 2954
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572531",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572532",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572533",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572534",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572535",
+      "values_compared": 2966
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572536",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572537",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572538",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572539",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572540",
+      "values_compared": 2775
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572541",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572542",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572543",
+      "values_compared": 2853
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572544",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572545",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572546",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572547",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572548",
+      "values_compared": 2862
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572549",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572550",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572551",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572552",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572553",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572554",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572555",
+      "values_compared": 2802
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572556",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572557",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572558",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572559",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572560",
+      "values_compared": 2824
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572561",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572562",
+      "values_compared": 2862
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572563",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572564",
+      "values_compared": 2763
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572565",
+      "values_compared": 2909
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572566",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572567",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572568",
+      "values_compared": 3444
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572569",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572570",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572571",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572572",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572573",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572574",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572575",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572576",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572577",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572578",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572579",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572580",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572581",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572582",
+      "values_compared": 2853
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572583",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572584",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572585",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572586",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572587",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0310",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572588",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572589",
+      "values_compared": 2985
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572590",
+      "values_compared": 2963
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572591",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572592",
+      "values_compared": 2853
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572593",
+      "values_compared": 2815
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0316",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572594",
+      "values_compared": 2747
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572595",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572596",
+      "values_compared": 3459
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572597",
+      "values_compared": 2985
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0320",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572598",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572599",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0322",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572600",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0323",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572601",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572602",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572603",
+      "values_compared": 2881
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572604",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0327",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572605",
+      "values_compared": 2821
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572606",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572607",
+      "values_compared": 2819
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0330",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572608",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572609",
+      "values_compared": 2787
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572610",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572611",
+      "values_compared": 2966
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572612",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::IsDegenerate",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0335",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572613",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572614",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572615",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572616",
+      "values_compared": 3341
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572617",
+      "values_compared": 3341
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572618",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0341",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572619",
+      "values_compared": 3444
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572620",
+      "values_compared": 2805
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572621",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572622",
+      "values_compared": 2973
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572623",
+      "values_compared": 2793
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572624",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572625",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572626",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0349",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572627",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0350",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572628",
+      "values_compared": 3341
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572629",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0352",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572630",
+      "values_compared": 2835
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572631",
+      "values_compared": 3037
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetThisModelSizeEstimate",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=8971100046885572632",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572633",
+      "values_compared": 2819
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572634",
+      "values_compared": 2805
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0357",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572635",
+      "values_compared": 2885
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572636",
+      "values_compared": 3410
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=8971100046885572637",
+      "values_compared": 4
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 207,
+  "cases_failed": 0,
+  "cases_passed": 267,
+  "cases_total": 474,
+  "deferred_by_unit": {
+    "topology.brep_p1": 50,
+    "topology.edgeuse_p3": 74,
+    "topology.face_p2": 61,
+    "topology.face_p3": 20,
+    "topology.face_p4": 2
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "heal.heal_data_p3"
+}

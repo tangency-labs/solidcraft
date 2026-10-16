@@ -143,9 +143,12 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 }
 
 /// Checks a B-rep block (all of `block`).
-fn check_block(path: &str, block: &[f64]) -> Result<(), FfiError> {
+pub(crate) fn check_block(path: &str, block: &[f64]) -> Result<(), FfiError> {
     let kind = block.first().copied().ok_or_else(|| bad("empty block"))?;
-    let mut rd = Reader { input: block, at: 1 };
+    let mut rd = Reader {
+        input: block,
+        at: 1,
+    };
     if kind == 4.0 {
         for _ in 0..3 {
             let d = rd.num()?;
@@ -157,7 +160,7 @@ fn check_block(path: &str, block: &[f64]) -> Result<(), FfiError> {
         rd.flag()?;
         return rd.done();
     }
-    if kind == 5.0 {
+    if kind == 5.0 || kind == 6.0 {
         let r = rd.num()?;
         if !(1e-3..=1e3).contains(&r) {
             return Err(bad("sphere radius out of range"));
@@ -316,6 +319,22 @@ fn targets(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 /// values; layout in the difftest runner of `heal.heal_data_p1`). Steps `25..=28`
 /// output `-2` and end the case when a props record they would use has no face (see
 /// `solidcore::heal::heal_data::p1`).
+/// Steps for `heal.heal_data_p3`: `32 op make` runs `HealTgts`; `33 op nrm
+/// [kind selector]* nadd [kind selector]*` runs `UpdateTargetLists` (kind 10 = null);
+/// `34..=39` run `Fix_CoinVertices`, `Fix_DegenFaces`, `Fix_DegenEdges`, `Fix_MoveSeam`,
+/// `Fix_SplitEdgesAtSeam`, `Fix_SplitFaceAtSeams`; `40 active op` runs the tracker
+/// overload with empty lists. `41` seeds the native degenerate-face queue from
+/// loaded face targets for the single-vertex-sphere regression. `42 null_face`
+/// seeds degenerate/missing/crossed face queues with no crossed direction, only
+/// immediately before a final step 38 (or 35/39 for null faces). Step 38
+/// also outputs each current face props' crossed direction, flag and tried state.
+/// Selectors use the
+/// fixture graph's traversal order. Step 33 refuses catch-up into an uninitialized
+/// incremental vertex voxel model (`-2`). A nonempty add list also requires every
+/// post-removal target count to equal its props count, including for null adds.
+/// Remove lookups must fit the corresponding props list. Zero prior vertices or an initialized
+/// model remain valid. Catch-up through `Fix_CoinVertices` or later is terminal
+/// because it can delete original fixture topology.
 ///
 /// # Errors
 ///
@@ -331,7 +350,7 @@ pub fn check_heal(args: &[f64]) -> Result<(), FfiError> {
     }
     let nsteps = rd.index(MAX_STEPS)?;
     for s in 0..nsteps {
-        let code = rd.index(31)?;
+        let code = rd.index(42)?;
         let last = s + 1 == nsteps;
         match code {
             12..=14 | 21 | 24 => {
@@ -375,6 +394,38 @@ pub fn check_heal(args: &[f64]) -> Result<(), FfiError> {
             28 => {
                 rd.flag()?;
             }
+            42 => {
+                let null_face = rd.flag()?;
+                let next = rd.input.get(rd.at).copied();
+                let safe_repair =
+                    next == Some(38.0) || (null_face && matches!(next, Some(35.0 | 39.0)));
+                if s + 2 != nsteps || !safe_repair {
+                    return Err(bad(
+                        "SeedFaceProblems must immediately precede its final guarded repair",
+                    ));
+                }
+            }
+            32 => {
+                rd.index(26)?;
+                rd.flag()?;
+                if !last {
+                    return Err(bad("HealTgts must be last"));
+                }
+            }
+            33 => {
+                rd.index(26)?;
+                for _ in 0..2 {
+                    let count = rd.index(MAX_TGTS)?;
+                    for _ in 0..count {
+                        rd.index(10)?;
+                        rd.index(MAX_SEL)?;
+                    }
+                }
+            }
+            40 => {
+                rd.flag()?;
+                rd.index(26)?;
+            }
             30 => {
                 let mode = rd.index(2)?;
                 rd.index(26)?;
@@ -404,4 +455,174 @@ pub fn heal(path: &str, block: &[f64], args: &[f64]) -> Result<Vec<f64>, FfiErro
     let mut input = block.to_vec();
     input.extend_from_slice(args);
     raw(Op::Heal, path, &input)
+}
+
+#[cfg(all(test, feature = "cpp"))]
+mod tests {
+    use super::*;
+
+    // Exercise the safe public FFI independently of the Rust runner: kernel
+    // deferrals must not conceal a crash in the native half of a case.
+    fn catch_up(
+        all_targets: bool,
+        cached: bool,
+        done: u8,
+        through: u8,
+        remove_all: bool,
+    ) -> Result<Vec<f64>, FfiError> {
+        let mut args = Vec::new();
+        for n in [8, 12, 6] {
+            args.push(if all_targets { f64::from(n) } else { 0.0 });
+            if all_targets {
+                args.extend((0..n).map(f64::from));
+            }
+        }
+        args.extend([
+            12.0,
+            12.0,
+            12.0,
+            if cached { 6.0 } else { 5.0 },
+            0.0,
+            1.0,
+            2.0,
+        ]);
+        if cached {
+            args.push(4.0);
+        }
+        args.extend([19.0, f64::from(done), 33.0, f64::from(through)]);
+        args.push(if remove_all { 8.0 } else { 0.0 });
+        if remove_all {
+            for i in 0..8 {
+                args.extend([9.0, f64::from(i)]);
+            }
+        }
+        args.extend([3.0, 3.0, 0.0, 7.0, 0.0, 9.0, 0.0]);
+        check_heal(&args)?;
+        heal("", &[4.0, 1.0, 2.0, 3.0, 0.0, 1.0], &args)
+    }
+
+    #[test]
+    fn synthetic_face_problems_allow_only_the_guarded_repair_paths() {
+        for null in [0.0, 1.0] {
+            for repair in [34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0] {
+                let args = [0.0, 0.0, 0.0, 12.0, 12.0, 12.0, 2.0, 42.0, null, repair];
+                let allowed = repair == 38.0 || (null == 1.0 && (repair == 35.0 || repair == 39.0));
+                assert_eq!(check_heal(&args).is_ok(), allowed);
+            }
+        }
+        let extra_step = [0.0, 0.0, 0.0, 12.0, 12.0, 12.0, 3.0, 42.0, 1.0, 38.0, 0.0];
+        assert!(check_heal(&extra_step).is_err());
+    }
+
+    #[test]
+    fn forged_done_state_is_refused_before_native_incremental_voxel_access() -> Result<(), FfiError>
+    {
+        for op in [6, 8, 9, 16, 26] {
+            let out = catch_up(true, false, op, op, false)?;
+            assert!(out.ends_with(&[33.0, -2.0]), "op={op}: {out:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn initialized_empty_and_below_coin_catch_up_remain_valid() -> Result<(), FfiError> {
+        for (all, cached, done, through, remove_all) in [
+            (true, true, 6, 6, false),
+            (false, false, 6, 6, false),
+            (true, false, 6, 5, false),
+            (true, false, 5, 6, false),
+            (true, false, 6, 6, true),
+        ] {
+            let out = catch_up(all, cached, done, through, remove_all)?;
+            assert!(out.contains(&-100.0), "valid catch-up was refused: {out:?}");
+        }
+        Ok(())
+    }
+    fn box_script(steps: &[f64], count: usize) -> Result<Vec<f64>, FfiError> {
+        let mut args = Vec::new();
+        for n in [8, 12, 6] {
+            args.push(f64::from(n));
+            args.extend((0..n).map(f64::from));
+        }
+        args.extend([12.0, 12.0, 12.0, count as f64]);
+        args.extend_from_slice(steps);
+        check_heal(&args)?;
+        heal("", &[4.0, 1.0, 2.0, 3.0, 0.0, 1.0], &args)
+    }
+
+    #[test]
+    fn second_review_crash_sequences_are_refused_before_native_update() -> Result<(), FfiError> {
+        let scripts: &[(&[f64], usize)] = &[
+            (
+                &[
+                    19.0, 9.0, 33.0, 6.0, 2.0, 9.0, 0.0, 9.0, 1.0, 2.0, 9.0, 0.0, 9.0, 0.0,
+                ],
+                2,
+            ),
+            (&[33.0, 0.0, 1.0, 3.0, 0.0, 1.0, 10.0, 0.0], 1),
+            (
+                &[
+                    0.0, 1.0, 19.0, 12.0, 33.0, 9.0, 1.0, 3.0, 0.0, 1.0, 3.0, 0.0,
+                ],
+                4,
+            ),
+            (&[12.0, 0.0, 33.0, 0.0, 0.0, 1.0, 9.0, 0.0], 2),
+            // Get*Props_ForTgts itself would index past props after an uncached removal.
+            (&[12.0, 0.0, 33.0, 0.0, 1.0, 9.0, 7.0, 0.0], 2),
+            (&[13.0, 0.0, 33.0, 0.0, 1.0, 7.0, 11.0, 0.0], 2),
+            (&[14.0, 0.0, 33.0, 0.0, 1.0, 3.0, 5.0, 0.0], 2),
+        ];
+        for &(steps, count) in scripts {
+            assert!(
+                box_script(steps, count)?.ends_with(&[33.0, -2.0]),
+                "{steps:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn target_props_guard_preserves_valid_cache_and_remove_add_combinations() -> Result<(), FfiError>
+    {
+        // 8 cache masks x 3 removed kinds x 5 add kinds x 2 removal paths.
+        for cache_mask in 0_u8..8 {
+            for (bit, kind, remove_step) in [(0, 7.0, 13.0), (1, 9.0, 12.0), (2, 3.0, 14.0)] {
+                for add_kind in [None, Some(10.0), Some(9.0), Some(7.0), Some(3.0)] {
+                    for prior_remove in [false, true] {
+                        let mut steps = Vec::new();
+                        let mut count = 1;
+                        for cache in 0_u8..3 {
+                            if cache_mask & (1 << cache) != 0 {
+                                steps.push(f64::from(cache));
+                                count += 1;
+                            }
+                        }
+                        if prior_remove {
+                            steps.extend([remove_step, 0.0]);
+                            count += 1;
+                        }
+                        steps.extend([33.0, 0.0]);
+                        if prior_remove {
+                            steps.push(0.0);
+                        } else {
+                            steps.extend([1.0, kind, 0.0]);
+                        }
+                        if let Some(add_kind) = add_kind {
+                            steps.extend([1.0, add_kind, 0.0]);
+                        } else {
+                            steps.push(0.0);
+                        }
+                        let out = box_script(&steps, count)?;
+                        let must_refuse = add_kind.is_some() && cache_mask & (1 << bit) == 0;
+                        if must_refuse {
+                            assert!(out.ends_with(&[33.0,-2.0]), "mask={cache_mask}, kind={kind}, add={add_kind:?}, prior={prior_remove}");
+                        } else {
+                            assert!(out.contains(&-100.0), "valid mask={cache_mask}, kind={kind}, add={add_kind:?}, prior={prior_remove}: {out:?}");
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }

@@ -48,11 +48,11 @@
 //!   order is one stub of `topology.brep_p1`.
 //! - **Unported callees** (`UNPORTED` stubs): `SmBrep::GetVertices`, `GetEdges`,
 //!   `GetFaces`, `GetInfiniteRegion` and `SmBrep::HealBrep` (`topology.brep_p1`),
-//!   `SmHealData::HealTgts` (`heal.heal_data_p3`), `SmBrep::TestClosureSplitRegion`
+//!   `SmBrep::TestClosureSplitRegion`
 //!   (`topology.brep_p6`), `SmBrep::FindAndSetInfiniteRegion` (`topology.brep_p5`),
 //!   `SmRegion::IsVoid` / `SetIsVoid` (`topology.shell`) and
-//!   `SmFace::CreateUVTrimCurves` (`topology.face_p3`). So `HealBrep` on a B-rep,
-//!   `SmApiHealBrep` on a B-rep and `Fix_InfiniteRegion` always stop at a stub, as do
+//!   `SmFace::CreateUVTrimCurves` (`topology.face_p3`). Default target gathering in `HealBrep`,
+//!   `SmApiHealBrep` on a B-rep and `Fix_InfiniteRegion` stop at a stub, as do
 //!   `Make_UVTrimCurves` when asked to make curves and `Fix_BadSheets` when it finds
 //!   a sheet face between two closed shells.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
@@ -167,22 +167,6 @@ fn face_create_uv_trim_curves(_k: &Kernel, _b: &mut Brep, _f: FaceId) -> Result<
 fn brep_heal_brep(_k: &mut Kernel, _b: &mut Brep, _healer_op: HealerOpType) -> Result<()> {
     // UNPORTED(topology.brep_p1): SmBrep::HealBrep
     Err(SolidError::unported("SmBrep::HealBrep", "topology.brep_p1"))
-}
-
-/// `HealTgts(eHealerOp, bMakeUVTrimCurves)`: runs the heal sequence on the loaded
-/// targets.
-fn heal_tgts<O: LoopObject>(
-    _h: &mut HealData<O>,
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _healer_op: HealerOpType,
-    _make_uv_trim_curves: bool,
-) -> Result<()> {
-    // UNPORTED(heal.heal_data_p3): SmHealData::HealTgts
-    Err(SolidError::unported(
-        "SmHealData::HealTgts",
-        "heal.heal_data_p3",
-    ))
 }
 
 /// The optional target lists of [`HealData::heal_brep`] (`pOptVertices`,
@@ -316,8 +300,8 @@ impl<O: LoopObject> HealData<O> {
     /// # Errors
     ///
     /// [`SolidError::Unported`] for `SmBrep::GetVertices` / `GetEdges` / `GetFaces`
-    /// (`topology.brep_p1`) when a target list is not given, and for
-    /// `SmHealData::HealTgts` (`heal.heal_data_p3`); those of [`HealData::reset`].
+    /// (`topology.brep_p1`) when a target list is not given; otherwise those of
+    /// [`HealData::reset`] and [`HealData::heal_targets`].
     pub fn heal_brep(
         &mut self,
         k: &mut Kernel,
@@ -356,7 +340,7 @@ impl<O: LoopObject> HealData<O> {
         self.load_targets(&tgt_vertices, &tgt_edges, &tgt_faces);
 
         // Heal the tgts in m_sTgtObjs and m_sTgtObjProps
-        heal_tgts(self, k, b, healer_op, make_uv_trim_curves)
+        self.heal_targets(k, b, healer_op, make_uv_trim_curves)
     }
 
     /// `Cache_FaceProps_Stage2`: sets the stage 2 props (surface, sheet, closure,
@@ -1031,13 +1015,9 @@ mod tests {
             faces: Some(&f),
         };
         let r = h.heal_brep(&mut k, Some(&mut b), HealerOpType::All, t, false);
-        assert!(matches!(
-            r,
-            Err(SolidError::Unported {
-                unit: "heal.heal_data_p3",
-                ..
-            })
-        ));
+        // The sequence now runs: these synthetic target ids do not exist in b.
+        assert!(matches!(r, Err(SolidError::NotFound { .. })));
+        assert_eq!(h.done_heal_op, HealerOpType::None);
         // the targets were loaded before the heal sequence
         assert_eq!(h.tgt_faces, f);
         assert_eq!(h.tgt_face_props.len(), 4);

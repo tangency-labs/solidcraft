@@ -29,9 +29,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::context::{MarkLock, ALL_MARKS};
+use solidcore::geom::vector2d::Point2;
 use solidcore::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, Tri, TriedLinkType,
 };
+use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
 use solidcore::heal::heal_data::p1::HealBrepTargets;
 use solidcore::heal::heal_data::p2::{
     EdgeProps, EdgePropsId, FaceFlag, FaceFlagOf, FaceMixed, FaceMixedOf, FacePropsEntry,
@@ -40,8 +42,6 @@ use solidcore::heal::heal_data::p2::{
 };
 use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
-use solidcore::geom::vector2d::Point2;
-use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId};
 use solidcore::{EntityRef, SolidError};
@@ -90,6 +90,12 @@ const STATE: f64 = -100.0;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum Prim {
+    /// The single-vertex sphere regression of `smTopoTest.cpp`.
+    SingleVertexSphere {
+        radius: f64,
+        #[serde(default)]
+        swap: bool,
+    },
     /// `SmPrimitiveCreation::CreateBox(dx, dy, dz, SmAxis2Placement())`.
     Box { size: [f64; 3] },
     /// A face on the full domain of `SmSphere::CreateCanonical(radius)`.
@@ -140,28 +146,55 @@ pub(crate) enum Step {
     FixMissedEdgeXsects,
     FixUncontainedEdges,
     FixBadGaps,
-    RemoveVertexProps { sel: u64 },
-    RemoveEdgeProps { sel: u64 },
-    RemoveFaceProps { sel: u64 },
+    RemoveVertexProps {
+        sel: u64,
+    },
+    RemoveEdgeProps {
+        sel: u64,
+    },
+    RemoveFaceProps {
+        sel: u64,
+    },
     /// `which`: 0 vertex, 1 edge, 2 face props; `tgts`: `[kind, index]` with `kind`
     /// the export's entity kinds (0 region .. 9 vertex).
-    PropsForTgts { which: u8, stale: bool, tgts: Vec<[u64; 2]> },
+    PropsForTgts {
+        which: u8,
+        stale: bool,
+        tgts: Vec<[u64; 2]>,
+    },
     FreeTargets,
-    LoadTargets { targets: Targets },
-    SetOldCounts { counts: [u64; 3] },
-    SetDoneHealOp { op: u8 },
-    ResetEdgeProps { sel: u64, metadata: bool },
-    ResetVertexProps { sel: u64 },
+    LoadTargets {
+        targets: Targets,
+    },
+    SetOldCounts {
+        counts: [u64; 3],
+    },
+    SetDoneHealOp {
+        op: u8,
+    },
+    ResetEdgeProps {
+        sel: u64,
+        metadata: bool,
+    },
+    ResetVertexProps {
+        sel: u64,
+    },
     SetupEmptyProbArrays,
     // ---- steps of unit heal.heal_data_p1 (runner `heal_heal_data_p1`) ----
     /// `ReSet(new_obj_arrays)` (last step only).
-    Reset { new_obj_arrays: bool },
+    Reset {
+        new_obj_arrays: bool,
+    },
     /// `MoveToNotYetProblems` of the `sel`-th alive face props.
-    MoveToNotYet { sel: u64 },
+    MoveToNotYet {
+        sel: u64,
+    },
     CacheFacePropsStage2,
     CacheFacePropsStage3,
     FixBadSheets,
-    MakeUvTrimCurves { make: bool },
+    MakeUvTrimCurves {
+        make: bool,
+    },
     /// Last step only.
     FixInfiniteRegion,
     /// `HealBrep`: `mode` 0 null B-rep, 1 every target, 2 `targets`; modes 1 and 2
@@ -175,6 +208,30 @@ pub(crate) enum Step {
     },
     /// The stage 2/3 snapshot of every face props record.
     FaceSnapshot,
+    // ---- heal.heal_data_p3 ----
+    HealTargets {
+        op: u8,
+        make: bool,
+    },
+    UpdateTargets {
+        op: u8,
+        remove: Vec<[u64; 2]>,
+        add: Vec<[u64; 2]>,
+    },
+    FixCoinVertices,
+    SeedDegenFaces,
+    SeedFaceProblems {
+        null_face: bool,
+    },
+    FixDegenFaces,
+    FixDegenEdges,
+    FixMoveSeam,
+    FixSplitEdgesAtSeam,
+    FixSplitFaceAtSeams,
+    UpdateTracked {
+        active: bool,
+        op: u8,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,12 +269,20 @@ fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
 }
 
-fn block_of(b: &BIn, validate_only: bool, init_gaps: bool) -> Result<(String, Vec<f64>), HarnessError> {
+fn block_of(
+    b: &BIn,
+    validate_only: bool,
+    init_gaps: bool,
+) -> Result<(String, Vec<f64>), HarnessError> {
     let mut v = Vec::new();
     let path = match b {
         BIn::Prim(Prim::Box { size }) => {
             v.push(4.0);
             v.extend(size);
+            String::new()
+        }
+        BIn::Prim(Prim::SingleVertexSphere { radius, swap }) => {
+            v.extend([6.0, *radius, flag(*swap)]);
             String::new()
         }
         BIn::Prim(Prim::Sphere { radius, swap }) => {
@@ -313,7 +378,9 @@ fn args_of(t: &Targets, voxels: [u64; 3], steps: &[Step], n: [usize; 3]) -> Vec<
                 v.extend(counts.iter().map(|&x| x as f64));
             }
             Step::SetDoneHealOp { op } => v.extend([19.0, f64::from(*op)]),
-            Step::ResetEdgeProps { sel, metadata } => v.extend([20.0, *sel as f64, flag(*metadata)]),
+            Step::ResetEdgeProps { sel, metadata } => {
+                v.extend([20.0, *sel as f64, flag(*metadata)]);
+            }
             Step::ResetVertexProps { sel } => v.extend([21.0, *sel as f64]),
             Step::SetupEmptyProbArrays => v.push(22.0),
             Step::Reset { new_obj_arrays } => v.extend([23.0, flag(*new_obj_arrays)]),
@@ -323,7 +390,12 @@ fn args_of(t: &Targets, voxels: [u64; 3], steps: &[Step], n: [usize; 3]) -> Vec<
             Step::FixBadSheets => v.push(27.0),
             Step::MakeUvTrimCurves { make } => v.extend([28.0, flag(*make)]),
             Step::FixInfiniteRegion => v.push(29.0),
-            Step::HealBrep { mode, op, make, targets } => {
+            Step::HealBrep {
+                mode,
+                op,
+                make,
+                targets,
+            } => {
                 v.extend([30.0, f64::from(*mode), f64::from(*op), flag(*make)]);
                 if *mode == 2 {
                     let none = Targets {
@@ -335,6 +407,26 @@ fn args_of(t: &Targets, voxels: [u64; 3], steps: &[Step], n: [usize; 3]) -> Vec<
                 }
             }
             Step::FaceSnapshot => v.push(31.0),
+            Step::HealTargets { op, make } => v.extend([32.0, f64::from(*op), flag(*make)]),
+            Step::UpdateTargets { op, remove, add } => {
+                v.extend([33.0, f64::from(*op), remove.len() as f64]);
+                for [kind, sel] in remove {
+                    v.extend([*kind as f64, *sel as f64]);
+                }
+                v.push(add.len() as f64);
+                for [kind, sel] in add {
+                    v.extend([*kind as f64, *sel as f64]);
+                }
+            }
+            Step::FixCoinVertices => v.push(34.0),
+            Step::SeedDegenFaces => v.push(41.0),
+            Step::SeedFaceProblems { null_face } => v.extend([42.0, flag(*null_face)]),
+            Step::FixDegenFaces => v.push(35.0),
+            Step::FixDegenEdges => v.push(36.0),
+            Step::FixMoveSeam => v.push(37.0),
+            Step::FixSplitEdgesAtSeam => v.push(38.0),
+            Step::FixSplitFaceAtSeams => v.push(39.0),
+            Step::UpdateTracked { active, op } => v.extend([40.0, flag(*active), f64::from(*op)]),
         }
     }
     v
@@ -380,7 +472,27 @@ pub(crate) fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
             let (path, block) = block_of(brep, *validate_only, *init_gaps)?;
             let (_, n) = export_of(&path, &block)?;
             let n = n.unwrap_or([0; 3]);
-            ffi_out(ffi::heal(&path, &block, &args_of(targets, *voxels, steps, n)))
+            let args = args_of(targets, *voxels, steps, n);
+            if steps.iter().any(|s| {
+                matches!(
+                    s,
+                    Step::HealTargets { .. }
+                        | Step::UpdateTargets { .. }
+                        | Step::FixCoinVertices
+                        | Step::FixDegenFaces
+                        | Step::FixDegenEdges
+                        | Step::FixMoveSeam
+                        | Step::FixSplitEdgesAtSeam
+                        | Step::FixSplitFaceAtSeams
+                        | Step::UpdateTracked { .. }
+                )
+            }) {
+                ffi_out(solidcore_ffi::units::heal_heal_data_p3::heal(
+                    &path, &block, &args,
+                ))
+            } else {
+                ffi_out(ffi::heal(&path, &block, &args))
+            }
         }
     }
 }
@@ -397,8 +509,16 @@ fn tried_of(c: i64) -> TriedLinkType {
 }
 
 const LABELS: [[&str; 3]; 3] = [
-    ["Edge ZoneTol3d too small                ", "SmallTol Edge Cnt  ", " - Bad "],
-    ["Sheet Face counts                       ", "                   ", ""],
+    [
+        "Edge ZoneTol3d too small                ",
+        "SmallTol Edge Cnt  ",
+        " - Bad ",
+    ],
+    [
+        "Sheet Face counts                       ",
+        "                   ",
+        "",
+    ],
     [
         "odd NoAreaLoopCnt on Face: no AddSeamFix",
         "Bad unpaired NoAreaLoop Face Cnt ",
@@ -427,7 +547,11 @@ fn put_face_flags(o: &mut Vec<f64>, p: &FaceProps<H>) {
     }
     o.push(FaceMixed::Sheet.value(p).code() as f64);
     o.push(FaceMixed::Poles.value(p).code() as f64);
-    for t in [FaceTried::MoveSeam, FaceTried::SplitEdgesAtSeam, FaceTried::SplitFacesAtSeam] {
+    for t in [
+        FaceTried::MoveSeam,
+        FaceTried::SplitEdgesAtSeam,
+        FaceTried::SplitFacesAtSeam,
+    ] {
         o.push(t.value(p).code() as f64);
     }
 }
@@ -668,10 +792,39 @@ fn pick<I: Copy>(alive: &[I], sel: u64) -> Option<I> {
     }
 }
 
+fn target_count_after_removals<T: Copy + PartialEq>(
+    targets: &[T],
+    removed: impl Iterator<Item = T>,
+) -> usize {
+    let mut remaining = targets.to_vec();
+    for t in removed {
+        if let Some(i) = remaining.iter().position(|&x| x == t) {
+            remaining.remove(i);
+        }
+    }
+    remaining.len()
+}
+
+fn removal_lookup_is_ub<T: PartialEq>(targets: &[T], props_count: usize, removed: &T) -> bool {
+    targets
+        .iter()
+        .position(|x| x == removed)
+        .is_some_and(|i| i >= props_count)
+}
+
 fn targets_of(t: &Targets, n: [usize; 3]) -> (Vec<VertexId>, Vec<EdgeId>, Vec<FaceId>) {
-    let v = resolve(&t.v, n[0]).into_iter().map(|x| VertexId::from_index(x as u32)).collect();
-    let e = resolve(&t.e, n[1]).into_iter().map(|x| EdgeId::from_index(x as u32)).collect();
-    let f = resolve(&t.f, n[2]).into_iter().map(|x| FaceId::from_index(x as u32)).collect();
+    let v = resolve(&t.v, n[0])
+        .into_iter()
+        .map(|x| VertexId::from_index(x as u32))
+        .collect();
+    let e = resolve(&t.e, n[1])
+        .into_iter()
+        .map(|x| EdgeId::from_index(x as u32))
+        .collect();
+    let f = resolve(&t.f, n[2])
+        .into_iter()
+        .map(|x| FaceId::from_index(x as u32))
+        .collect();
     (v, e, f)
 }
 
@@ -901,7 +1054,9 @@ fn restore(b: &mut Brep, extra: &[f64], c: [usize; 10]) -> Result<(), HarnessErr
             }
             l.push(VertexuseId::from_index(x as u32));
         }
-        b.vertex_mut(VertexId::from_index(v as u32)).map_err(he)?.vertexuses = l;
+        b.vertex_mut(VertexId::from_index(v as u32))
+            .map_err(he)?
+            .vertexuses = l;
     }
     let eu_of = |x: f64| -> Result<Option<EdgeuseId>, HarnessError> {
         match x {
@@ -950,7 +1105,9 @@ fn restore(b: &mut Brep, extra: &[f64], c: [usize; 10]) -> Result<(), HarnessErr
             vertexuse: vu_of(next()?)?,
             face_uv: Point2::new(next()?, next()?),
         };
-        let r = b.vertexuse_mut(VertexuseId::from_index(u as u32)).map_err(he)?;
+        let r = b
+            .vertexuse_mut(VertexuseId::from_index(u as u32))
+            .map_err(he)?;
         r.vertex_edge_gap = eg;
         r.vertex_face_gap = fg;
     }
@@ -973,7 +1130,11 @@ fn put_face_snapshot(o: &mut Vec<f64>, p: &FaceProps<H>) {
     o.extend([t(p.closed_u), t(p.closed_v), t(p.closed_surf)]);
     o.push(f64::from(p.closed_val_u as i32));
     o.push(f64::from(p.closed_val_v as i32));
-    o.extend([p.poles as f64, p.approx_poles as f64, p.no_vertex_poles as f64]);
+    o.extend([
+        p.poles as f64,
+        p.approx_poles as f64,
+        p.no_vertex_poles as f64,
+    ]);
     for l in [&p.pole_points, &p.pole_normals, &p.flat_corner_points] {
         o.push(l.len() as f64);
         for v in l {
@@ -1057,19 +1218,53 @@ fn rust_heal(
             Step::FixInfiniteRegion => 29,
             Step::HealBrep { .. } => 30,
             Step::FaceSnapshot => 31,
+            Step::HealTargets { .. } => 32,
+            Step::UpdateTargets { .. } => 33,
+            Step::FixCoinVertices => 34,
+            Step::SeedDegenFaces => 41,
+            Step::SeedFaceProblems { .. } => 42,
+            Step::FixDegenFaces => 35,
+            Step::FixDegenEdges => 36,
+            Step::FixMoveSeam => 37,
+            Step::FixSplitEdgesAtSeam => 38,
+            Step::FixSplitFaceAtSeams => 39,
+            Step::UpdateTracked { .. } => 40,
         };
-        let last_without_state = matches!(s, Step::HealBrep { mode, .. } if *mode != 0);
+        let last_without_state = matches!(s, Step::HealBrep { mode, .. } if *mode != 0)
+            || matches!(s, Step::HealTargets { .. })
+            || match s {
+                Step::UpdateTargets { op, add, .. } => {
+                    !add.is_empty()
+                        && i64::from(*op).min(h.done_heal_op.code())
+                            >= HealerOpType::FixCoinVertices.code()
+                }
+                Step::FixCoinVertices => h.bad_vertex_props_coin_vertices.base.len() >= 2,
+                Step::FixDegenFaces => !h.bad_face_props_degen_faces.is_empty(),
+                Step::FixDegenEdges => !h.bad_edge_props_degen_edges.is_empty(),
+                Step::FixMoveSeam => {
+                    !h.bad_face_props_missing_seam.is_empty()
+                        || !h.bad_face_props_crossed_seam.is_empty()
+                        || !h.bad_face_props_near_miss_seam.is_empty()
+                }
+                Step::FixSplitEdgesAtSeam => !h.bad_face_props_crossed_seam.is_empty(),
+                Step::FixSplitFaceAtSeams => !h.bad_face_props_missing_seam.is_empty(),
+                _ => false,
+            };
         o.push(f64::from(code));
         let r: Result<bool, SolidError> = match s {
             Step::CacheEdgeProps => h.cache_edge_props(&k, &mut b, HealerOpType::CacheEdgeprops),
-            Step::CacheVertexProps => h.cache_vertex_props(&k, &mut b, HealerOpType::CacheVertexprops),
+            Step::CacheVertexProps => {
+                h.cache_vertex_props(&k, &mut b, HealerOpType::CacheVertexprops)
+            }
             Step::CacheFacePropsGaps => {
                 h.cache_face_props_gaps(&k, &mut b, HealerOpType::CacheFacepropsGaps)
             }
             Step::FixTolSizes => h
                 .fix_tol_sizes(&k, &mut b, HealerOpType::FixTolsizes)
                 .map(|()| false),
-            Step::CacheCoinVertices => h.cache_coin_vertices(&k, &b, HealerOpType::CacheCoinVertices),
+            Step::CacheCoinVertices => {
+                h.cache_coin_vertices(&k, &b, HealerOpType::CacheCoinVertices)
+            }
             Step::CacheDegenFaces => h.cache_degen_faces(&k, &b, HealerOpType::CacheDegenFaces),
             Step::CacheCoinEdges => Ok(h.cache_coin_edges(HealerOpType::CacheCoinEdges)),
             Step::FixCoinEdges => h.fix_coin_edges(HealerOpType::FixCoinEdges).map(|()| false),
@@ -1129,7 +1324,10 @@ fn rust_heal(
                 }
             }
             Step::PropsForTgts { which, stale, tgts } => {
-                let list: Vec<EntityRef> = tgts.iter().filter_map(|[kk, i]| entity(*kk, *i, c)).collect();
+                let list: Vec<EntityRef> = tgts
+                    .iter()
+                    .filter_map(|[kk, i]| entity(*kk, *i, c))
+                    .collect();
                 o.push(0.0);
                 let out: Vec<f64> = match which {
                     0 => h
@@ -1168,7 +1366,8 @@ fn rust_heal(
                 Ok(false)
             }
             Step::SetDoneHealOp { op } => {
-                h.done_heal_op = HealerOpType::from_code(i64::from(*op)).unwrap_or(HealerOpType::None);
+                h.done_heal_op =
+                    HealerOpType::from_code(i64::from(*op)).unwrap_or(HealerOpType::None);
                 Ok(false)
             }
             Step::ResetEdgeProps { sel, metadata } => {
@@ -1217,7 +1416,13 @@ fn rust_heal(
             Step::FixBadSheets => {
                 let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)
                     .map_err(|e| harness(format!("mark lock: {e}")))?;
-                let r = h.fix_bad_sheets(&mut k, &mut b, &mut marks, &lock, HealerOpType::FixBadsheets);
+                let r = h.fix_bad_sheets(
+                    &mut k,
+                    &mut b,
+                    &mut marks,
+                    &lock,
+                    HealerOpType::FixBadsheets,
+                );
                 lock.release(std::slice::from_mut(&mut k.context))
                     .map_err(|e| harness(format!("mark lock: {e}")))?;
                 r.map(|()| false)
@@ -1228,22 +1433,195 @@ fn rust_heal(
             Step::FixInfiniteRegion => h
                 .fix_infinite_region(&mut b, HealerOpType::FixInfiniteRegions)
                 .map(|()| false),
-            Step::HealBrep { mode, op, make, targets } => {
+            Step::HealBrep {
+                mode,
+                op,
+                make,
+                targets,
+            } => {
                 let op = HealerOpType::from_code(i64::from(*op)).unwrap_or(HealerOpType::None);
                 let lists = match (mode, targets) {
                     (2, Some(t)) => Some(targets_of(t, n)),
                     (2, None) => Some((Vec::new(), Vec::new(), Vec::new())),
                     _ => None,
                 };
-                let t = lists.as_ref().map_or_else(HealBrepTargets::default, |(v, e, f)| {
-                    HealBrepTargets {
+                let t = lists
+                    .as_ref()
+                    .map_or_else(HealBrepTargets::default, |(v, e, f)| HealBrepTargets {
                         vertices: Some(v),
                         edges: Some(e),
                         faces: Some(f),
-                    }
-                });
+                    });
                 let brep = if *mode == 0 { None } else { Some(&mut b) };
                 h.heal_brep(&mut k, brep, op, t, *make).map(|()| false)
+            }
+            Step::HealTargets { op, make } => {
+                let r = h.heal_targets(&mut k, &mut b, op_of(i64::from(*op)), *make);
+                o.extend([
+                    h.stop_heal_op.code() as f64,
+                    h.done_heal_op.code() as f64,
+                    h.recursion_count as f64,
+                    h.tgt_vertices.len() as f64,
+                    h.tgt_edges.len() as f64,
+                    h.tgt_faces.len() as f64,
+                ]);
+                r.map(|()| false)
+            }
+            Step::UpdateTargets { op, remove, add } => {
+                let rm: Vec<_> = remove
+                    .iter()
+                    .filter_map(|&[kind, sel]| entity(kind, sel, c))
+                    .collect();
+                let add: Vec<_> = add
+                    .iter()
+                    .map(|&[kind, sel]| entity(kind, sel, c))
+                    .collect();
+                if rm.iter().any(|e| match e {
+                    EntityRef::Face(f) => {
+                        removal_lookup_is_ub(&h.tgt_faces, h.tgt_face_props.len(), f)
+                    }
+                    EntityRef::Edge(e) => {
+                        removal_lookup_is_ub(&h.tgt_edges, h.tgt_edge_props.len(), e)
+                    }
+                    EntityRef::Vertex(v) => {
+                        removal_lookup_is_ub(&h.tgt_vertices, h.tgt_vertex_props.len(), v)
+                    }
+                    _ => false,
+                }) {
+                    o.push(NULL_DEREF);
+                    stop = true;
+                    break;
+                }
+                let rf = h.face_props_for_tgts(&rm, true);
+                let re = h.edge_props_for_tgts(&rm, true);
+                let rv = h.vertex_props_for_tgts(&rm, true);
+                let faces_after = target_count_after_removals(
+                    &h.tgt_faces,
+                    rf.iter()
+                        .filter_map(|id| h.face_props.get(*id).and_then(|p| p.props.face)),
+                );
+                let edges_after = target_count_after_removals(
+                    &h.tgt_edges,
+                    re.iter()
+                        .filter_map(|id| h.edge_props.get(*id).and_then(|p| p.edge)),
+                );
+                let vertices_after = target_count_after_removals(
+                    &h.tgt_vertices,
+                    rv.iter()
+                        .filter_map(|id| h.vertex_props.get(*id).and_then(|p| p.vertex)),
+                );
+                let drift = faces_after != h.tgt_face_props.len().saturating_sub(rf.len())
+                    || edges_after != h.tgt_edge_props.len().saturating_sub(re.len())
+                    || vertices_after != h.tgt_vertex_props.len().saturating_sub(rv.len());
+                let new_vertices = add
+                    .iter()
+                    .flatten()
+                    .filter(|e| matches!(e, EntityRef::Vertex(v) if b.vertex(*v).is_ok()))
+                    .count();
+                let unsized_incremental = i64::from(*op).min(h.done_heal_op.code())
+                    >= HealerOpType::CacheCoinVertices.code()
+                    && vertices_after > 0
+                    && new_vertices > 0
+                    && h.vertices_in_voxels.bbox().is_init();
+                if !add.is_empty() && (drift || unsized_incremental) {
+                    Err(SolidError::invalid_input(
+                        "difftest::heal_heal_data_p2",
+                        "target/props drift or incremental catch-up before voxel initialization",
+                    ))
+                } else {
+                    h.update_target_lists(&mut k, &mut b, &rm, &add, op_of(i64::from(*op)))
+                        .map(|()| false)
+                }
+            }
+            Step::SeedFaceProblems { null_face } => {
+                for (i, &id) in h.tgt_face_props.iter().enumerate() {
+                    let p = &mut h
+                        .face_props
+                        .props_mut(id)
+                        .map_err(|e| harness(e.to_string()))?
+                        .props;
+                    p.face = if *null_face {
+                        None
+                    } else {
+                        h.tgt_faces.get(i).copied()
+                    };
+                    p.face_index = i as u64;
+                    p.bad_crossed_seam_dir =
+                        solidcore::nurbs::b_spline_surface::p1::SurfParamType::Neither;
+                    h.bad_face_props_degen_faces
+                        .add(&mut h.face_props, id, true)
+                        .map_err(|e| harness(e.to_string()))?;
+                    h.bad_face_props_crossed_seam
+                        .add(&mut h.face_props, id, true)
+                        .map_err(|e| harness(e.to_string()))?;
+                    h.bad_face_props_missing_seam
+                        .add(&mut h.face_props, id, true)
+                        .map_err(|e| harness(e.to_string()))?;
+                }
+                Ok(false)
+            }
+            Step::SeedDegenFaces => {
+                for (i, &id) in h.tgt_face_props.iter().enumerate() {
+                    let p = &mut h
+                        .face_props
+                        .props_mut(id)
+                        .map_err(|e| harness(e.to_string()))?
+                        .props;
+                    p.face = h.tgt_faces.get(i).copied();
+                    p.face_index = i as u64;
+                    h.bad_face_props_degen_faces
+                        .add(&mut h.face_props, id, true)
+                        .map_err(|e| harness(e.to_string()))?;
+                }
+                Ok(false)
+            }
+            Step::FixCoinVertices => h
+                .fix_coin_vertices(&mut k, &mut b, HealerOpType::FixCoinVertices)
+                .map(|()| false),
+            Step::FixDegenFaces => h
+                .fix_degen_faces(&mut k, &mut b, HealerOpType::FixDegenFaces)
+                .map(|()| false),
+            Step::FixDegenEdges => h
+                .fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges)
+                .map(|()| false),
+            Step::FixMoveSeam | Step::FixSplitEdgesAtSeam => {
+                let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)
+                    .map_err(|e| harness(e.to_string()))?;
+                let r = if matches!(s, Step::FixMoveSeam) {
+                    h.fix_move_seam(&mut k, &mut b, &mut marks, &lock, HealerOpType::FixMoveseam)
+                } else {
+                    h.fix_split_edges_at_seam(
+                        &mut k,
+                        &mut b,
+                        &mut marks,
+                        &lock,
+                        HealerOpType::FixSplitedgeAtseam,
+                    )
+                };
+                lock.release(std::slice::from_mut(&mut k.context))
+                    .map_err(|e| harness(e.to_string()))?;
+                r.map(|()| false)
+            }
+            Step::FixSplitFaceAtSeams => h
+                .fix_split_face_at_seams(&mut k, &mut b, HealerOpType::FixSplitfaceAtseams)
+                .map(|()| false),
+            Step::UpdateTracked { active, op } => {
+                use solidcore::topology::{topology::TrackTopologyChanges, BrepId};
+                let mut tracker = TrackTopologyChanges::new(
+                    Some(BrepId::from_index(0)),
+                    123,
+                    *active,
+                    Some(&mut k.context),
+                );
+                let r = h.update_tracked_targets(
+                    &mut k,
+                    &mut b,
+                    &tracker,
+                    |_| None,
+                    op_of(i64::from(*op)),
+                );
+                tracker.stop_tracking(Some(&mut k.context));
+                r.map(|()| false)
             }
             Step::FaceSnapshot => {
                 o.push(h.face_props.allocated() as f64);
@@ -1259,6 +1637,21 @@ fn rust_heal(
                 continue;
             }
         };
+        if matches!(s, Step::FixSplitEdgesAtSeam) && r.is_ok() {
+            o.push(h.tgt_face_props.len() as f64);
+            for &id in &h.tgt_face_props {
+                let p = &h
+                    .face_props
+                    .props(id)
+                    .map_err(|e| harness(e.to_string()))?
+                    .props;
+                o.extend([
+                    f64::from(p.bad_crossed_seam_dir as i32),
+                    p.bad_crossed_seam.code() as f64,
+                    p.been_through_split_edges_at_seam.code() as f64,
+                ]);
+            }
+        }
         match r {
             Ok(new_probs) if last_without_state => {
                 o.extend([0.0, flag(new_probs)]);
@@ -1325,7 +1718,11 @@ pub(crate) fn gen_targets(rng: &mut Rng) -> Targets {
     Targets {
         // vertex props of face vertices need the vertex/face gap (often deferred):
         // leave the vertices out of a third of the cases
-        v: if rng.chance(0.35) { Sel::None } else { gen_sel(rng) },
+        v: if rng.chance(0.35) {
+            Sel::None
+        } else {
+            gen_sel(rng)
+        },
         e: gen_sel(rng),
         f: gen_sel(rng),
     }
@@ -1360,7 +1757,9 @@ fn gen_extra(rng: &mut Rng) -> Step {
         3 | 4 => Step::PropsForTgts {
             which: rng.below(3) as u8,
             stale: rng.chance(0.5),
-            tgts: (0..rng.below(8)).map(|_| [rng.below(10), rng.below(64)]).collect(),
+            tgts: (0..rng.below(8))
+                .map(|_| [rng.below(10), rng.below(64)])
+                .collect(),
         },
         5 => Step::SetOldCounts {
             counts: [rng.below(6), rng.below(10), rng.below(4)],
@@ -1385,7 +1784,11 @@ fn gen_extra(rng: &mut Rng) -> Step {
 
 fn gen_heal(rng: &mut Rng) -> Inputs {
     let brep = gen_brep_in(rng);
-    let mut steps = vec![Step::CacheEdgeProps, Step::CacheVertexProps, Step::CacheFacePropsGaps];
+    let mut steps = vec![
+        Step::CacheEdgeProps,
+        Step::CacheVertexProps,
+        Step::CacheFacePropsGaps,
+    ];
     if rng.chance(0.1) {
         steps.push(Step::FixTolSizes);
     }
@@ -1411,7 +1814,11 @@ fn gen_heal(rng: &mut Rng) -> Inputs {
         steps.push(Step::SetOldCounts {
             counts: [rng.below(8), rng.below(12), rng.below(6)],
         });
-        steps.extend([Step::CacheEdgeProps, Step::CacheVertexProps, Step::CacheCoinVertices]);
+        steps.extend([
+            Step::CacheEdgeProps,
+            Step::CacheVertexProps,
+            Step::CacheCoinVertices,
+        ]);
     }
     if rng.chance(0.15) {
         steps.push(Step::FreeTargets);
@@ -1463,7 +1870,12 @@ fn gen_prob(rng: &mut Rng) -> Inputs {
             16 => [7, rng.below(3) as i64, 0, 0],
             17 => [8, rng.below(100) as i64, 0, 0],
             18 => [9, rng.below(50) as i64, 0, 0],
-            _ => [0, rng.below(27) as i64, rng.below(max_link + 1) as i64 - 1, 0],
+            _ => [
+                0,
+                rng.below(27) as i64,
+                rng.below(max_link + 1) as i64 - 1,
+                0,
+            ],
         };
         ops.push(op);
     }
@@ -1476,7 +1888,11 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let c = if rng.chance(0.25) { gen_prob(rng) } else { gen_heal(rng) };
+        let c = if rng.chance(0.25) {
+            gen_prob(rng)
+        } else {
+            gen_heal(rng)
+        };
         serde_json::to_value(c).ok()
     }
 

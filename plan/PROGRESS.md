@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**195 / 261 units ported** (108 green, 87 partial), **266,719 / 387,903 upstream lines (68.8%)**. 30 claimed, 0 blocked, 36 todo.
+**196 / 261 units ported** (108 green, 88 partial), **267,939 / 387,903 upstream lines (69.1%)**. 30 claimed, 0 blocked, 35 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -38,7 +38,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `blend.fillet_corner_p1` (1971 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_standard_solver_p1`
 - [ ] `blend.fillet_solver_p2` (1939 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`
 - [ ] `blend.fillet_solver_p3` (1112 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `surface.offset_surface`
-- [ ] `offset.offset_executive_p1` (2107 lines) — missing: `offset.offset_geometry_creation`, `surface.offset_surface`, `topology.brep_p1`
 - [ ] `blend.fillet_geom_p3` (1032 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `surface.offset_surface`
 - [ ] `blend.fillet_geom_p4` (2074 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`
 - [ ] `blend.fillet_geom_p6` (1813 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `topology.brep_p3`
@@ -61,7 +60,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `intersect.curve_class_p4` (2022 lines) — in progress: #137 @froglemonade2 (ready for review)
 - [ ] 🔨 `topology.shell` (750 lines) — in progress: #154 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p8` (1900 lines) — in progress: #152 @Karl-VonRichter (ready for review)
-- [ ] 🔨 `intersect.curve_class_p9` (1220 lines) — in progress: #151 @Karl-VonRichter (ready for review)
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
 - [ ] 🔨 `topology.edgeuse_p3` (2273 lines) — in progress: #117 @froglemonade2 (ready for review)
 - [ ] 🔨 `topology.face_p4` (1812 lines) — in progress: #134 @bherbruck (draft)
@@ -82,6 +80,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `boolean.topology_intersector_p1` (2491 lines) — in progress: #146 @bluecmd (ready for review)
 - [ ] 🔨 `heal.heal_data_p3` (1967 lines) — in progress: #164 @damgru (ready for review)
 - [ ] 🔨 `offset.offset_geometry_creation` (2652 lines) — in progress: #156 @bluecmd (draft)
+- [ ] 🔨 `offset.offset_executive_p1` (2107 lines) — in progress: #175 @altvnk (draft)
 - [ ] 🔨 `primitive.api_primitives` (885 lines) — in progress: #160 @bherbruck (ready for review)
 
 ## By module
@@ -274,7 +273,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `topology.proto_topology_p2` (2091 lines) — partial, 1533 cases
 - [ ] 🟡 `topology.proto_topology_p3` (1577 lines) — partial, 3013 cases
 
-### intersect (20/25)
+### intersect (21/25)
 
 - [ ] 🟡 `intersect.surface_tracer` (1900 lines) — partial, 427 cases
 - [ ] 🟡 `intersect.point_class` (909 lines) — partial, 2511 cases
@@ -300,7 +299,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `intersect.curve_class_p5` (2017 lines) — partial, 1081 cases
 - [ ] 🟡 `intersect.surface_intersector_p5` (622 lines) — partial, 1725 cases
 - [ ] 🔨 `intersect.curve_class_p8` (1900 lines) — in progress: #152 @Karl-VonRichter (ready for review)
-- [ ] 🔨 `intersect.curve_class_p9` (1220 lines) — in progress: #151 @Karl-VonRichter (ready for review)
+- [ ] 🟡 `intersect.curve_class_p9` (1220 lines) — partial
 
 ### primitive (1/5)
 
@@ -348,7 +347,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ### offset (0/3)
 
 - [ ] 🔨 `offset.offset_geometry_creation` (2652 lines) — in progress: #156 @bluecmd (draft)
-- [ ] ⏳ `offset.offset_executive_p1` (2107 lines) — waiting
+- [ ] 🔨 `offset.offset_executive_p1` (2107 lines) — in progress: #175 @altvnk (draft)
 - [ ] ⏳ `offset.offset_executive_p2` (1846 lines) — waiting
 
 ### boolean (3/9)

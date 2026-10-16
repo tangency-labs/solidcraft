@@ -1,0 +1,2389 @@
+{
+  "cases": [
+    {
+      "name": "empty_targets_through_0",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 0,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_1",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 1,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 2,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 3,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_4",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 4,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_5",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 5,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_6",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 6,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_7",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 7,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_8",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 8,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_9",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 9,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_10",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 10,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_11",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 11,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_12",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 12,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_13",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 13,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_14",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 14,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_15",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 15,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_16",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 16,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_17",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 17,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_18",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 18,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_19",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 19,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_20",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 20,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_21",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 21,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_22",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 22,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_23",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 23,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_24",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 24,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_25",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 25,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_targets_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 26,
+            "make": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_cache_through_0",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 0,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_cache_through_1",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 1,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_cache_through_2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 2,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_cache_through_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 3,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_cache_through_4",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "heal_targets",
+            "op": 4,
+            "make": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_0_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_2_through_1",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 2
+          },
+          {
+            "step": "update_targets",
+            "op": 1,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_2_through_2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 2
+          },
+          {
+            "step": "update_targets",
+            "op": 2,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_2_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 2
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_3_through_2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 3
+          },
+          {
+            "step": "update_targets",
+            "op": 2,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_3_through_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 3
+          },
+          {
+            "step": "update_targets",
+            "op": 3,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_3_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 3
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_4_through_4",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 4
+          },
+          {
+            "step": "update_targets",
+            "op": 4,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_4_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 4
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "catch_up_done_5_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [],
+            "add": [
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                0
+              ],
+              [
+                9,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_False_through_0",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": false,
+            "op": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_True_through_0",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": true,
+            "op": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_False_through_2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": false,
+            "op": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_True_through_2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": true,
+            "op": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_False_through_4",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": false,
+            "op": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_True_through_4",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": true,
+            "op": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_False_through_25",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": false,
+            "op": 25
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_True_through_25",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": true,
+            "op": 25
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_False_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": false,
+            "op": 26
+          }
+        ]
+      }
+    },
+    {
+      "name": "tracker_True_through_26",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_tracked",
+            "active": true,
+            "op": 26
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_repair_queues_0.0001",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            0.0001,
+            0.0002,
+            0.0001
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "fix_coin_vertices"
+          },
+          {
+            "step": "fix_degen_faces"
+          },
+          {
+            "step": "fix_degen_edges"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_repair_queues_1.0",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "fix_coin_vertices"
+          },
+          {
+            "step": "fix_degen_faces"
+          },
+          {
+            "step": "fix_degen_edges"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_repair_queues_10000.0",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10000.0,
+            10000.0,
+            10000.0
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "fix_coin_vertices"
+          },
+          {
+            "step": "fix_degen_faces"
+          },
+          {
+            "step": "fix_degen_edges"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ]
+      }
+    },
+    {
+      "name": "upstream_seams_heal_box_10_through_stage3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep (HealTgts order)"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_through_stage3_faces_only",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep (HealTgts order)"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_healbrep_all",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_healbrep_all_faces_only",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_fix_infinite_region",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "SmHealData::HealTgts last step"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_fix_infinite_region_faces_only",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "SmHealData::HealTgts last step"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_reset",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "SmHealData::HealBrep ReSet(TRUE)"
+    },
+    {
+      "name": "upstream_seams_heal_box_10_reset_faces_only",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            10,
+            10,
+            10
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "SmHealData::HealBrep ReSet(TRUE)"
+    },
+    {
+      "name": "upstream_seams_squeeze_edge_box_stage2",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            1,
+            1
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+    },
+    {
+      "name": "upstream_seams_squeeze_edge_box_stage2_faces_only",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            1,
+            1
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 5
+          },
+          {
+            "step": "cache_face_props_stage2"
+          },
+          {
+            "step": "fix_move_seam"
+          },
+          {
+            "step": "fix_split_edges_at_seam"
+          },
+          {
+            "step": "fix_split_face_at_seams"
+          }
+        ],
+        "validate_only": false
+      },
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+    },
+    {
+      "name": "replace_initialized_target_kind_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                3,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "replace_initialized_target_kind_7",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "all",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                7,
+                0
+              ]
+            ],
+            "add": [
+              [
+                7,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate_unrelated_removals_are_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "none",
+          "e": "none",
+          "f": "none"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 26,
+            "remove": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                0
+              ]
+            ],
+            "add": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "single_vertex_sphere_rebuild_swap_False",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "single_vertex_sphere",
+          "radius": 2.0,
+          "swap": false
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "seed_degen_faces"
+          },
+          {
+            "step": "fix_degen_faces"
+          }
+        ]
+      },
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4572 my_test_heal_single_vertex_sphere (Fix_DegenFaces target)"
+    },
+    {
+      "name": "single_vertex_sphere_rebuild_swap_True",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "single_vertex_sphere",
+          "radius": 2.0,
+          "swap": true
+        },
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "seed_degen_faces"
+          },
+          {
+            "step": "fix_degen_faces"
+          }
+        ]
+      },
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4572 my_test_heal_single_vertex_sphere (Fix_DegenFaces target)"
+    }
+  ]
+}
