@@ -42,7 +42,9 @@
 //!   [`LocalSolveResult::status`]; [`SolidError::Unported`] is always propagated.
 //! - **Solution nodes.** `LocalSolve` stores the grid element pointer in
 //!   `m_apNodes[0]` through an illegal cast that only `SmRayRenderer::RenderRay`
-//!   reads; `FireRay` clears it. The Rust solution leaves `nodes` empty.
+//!   reads; `FireRay` clears it. The Rust `LocalSolve` sets `nodes[0]` to a marker
+//!   node (the element's surface index) so that "set" compares as upstream's pointer;
+//!   nothing reads its value, and the solution `FireRay` returns has it empty.
 //! - **Grid elements of other types.** `FireRay` asserts (debug builds only) that a
 //!   non-polygon element is a surface element and casts it regardless; an element
 //!   of another type (user data, hierarchy) is [`SolidError::InvalidInput`] here.
@@ -68,8 +70,7 @@
 //!   upstream leaves unset before `DoRender` are black; the hit node `RenderRay`
 //!   passes as the skip element is `m_apNodes[0]`, which `FireRay` always clears, so
 //!   no element is skipped; unsigned products wrap as upstream's `ULONG`.
-//! - **Unported callees.** `SmSurface::LocalLineIntersect` (`surface.surface_p8`),
-//!   `SmFace::PointClassify` (`query.face_p2`), `Grid::expand_hierarchy` and the poly
+//! - **Unported callees.** `SmFace::PointClassify` (`query.face_p2`), `Grid::expand_hierarchy` and the poly
 //!   types return [`SolidError::Unported`] (see the `UNPORTED` markers). The surface
 //!   cache and its tree (`smsurf_GetSurfaceCache`, `GetTree`) are ported.
 //! - `SM_ERR` results the upstream ignores or `SER`s keep their behaviour; the
@@ -149,23 +150,6 @@ impl SolutionObject for RayObject {
     }
 }
 
-/// The outputs of `SmSurface::LocalLineIntersect`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LineIntersection {
-    /// `rbFoundIntersection`.
-    pub found: bool,
-    /// `rUVFound`: the surface parameters of the intersection.
-    pub uv: Point2,
-    /// `rdTFound`: the line parameter.
-    pub t: f64,
-    /// `rdDeviation`: the distance between the final line and surface points.
-    pub deviation: f64,
-    /// `rPoint`: the intersection point.
-    pub point: Point3,
-    /// `rNormal`: the surface normal there (not unitized).
-    pub normal: Vec3,
-}
-
 /// The outputs of `SmSurface::EvaluateNormalSection`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NormalSection {
@@ -175,25 +159,6 @@ pub struct NormalSection {
     pub curvature: f64,
     /// `rSurfaceNormalVector`: the unit surface normal.
     pub normal: Vec3,
-}
-
-/// `SmSurface::LocalLineIntersect`: the line `point + t * vector` against the surface
-/// from the guess `uv_guess`.
-fn surface_local_line_intersect(
-    _surface: &Surface,
-    _uv_domain: &Extent2d,
-    _line_point: Point3,
-    _line_vector: Vec3,
-    _interval: &Extent1d,
-    _distance_tolerance: f64,
-    _accuracy_tolerance: f64,
-    _uv_guess: Point2,
-) -> Result<LineIntersection> {
-    // UNPORTED(surface.surface_p8): SmSurface::LocalLineIntersect
-    Err(SolidError::unported(
-        "SmSurface::LocalLineIntersect",
-        "surface.surface_p8",
-    ))
 }
 
 /// `SmSurface::EvaluateNormalSection` (`bUFromLeft`, `bVFromLeft` both true).
@@ -753,8 +718,8 @@ impl Lsi3LocalSolver {
             };
             uv_point = Vec2::new(gu, gv);
 
-            let hit = surface_local_line_intersect(
-                surface,
+            // SmSurface::LocalLineIntersect (SER)
+            let hit = surface.local_line_intersect(
                 uv_domain,
                 self.line_point,
                 self.line_vector,
@@ -804,6 +769,9 @@ impl Lsi3LocalSolver {
                     }
                     sol.start.solution_value = hit.deviation;
                     sol.solution_type = SolutionType::SingleValue;
+                    // the grid element pointer upstream stores through an illegal
+                    // cast (see the module header); only "set" matters
+                    sol.nodes[0] = Some(NodeId(element.surface));
                 }
             }
 

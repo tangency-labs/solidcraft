@@ -1466,16 +1466,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "integration_port106_gen0015_step",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_point_solve_p2/degenerate_diagnostics.json#3",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -1502,16 +1498,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "integration_port106_gen1006_step",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_point_solve_p2/degenerate_diagnostics.json#7",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -1538,16 +1530,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "integration_port106_gen1779_step",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_point_solve_p2/degenerate_diagnostics.json#11",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -1574,16 +1562,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "integration_port106_gen2606_step",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_point_solve_p2/degenerate_diagnostics.json#15",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -10779,17 +10763,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 4,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 1341,
+  "cases_passed": 1345,
   "cases_total": 1345,
-  "deferred_by_unit": {
-    "surface.surface_p8": 4
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.surface_point_solve_p2"
 }

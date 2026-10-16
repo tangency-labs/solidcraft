@@ -856,7 +856,16 @@ fn rust_op(k: &Kernel, op: &OpIn, a: &mut Plane, o: &mut Vec<f64>) -> Result<(),
         } => {
             let d = dom_of(a, *dom);
             let i = ivl.map(|[x, y]| Extent1d::from_min_max(x, y));
-            let r = a.global_line_intersect::<H>(&d, v3(*p), v3(*v), i.as_ref(), *ray, *tol);
+            let r = a.global_line_intersect::<H>(
+                &Kernel::default(),
+                H(0),
+                &d,
+                v3(*p),
+                v3(*v),
+                i.as_ref(),
+                *ray,
+                *tol,
+            );
             if let Some(sols) = st(o, r)? {
                 put_sols(o, &sols);
             }

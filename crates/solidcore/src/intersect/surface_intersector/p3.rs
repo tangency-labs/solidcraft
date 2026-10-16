@@ -40,7 +40,12 @@
 //!   Their `process_boundary_curves` flags are set as upstream's
 //!   `SmTemporaryChangeValue`s set them; a callee that fetches its own cache does not
 //!   see them. [`SurfaceIntersector::find_boundary_start_points_with_caches`] takes
-//!   the caches from the caller instead (only their iso boundary curves are read). The temporary removal of the other surface's owner (point validation)
+//!   the caches from the caller instead. Their iso boundary curves are read, and
+//!   `GlobalCurveIntersect`, which upstream runs on the other surface's one cache
+//!   (`smsurf_GetSurfaceCache` returns the intersector's), runs on a copy of the
+//!   caller's cache whose handles name the curve and surface objects of the solve
+//!   ([`Surface::global_curve_intersect_in`], `SurfaceCache::map_handles`), so its
+//!   line and tree solves see the same tree. The temporary removal of the other surface's owner (point validation)
 //!   has no counterpart: Rust surfaces have no owner.
 //! - **Points of `FindBoundaryStartPoints`.** Upstream takes a point from the block
 //!   manager for every solution and leaks those it does not keep; here a solution's
@@ -57,7 +62,7 @@
 //! - **Previous UVs.** `ComputeNextPoint` hands `RefinePoint` the address of the
 //!   previous point's first UV position, which the callee may read as the array
 //!   `m_vUVCurvePV` (`[uv0, duv0, uv1, duv1]`); that array is passed.
-//! - **Unported callees.** `SmSurface::GlobalCurveIntersect` (`surface.surface_p8`),
+//! - **Unported callees.**
 //!   `SmSurface::DropAndTrimCurve`'s trace (`intersect.surface_drop_curve`, through
 //!   [`Surface::drop_and_trim_curve`]) return [`SolidError::Unported`], which always propagates (also where upstream
 //!   ignores the status).
@@ -71,7 +76,9 @@ use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::line_closest_point;
-use crate::geom::solution_array::{Solution, SolutionEnd, SolutionType};
+use crate::geom::solution_array::{
+    ObjectKind, Solution, SolutionEnd, SolutionObject, SolutionType,
+};
 use crate::geom::tol::{is_zero, ZONE_TOL_3D};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -242,7 +249,7 @@ impl SurfaceIntersector<'_> {
         out: &mut TsectCurves,
     ) -> Result<()> {
         // get surface caches (NER: no cache is SM_ERR_NULL_POINTER)
-        let get = |s: &Surface| match surface_cache::<()>(k, s, None) {
+        let get = |i: SrfIndex| match surface_cache::<SrfIndex>(k, self.surface(i), Some(i)) {
             Ok(c) => Ok(c),
             Err(e) if e.is_unported() => Err(e),
             Err(_) => Err(SolidError::Upstream {
@@ -251,9 +258,9 @@ impl SurfaceIntersector<'_> {
                 entity: None,
             }),
         };
-        let mut caches = vec![get(self.surface(SrfIndex::First))?];
+        let mut caches = vec![get(SrfIndex::First)?];
         if !self.doing_self_intersection {
-            caches.push(get(self.surface(SrfIndex::Second))?);
+            caches.push(get(SrfIndex::Second)?);
         }
 
         self.find_boundary_start_points_with_caches(k, &mut caches, intersection_box, out)
@@ -377,8 +384,19 @@ impl SurfaceIntersector<'_> {
                 let solutions = if bbox.are_disjoint(intersection_box, 0.0) {
                     Vec::new()
                 } else {
+                    // on OtherSurface's cache: upstream's GlobalCurveIntersect fetches
+                    // that same cache (smsurf_GetSurfaceCache) and solves on its tree
+                    let other_cache = caches.get((1 - l_srf).min(caches.len() - 1)).ok_or(
+                        SolidError::Upstream {
+                            operation: OP_FBSP,
+                            code: SM_ERR_NULL_POINTER,
+                            entity: None,
+                        },
+                    )?;
                     surface_global_curve_intersect(
+                        k,
                         self.surface(other),
+                        other_cache,
                         &other_domain,
                         &tgt_curve,
                         &bsc_ivl,
@@ -1334,20 +1352,91 @@ fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<b
     }
 }
 
-/// `surface.GlobalCurveIntersect(domain, curve, interval, tol, solutions)`: the
-/// solutions, `[t, u, v]` each.
-fn surface_global_curve_intersect(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
+/// The objects of the solve of [`surface_global_curve_intersect`]: the boundary curve
+/// and the surface, carrying the natural interval / domain that the solver's
+/// identical-solution test reads through upstream's object pointers
+/// (`GetNaturalInterval`, `GetNaturalUVDomain`). The solutions returned name no objects.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SolveObject {
+    Curve(Extent1d),
+    Surface(Extent2d),
+}
+
+impl SolutionObject for SolveObject {
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Curve(_) => ObjectKind::Curve,
+            Self::Surface(_) => ObjectKind::Surface,
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Curve(ivl) => Some(*ivl),
+            Self::Surface(_) => None,
+        }
+    }
+
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        match self {
+            Self::Curve(_) => None,
+            Self::Surface(domain) => Some(*domain),
+        }
+    }
+}
+
+/// `surface.GlobalCurveIntersect(domain, curve, interval, tol, solutions)`, which
+/// upstream runs on the surface's one cache: here on a copy of `cache` (the
+/// intersector's cache of `surface`; its handles, which name only the surface, become
+/// the [`SolveObject`] of the surface; a cache naming no surface cannot serve the leaf
+/// solves, so the solve then builds its own). The solutions, `[t, u, v]` each (their
+/// objects and nodes are not kept).
+fn surface_global_curve_intersect<O: Copy + PartialEq>(
+    k: &Kernel,
+    surface: &Surface,
+    cache: &SurfaceCache<O>,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
 ) -> Result<Vec<Solution<()>>> {
-    // UNPORTED(surface.surface_p8): SmSurface::GlobalCurveIntersect
-    Err(SolidError::unported(
-        "SmSurface::GlobalCurveIntersect",
-        "surface.surface_p8",
-    ))
+    let surface_object = SolveObject::Surface(surface.natural_uv_domain());
+    let curve_object = SolveObject::Curve(curve.natural_interval());
+    let found = if cache.surface_handle().is_some() {
+        let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
+        surface.global_curve_intersect_in::<SolveObject>(
+            k,
+            [Some(curve_object), Some(surface_object)],
+            Some(&mut solve_cache),
+            domain,
+            curve,
+            interval,
+            tol,
+        )?
+    } else {
+        // a cache that does not name its surface cannot serve the leaf solves
+        // (sm_GetOriginalSurface reads the tree's owner): the solve builds its own
+        surface.global_curve_intersect::<SolveObject>(
+            k,
+            [curve_object, surface_object],
+            domain,
+            curve,
+            interval,
+            tol,
+        )?
+    };
+    Ok(found
+        .as_slice()
+        .iter()
+        .map(|s| {
+            let mut out = Solution::<()>::new();
+            out.solution_type = s.solution_type;
+            out.num_variables = s.num_variables;
+            out.start = s.start;
+            out.end = s.end;
+            out
+        })
+        .collect())
 }
 
 /// The outputs of `SmSurface::DropAndTrimCurve` used here.

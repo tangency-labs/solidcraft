@@ -54,9 +54,9 @@
 //!   to a double as the distance; the port returns the error.
 //! - **`ApproximatePolarBox`** returns a new box (`ReSet` of the caller's box keeps
 //!   only its unused basis and domain).
-//! - **`HasPlaneCrossings`** needs `SmPlane` (`GlobalCurveIntersect`, unit
-//!   `surface.surface_p8`): with any plane it returns [`SolidError::Unported`]; the
-//!   plane type is generic.
+//! - **`HasPlaneCrossings`** takes the kernel and the planes as [`Plane`]s (the plane's
+//!   `GlobalCurveIntersect` is [`Surface::global_curve_intersect`]); its solutions name
+//!   no object the result reads.
 //! - **`AssertValid`** reports for the object `key`; the owner is an [`ObjectRef`]
 //!   whose type code is compared with the allowed owner types (none of them has
 //!   subclasses). The test requests of `SM_LEVEL_GIVEN` are not modelled (`SM_LEVEL_0`
@@ -91,11 +91,15 @@ use crate::geom::local_solve_nd::EvalNFunctions;
 use crate::geom::matrix::Matrix;
 use crate::geom::object::ObjectRef;
 use crate::geom::polar_box::PolarBox;
-use crate::geom::solution_array::{Solution, SolutionEnd, SolutionType};
+use crate::geom::solution_array::{
+    ObjectKind, Solution, SolutionEnd, SolutionObject, SolutionType,
+};
 use crate::geom::tol::{are_same, is_zero, tol3d};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, max4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
+use crate::surface::plane::Plane;
+use crate::surface::surface::Surface;
 
 const OP_CHAIN: &str = "curve::curve::p4::fix_chain_curves_list";
 const OP_EFO: &str = "curve::curve::p4::CurvePropertyEfo::evaluate";
@@ -883,18 +887,24 @@ pub fn is_degenerate_base<C: CurveEvaluate + ?Sized>(
 /// `SmCurve::HasPlaneCrossings`: whether the curve crosses one of `planes` (a point
 /// intersection off the curve ends, or a range that is not the whole curve).
 ///
+/// The status of `GlobalCurveIntersect` is ignored upstream (no `SER`): a failed
+/// intersection leaves no solutions, so the plane is not crossed.
+///
 /// # Errors
 ///
-/// [`SolidError::Unported`] for any plane (`SmSurface::GlobalCurveIntersect`, unit
-/// `surface.surface_p8`).
-pub fn has_plane_crossings<C: CurveEvaluate + ?Sized, P>(curve: &C, planes: &[P]) -> Result<bool> {
+/// [`SolidError::Unported`] from [`Surface::global_curve_intersect`].
+pub fn has_plane_crossings(k: &Kernel, curve: &Curve, planes: &[Plane]) -> Result<bool> {
     // locals
     let ivl = curve.natural_interval();
 
     // for every plane
     for plane in planes {
         // find all Curve/Plane intersections
-        let solutions = plane_global_curve_intersect(plane, curve, &ivl, EFF_ZERO)?;
+        // (status ignored: an error leaves the solution array empty)
+        let solutions = ignored(plane_global_curve_intersect(
+            k, plane, curve, &ivl, EFF_ZERO,
+        ))?
+        .unwrap_or_default();
 
         // for every solution - classify the intersection
         for (solution_type, start, end) in &solutions {
@@ -916,19 +926,45 @@ pub fn has_plane_crossings<C: CurveEvaluate + ?Sized, P>(curve: &C, planes: &[P]
     Ok(false)
 }
 
+/// The objects of the plane intersection's solutions (never read).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaneHandle {
+    Curve,
+    Plane,
+}
+
+impl SolutionObject for PlaneHandle {
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Curve => ObjectKind::Curve,
+            Self::Plane => ObjectKind::Surface,
+        }
+    }
+}
+
 /// `pPlane->GlobalCurveIntersect(pPlane->GetNaturalUVDomain(), curve, ivl, tol)`:
 /// the solutions' types, starts and ends.
-fn plane_global_curve_intersect<P, C: ?Sized>(
-    _plane: &P,
-    _curve: &C,
-    _ivl: &Extent1d,
-    _tol: f64,
+fn plane_global_curve_intersect(
+    k: &Kernel,
+    plane: &Plane,
+    curve: &Curve,
+    ivl: &Extent1d,
+    tol: f64,
 ) -> Result<Vec<(SolutionType, SolutionEnd, SolutionEnd)>> {
-    // UNPORTED(surface.surface_p8): SmSurface::GlobalCurveIntersect
-    Err(SolidError::Unported {
-        upstream: "SmSurface::GlobalCurveIntersect",
-        unit: "surface.surface_p8",
-    })
+    let surface = Surface::from(plane.clone());
+    let sols = surface.global_curve_intersect::<PlaneHandle>(
+        k,
+        [PlaneHandle::Curve, PlaneHandle::Plane],
+        &surface.natural_uv_domain(),
+        curve,
+        ivl,
+        tol,
+    )?;
+    Ok(sols
+        .as_slice()
+        .iter()
+        .map(|s| (s.solution_type, s.start, s.end))
+        .collect())
 }
 
 // ---- validity -----------------------------------------------------------------------------

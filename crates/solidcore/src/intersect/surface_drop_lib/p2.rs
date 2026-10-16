@@ -69,6 +69,7 @@ use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p1::{map_to_2d_dir, zone_tol_3d};
 use crate::surface::surface::p2::SurfaceKind;
+use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::ObjectHandle;
 
@@ -728,8 +729,9 @@ impl DropPt {
                 let unowned = surface.clone();
 
                 // drop sCrvSpanEndPt to surface with GlobalPointSolve
-                let solutions: SolutionArray<ObjectHandle> = unowned.global_point_solve(
+                let solutions: SolutionArray<NoObject> = unowned.global_point_solve(
                     k,
+                    Some(NoObject),
                     uv_domain,
                     SolverOperation::Minimize,
                     end.crv_pd[0],

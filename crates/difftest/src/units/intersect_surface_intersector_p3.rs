@@ -56,7 +56,8 @@ use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::{Surface, SurfaceKind};
-use solidcore::surface::surface_cache::{SurfaceCache, SurfaceCacheOptions};
+use solidcore::surface::surface::p2::surface_cache;
+use solidcore::surface::surface_cache::SurfaceCache;
 use solidcore::SolidError;
 use solidcore_ffi::units::intersect_surface_intersector_p3::{self as ffi};
 
@@ -1045,13 +1046,13 @@ struct Run<'a> {
 
 impl Run<'_> {
     /// The surface caches for `FindBoundaryStartPoints` of planes and B-spline
-    /// surfaces: fresh caches without a tree (kept as upstream keeps them on the
-    /// surfaces). `smsurf_GetSurfaceCache` builds the tree, which reaches the unported
-    /// `CalculateContinuities` (`surface.surface_p6`), but `FindBoundaryStartPoints`
-    /// reads only the cache's iso boundary curves, which are the same either way.
-    /// `None` (the real `smsurf_GetSurfaceCache`) for a curve-bounded surface, whose
-    /// trimmed-surface cache build fails upstream.
-    fn caches(&mut self) -> Option<&mut Vec<SurfaceCache<()>>> {
+    /// surfaces, built as `smsurf_GetSurfaceCache` builds them on the first call and
+    /// kept (as upstream keeps them on the surfaces: later calls see the iso boundary
+    /// curves and the tree of the first; `GlobalCurveIntersect` solves on that tree).
+    /// `None` (`FindBoundaryStartPoints` fetches the caches itself, with the same
+    /// result) for a curve-bounded surface, whose trimmed-surface cache build fails
+    /// upstream, or when a build fails.
+    fn caches(&mut self, k: &Kernel) -> Option<&mut Vec<SurfaceCache<()>>> {
         let surfaces = self.surfaces;
         if surfaces
             .iter()
@@ -1059,17 +1060,16 @@ impl Run<'_> {
         {
             return None;
         }
-        let same = self.same;
-        Some(self.caches.get_or_insert_with(|| {
-            let make = |s: &Surface| {
-                SurfaceCache::new(s.clone(), s.natural_uv_domain(), SurfaceCacheOptions::default())
-            };
-            if same {
-                vec![make(surfaces[0])]
-            } else {
-                vec![make(surfaces[0]), make(surfaces[1])]
-            }
-        }))
+        if self.caches.is_none() {
+            let n = if self.same { 1 } else { 2 };
+            let built: Result<Vec<_>, _> = surfaces
+                .iter()
+                .take(n)
+                .map(|s| surface_cache::<()>(k, s, Some(())))
+                .collect();
+            self.caches = Some(built.ok()?);
+        }
+        self.caches.as_mut()
     }
 }
 
@@ -1207,7 +1207,7 @@ fn run_op(run: &mut Run<'_>, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut
             );
             let k = Kernel::default();
             let mut outs = core::mem::take(&mut run.outs);
-            let r = match run.caches() {
+            let r = match run.caches(&k) {
                 Some(caches) => si.find_boundary_start_points_with_caches(&k, caches, &bx, &mut outs),
                 None => si.find_boundary_start_points(&k, &bx, &mut outs),
             };

@@ -150,16 +150,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalLineIntersect",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "edge_line_in_plane_point",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.plane_p1/upstream.json#10 (upstream edge case: line in the plane touching a corner (one parameter))",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -11811,8 +11807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalLineIntersect",
-        "unit": "surface.surface_p8"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0246",
@@ -22167,13 +22163,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 131,
+  "cases_deferred": 130,
   "cases_failed": 0,
-  "cases_passed": 2574,
+  "cases_passed": 2575,
   "cases_total": 2705,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p3": 129,
-    "surface.surface_p8": 2
+    "intersect.surface_drop_curve": 1,
+    "intersect.surface_drop_lib_p3": 129
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -2455,8 +2455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSPGlobalSolver::LocalSolve",
-        "unit": "surface.surface_p8"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_4_0",
@@ -2467,8 +2467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSPGlobalSolver::LocalSolve",
-        "unit": "surface.surface_p8"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_4_1",
@@ -2519,8 +2519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalCurveIntersect",
-        "unit": "surface.surface_p8"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_0_0",
@@ -2531,8 +2531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalCurveIntersect",
-        "unit": "surface.surface_p8"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_0_1",
@@ -2631,8 +2631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalCurveIntersect",
-        "unit": "surface.surface_p8"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_0_0",
@@ -2643,8 +2643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalCurveIntersect",
-        "unit": "surface.surface_p8"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_0_1",
@@ -19573,9 +19573,9 @@
   "cases_total": 2429,
   "deferred_by_unit": {
     "curve.iso_curve": 12,
+    "intersect.curve_class_p4": 4,
     "intersect.surface_tracer": 8,
-    "surface.surface_p8": 6,
-    "topology.brep_p1": 4,
+    "topology.brep_p1": 6,
     "topology.edge": 3
   },
   "max_rel_err": 0.0,

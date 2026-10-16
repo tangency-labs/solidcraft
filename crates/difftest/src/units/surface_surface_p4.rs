@@ -462,6 +462,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let k = Kernel::new(&KernelOptions::default());
             match stat(s.global_point_solve::<NoObject>(
                 &k,
+                Some(NoObject),
                 &dom_of(*dom),
                 sop_of(*sop)?,
                 v3(*p),

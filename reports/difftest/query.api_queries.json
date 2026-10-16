@@ -2122,16 +2122,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "rational_kind9_1e-05_axis",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.api_queries/queries.json#239",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -2222,16 +2218,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "rational_kind9_100000_axis",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.api_queries/queries.json#251",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11855,15 +11847,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 557,
+  "cases_deferred": 555,
   "cases_failed": 0,
-  "cases_passed": 646,
+  "cases_passed": 648,
   "cases_total": 1203,
   "deferred_by_unit": {
     "query.brep": 335,
     "query.face_p1": 12,
     "query.face_p3": 45,
-    "surface.surface_p8": 2,
     "topology.brep_p1": 114,
     "topology.brep_p2": 42,
     "topology.edgeuse_p3": 7

@@ -2019,6 +2019,7 @@ fn surface_global_point_solve(
     let solutions = ignored(
         surface.global_point_solve::<crate::surface::surface::p4::NoObject>(
             k,
+            Some(crate::surface::surface::p4::NoObject),
             &surface.natural_uv_domain(),
             SolverOperation::Minimize,
             point,

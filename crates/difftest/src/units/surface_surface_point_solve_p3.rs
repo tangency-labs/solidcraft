@@ -296,7 +296,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 match mode {
                     0 => out.push(flag(stepper.find_boundary_solution()?)),
                     1 => {
-                        let result = stepper.find_next_step(&mut previous)?;
+                        let result = stepper.find_next_step(&Kernel::default(), &mut previous)?;
                         if let Some(status) = out.first_mut() {
                             *status = f64::from(result.status);
                         }

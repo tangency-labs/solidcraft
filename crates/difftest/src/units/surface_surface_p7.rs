@@ -34,6 +34,7 @@ use solidcore::geom::solution_array::{
 };
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
+use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, LocationType, SurfParamType,
@@ -622,7 +623,7 @@ pub(crate) fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
         ))),
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
         SrfIn::Revolution { a, b, p, axis, swap, oob } => {
-            let k = solidcore::kernel::Kernel::default();
+            let k = Kernel::default();
             let mut l = Line::from_points(v3(*a), v3(*b), 3);
             l.make_nurb().map_err(|e| harness(format!("line nurb: {e}")))?;
             let mut r = SurfOfRevolution::create_canonical(
@@ -964,7 +965,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::Flat { angle, want } => {
-            let f = st(s.flat_corners(&solidcore::kernel::Kernel::default(), *angle, *want))?
+            let f = st(s.flat_corners(&Kernel::default(), *angle, *want))?
                 .map_err(|c| harness(format!("GetFlatCorners failed: {c}")))?;
             o.extend([0.0, f64::from(f.flags)]);
             if let Some(pts) = f.points {
@@ -985,7 +986,10 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             target,
             req,
         } => {
+            let k = Kernel::default();
             let r: solidcore::Result<SolutionArray<Obj>> = s.global_point_solve_0(
+                &k,
+                Obj,
                 &dom_of(*dom),
                 sop_of(*sop)?,
                 v3(*p),
@@ -994,7 +998,16 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 req_of(*req)?,
             );
             match st(r)? {
-                Ok(a) => o.extend([0.0, a.len() as f64]),
+                Ok(a) => {
+                    o.extend([0.0, a.len() as f64]);
+                    for sol in a.as_slice() {
+                        o.extend([
+                            sol.start.solution_value,
+                            sol.start.parameters.first().copied().unwrap_or(0.0),
+                            sol.start.parameters.get(1).copied().unwrap_or(0.0),
+                        ]);
+                    }
+                }
                 Err(c) => o.extend([c, 0.0]),
             }
         }
@@ -1010,7 +1023,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         } => {
             let c = curve_of(curve)?;
             let vecs: Vec<Vec3> = vecs.iter().map(|p| v3(*p)).collect();
-            let k = solidcore::kernel::Kernel::default();
+            let k = Kernel::default();
             let curve_handle = Some(Handle {
                 id: 0,
                 interval: Some(c.natural_interval()),
@@ -1048,7 +1061,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         } => {
             let s2 = surface_of(other)?;
             let vecs: Vec<Vec3> = vecs.iter().map(|p| v3(*p)).collect();
-            let k = solidcore::kernel::Kernel::default();
+            let k = Kernel::default();
             let handles = [Some(surface_handle(1, &s)), Some(surface_handle(2, &s2))];
             let r: solidcore::Result<SolutionArray<Handle>> = s.global_surface_solve(
                 &k,
@@ -1112,7 +1125,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let cur = Curve::new(pw, curve.p, curve.u.clone())
                 .map_err(|e| harness(format!("curve input: {e}")))?;
             let bc = BSplineCurve::from_nurb(cur, curve.dim, false);
-            let k = solidcore::kernel::Kernel::default();
+            let k = Kernel::default();
             match st(s.create_parallel_projection_curves(&k, &dom_of(*dom), &bc, v3(*vec), *dist, None, None))? {
                 Ok((c3d, _)) => o.extend([0.0, c3d.len() as f64]),
                 Err(c) => o.extend([c, 0.0]),

@@ -9,8 +9,10 @@
 //! A case is two surfaces (B may be A itself), their domains, the edge flags, the optional
 //! tolerances and optionally a hand-built decomposition tree per surface cache. With trees,
 //! the C++ side swaps them into the real surface caches for the call and the Rust side runs
-//! `do_intersection_with_caches` on caches holding them; without, both sides build the caches
-//! (`do_intersection`). Both produce `status` and, on success, the curves (values `rec`, see
+//! `do_intersection_with_caches` on caches holding them (upstream's nested
+//! `SmSurface::GlobalCurveIntersect` fetches the same swapped cache; the port hands it the
+//! intersector's cache, so both solve the boundary curves on the hand tree); without, both
+//! sides build the caches (`do_intersection`). Both produce `status` and, on success, the curves (values `rec`, see
 //! the ffi module; statuses `0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust
 //! `InvalidInput`, `-1` for a Rust error upstream cannot return).
 //!
@@ -20,12 +22,11 @@
 //! a B-spline against a plane or a B-spline, a surface against itself, and curve-bounded
 //! surfaces over planes; trees of depth 0 to 3 sampled from the surfaces.
 //!
-//! Deferred cases: every case without trees (the surface cache build needs
-//! `SmSurface::CalculateContinuities`, `surface.surface_p6`); boundary start points on a
-//! boundary curve near the other surface (`SmSurface::GlobalCurveIntersect`,
-//! `surface.surface_p8`); interior candidates with normals at least 5 degrees apart
-//! (`SmSurface::LocalSurfaceIntersect`, `surface.surface_p11`); B-spline boundary curves
-//! (`SmSurface::IsSingularity`, `surface.surface_p5`).
+//! Deferred cases: plane boundary iso curves (`SmPlane::CreateIsoParametricCurve` and
+//! `SmBezierPatch::GetPolarBox`, `surface.surface_cache_p1`); traced points that need
+//! `SmSurfaceIntersector::ComputePointValues` (`intersect.surface_intersector_p2`); curves
+//! coincident with the other surface (`SmSurfaceDropCurve::DoTrace`,
+//! `intersect.surface_drop_curve`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

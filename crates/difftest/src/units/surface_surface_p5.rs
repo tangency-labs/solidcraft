@@ -726,7 +726,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let dom = s.natural_uv_domain();
             let (pair, pref) = match kind {
                 0 => must(
-                    SpGlobalSolver { base, surface: Some(&s), uv_domain: dom }
+                    SpGlobalSolver { base, surface: Some(&s), uv_domain: dom, surface_cache: None, kernel: None }
                         .identical_solutions(&sa, &sb),
                     "identical_solutions",
                 )?,

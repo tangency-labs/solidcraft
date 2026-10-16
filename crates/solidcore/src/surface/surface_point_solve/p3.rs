@@ -228,7 +228,7 @@ impl SurfPtSolveStepper<'_> {
     ///
     /// Missing dependencies and evaluation errors. Ordinary iteration failure is
     /// represented by [`NextStep::status`] so its reason is retained.
-    pub fn find_next_step(&mut self, previous: &mut Self) -> Result<NextStep> {
+    pub fn find_next_step(&mut self, k: &Kernel, previous: &mut Self) -> Result<NextStep> {
         use TerminationReason::{
             FoundAnswerConverged as Converged, OutOfBounds, StillIterating, UnableToConverge,
         };
@@ -248,7 +248,7 @@ impl SurfPtSolveStepper<'_> {
         }
         self.set_nr_suspect(false);
         let mut nr = Self::copy_of(previous);
-        let mut reason = nr.step(previous, false)?;
+        let mut reason = nr.step(k, previous, false)?;
         if reason == Converged {
             self.assign(&nr);
             return Ok(NextStep::success(reason));
@@ -299,7 +299,7 @@ impl SurfPtSolveStepper<'_> {
         }
         self.set_nr_suspect(true);
         let mut plane = Self::copy_of(previous);
-        reason = plane.step(previous, true)?;
+        reason = plane.step(k, previous, true)?;
         if reason == Converged {
             // Upstream deliberately assigns sNREval here, even after the plane step.
             self.assign(&nr);
@@ -490,7 +490,7 @@ impl Surface {
         let mut reason = StillIterating;
         let mut iterations = 0;
         while iterations < 35 {
-            let step = next.find_next_step(&mut curr)?;
+            let step = next.find_next_step(k, &mut curr)?;
             reason = step.reason;
             if next.converged_with(true)? {
                 reason = Converged;

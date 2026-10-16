@@ -890,6 +890,13 @@ void run(int32_t op, Rd& rd, std::vector<double>& o)
         SmStatus r = s->GlobalPointSolve_0(d, sop, p, tol, pt, req, sols);
         o.push_back(st(r));
         o.push_back((double)sols.GetSize());
+        if (r == SM_SUCCESS)
+            for (ULONG i = 0; i < sols.GetSize(); i++)
+            {
+                o.push_back(sols[i].m_vStart.m_dSolutionValue);
+                o.push_back(sols[i].m_vStart[0]);
+                o.push_back(sols[i].m_vStart[1]);
+            }
         break;
     }
     case OP_GCS:

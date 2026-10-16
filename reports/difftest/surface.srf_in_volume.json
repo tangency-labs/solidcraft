@@ -10526,14 +10526,10 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1313",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11218638831660612543",
       "values_compared": 0
     },
@@ -15334,14 +15330,10 @@
       "values_compared": 86
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1912",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11218638831660613142",
       "values_compared": 0
     },
@@ -16335,13 +16327,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 11,
+  "cases_deferred": 9,
   "cases_failed": 0,
-  "cases_passed": 2025,
+  "cases_passed": 2027,
   "cases_total": 2036,
   "deferred_by_unit": {
-    "surface.srf_in_volume": 9,
-    "surface.surface_p8": 2
+    "surface.srf_in_volume": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -49,10 +49,10 @@
 //!   propagates.
 //! - **Signed directed solves** without a vector (`m_cpOptVectors == NULL`, which
 //!   upstream dereferences) are `InvalidInput`.
-//! - **Unported callees** (return [`SolidError::Unported`]): the file-static
-//!   `sm_IntersectSrfBndryCrv` (boundary iso curve against the other surface, only with
-//!   `do_boundary_testing`) and `sm_ExtractIsoCurve` (`LiftCurve`), both unit
-//!   `surface.surface_p8`.
+//! - **Wired callees** (unit `surface.surface_p8`): the file-static
+//!   `sm_IntersectSrfBndryCrv` (`do_boundary_testing`) and `sm_ExtractIsoCurve`
+//!   (`LiftCurve`) call [`super::p8`]; a UV curve that is not of a B-spline kind is not an
+//!   iso curve (upstream's signature takes an `SmBSplineCurve`).
 //! - **Upstream issues.** `IntersectSurfaceBoundaries` dereferences a `NULL` curve
 //!   array (UB-121; the port always returns the curves); `LocalSurfaceIntersect`'s
 //!   boundary retries bind `!bFoundSolution` to the minimum test only (WR-99;
@@ -138,7 +138,9 @@ fn intersect_srf_bndry_crv(
     guess_uv: Point2,
     guess_t: f64,
 ) -> Result<Option<BoundaryHit>> {
-    let _ = (
+    // (sm_IntersectSrfBndryCrv, surface.surface_p8; the deviation and the tangency flag
+    // are not read here)
+    let hit = super::p8::intersect_srf_bndry_crv(
         surface,
         uv_domain,
         curve_surface,
@@ -147,12 +149,11 @@ fn intersect_srf_bndry_crv(
         tol_3d,
         guess_uv,
         guess_t,
-    );
-    // UNPORTED(surface.surface_p8): sm_IntersectSrfBndryCrv
-    Err(SolidError::unported(
-        "sm_IntersectSrfBndryCrv",
-        "surface.surface_p8",
-    ))
+    )?;
+    Ok(hit.found.then_some(BoundaryHit {
+        uv: hit.uv,
+        t: hit.t,
+    }))
 }
 
 /// `SmSurface::LocalSurfaceSolve(domain, other, other_domain, op, tol, NULL, vectors,
@@ -257,8 +258,7 @@ impl Surface {
     /// # Errors
     ///
     /// Those of the evaluations, the angle between zero normals and the solves (all
-    /// checked upstream); `SM_ERR` past [`MAX_RECURSION`] self calls;
-    /// [`SolidError::Unported`]: `sm_IntersectSrfBndryCrv` (`surface.surface_p8`).
+    /// checked upstream); `SM_ERR` past [`MAX_RECURSION`] self calls.
     pub fn local_surface_intersect(
         &self,
         uv_domain: &Extent2d,
@@ -1325,9 +1325,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
     /// `SM_ERR_NULL_POINTER` without both `caches`; `InvalidInput` when a node is not a
     /// patch of its cache or for a signed directed solve without a vector; those of
     /// the checked (`SER`) calls: `ComputeConeBoundTo`, `LocalSurfaceIntersect`,
-    /// `sm_SCLocalSolve`, `LocalSurfaceSolve` and `sm_PassSSConvergenceTest`;
-    /// [`SolidError::Unported`] from `LocalSurfaceIntersect`'s boundary solves
-    /// (`surface.surface_p8`).
+    /// `sm_SCLocalSolve`, `LocalSurfaceSolve` and `sm_PassSSConvergenceTest`.
     #[allow(clippy::too_many_lines)]
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
         let node1 = *self.base.branch_node(branch, 0)?;
@@ -1761,12 +1759,33 @@ fn extract_iso_curve(
     interval: &Extent1d,
     approx_tol_3d: f64,
 ) -> Result<Option<(BSplineCurve, f64)>> {
-    let _ = (k, surface, uv_domain, uv_curve, interval, approx_tol_3d);
-    // UNPORTED(surface.surface_p8): sm_ExtractIsoCurve
-    Err(SolidError::unported(
-        "sm_ExtractIsoCurve",
-        "surface.surface_p8",
-    ))
+    // `sm_ExtractIsoCurve` takes an `SmBSplineCurve`: every `Curve` kind derived from it
+    // has one as base. Other kinds cannot reach upstream's signature, so they are not
+    // iso curves here.
+    let uv_bspline = match uv_curve.kind() {
+        CurveKind::BSpline(b) => b,
+        CurveKind::Line(l) => l.base(),
+        CurveKind::Ellipse(e) => e.base(),
+        CurveKind::Hyperbola(h) => h.base(),
+        CurveKind::Parabola(p) => p.base(),
+        _ => return Ok(None),
+    };
+    // (sm_ExtractIsoCurve, surface.surface_p8; rdMaxApproxDev is always 0.0 there)
+    let Some(iso) =
+        super::p8::extract_iso_curve(k, surface, uv_domain, uv_bspline, interval, approx_tol_3d)?
+    else {
+        return Ok(None);
+    };
+    // rp3dCurve is an SmBSplineCurve
+    let bspline = match iso.into_kind() {
+        CurveKind::BSpline(b) => b,
+        CurveKind::Line(l) => l.base().clone(),
+        CurveKind::Ellipse(e) => e.base().clone(),
+        CurveKind::Hyperbola(h) => h.base().clone(),
+        CurveKind::Parabola(p) => p.base().clone(),
+        _ => return Err(SolidError::sm_err(OP_LIFT)),
+    };
+    Ok(Some((bspline, 0.0)))
 }
 
 /// The lifted curve of [`Surface::lift_curve`].
@@ -1792,9 +1811,8 @@ impl Surface {
     ///
     /// `SM_ERR` when no segment could be lifted or a segment's continuous domain is
     /// empty; `SM_ERR_NULL_POINTER` without a surface cache; those of the checked
-    /// (`SER`) calls; [`SolidError::Unported`]: `sm_ExtractIsoCurve`
-    /// (`surface.surface_p8`), and a curve on a surface that is not a B-spline
-    /// (`SmCrvOnSurf` holds an `SmBSplineSurface` here).
+    /// (`SER`) calls; [`SolidError::Unported`] for a curve on a surface that is not a
+    /// B-spline (`SmCrvOnSurf` holds an `SmBSplineSurface` here).
     #[allow(clippy::too_many_lines)]
     pub fn lift_curve(
         &self,

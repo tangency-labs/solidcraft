@@ -466,6 +466,7 @@ impl CurveLoops {
             for (p, uv) in [(p1, &mut uv1), (p2, &mut uv2)] {
                 let sols = match surface.global_point_solve::<NoObject>(
                     k,
+                    None,
                     domain,
                     SolverOperation::Intersect,
                     p,

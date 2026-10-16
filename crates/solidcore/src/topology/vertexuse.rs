@@ -760,7 +760,14 @@ fn global_point_solve(
     // switches around the call (point testing, boundary curves, `m_bHaveTSurfaceCache`)
     // have nothing to act on; a face-owned surface is Unported (query.face_p2) inside.
     let solutions = surface.global_point_solve::<crate::surface::surface::p4::NoObject>(
-        k, domain, op, point, tol, None, request,
+        k,
+        Some(crate::surface::surface::p4::NoObject),
+        domain,
+        op,
+        point,
+        tol,
+        None,
+        request,
     )?;
     solutions
         .as_slice()

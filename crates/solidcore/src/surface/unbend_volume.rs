@@ -71,7 +71,7 @@
 //!   guess of the local solve is dropped.
 //! - **`IsCurveInParamDomainSimple`** builds the half-plane `SmPlane` and asks
 //!   `SmCurve::HasPlaneCrossings`, which needs `SmSurface::GlobalCurveIntersect`
-//!   (unit `surface.surface_p8`, not ported): [`SolidError::Unported`].
+//!   (the plane intersector).
 //! - **`IsPointInParamDomainSimple`** passes one boolean for all three out-flags of
 //!   `IsOnBoundarySimple`, whose last write `rbOnW = FALSE` then makes it return
 //!   `FALSE`: every point is in the domain (ported as that constant; it also decides
@@ -104,6 +104,7 @@ use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, ZONE_TOL_3D};
 use crate::geom::transform::Transform;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{
     max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQ, INFINITE_PARAMETER, UNDEF_DOUBLE,
 };
@@ -892,9 +893,9 @@ impl UnbendVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from `SmCurve::HasPlaneCrossings` (its plane
-    /// intersector, unit `surface.surface_p8`).
-    pub fn is_curve_in_param_domain_simple(&self, param_curve: &Curve) -> Result<bool> {
+    /// Those of `SmCurve::HasPlaneCrossings` (the plane intersector); unported callees
+    /// of it return [`SolidError::Unported`].
+    pub fn is_curve_in_param_domain_simple(&self, k: &Kernel, param_curve: &Curve) -> Result<bool> {
         // locals
         let uv_scale = Vec2::new(1.0, 1.0);
         let su = Vec3::new(1.0, 0.0, 0.0);
@@ -912,7 +913,7 @@ impl UnbendVolume {
         let planes = [Plane::new(plane_point, sw, su, uv_scale, &plane_domain)];
 
         // check for curve crossing discontinuity planes
-        let has_plane_crossings = has_plane_crossings(param_curve, &planes)?;
+        let has_plane_crossings = has_plane_crossings(k, param_curve, &planes)?;
         Ok(!has_plane_crossings)
     }
 
@@ -1102,14 +1103,12 @@ mod tests {
         // degenerate (even on the axis: the point test is always true)
         assert!(u.is_line_in_param_domain_simple(v(1.0, 1.0, 0.0), v(1.0, 1.0, 0.0)));
         assert!(u.is_line_in_param_domain_simple(Vec3::ZERO, Vec3::ZERO));
-        assert!(matches!(
-            u.is_curve_in_param_domain_simple(&Curve::from(Line::from_points(
-                v(1.0, 1.0, 0.0),
-                v(2.0, 1.0, 0.0),
-                3
-            ))),
-            Err(SolidError::Unported { .. })
-        ));
+        // the plane intersector runs (its unported callees defer)
+        let r = u.is_curve_in_param_domain_simple(
+            &Kernel::default(),
+            &Curve::from(Line::from_points(v(1.0, 1.0, 0.0), v(2.0, 1.0, 0.0), 3)),
+        );
+        assert!(r.is_ok() || matches!(r, Err(SolidError::Unported { .. })));
     }
 
     #[test]

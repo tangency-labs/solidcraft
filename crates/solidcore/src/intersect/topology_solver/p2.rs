@@ -193,20 +193,6 @@ fn name_curve_face<O: Copy + PartialEq>(
     solution.num_variables = 3;
 }
 
-fn surface_curve_intersect<O>(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
-) -> Result<SolutionArray<O>> {
-    // UNPORTED(surface.surface_p8): SmSurface::GlobalCurveIntersect
-    Err(SolidError::unported(
-        "SmSurface::GlobalCurveIntersect",
-        "surface.surface_p8",
-    ))
-}
-
 fn classified_curve_intervals<O>(
     _curve: &Curve,
     _interval: &Extent1d,
@@ -388,7 +374,16 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         let domain = ts.objects.face_uv_domain(face)?;
         let tol = ts.base.tolerance_3d + ts.objects.face_tolerance(face)?;
         let solutions = if ts.base.operation == SolverOperation::Intersect {
-            surface_curve_intersect(surface, &domain, curve.curve, &self.interval, tol)?
+            // surface->GlobalCurveIntersect(domain, curve, interval, tol, solutions)
+            // (SER): the solutions name the curve and the surface
+            surface.global_curve_intersect(
+                ts.kernel,
+                [curve.handle, surface_handle],
+                &domain,
+                curve.curve,
+                &self.interval,
+                tol,
+            )?
         } else {
             let mut vectors = ts.base.opt_vectors.clone();
             if ts.base.operation == SolverOperation::Signed3dDirectedMinimize && self.swap_order {

@@ -46,6 +46,7 @@
 use super::p1::{is_node_valid, is_point_valid, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
 use super::p4;
+use super::p6::{CurveIntersection, RangeTangentPoint};
 use super::p9::implicit_iso;
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::Curve;
@@ -80,32 +81,21 @@ const NO_INDEX: usize = usize::MAX;
 /// Upstream's guess arrays (`SmPoint2d sUVGuesses[6]`).
 const MAX_GUESSES: usize = 6;
 
-// ---- calls into units that are not ported yet ------------------------------------------------
-
-/// A surface/curve intersection found by `SmSurface::LocalCurveIntersect`.
-struct SurfaceCurveHit {
-    uv: Point2,
-    t: f64,
-    deviation: f64,
-}
+// ---- calls into other units -------------------------------------------------------------------
 
 /// `SmSurface::LocalCurveIntersect` (`bFoundIntersection`, `rUVFound`, `rdTFound`,
-/// `rdDeviation`).
+/// `rdDeviation`), the status checked by the caller (`SER`).
 #[allow(clippy::too_many_arguments)] // upstream's arguments
 fn surface_local_curve_intersect(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
-    _uv_guess: Point2,
-    _t_guess: f64,
-) -> Result<Option<SurfaceCurveHit>> {
-    // UNPORTED(surface.surface_p6): SmSurface::LocalCurveIntersect
-    Err(SolidError::unported(
-        "SmSurface::LocalCurveIntersect",
-        "surface.surface_p6",
-    ))
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
+    uv_guess: Point2,
+    t_guess: f64,
+) -> Result<Option<CurveIntersection>> {
+    surface.local_curve_intersect(domain, curve, interval, tol, uv_guess, t_guess)
 }
 
 /// `sm_FilterSolution`: whether to keep a curve/surface solution (`rbKeepSolution`).
@@ -187,17 +177,13 @@ fn surface_drop_point(
 
 /// `SmSurface::ClassifyIntersectingRangeSolution`: `bIsDegenerate` and, when it is,
 /// the tangent point solution written to `rSolPoint`.
-fn classify_intersecting_range_solution<O>(
-    _surface: &Surface,
-    _curve: &Curve,
-    _solution: &Solution<O>,
-    _tol: f64,
-) -> Result<(bool, Option<SolutionEnd>)> {
-    // UNPORTED(surface.surface_p6): SmSurface::ClassifyIntersectingRangeSolution
-    Err(SolidError::unported(
-        "SmSurface::ClassifyIntersectingRangeSolution",
-        "surface.surface_p6",
-    ))
+fn classify_intersecting_range_solution<O: SolutionObject>(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    solution: &Solution<O>,
+) -> Result<(bool, Option<RangeTangentPoint>)> {
+    surface.classify_intersecting_range_solution(k, curve, solution)
 }
 
 /// The outputs of `SmSurface::DropAndTrimCurve` used here.
@@ -1389,12 +1375,17 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
 
         // for nonDegenerate intervals (status ignored)
         if !small_interval {
+            // (`ClassifyIntersectingRangeSolution` writes only the deviation and the
+            // first three parameters of `rCurrSol.m_vStart`)
             if let Some((degenerate, point)) = ignored(classify_intersecting_range_solution(
-                surface, curve, &curr, tol,
+                k, surface, curve, &curr,
             ))? {
                 is_degenerate = degenerate;
-                if let Some(end) = point {
-                    curr.start = end;
+                if let Some(pt) = point {
+                    curr.start.solution_value = pt.solution_value;
+                    for (slot, v) in curr.start.parameters.iter_mut().zip(pt.parameters) {
+                        *slot = v;
+                    }
                     solutions.set_at(ii, &curr)?;
                 }
             }

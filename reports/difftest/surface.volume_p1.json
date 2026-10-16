@@ -6130,16 +6130,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalCurveIntersect",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "simple_preds_unbend_or",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#766 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11798,16 +11794,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalCurveIntersect",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0588",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295766102",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -23099,17 +23091,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 2,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2884,
+  "cases_passed": 2886,
   "cases_total": 2886,
-  "deferred_by_unit": {
-    "surface.surface_p8": 2
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.volume_p1"
 }

@@ -1462,6 +1462,103 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.surface_handle
     }
 
+    /// Copies this cache with its object handles translated by `map` (tree, node
+    /// data, surface handle, subdivision surfaces), everything else unchanged. A Rust
+    /// adapter like [`Tree::map_objects`]: it lets a solve whose solutions name other
+    /// objects (a curve beside the surface) run over this cache. The copy names no
+    /// further subdivision halves (`set_subdivision_handles`, construction only).
+    /// `map` must name the same target object every time it receives the same
+    /// source handle.
+    ///
+    /// # Errors
+    ///
+    /// Those of `map`.
+    pub fn map_handles<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> Result<P>,
+    ) -> Result<SurfaceCache<P>> {
+        let map_aux = |a: &BezierAux2d<O>| -> Result<BezierAux2d<P>> {
+            let mut vertex_list = Vec::new();
+            for v in &a.vertex_list {
+                vertex_list.push(VertexListItem {
+                    vertexuse: v.vertexuse.map(&map).transpose()?,
+                    uv_point: v.uv_point,
+                    uv_tol: v.uv_tol,
+                });
+            }
+            Ok(BezierAux2d {
+                polar_box: a.polar_box,
+                is_tess_only: a.is_tess_only,
+                uv_domain: a.uv_domain,
+                has_inside_part: a.has_inside_part,
+                corner_nodes: a.corner_nodes,
+                vertex_list,
+                edgeuse_list: a
+                    .edgeuse_list
+                    .iter()
+                    .map(|&o| map(o))
+                    .collect::<Result<_>>()?,
+                poly_edge_list: a
+                    .poly_edge_list
+                    .iter()
+                    .map(|&o| map(o))
+                    .collect::<Result<_>>()?,
+                chord_height_satisfied: a.chord_height_satisfied,
+                angle_tol_satisfied: a.angle_tol_satisfied,
+                owning_tree_node: a.owning_tree_node,
+            })
+        };
+        let mut patches = Vec::new();
+        for p in &self.patches {
+            patches.push(BezierPatch {
+                aux: map_aux(&p.aux)?,
+                bezier: p.bezier.clone(),
+                u_curve_conts: p.u_curve_conts,
+                v_curve_conts: p.v_curve_conts,
+                pseudo_box: p.pseudo_box,
+            });
+        }
+        let mut auxs = Vec::new();
+        for a in &self.auxs {
+            auxs.push(map_aux(a)?);
+        }
+        let mut subdivision_surfaces = Vec::new();
+        for (o, s) in &self.subdivision_surfaces {
+            subdivision_surfaces.push((map(*o)?, s.clone()));
+        }
+        Ok(SurfaceCache {
+            alt_caches: self.alt_caches.clone(),
+            tree: self
+                .tree
+                .as_ref()
+                .map(|t| t.map_objects(&map))
+                .transpose()?,
+            surface: self.surface.clone(),
+            surface_handle: self.surface_handle.map(&map).transpose()?,
+            uv_domain: self.uv_domain,
+            u_continuities: self.u_continuities.clone(),
+            v_continuities: self.v_continuities.clone(),
+            patches,
+            auxs,
+            opts: self.opts,
+            iso_curve_tolerance: self.iso_curve_tolerance,
+            tessellation_algorithm: self.tessellation_algorithm,
+            start_fast_subdivision_angle_deg: self.start_fast_subdivision_angle_deg,
+            switch_to_fast_subdivision: self.switch_to_fast_subdivision,
+            trim_subdivision_factor: self.trim_subdivision_factor,
+            iso_boundary_curves: self.iso_boundary_curves.clone(),
+            subdivision_surfaces,
+            subdivision_handles: None,
+            subdivision_handle_count: self.subdivision_handle_count,
+            bounding_planes: self.bounding_planes.clone(),
+            have_t_surface_cache: self.have_t_surface_cache,
+            face_was_modified: self.face_was_modified,
+            process_boundary_curves: self.process_boundary_curves,
+            point_test_enabled: self.point_test_enabled,
+            face_containment_done: self.face_containment_done,
+        })
+    }
+
     /// `SmSurfaceCache_TYPE` (`GetType`).
     #[must_use]
     pub const fn type_code(&self) -> i64 {

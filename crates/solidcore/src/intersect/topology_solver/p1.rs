@@ -1386,11 +1386,15 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             let face_surface = objects.face_surface(face)?;
             let uv_domain = objects.face_uv_domain(face)?;
             let face_tol = objects.face_tolerance(face)?;
-            let solutions = surface_global_line_intersect(
+            // pFace->GetSurface()->GlobalLineIntersect(uv_domain, point, line_vec, NULL,
+            // ray_fire, tol, solutions) (SER)
+            let solutions = objects.surface(face_surface)?.global_line_intersect(
+                ts.kernel,
                 face_surface,
                 &uv_domain,
                 self.point,
                 line_vec,
+                None,
                 ray_fire,
                 tol + face_tol,
             )?;
@@ -1473,6 +1477,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             let face_tol = objects.face_tolerance(face)?;
             let solutions = surface_global_point_solve(
                 ts.kernel,
+                face_surface,
                 objects.surface(face_surface)?,
                 &uv_domain,
                 op,
@@ -1786,27 +1791,11 @@ pub(super) fn face_silhouettes<O: Copy + PartialEq>(
     ))
 }
 
-/// `pFace->GetSurface()->GlobalLineIntersect(uv_domain, point, line_vec, NULL,
-/// ray_fire, tol, solutions)`.
-fn surface_global_line_intersect<O>(
-    _surface: O,
-    _uv_domain: &Extent2d,
-    _point: Point3,
-    _line_vec: Vec3,
-    _ray_fire: bool,
-    _tol: f64,
-) -> Result<SolutionArray<O>> {
-    // UNPORTED(surface.surface_p8): SmSurface::GlobalLineIntersect
-    Err(SolidError::unported(
-        "SmSurface::GlobalLineIntersect",
-        "surface.surface_p8",
-    ))
-}
-
 /// `pFace->GetSurface()->GlobalPointSolve(uv_domain, op, point, tol,
 /// pdBestAnswer, SM_SR_ALL, solutions)`.
 fn surface_global_point_solve<O: SolutionObject>(
     kernel: &Kernel,
+    handle: O,
     surface: &Surface,
     uv_domain: &Extent2d,
     op: SolverOperation,
@@ -1816,6 +1805,7 @@ fn surface_global_point_solve<O: SolutionObject>(
 ) -> Result<SolutionArray<O>> {
     surface.global_point_solve::<O>(
         kernel,
+        Some(handle),
         uv_domain,
         op,
         point,

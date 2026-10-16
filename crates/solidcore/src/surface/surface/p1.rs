@@ -2781,6 +2781,8 @@ impl<'t, 's, O: SolutionObject> SpGlobalSolver<'t, 's, O> {
             base: GlobalSolver::with_trees(point_tree, surface_tree, 2),
             surface,
             uv_domain,
+            surface_cache: None,
+            kernel: None,
         }
     }
 }

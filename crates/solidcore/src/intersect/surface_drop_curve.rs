@@ -234,6 +234,7 @@ fn surface_global_point_solve(
 ) -> Result<Vec<Point2>> {
     let sols = surface.global_point_solve::<NoObject>(
         k,
+        Some(NoObject),
         uv_domain,
         op,
         point,

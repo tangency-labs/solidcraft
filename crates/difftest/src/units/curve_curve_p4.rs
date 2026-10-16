@@ -48,6 +48,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
+use solidcore::surface::plane::Plane;
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_curve_p4::{self as ffi, Op};
 
@@ -1037,7 +1038,11 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::Planes { curve, planes } => {
             let c = build(curve)?;
-            let r = tri!(o, has_plane_crossings(&c, planes));
+            let planes: Vec<Plane> = planes
+                .iter()
+                .map(|[p, n]| Plane::from_normal(Vec3::from_array(*p), Vec3::from_array(*n)))
+                .collect();
+            let r = tri!(o, has_plane_crossings(&Kernel::default(), &c, &planes));
             o.extend([0.0, b(r)]);
         }
     }

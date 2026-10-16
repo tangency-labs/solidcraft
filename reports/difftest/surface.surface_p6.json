@@ -13626,16 +13626,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::InvertPointNearSingularity",
-        "unit": "surface.surface_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1604",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548448634586467832",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16799,17 +16795,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 1,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2098,
+  "cases_passed": 2099,
   "cases_total": 2099,
-  "deferred_by_unit": {
-    "surface.surface_p8": 1
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.surface_p6"
 }

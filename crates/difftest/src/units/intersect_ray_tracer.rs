@@ -1160,7 +1160,8 @@ mod tests {
             }
         }
         assert!(ok > 200, "{ok} {deferred} {st:?}");
-        assert!(deferred > 10, "{ok} {deferred} {st:?}");
+        // (`LocalSolve` no longer defers since `LocalLineIntersect` is ported)
+        assert!(ok + deferred == MIN_GENERATED, "{ok} {deferred} {st:?}");
         assert!(st.walks > 200, "{st:?}");
         assert!(st.elements_seen > 100, "{st:?}");
     }
