@@ -481,6 +481,22 @@ pub struct ObjsInVoxels<T> {
     point_capacity: usize,
 }
 
+impl<T> Default for ObjsInVoxels<T> {
+    /// An unsized, empty model (`SetSize(0, 0, 0, NULL, 0)`).
+    fn default() -> Self {
+        Self {
+            hash: HashTable::default(),
+            x_cnt: 0,
+            y_cnt: 0,
+            z_cnt: 0,
+            bbox: Extent3d::new(),
+            removed_point_item_count: 0,
+            point_items: Vec::new(),
+            point_capacity: 0,
+        }
+    }
+}
+
 impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     /// A model of `x_cnt * y_cnt * z_cnt` voxels over `bbox` (`None`: not sized)
     /// with room for `item_estimate` items (`SmObjsInVoxels(...)`).

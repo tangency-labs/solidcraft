@@ -1,0 +1,1113 @@
+// SPDX-License-Identifier: Apache-2.0
+// difftest shim for unit `heal.heal_data_p2`: SmEdgeProps, SmVertexProps, the
+// SmProbArray class family and the SmHealData target management, tolerance,
+// coincidence and degeneracy steps (source/SMLib/src/SmHealData.cpp,
+// source/SMLib/src/SmEdgeProps.cpp, source/SMLib/src/SmVertexProps.cpp,
+// source/SMLib/inc/SmHealProbArray.h).
+//
+// One entry point, sc_heal_heal_data_p2_eval(op, path, in, n_in, out, cap, out_len).
+// Layouts are documented in crates/solidcore-ffi/src/units/heal_heal_data_p2.rs, which
+// validates every input. B-rep blocks are those of sc_topology_fixture.h (kinds 0..3)
+// plus kind 4 (SmPrimitiveCreation::CreateBox, as prog_test
+// my_test_squeeze_edge_tracks_removal) and kind 5 (a full SmSphere face, as prog_test
+// my_test_closed_sphere_properties). Analytic face surfaces and edge curves other than
+// SmPlane / SmLine are replaced by plain B-spline copies (what the Rust import
+// rebuilds, as the heal.gap shim does), then the graph is walked (with the vertex
+// lists) and exported, followed by each vertex's vertex use list.
+#include "sc_topology_fixture.h"
+
+#include <SmHashTable.h>
+#include <SmHealData.h>
+#include <SmPrimitiveCreation.h>
+#include <SmSphere.h>
+
+#include <set>
+
+namespace
+{
+enum P2Op : int32_t
+{
+    P2_EXPORT = 0,
+    P2_PROB = 1,
+    P2_HEAL = 2,
+    P2_VLISTS = 3,
+};
+
+struct EdgePeek : SmEdge
+{
+    static SmCurve* SmEdge::*curve() { return &EdgePeek::m_pCurve; }
+};
+
+// A plain SmBSplineCurve of `c`'s NURB, or nullptr when `c` already is one (or a line)
+// or has no NURB.
+SmBSplineCurve* plain_curve(SmCurve* c)
+{
+    if (c == nullptr || !c->IsKindOf(SmBSplineCurve_TYPE) || c->GetType() == SmBSplineCurve_TYPE ||
+        c->GetType() == SmLine_TYPE)
+        return nullptr;
+    SmBSplineCurve* b = (SmBSplineCurve*)c;
+    gw_CURVE* nurb = b->GetGwNurbPointer();
+    if (nurb == nullptr)
+        return nullptr;
+    return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
+}
+
+// Gives every analytic face and edge of the B-rep a plain B-spline copy (the
+// originals are left unowned and leaked), as the heal.gap shim does.
+void normalise(Graph& g)
+{
+    for (SmFace* f : g.faces)
+    {
+        SmSurface* s = f->*FPeek::srf();
+        if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
+            s->GetType() == SmPlane_TYPE)
+            continue;
+        SmBSplineSurface* b = (SmBSplineSurface*)s;
+        gw_SURFACE* nurb = b->GetGwNurbPointer();
+        if (nurb == nullptr)
+            continue;
+        SmBSplineSurface* nb = new (the_context()) SmBSplineSurface(sm_AllocateAndCopyNurbSurface(nurb), FALSE, NULL);
+        nb->GetOutOfBoundsEnabled() = b->GetOutOfBoundsEnabled();
+        nb->SetBSplineSurfaceForm(b->GetBSplineSurfaceForm());
+        f->*FPeek::srf() = nb;
+    }
+    for (SmEdge* e : g.edges)
+    {
+        SmBSplineCurve* nc = plain_curve(e->*EdgePeek::curve());
+        if (nc != nullptr)
+            e->*EdgePeek::curve() = nc;
+    }
+}
+
+// Computes the cached vertex/face, vertex/edge, edge/face and edge/CCW-edge gaps, as
+// the fixture's `build` does for `init_gaps`, but over every vertex use (the walk
+// includes the vertex lists).
+void init_cached_gaps(SmBrep* brep)
+{
+    Graph g;
+    walk(brep, g, true);
+    for (SmVertexuse* p : g.vertexuses)
+    {
+        if (p->IsLoopVertexuse() || p->IsEdgeVertexuse())
+            if (p->GetFaceuse() && p->GetFaceuse()->GetFace() && p->GetFaceuse()->GetFace()->GetSurface())
+                p->GetVertexFaceGap();
+        if (p->HasVertexEdgeGap())
+            p->GetVertexEdgeGap();
+    }
+    for (SmEdgeuse* p : g.edgeuses)
+        if (p->IsLoopEdgeuse() && p->GetCCWEdgeuse() && p->GetFace() && p->GetFace()->GetSurface() &&
+            p->GetEdge() && p->GetEdge()->GetCurve())
+        {
+            p->GetMaxEdgeFaceGap();
+            p->GetEdgeCCWEdgeGap();
+        }
+}
+
+// Builds the B-rep of a block (kinds 0..3 by the fixture, 4 box, 5 sphere face).
+SmBrep* build_any(Rd& rd, const char* path, SmStatus& status)
+{
+    int64_t kind = (int64_t)rd.in[rd.at];
+    if (kind != 4 && kind != 5)
+        return build(rd, path, status);
+    rd.idx();
+    const SmContext& ctx = the_context();
+    SmBrep* brep = new (ctx) SmBrep();
+    status = SM_SUCCESS;
+    if (kind == 4)
+    {
+        double dx = rd.num(), dy = rd.num(), dz = rd.num();
+        SmPrimitiveCreation prim(brep->GetInfiniteRegion());
+        status = prim.CreateBox(dx, dy, dz, SmAxis2Placement());
+    }
+    else
+    {
+        double r = rd.num();
+        bool swap = rd.flag();
+        SmSphere* sphere = nullptr;
+        status = SmSphere::CreateCanonical(ctx, SmAxis2Placement(), r, sphere);
+        if (status == SM_SUCCESS && swap)
+            status = sphere->SwapUV();
+        if (status == SM_SUCCESS)
+        {
+            SmShell* shell = nullptr;
+            SmFace* face = nullptr;
+            status = brep->CreateFaceInRegionFromSurface(brep->GetInfiniteRegion(), sphere,
+                                                         sphere->GetNaturalUVDomain(), shell, face);
+        }
+    }
+    brep->m_bValidateOnly = rd.bflag();
+    rd.flag(); // init_gaps: done by prepare()
+    if (status != SM_SUCCESS)
+    {
+        delete brep;
+        return nullptr;
+    }
+    return brep;
+}
+
+// Builds, normalises and walks; nullptr with the status written to `o` on failure.
+SmBrep* prepare(Rd& rd, const char* path, Graph& g, std::vector<double>& o)
+{
+    SmStatus status = SM_SUCCESS;
+    SmBrep* brep = build_any(rd, path, status);
+    if (brep == nullptr)
+    {
+        o.push_back(-1.0);
+        o.push_back(st(status));
+        return nullptr;
+    }
+    {
+        Graph g0;
+        walk(brep, g0, true);
+        normalise(g0);
+    }
+    // the block's last value is `init_gaps`
+    if (rd.at > 0 && rd.in[rd.at - 1] != 0.0)
+        init_cached_gaps(brep);
+    walk(brep, g, true);
+    return brep;
+}
+
+void put_vertex_lists(Graph& g, std::vector<double>& o)
+{
+    for (SmVertex* v : g.vertices)
+    {
+        std::vector<int64_t> l;
+        for (SmTopology* t : list_of(v->GetList()))
+            l.push_back(g.find(8, t));
+        put_list(o, l);
+    }
+}
+
+// The cached gap records of every edge use and vertex use (the export only has their
+// IsInit flags): per edge use `init gap eu0 eu1 t0 t1` (end/CCW-start) and
+// `init gap eu t u v` (edge/face), per vertex use `init gap vu t` (vertex/edge) and
+// `init gap vu u v` (vertex/face).
+void put_cached_gaps(Graph& g, std::vector<double>& o)
+{
+    for (SmEdgeuse* eu : g.edgeuses)
+    {
+        const SmEdgeEdgeGap& c = eu->*EuPeek::ccw_gap();
+        o.push_back(flg(c.IsInit()));
+        o.push_back(c.m_dGap3d);
+        o.push_back((double)g.find(6, c.GetEdgeuse(0)));
+        o.push_back((double)g.find(6, c.GetEdgeuse(1)));
+        o.push_back(c.GetEdgeT(0));
+        o.push_back(c.GetEdgeT(1));
+        const SmEdgeFaceGap& f = eu->*EuPeek::face_gap();
+        o.push_back(flg(f.IsInit()));
+        o.push_back(f.m_dGap3d);
+        o.push_back((double)g.find(6, f.GetEdgeuse(0)));
+        o.push_back(f.GetEdgeT(0));
+        SmPoint2d uv = f.GetFaceUV();
+        o.push_back(uv.x);
+        o.push_back(uv.y);
+    }
+    for (SmVertexuse* vu : g.vertexuses)
+    {
+        const SmVertexEdgeGap& e = vu->*VuPeek::edge_gap();
+        o.push_back(flg(e.IsInit()));
+        o.push_back(e.m_dGap3d);
+        o.push_back((double)g.find(8, e.GetVertexuse()));
+        o.push_back(e.GetEdgeT(0));
+        const SmVertexFaceGap& f = vu->*VuPeek::face_gap();
+        o.push_back(flg(f.IsInit()));
+        o.push_back(f.m_dGap3d);
+        o.push_back((double)g.find(8, f.GetVertexuse()));
+        SmPoint2d uv = f.GetFaceUV();
+        o.push_back(uv.x);
+        o.push_back(uv.y);
+    }
+}
+
+void run_export(Rd& rd, const char* path, std::vector<double>& o, bool lists)
+{
+    Graph g;
+    SmBrep* brep = prepare(rd, path, g, o);
+    if (brep == nullptr)
+        return;
+    o.push_back(0.0);
+    if (lists)
+    {
+        put_vertex_lists(g, o);
+        put_cached_gaps(g, o);
+    }
+    else
+        export_graph(brep, g, o);
+    delete brep;
+}
+
+// ---- standalone problem arrays over SmFaceProps -----------------------------------------
+
+typedef ULONG SmFaceProps::*FaceFlagPtr;
+const FaceFlagPtr FACE_FLAGS[] = {
+    &SmFaceProps::m_bBadHasNotYetProb,    &SmFaceProps::m_bBadSmallZoneTol3d,     &SmFaceProps::m_bBadLargeZoneTol3d,
+    &SmFaceProps::m_bBadDegenFace,        &SmFaceProps::m_lBadFlatCorners,        &SmFaceProps::m_bBadMissingSeam,
+    &SmFaceProps::m_bBadCrossedSeam,      &SmFaceProps::m_bBadNearMissSeam,       &SmFaceProps::m_bBadLoopProblems,
+    &SmFaceProps::m_bBadOuterLoopOrder,   &SmFaceProps::m_lBadOrient_LoopCnt,     &SmFaceProps::m_lBadNoArea_LoopCnt,
+    &SmFaceProps::m_lOuterLoopCnt,        &SmFaceProps::m_lBadNested_LoopCnt,     &SmFaceProps::m_bBadUnpairedNoArea_Loop,
+    &SmFaceProps::m_lBadClosed3d_LoopCnt, &SmFaceProps::m_lBadClosedPtr_LoopCnt,  &SmFaceProps::m_lBadMissingPoles,
+};
+const int N_FACE_FLAGS = 18;
+typedef SmMixedLinkType SmFaceProps::*FaceMixedPtr;
+const FaceMixedPtr FACE_MIXED[] = {&SmFaceProps::m_eSheet, &SmFaceProps::m_ePoles};
+typedef SmTriedLinkType SmFaceProps::*FaceTriedPtr;
+const FaceTriedPtr FACE_TRIED[] = {&SmFaceProps::m_eBeenThroughMoveSeam, &SmFaceProps::m_eBeenThroughSplitEdgesAtSeam,
+                                   &SmFaceProps::m_eBeenThroughSplitFacesAtSeam};
+
+const char* const LABELS[3][3] = {
+    {"Edge ZoneTol3d too small                ", "SmallTol Edge Cnt  ", " - Bad "},
+    {"Sheet Face counts                       ", "                   ", ""},
+    {"odd NoAreaLoopCnt on Face: no AddSeamFix", "Bad unpaired NoAreaLoop Face Cnt ", " - Warn "},
+};
+
+void put_str(std::vector<double>& o, const TCHAR* s)
+{
+    size_t n = 0;
+    while (s[n] != 0)
+        n++;
+    o.push_back((double)n);
+    for (size_t i = 0; i < n; i++)
+        o.push_back((double)(unsigned char)s[i]);
+}
+
+template <class T> void put_base(std::vector<double>& o, const SmProbArray<T>& a, const std::map<const void*, int64_t>& ix)
+{
+    o.push_back((double)a.m_sProbArray.GetSize());
+    for (ULONG i = 0; i < a.m_sProbArray.GetSize(); i++)
+    {
+        auto it = ix.find((const void*)a.m_sProbArray.GetAt(i));
+        o.push_back(it == ix.end() ? -3.0 : (double)it->second);
+    }
+    o.push_back((double)a.m_lOrigProbCount);
+    o.push_back((double)a.m_eGetHealerOp);
+    put_str(o, a.m_sOutputLabel);
+    put_str(o, a.m_sDataLabel);
+    put_str(o, a.m_sProbLabel);
+}
+
+// Whether SmPairProbArray::Remove(tgt) would read a member flag without a link or past
+// the end of the list (a simulation of its first loop on a copy).
+template <class T> bool pair_remove_is_ub(const SmPairProbArray<T>& a, T* tgt)
+{
+    std::vector<T*> v;
+    for (ULONG i = 0; i < a.m_sProbArray.GetSize(); i++)
+        v.push_back(a.m_sProbArray.GetAt(i));
+    ULONG lnk_null = a.m_plObjProbFlag == NULL;
+    bool removed = false;
+    for (size_t ii = 0; ii < v.size() + (removed ? 2 : 0); ii += 2)
+    {
+        if (removed)
+        {
+            ii -= 2;
+            removed = false;
+        }
+        if (ii + 1 > v.size())
+            break;
+        if (lnk_null)
+            return true;
+        if (TRUE != v[ii]->*(a.m_plObjProbFlag))
+            break;
+        if (ii + 1 >= v.size())
+            return true;
+        if (TRUE != v[ii + 1]->*(a.m_plObjProbFlag))
+            break;
+        if (v[ii] == tgt || v[ii + 1] == tgt)
+        {
+            v.erase(v.begin() + (long)ii, v.begin() + (long)ii + 2);
+            removed = true;
+        }
+    }
+    return false;
+}
+
+void put_face_flags(std::vector<double>& o, SmFaceProps* p)
+{
+    for (int k = 0; k < N_FACE_FLAGS; k++)
+        o.push_back((double)(p->*FACE_FLAGS[k]));
+    o.push_back((double)p->m_eSheet);
+    o.push_back((double)p->m_ePoles);
+    o.push_back((double)p->m_eBeenThroughMoveSeam);
+    o.push_back((double)p->m_eBeenThroughSplitEdgesAtSeam);
+    o.push_back((double)p->m_eBeenThroughSplitFacesAtSeam);
+}
+
+// `kind n nops ops...`: kind 0 SmProbArray, 1 SmPairProbArray, 2 SmMixedProbArray,
+// 3 SmTriedProbArray, each over `n` SmFaceProps.
+void run_prob(Rd& rd, std::vector<double>& o)
+{
+    const SmContext& ctx = the_context();
+    int64_t kind = rd.idx();
+    int64_t n = rd.idx();
+    std::vector<SmFaceProps*> objs;
+    std::map<const void*, int64_t> ix;
+    for (int64_t i = 0; i < n; i++)
+    {
+        objs.push_back(new SmFaceProps(&ctx));
+        ix[(const void*)objs.back()] = i;
+    }
+    SmProbArray<SmFaceProps> plain;
+    SmPairProbArray<SmFaceProps> pair;
+    SmMixedProbArray<SmFaceProps> mixed;
+    SmTriedProbArray<SmFaceProps> tried;
+    SmProbArray<SmFaceProps>& base = kind == 0 ? plain : kind == 1 ? (SmProbArray<SmFaceProps>&)pair
+                                                 : kind == 2 ? (SmProbArray<SmFaceProps>&)mixed
+                                                             : (SmProbArray<SmFaceProps>&)tried;
+    int64_t nops = rd.idx();
+    bool stop = false;
+    for (int64_t s = 0; s < nops; s++)
+    {
+        int64_t code = rd.idx();
+        int64_t a = rd.idx();
+        int64_t b = rd.idx();
+        int64_t c = rd.idx();
+        if (stop)
+            continue;
+        o.push_back((double)code);
+        switch (code)
+        {
+        case 0: // setup(op, link or -1)
+            if (kind == 2)
+                mixed.Setup((SmHealerOpType)a, b < 0 ? (FaceMixedPtr)NULL : FACE_MIXED[b]);
+            else if (kind == 3)
+                tried.Setup((SmHealerOpType)a, b < 0 ? (FaceTriedPtr)NULL : FACE_TRIED[b]);
+            else
+                base.Setup((SmHealerOpType)a, b < 0 ? (FaceFlagPtr)NULL : FACE_FLAGS[b]);
+            o.push_back(0.0);
+            break;
+        case 1: // add(obj, arg)
+        {
+            SmFaceProps* p = objs[(size_t)a];
+            ULONG r = kind == 2 ? mixed.Add(p, (SmMixedLinkType)b)
+                      : kind == 3 ? tried.Add(p, (SmTriedLinkType)b)
+                                  : base.Add(p, b != 0 ? TRUE : FALSE);
+            o.push_back((double)r);
+            break;
+        }
+        case 2: // remove(obj)
+        {
+            SmFaceProps* p = objs[(size_t)a];
+            if (kind == 1 && pair_remove_is_ub(pair, p))
+            {
+                o.push_back(ST_NULL_DEREF);
+                stop = true;
+                break;
+            }
+            SmBoolean r = kind == 1 ? pair.Remove(p) : base.Remove(p);
+            o.push_back(flg(r));
+            break;
+        }
+        case 3: base.RemoveAll(); o.push_back(0.0); break;
+        case 4:
+            if (kind == 1)
+                pair.ReSet();
+            else if (kind == 2)
+                mixed.ReSet();
+            else
+                base.ReSet();
+            o.push_back(0.0);
+            break;
+        case 5: o.push_back((double)base.IncOrigProbCount()); break;
+        case 6: // set member flag b of obj a to c
+            objs[(size_t)a]->*FACE_FLAGS[b] = (ULONG)c;
+            o.push_back(0.0);
+            break;
+        case 7: base.SetLabels(LABELS[a][0], LABELS[a][1], LABELS[a][2]); o.push_back(0.0); break;
+        case 8: // GetAt(a mod size), -1 when empty
+        {
+            ULONG sz = base.GetSize();
+            if (sz == 0)
+                o.push_back(-1.0);
+            else
+                o.push_back((double)ix[(const void*)base.GetAt((ULONG)a % sz)]);
+            break;
+        }
+        case 9:
+            if (kind == 1)
+                pair.SetOrigCoinPairCnt((ULONG)a);
+            else
+                base.SetOrigProbCnt((ULONG)a);
+            o.push_back(0.0);
+            break;
+        default: o.push_back((double)SC_ERR_ARG); break;
+        }
+    }
+    if (!stop)
+    {
+        o.push_back(-100.0);
+        put_base(o, base, ix);
+        o.push_back(kind == 1 ? (double)pair.m_lOrigCoinPairCnt : 0.0);
+        o.push_back(base.GetOrigProbCount());
+        for (SmFaceProps* p : objs)
+            put_face_flags(o, p);
+    }
+    for (SmFaceProps* p : objs)
+        delete p;
+}
+
+// ---- the healer ------------------------------------------------------------------------
+
+struct Registry
+{
+    std::vector<SmVertexProps*> v;
+    std::vector<SmEdgeProps*> e;
+    std::vector<SmFaceProps*> f;
+    std::set<const void*> dead;
+    std::map<const void*, int64_t> iv, ie, iff;
+
+    void note(SmHealData& h)
+    {
+        for (ULONG i = 0; i < h.m_sTgtVertexProps.GetSize(); i++)
+            if (iv.find(h.m_sTgtVertexProps[i]) == iv.end())
+            {
+                iv[h.m_sTgtVertexProps[i]] = (int64_t)v.size();
+                v.push_back(h.m_sTgtVertexProps[i]);
+            }
+        for (ULONG i = 0; i < h.m_sTgtEdgeProps.GetSize(); i++)
+            if (ie.find(h.m_sTgtEdgeProps[i]) == ie.end())
+            {
+                ie[h.m_sTgtEdgeProps[i]] = (int64_t)e.size();
+                e.push_back(h.m_sTgtEdgeProps[i]);
+            }
+        for (ULONG i = 0; i < h.m_sTgtFaceProps.GetSize(); i++)
+            if (iff.find(h.m_sTgtFaceProps[i]) == iff.end())
+            {
+                iff[h.m_sTgtFaceProps[i]] = (int64_t)f.size();
+                f.push_back(h.m_sTgtFaceProps[i]);
+            }
+    }
+    bool alive(const void* p) const { return dead.find(p) == dead.end(); }
+    template <class T> T* pick(std::vector<T*>& all, int64_t sel)
+    {
+        std::vector<T*> live;
+        for (T* p : all)
+            if (alive(p))
+                live.push_back(p);
+        if (live.empty())
+            return nullptr;
+        return live[(size_t)(sel % (int64_t)live.size())];
+    }
+};
+
+template <class T> int64_t idx_of(const std::map<const void*, int64_t>& m, const T* p)
+{
+    if (p == nullptr)
+        return -1;
+    auto it = m.find((const void*)p);
+    return it == m.end() ? -3 : it->second;
+}
+
+struct EdgeuseGapPeek : SmEdgeuse
+{
+    static SmEdgeFaceGap SmEdgeuse::*face_gap() { return &EdgeuseGapPeek::m_sMaxEdgeFaceGap3d; }
+    static SmEdgeEdgeGap SmEdgeuse::*ccw_gap() { return &EdgeuseGapPeek::m_sEdgeCCWEdgeGap3d; }
+};
+struct VertexuseGapPeek : SmVertexuse
+{
+    static SmVertexFaceGap SmVertexuse::*face_gap() { return &VertexuseGapPeek::m_sVertexFaceGap3d; }
+    static SmVertexEdgeGap SmVertexuse::*edge_gap() { return &VertexuseGapPeek::m_sVertexEdgeGap3d; }
+};
+
+struct VxPeek : SmObjsInVoxels<SmVertexProps*>
+{
+    static SmExtent3d SmObjsInVoxels<SmVertexProps*>::*box() { return &VxPeek::m_sBBox; }
+};
+
+// The edge use owning a gap member (traversal index), -3 when none does.
+int64_t eu_of_gap(Graph& g, const void* gap, bool ccw)
+{
+    if (gap == nullptr)
+        return -1;
+    for (size_t i = 0; i < g.edgeuses.size(); i++)
+    {
+        SmEdgeuse* eu = g.edgeuses[i];
+        const void* m = ccw ? (const void*)&(eu->*EdgeuseGapPeek::ccw_gap()) : (const void*)&(eu->*EdgeuseGapPeek::face_gap());
+        if (m == gap)
+            return (int64_t)i;
+    }
+    return -3;
+}
+int64_t vu_of_gap(Graph& g, const void* gap, bool edge)
+{
+    if (gap == nullptr)
+        return -1;
+    for (size_t i = 0; i < g.vertexuses.size(); i++)
+    {
+        SmVertexuse* vu = g.vertexuses[i];
+        const void* m =
+            edge ? (const void*)&(vu->*VertexuseGapPeek::edge_gap()) : (const void*)&(vu->*VertexuseGapPeek::face_gap());
+        if (m == gap)
+            return (int64_t)i;
+    }
+    return -3;
+}
+
+void read_targets(Rd& rd, Graph& g, SmTArray<SmVertex*>& vs, SmTArray<SmEdge*>& es, SmTArray<SmFace*>& fs)
+{
+    int64_t n = rd.idx();
+    for (int64_t i = 0; i < n; i++)
+    {
+        int64_t s = rd.idx();
+        if (!g.vertices.empty())
+            vs.Add(g.vertices[(size_t)(s % (int64_t)g.vertices.size())]);
+    }
+    n = rd.idx();
+    for (int64_t i = 0; i < n; i++)
+    {
+        int64_t s = rd.idx();
+        if (!g.edges.empty())
+            es.Add(g.edges[(size_t)(s % (int64_t)g.edges.size())]);
+    }
+    n = rd.idx();
+    for (int64_t i = 0; i < n; i++)
+    {
+        int64_t s = rd.idx();
+        if (!g.faces.empty())
+            fs.Add(g.faces[(size_t)(s % (int64_t)g.faces.size())]);
+    }
+}
+
+template <class T> void put_targets(std::vector<double>& o, Graph& g, int kind, const SmTArray<T*>& a)
+{
+    o.push_back((double)a.GetSize());
+    for (ULONG i = 0; i < a.GetSize(); i++)
+        o.push_back((double)g.find(kind, a.GetAt(i)));
+}
+template <class T> void put_props_list(std::vector<double>& o, const std::map<const void*, int64_t>& m, const SmTArray<T*>& a)
+{
+    o.push_back((double)a.GetSize());
+    for (ULONG i = 0; i < a.GetSize(); i++)
+        o.push_back((double)idx_of(m, a.GetAt(i)));
+}
+
+void put_ext1(std::vector<double>& o, const SmExtent1d& e)
+{
+    o.push_back(e.GetMin());
+    o.push_back(e.GetMax());
+}
+
+void dump(SmHealData& h, Graph& g, Registry& r, std::vector<double>& o)
+{
+    o.push_back(-100.0);
+    put_targets(o, g, 9, h.m_sTgtVertices);
+    put_targets(o, g, 7, h.m_sTgtEdges);
+    put_targets(o, g, 3, h.m_sTgtFaces);
+    put_props_list(o, r.iv, h.m_sTgtVertexProps);
+    put_props_list(o, r.ie, h.m_sTgtEdgeProps);
+    put_props_list(o, r.iff, h.m_sTgtFaceProps);
+    o.push_back((double)h.m_lOldVertexCnt);
+    o.push_back((double)h.m_lOldEdgeCnt);
+    o.push_back((double)h.m_lOldFaceCnt);
+    o.push_back((double)h.m_eStopHealOp);
+    o.push_back((double)h.m_eDoneHealOp);
+    o.push_back((double)h.m_lRecursionCount);
+
+    o.push_back((double)r.v.size());
+    for (SmVertexProps* p : r.v)
+    {
+        if (!r.alive(p))
+        {
+            o.push_back(0.0);
+            continue;
+        }
+        o.push_back(1.0);
+        o.push_back((double)g.find(9, p->m_pVertex));
+        o.push_back((double)p->m_lVertexIndx);
+        o.push_back((double)p->m_sZoneTol3d);
+        o.push_back((double)p->m_sOrigZoneTol3d);
+        o.push_back((double)vu_of_gap(g, p->m_pMaxGap3d_VtxEdge, true));
+        o.push_back(p->m_pMaxGap3d_VtxEdge ? p->m_pMaxGap3d_VtxEdge->GetLength() : 0.0);
+        o.push_back((double)vu_of_gap(g, p->m_pMaxGap3d_VtxFace, false));
+        o.push_back(p->m_pMaxGap3d_VtxFace ? p->m_pMaxGap3d_VtxFace->GetLength() : 0.0);
+        o.push_back((double)p->m_bBadSmallZoneTol3d);
+        o.push_back((double)p->m_bBadLargeZoneTol3d);
+        o.push_back((double)p->m_bWarnLargeGap3d);
+        o.push_back((double)p->m_bBadCoincidentVertex);
+        o.push_back((double)p->m_bBadBackPointer);
+        o.push_back(flg(p->IsSet()));
+        o.push_back(flg(p->HasProblems()));
+    }
+    o.push_back((double)r.e.size());
+    for (SmEdgeProps* p : r.e)
+    {
+        if (!r.alive(p))
+        {
+            o.push_back(0.0);
+            continue;
+        }
+        o.push_back(1.0);
+        o.push_back((double)g.find(7, p->m_pEdge));
+        o.push_back((double)p->m_lEdgeIndx);
+        put_ext1(o, p->m_sEdgeInterval);
+        o.push_back((double)p->m_sZoneTol3d);
+        o.push_back((double)p->m_sOrigZoneTol3d);
+        o.push_back(p->m_dApproxEdgeLength3d);
+        o.push_back(p->m_cpCurve ? 1.0 : 0.0);
+        put_ext1(o, p->m_sNaturalInterval);
+        o.push_back((double)eu_of_gap(g, p->m_pMaxGap3d_EdgeEdge, true));
+        o.push_back(p->m_pMaxGap3d_EdgeEdge ? p->m_pMaxGap3d_EdgeEdge->GetLength() : 0.0);
+        o.push_back((double)eu_of_gap(g, p->m_pMaxGap3d_EdgeFace, false));
+        o.push_back(p->m_pMaxGap3d_EdgeFace ? p->m_pMaxGap3d_EdgeFace->GetLength() : 0.0);
+        o.push_back((double)p->m_bBadSmallZoneTol3d);
+        o.push_back((double)p->m_bBadLargeZoneTol3d);
+        o.push_back((double)p->m_bWarnLargeGap3d);
+        o.push_back((double)p->m_bBadDegenEdge);
+        o.push_back((double)p->m_bBadUncontainedEdge);
+        o.push_back((double)p->m_bBadCoincidentEdge);
+        o.push_back((double)p->m_bBadMissedEdgeXSect);
+        o.push_back((double)p->m_bBadBackPointer);
+        o.push_back(flg(p->IsSet_Metadata()));
+        o.push_back(flg(p->IsSet_Gaps()));
+        o.push_back(flg(p->HasProblems()));
+    }
+    o.push_back((double)r.f.size());
+    for (SmFaceProps* p : r.f)
+    {
+        if (!r.alive(p))
+        {
+            o.push_back(0.0);
+            continue;
+        }
+        o.push_back(1.0);
+        o.push_back((double)g.find(3, p->m_pFace));
+        o.push_back((double)p->m_lFaceIndx);
+        o.push_back((double)p->m_sZoneTol3d);
+        o.push_back((double)p->m_sOrigZoneTol3d);
+        o.push_back((double)p->m_ePropStage);
+        o.push_back((double)p->m_bBadBackPointer);
+        put_face_flags(o, p);
+    }
+
+    // problem arrays
+    put_base(o, h.m_sNotYetFaceProps, r.iff);
+    {
+        // back pointers: a mixed list of the three kinds
+        const SmProbArray<SmObjProps>& a = h.m_sBadObjProps_BackPointers;
+        o.push_back((double)a.m_sProbArray.GetSize());
+        o.push_back((double)a.m_lOrigProbCount);
+        o.push_back((double)a.m_eGetHealerOp);
+        put_str(o, a.m_sOutputLabel);
+        put_str(o, a.m_sDataLabel);
+        put_str(o, a.m_sProbLabel);
+    }
+    put_base(o, h.m_sBadEdgeProps_Uncontained, r.ie);
+    put_base(o, h.m_sBadEdgeProps_SmallZoneTol3d, r.ie);
+    put_base(o, h.m_sBadEdgeProps_LargeZoneTol3d, r.ie);
+    put_base(o, h.m_sWarnEdgeProps_LargeGap3d, r.ie);
+    put_base(o, h.m_sBadEdgeProps_DegenEdges, r.ie);
+    put_base(o, h.m_sBadVertexProps_SmallZoneTol3d, r.iv);
+    put_base(o, h.m_sBadVertexProps_LargeZoneTol3d, r.iv);
+    put_base(o, h.m_sWarnVertexProps_LargeGap3d, r.iv);
+    put_base(o, h.m_sBadFaceProps_SmallZoneTol3d, r.iff);
+    put_base(o, h.m_sBadFaceProps_LargeZoneTol3d, r.iff);
+    put_base(o, h.m_sBadVertexProps_CoinVertices, r.iv);
+    o.push_back((double)h.m_sBadVertexProps_CoinVertices.m_lOrigCoinPairCnt);
+    put_base(o, h.m_sBadFaceProps_DegenFaces, r.iff);
+    put_base(o, h.m_sBadEdgeProps_CoinEdges, r.ie);
+    o.push_back((double)h.m_sBadEdgeProps_CoinEdges.m_lOrigCoinPairCnt);
+    put_base(o, h.m_sBadEdgeProps_MissedEdgeXSects, r.ie);
+    o.push_back((double)h.m_sBadEdgeProps_MissedEdgeXSects.m_lOrigCoinPairCnt);
+    put_base(o, h.m_sFaceProps_Sheets, r.iff);
+    put_base(o, h.m_sFaceProps_NoVertexPole, r.iff);
+    put_base(o, h.m_sBadFaceProps_FlatCorner, r.iff);
+    put_base(o, h.m_sBadFaceProps_MissingSeam, r.iff);
+    put_base(o, h.m_sBadFaceProps_CrossedSeam, r.iff);
+    put_base(o, h.m_sBadFaceProps_NearMissSeam, r.iff);
+    put_base(o, h.m_sRanFaceProps_MoveSeam, r.iff);
+    put_base(o, h.m_sRanFaceProps_SplitEdgesAtSeam, r.iff);
+    put_base(o, h.m_sBadFaceProps_LoopProblems, r.iff);
+    put_base(o, h.m_sBadFaceProps_OuterLoopOrder, r.iff);
+    put_base(o, h.m_sBadFaceProps_OrientLoop, r.iff);
+    put_base(o, h.m_sBadFaceProps_NoArea_Loop, r.iff);
+    put_base(o, h.m_sBadFaceProps_MultiOuterLoops, r.iff);
+    put_base(o, h.m_sBadFaceProps_NestedOuterLoops, r.iff);
+    put_base(o, h.m_sBadFaceProps_UnpairedNoAreaLoop, r.iff);
+    put_base(o, h.m_sBadFaceProps_Closed3dLoop, r.iff);
+    put_base(o, h.m_sBadFaceProps_ClosedPtrLoop, r.iff);
+    put_base(o, h.m_sBadFaceProps_MissingPole, r.iff);
+    put_base(o, h.m_sRanFaceProps_SplitFaceAtSeam, r.iff);
+    o.push_back((double)h.m_lRanRegion_TestClosure_Cnt);
+    o.push_back((double)h.m_lFixRegion_SplitRegion_Cnt);
+
+    // histograms and statistics
+    for (const SmTArray<ULONG>* a : {&h.m_sLoopGap3d_Histogram, &h.m_sEdgeFaceGap3d_Histogram, &h.m_sEdgeLen3d_Histogram,
+                                     &h.m_sVertEdgeGap3d_Histogram, &h.m_sVertFaceGap3d_Histogram,
+                                     &h.m_sVertVertGap3d_Histogram})
+    {
+        o.push_back((double)a->GetSize());
+        for (ULONG i = 0; i < a->GetSize(); i++)
+            o.push_back((double)a->GetAt(i));
+    }
+    o.push_back(h.m_dMaxEdgeLength);
+    o.push_back(h.m_dAvgEdgeLength);
+    o.push_back(h.m_dNonDegen_MinEdgeLength);
+    o.push_back((double)h.m_lNonDegenEdgeCnt);
+
+    // vertex voxel model
+    o.push_back((double)h.m_lXCnt);
+    o.push_back((double)h.m_lYCnt);
+    o.push_back((double)h.m_lZCnt);
+    put_vec(o, h.m_sVertexBBox.GetMin());
+    put_vec(o, h.m_sVertexBBox.GetMax());
+    SmTArray<SmPointItem<SmVertexProps*>>& items = h.m_pVerticesInVoxels->GetPointItems();
+    o.push_back((double)items.GetSize());
+    for (ULONG i = 0; i < items.GetSize(); i++)
+    {
+        o.push_back((double)idx_of(r.iv, items[i].m_sTgtItem));
+        put_vec(o, items[i].m_sTgtPoint3d);
+        o.push_back((double)items[i].m_sTgtZoneTol3d);
+    }
+}
+
+// A topology entry of a GetXProps_ForTgts list: kind (graph order) and index.
+SmTopology* topo_of(Graph& g, int64_t kind, int64_t i)
+{
+    auto at = [i](auto& v) -> SmTopology* {
+        return v.empty() ? nullptr : (SmTopology*)v[(size_t)(i % (int64_t)v.size())];
+    };
+    switch (kind)
+    {
+    case 0: return at(g.regions);
+    case 1: return at(g.shells);
+    case 2: return at(g.faceuses);
+    case 3: return at(g.faces);
+    case 4: return at(g.loopuses);
+    case 5: return at(g.loops);
+    case 6: return at(g.edgeuses);
+    case 7: return at(g.edges);
+    case 8: return at(g.vertexuses);
+    default: return at(g.vertices);
+    }
+}
+
+// Whether a cache step would read a target topology list past its end.
+template <class P, class T, class Pred> bool lists_drift(const SmTArray<P*>& props, const SmTArray<T*>& tgts, ULONG start, Pred needs)
+{
+    for (ULONG ii = start; ii < props.GetSize(); ii++)
+        if (needs(props.GetAt(ii)) && ii >= tgts.GetSize())
+            return true;
+    return false;
+}
+
+void run_heal(Rd& rd, const char* path, std::vector<double>& o)
+{
+    Graph g;
+    SmBrep* brep = prepare(rd, path, g, o);
+    if (brep == nullptr)
+        return;
+    o.push_back(0.0);
+    SmTArray<SmVertex*> vs;
+    SmTArray<SmEdge*> es;
+    SmTArray<SmFace*> fs;
+    read_targets(rd, g, vs, es, fs);
+    SmHealData* h = new SmHealData(brep, vs, es, fs);
+    Registry r;
+    r.note(*h);
+    h->m_lXCnt = (ULONG)rd.idx();
+    h->m_lYCnt = (ULONG)rd.idx();
+    h->m_lZCnt = (ULONG)rd.idx();
+
+    int64_t nsteps = rd.idx();
+    bool stop = false;
+    for (int64_t s = 0; s < nsteps && !stop; s++)
+    {
+        int64_t code = rd.idx();
+        o.push_back((double)code);
+        SmBoolean bNew = FALSE;
+        SmStatus stat = SM_SUCCESS;
+        switch (code)
+        {
+        case 0:
+        {
+            bool bad = false;
+            for (ULONG ii = h->m_lOldEdgeCnt; ii < h->m_sTgtEdgeProps.GetSize(); ii++)
+            {
+                SmEdgeProps* p = h->m_sTgtEdgeProps[ii];
+                if (!p->IsSet_Gaps())
+                {
+                    if (ii >= h->m_sTgtEdges.GetSize())
+                    {
+                        bad = true;
+                        break;
+                    }
+                    if (!p->IsSet_Metadata() && h->m_sTgtEdges[ii]->GetCurve() == NULL)
+                    {
+                        bad = true;
+                        break;
+                    }
+                }
+            }
+            if (bad && !(h->m_sTgtEdgeProps.GetSize() == 0 || h->m_sTgtEdgeProps.GetSize() == h->m_lOldEdgeCnt))
+            {
+                o.push_back(ST_NULL_DEREF);
+                stop = true;
+                continue;
+            }
+            stat = h->Cache_EdgeProps(brep, &bNew, SM_HO_CACHE_EDGEPROPS);
+            break;
+        }
+        case 1:
+        {
+            bool bad = !(h->m_sTgtVertexProps.GetSize() == 0 || h->m_sTgtVertexProps.GetSize() == h->m_lOldVertexCnt) &&
+                       lists_drift(h->m_sTgtVertexProps, h->m_sTgtVertices, h->m_lOldVertexCnt,
+                                   [](SmVertexProps* p) { return !p->IsSet(); });
+            if (bad)
+            {
+                o.push_back(ST_NULL_DEREF);
+                stop = true;
+                continue;
+            }
+            stat = h->Cache_VertexProps(brep, &bNew, SM_HO_CACHE_VERTEXPROPS);
+            break;
+        }
+        case 2:
+        {
+            bool bad = !(h->m_sTgtFaceProps.GetSize() == 0 || h->m_sTgtFaceProps.GetSize() == h->m_lOldFaceCnt) &&
+                       lists_drift(h->m_sTgtFaceProps, h->m_sTgtFaces, h->m_lOldFaceCnt,
+                                   [](SmFaceProps* p) { return !p->HasProps(SM_PROPSTAGE_GAPS, p->m_pFace); });
+            if (bad)
+            {
+                o.push_back(ST_NULL_DEREF);
+                stop = true;
+                continue;
+            }
+            stat = h->Cache_FaceProps_Gaps(brep, &bNew, SM_HO_CACHE_FACEPROPS_GAPS);
+            break;
+        }
+        case 3: stat = h->Fix_TolSizes(brep, SM_HO_FIX_TOLSIZES); break;
+        case 4:
+        {
+            // every visited props needs its vertex; re-running on new vertices must put
+            // one into a voxel (else the first index of an empty bucket list is read)
+            ULONG n = h->m_sTgtVertexProps.GetSize();
+            ULONG old = h->m_lOldVertexCnt;
+            bool bad = false;
+            if (!(n == 0 || n == old))
+            {
+                for (ULONG ii = (old == 0 ? 0 : old); ii < n; ii++)
+                    if (h->m_sTgtVertexProps[ii]->m_pVertex == NULL)
+                        bad = true;
+                if (old != 0 && (old > n || (h->m_pVerticesInVoxels->*VxPeek::box()).IsInit()))
+                    bad = true;
+            }
+            if (bad)
+            {
+                o.push_back(ST_NULL_DEREF);
+                stop = true;
+                continue;
+            }
+            stat = h->Cache_CoinVertices(brep, &bNew, SM_HO_CACHE_COIN_VERTICES);
+            break;
+        }
+        case 5:
+        {
+            if (h->m_sTgtFaces.GetSize() < h->m_sTgtFaceProps.GetSize())
+            {
+                o.push_back(ST_NULL_DEREF);
+                stop = true;
+                continue;
+            }
+            stat = h->Cache_DegenFaces(brep, &bNew, SM_HO_CACHE_DEGEN_FACES);
+            break;
+        }
+        case 6: stat = h->Cache_CoinEdges(brep, &bNew, SM_HO_CACHE_COIN_EDGES); break;
+        case 7: stat = h->Fix_CoinEdges(brep, SM_HO_FIX_COIN_EDGES); break;
+        case 8: stat = h->Cache_MissedEdgeXSects(brep, &bNew, SM_HO_CACHE_MISSED_EDGEXSECTS); break;
+        case 9: stat = h->Fix_MissedEdgeXSects(brep, SM_HO_FIX_MISSED_EDGEXSECTS); break;
+        case 10: stat = h->Fix_UncontainedEdges(brep, SM_HO_FIX_UNCONTAINED_EDGES); break;
+        case 11: stat = h->Fix_BadGaps(brep, SM_HO_FIX_BADGAPS); break;
+        case 12:
+        case 13:
+        case 14:
+        {
+            int64_t sel = rd.idx();
+            SmBoolean b1 = UNSURE, b2 = UNSURE;
+            if (code == 12)
+            {
+                SmVertexProps* p = r.pick(r.v, sel);
+                if (p == nullptr)
+                {
+                    o.push_back(-3.0);
+                    continue;
+                }
+                if (pair_remove_is_ub(h->m_sBadVertexProps_CoinVertices, p))
+                {
+                    o.push_back(ST_NULL_DEREF);
+                    stop = true;
+                    continue;
+                }
+                h->RemoveVertexProps_FromLists(p, &b1, &b2);
+                o.push_back((double)idx_of(r.iv, p));
+            }
+            else if (code == 13)
+            {
+                SmEdgeProps* p = r.pick(r.e, sel);
+                if (p == nullptr)
+                {
+                    o.push_back(-3.0);
+                    continue;
+                }
+                if (pair_remove_is_ub(h->m_sBadEdgeProps_CoinEdges, p) ||
+                    pair_remove_is_ub(h->m_sBadEdgeProps_MissedEdgeXSects, p))
+                {
+                    o.push_back(ST_NULL_DEREF);
+                    stop = true;
+                    continue;
+                }
+                h->RemoveEdgeProps_FromLists(p, &b1, &b2);
+                o.push_back((double)idx_of(r.ie, p));
+            }
+            else
+            {
+                SmFaceProps* p = r.pick(r.f, sel);
+                if (p == nullptr)
+                {
+                    o.push_back(-3.0);
+                    continue;
+                }
+                h->RemoveFaceProps_FromLists(p, &b1, &b2);
+                o.push_back((double)idx_of(r.iff, p));
+            }
+            o.push_back((double)b1);
+            o.push_back((double)b2);
+            continue;
+        }
+        case 15:
+        {
+            int64_t which = rd.idx();
+            SmBoolean stale = rd.bflag();
+            int64_t n = rd.idx();
+            SmTArray<SmTopology*> tg;
+            for (int64_t i = 0; i < n; i++)
+            {
+                int64_t k = rd.idx();
+                int64_t j = rd.idx();
+                SmTopology* t = topo_of(g, k, j);
+                if (t != nullptr)
+                    tg.Add(t);
+            }
+            o.push_back(0.0);
+            if (which == 0)
+            {
+                SmTArray<SmVertexProps*> out;
+                ULONG c = h->GetVertexProps_ForTgts(&tg, &out, stale);
+                o.push_back((double)c);
+                for (ULONG i = 0; i < out.GetSize(); i++)
+                    o.push_back((double)idx_of(r.iv, out[i]));
+            }
+            else if (which == 1)
+            {
+                SmTArray<SmEdgeProps*> out;
+                ULONG c = h->GetEdgeProps_ForTgts(&tg, &out, stale);
+                o.push_back((double)c);
+                for (ULONG i = 0; i < out.GetSize(); i++)
+                    o.push_back((double)idx_of(r.ie, out[i]));
+            }
+            else
+            {
+                SmTArray<SmFaceProps*> out;
+                ULONG c = h->GetFaceProps_ForTgts(&tg, &out, stale);
+                o.push_back((double)c);
+                for (ULONG i = 0; i < out.GetSize(); i++)
+                    o.push_back((double)idx_of(r.iff, out[i]));
+            }
+            continue;
+        }
+        case 16: // FreeTargets (last step only)
+            for (ULONG i = 0; i < h->m_sTgtVertexProps.GetSize(); i++)
+                r.dead.insert(h->m_sTgtVertexProps[i]);
+            for (ULONG i = 0; i < h->m_sTgtEdgeProps.GetSize(); i++)
+                r.dead.insert(h->m_sTgtEdgeProps[i]);
+            for (ULONG i = 0; i < h->m_sTgtFaceProps.GetSize(); i++)
+                r.dead.insert(h->m_sTgtFaceProps[i]);
+            for (ULONG i = 0; i < h->m_sNotYetFaceProps.GetSize(); i++)
+                r.dead.insert(h->m_sNotYetFaceProps[i]);
+            h->FreeTargets();
+            break;
+        case 17:
+        {
+            SmTArray<SmVertex*> v2;
+            SmTArray<SmEdge*> e2;
+            SmTArray<SmFace*> f2;
+            read_targets(rd, g, v2, e2, f2);
+            h->LoadTargets(brep, v2, e2, f2);
+            r.note(*h);
+            break;
+        }
+        case 18:
+            h->m_lOldVertexCnt = (ULONG)rd.idx();
+            h->m_lOldEdgeCnt = (ULONG)rd.idx();
+            h->m_lOldFaceCnt = (ULONG)rd.idx();
+            break;
+        case 19: h->m_eDoneHealOp = (SmHealerOpType)rd.idx(); break;
+        case 20:
+        {
+            int64_t sel = rd.idx();
+            bool meta = rd.flag();
+            SmEdgeProps* p = r.pick(r.e, sel);
+            if (p != nullptr)
+                p->ReSet(meta ? TRUE : FALSE);
+            break;
+        }
+        case 21:
+        {
+            int64_t sel = rd.idx();
+            SmVertexProps* p = r.pick(r.v, sel);
+            if (p != nullptr)
+                p->ReSet();
+            break;
+        }
+        case 22: h->SetupEmptyProbArrays(); break;
+        default: stat = SC_ERR_ARG; break;
+        }
+        o.push_back(st(stat));
+        o.push_back(flg(bNew));
+        if (stat != SM_SUCCESS)
+            stop = true;
+    }
+    if (!stop)
+        dump(*h, g, r, o);
+
+    // free what the healer no longer owns, then the healer and the B-rep
+    std::set<const void*> owned;
+    for (ULONG i = 0; i < h->m_sTgtVertexProps.GetSize(); i++)
+        owned.insert(h->m_sTgtVertexProps[i]);
+    for (ULONG i = 0; i < h->m_sTgtEdgeProps.GetSize(); i++)
+        owned.insert(h->m_sTgtEdgeProps[i]);
+    for (ULONG i = 0; i < h->m_sTgtFaceProps.GetSize(); i++)
+        owned.insert(h->m_sTgtFaceProps[i]);
+    for (ULONG i = 0; i < h->m_sNotYetFaceProps.GetSize(); i++)
+        owned.insert(h->m_sNotYetFaceProps[i]);
+    for (SmVertexProps* p : r.v)
+        if (r.alive(p) && owned.find(p) == owned.end())
+            delete p;
+    for (SmEdgeProps* p : r.e)
+        if (r.alive(p) && owned.find(p) == owned.end())
+            delete p;
+    for (SmFaceProps* p : r.f)
+        if (r.alive(p) && owned.find(p) == owned.end())
+            delete p;
+    delete h;
+    delete brep;
+}
+} // namespace
+
+SC_EXPORT int32_t sc_heal_heal_data_p2_eval(int32_t op, const char* path, const double* in, int64_t n_in, double* out,
+                                            int64_t cap, int64_t* out_len)
+{
+    if (in == nullptr || n_in < 0 || out_len == nullptr || path == nullptr)
+        return SC_ERR_ARG;
+    SC_TRY
+    Rd rd{in, 0};
+    std::vector<double> o;
+    switch (op)
+    {
+    case P2_EXPORT: run_export(rd, path, o, false); break;
+    case P2_VLISTS: run_export(rd, path, o, true); break;
+    case P2_PROB: run_prob(rd, o); break;
+    case P2_HEAL: run_heal(rd, path, o); break;
+    default: return SC_ERR_ARG;
+    }
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}

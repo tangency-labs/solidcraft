@@ -1,0 +1,4620 @@
+{
+ "cases": [
+  {
+   "name": "squeeze_edge_box",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": {
+      "list": [
+       0
+      ]
+     },
+     "f": "none"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": true,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        3,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+  },
+  {
+   "name": "missing_poles_box_two_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "none",
+     "f": {
+      "list": [
+       0,
+       1
+      ]
+     }
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_degen_faces"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:637 my_test_missing_poles_refreshes_all_faces"
+  },
+  {
+   "name": "closed_sphere_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 2.0,
+     "swap": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+  },
+  {
+   "name": "closed_sphere_swap0_through_fix_tol",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 2.0,
+     "swap": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "fix_tol_sizes"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep to SM_HO_CACHE_FACEPROPS_2)"
+  },
+  {
+   "name": "closed_sphere_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 2.0,
+     "swap": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+  },
+  {
+   "name": "closed_sphere_swap1_through_fix_tol",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 2.0,
+     "swap": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "fix_tol_sizes"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep to SM_HO_CACHE_FACEPROPS_2)"
+  },
+  {
+   "name": "heal_box_10",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep"
+  },
+  {
+   "name": "heal_box_10_full_sequence",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "fix_tol_sizes"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep"
+  },
+  {
+   "name": "file_Mouse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_Mouse_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_Mouse_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_Endcap",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_Endcap_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_Endcap_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_box_with_large_fillet",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_box_with_large_fillet_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_box_with_large_fillet_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_cone",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_cone_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_cone_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_disk",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_disk_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_disk_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_ellips_ts2_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_plane_circ",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_plane_circ_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_plane_circ_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_plane_square",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_plane_square_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_plane_square_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_sphere",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_sphere_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_sphere_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_surf_extrude_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_surf_rev_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_surf_sphere150_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_torus",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_torus_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_torus_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_toruswvy_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb (SM_API_test TestSmHealBrep sequence)"
+  },
+  {
+   "name": "file_vase_rev_rebuild_reverse",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "reverse",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_edges_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 1
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 0
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 1,
+      "stale": false,
+      "tgts": [
+       [
+        7,
+        0
+       ],
+       [
+        7,
+        1
+       ],
+       [
+        7,
+        2
+       ],
+       [
+        3,
+        0
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "squeeze_edge_box_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "none",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 3
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 2,
+      "stale": true,
+      "tgts": [
+       [
+        3,
+        0
+       ],
+       [
+        3,
+        3
+       ],
+       [
+        7,
+        0
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_Mouse_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_Endcap_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_box_with_large_fillet_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_cone_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_disk_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_plane_circ_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_plane_square_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_sphere_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_torus_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_vertex_props",
+      "sel": 1
+     },
+     {
+      "step": "props_for_tgts",
+      "which": 0,
+      "stale": false,
+      "tgts": [
+       [
+        9,
+        0
+       ],
+       [
+        9,
+        3
+       ],
+       [
+        8,
+        1
+       ]
+      ]
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_box_10_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep"
+  },
+  {
+   "name": "squeeze_edge_box_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": {
+      "list": [
+       0
+      ]
+     },
+     "f": "none"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "remove_edge_props",
+      "sel": 0
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+  },
+  {
+   "name": "closed_sphere_swap0_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 2.0,
+     "swap": false
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+  },
+  {
+   "name": "closed_sphere_swap1_cached_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 2.0,
+     "swap": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+  },
+  {
+   "name": "network_full",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     }
+    ],
+    "validate_only": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp my_test_topology"
+  },
+  {
+   "name": "network_degen_faces_no_faces",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "cache_coin_vertices"
+     }
+    ],
+    "validate_only": false
+   }
+  }
+ ]
+}
