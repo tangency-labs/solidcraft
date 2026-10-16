@@ -449,7 +449,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
     /// `FindInterval` with its out-params left in `out` also on failure (`IsCoincident`
     /// ignores the status and reads them).
-    fn find_interval_inner(
+    pub(super) fn find_interval_inner(
         &self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,

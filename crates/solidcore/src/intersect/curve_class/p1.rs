@@ -27,6 +27,7 @@
 //! | [`CurveClassification::face`]                          | `GetFace`                                        |
 //! | [`CurveClassification::surface1`], [`CurveClassification::surface2`] | `GetSurface1`, `GetSurface2`        |
 //! | [`CurveClassification::curve`]                         | `GetCurve`                                       |
+//! | [`CurveClassification::set_interval`]               | `SetInterval` (inline)                           |
 //! | [`CurveClassification::interval`]                      | `GetInterval`                                    |
 //! | [`CurveClassification::sub_interval`]                  | `GetSubInterval`                                 |
 //! | [`CurveClassification::uv_curve1`], [`CurveClassification::uv_curve2`] | `GetUVCurve1`, `GetUVCurve2`      |

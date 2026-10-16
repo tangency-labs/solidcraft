@@ -136,7 +136,8 @@ fn classify_against_volume(
     _in_param_space: bool,
 ) -> Result<Vec<Extent1d>> {
     // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
-    // UNPORTED(intersect.curve_class_p8): SmCurveClassification::Intersect3DDiscontinuities
+    // Part 8 is available as CurveClassification::intersect_volume_discontinuities;
+    // construction/context plumbing from part 4 must be wired before it can run here.
     // (then the intervals: intersect::curve_class::CurveClassification::size / at)
     Err(SolidError::unported(
         "SmCurveClassification::SmCurveClassification",
