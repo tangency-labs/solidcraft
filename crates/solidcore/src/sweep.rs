@@ -7,3 +7,5 @@
 
 pub mod api_brep;
 pub mod api_surfaces;
+pub mod rotational_sweep_geometry;
+pub mod topology_sweep;

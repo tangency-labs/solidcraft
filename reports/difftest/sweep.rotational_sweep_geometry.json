@@ -1,0 +1,6279 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#0 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#1 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#2 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#3 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#4 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#5 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#6 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#7 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#8 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#9 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#10 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#11 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#12 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#13 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#14 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#15 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#16 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up09_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#17 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 9)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#18 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#19 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#20 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#21 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#22 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#23 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#24 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#25 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#26 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#27 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#28 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#29 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#30 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#31 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#32 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#33 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#34 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up10_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#35 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 10)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#36 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#37 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#38 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#39 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#40 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#41 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#42 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#43 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#44 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#45 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#46 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#47 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#48 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#49 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#50 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#51 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#52 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up11_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#53 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 11)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#54 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#55 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#56 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#57 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#58 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#59 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#60 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#61 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#62 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#63 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#64 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#65 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#66 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#67 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#68 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#69 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#70 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up12_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#71 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 12)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#72 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#73 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#74 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#75 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#76 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#77 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#78 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#79 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#80 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#81 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#82 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#83 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#84 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#85 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#86 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#87 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#88 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up14_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#89 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 14)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#90 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#91 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#92 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#93 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#94 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#95 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#96 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#97 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#98 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#99 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#100 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#101 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#102 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#103 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#104 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#105 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#106 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up16_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#107 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 16)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#108 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#109 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#110 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#111 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#112 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#113 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#114 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#115 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#116 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#117 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#118 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#119 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#120 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#121 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#122 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#123 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#124 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up17_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#125 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 17)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#126 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#127 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#128 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#129 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#130 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#131 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#132 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#133 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#134 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#135 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#136 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#137 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#138 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#139 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#140 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#141 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#142 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up18_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#143 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 18)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#144 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#145 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#146 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#147 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#148 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#149 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#150 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#151 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#152 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#153 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#154 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#155 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#156 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#157 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#158 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#159 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#160 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up19_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#161 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 19)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#162 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#163 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#164 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#165 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#166 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#167 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#168 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#169 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#170 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#171 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#172 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#173 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#174 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#175 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#176 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#177 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#178 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up20_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#179 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 20)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#180 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#181 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#182 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#183 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#184 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#185 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#186 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#187 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#188 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#189 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#190 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#191 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#192 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#193 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#194 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#195 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#196 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up21_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#197 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 21)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#198 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#199 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#200 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#201 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#202 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#203 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#204 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#205 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#206 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#207 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#208 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#209 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#210 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#211 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#212 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#213 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#214 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up22_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#215 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 22)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#216 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#217 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#218 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#219 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#220 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#221 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#222 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#223 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#224 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#225 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#226 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#227 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#228 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#229 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#230 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#231 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#232 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up23_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#233 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 23)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_edge_higher_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#234 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_edge_same_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#235 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_edge_higher_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#236 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_edge_same_wire",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#237 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_higher_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#238 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_same_vloop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#239 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_higher_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#240 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#241 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_higher_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#242 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_same_wire_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#243 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_higher_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#244 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_vertex_same_origin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#245 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_face_same_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#246 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#247 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_start_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#248 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_end_cs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#249 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_is_closed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#250 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "up24_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#251 (upstream tests/prog_test/src/smSweepTest.cpp my_test_sweep case 24)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#252 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#253 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_opp_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#254 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_opp_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#255 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#256 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_down_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#257 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cylinder_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#258 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cone_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#259 (upstream edge case)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#260 (upstream edge case)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_same_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#261 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#262 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_check_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#263 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "end_on_axis_check_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#264 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_in_tol_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#265 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_out_tol_bline_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#266 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#267 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#268 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_opp_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#269 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_opp_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#270 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#271 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_down_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#272 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cylinder_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#273 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cone_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#274 (upstream edge case)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#275 (upstream edge case)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_same_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#276 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#277 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_check_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#278 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "end_on_axis_check_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#279 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_in_tol_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#280 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_out_tol_bline_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#281 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#282 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#283 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_opp_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#284 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_opp_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#285 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#286 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_down_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#287 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cylinder_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#288 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cone_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#289 (upstream edge case)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#290 (upstream edge case)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_same_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#291 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#292 (upstream edge case)",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_check_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#293 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "end_on_axis_check_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#294 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_in_tol_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#295 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_out_tol_line_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#296 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#297 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#298 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_opp_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#299 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_rev_opp_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#300 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#301 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_down_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#302 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cylinder_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#303 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cone_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#304 (upstream edge case)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#305 (upstream edge case)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_axis_same_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#306 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#307 (upstream edge case)",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "crossing_check_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#308 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "end_on_axis_check_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#309 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_in_tol_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#310 (upstream edge case)",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_axis_out_tol_line_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#311 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "almost_perp_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#312 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "almost_parallel_line_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#313 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "almost_perp_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#314 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "almost_parallel_line_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#315 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "almost_perp_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#316 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "almost_parallel_line_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#317 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sphere_half_arc",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#318 (upstream edge case)",
+      "values_compared": 247
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "torus_full_circle",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#319 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "torus_sub_arc",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#320 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "torus_full_circle_quarter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#321 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "circle_touching_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#322 (upstream edge case)",
+      "values_compared": 247
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "circle_touching_axis_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#323 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "circle_perp_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#324 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_higher_axis_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#325 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_same_axis_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#326 (upstream edge case)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_higher_axis_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#327 (upstream edge case)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_same_axis_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#328 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_higher_axis_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#329 (upstream edge case)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_same_axis_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#330 (upstream edge case)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_higher_axis_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#331 (upstream edge case)",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_same_axis_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#332 (upstream edge case)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "start_cs_on_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#333 (upstream edge case)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "end_cs_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#334 (upstream edge case)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "is_closed_quarter_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#335 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "is_closed_quarter_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#336 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "is_closed_quarter_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#337 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "is_closed_quarter_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#338 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "zero_axis_transform",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#339 (upstream edge case)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "zero_axis_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#340 (upstream edge case)",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_same_nurb_twisted",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#341 (upstream edge case)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_same_nurb_flat",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#342 (upstream edge case)",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_same_full_turn",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#343 (upstream edge case)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_analytics",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#344 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "annulus_analytics",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#345 (upstream edge case)",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "hermite_edge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#346 (upstream edge case)",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "hermite_check",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#347 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cone_scale_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#348 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_scale_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#349 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cone_scale_100000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#350 (upstream edge case)",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disc_scale_100000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#351 (upstream edge case)",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_bulge_ends_on_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#352 (upstream edge case)",
+      "values_compared": 247
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_bulge_ends_on_axis_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#353 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_bulge_check",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#354 (upstream edge case)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_partly_on_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#355 (upstream edge case)",
+      "values_compared": 247
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_partly_on_axis_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#356 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_back_on_axis_big_eps",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#357 (upstream edge case)",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_back_on_axis_big_eps_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#358 (upstream edge case)",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_zigzag_on_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#359 (upstream edge case)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nurb_zigzag_on_axis_big_eps",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#360 (upstream edge case)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811144",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811145",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811146",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811147",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811148",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811149",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811150",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811151",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811152",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811153",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811154",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811155",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811156",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811157",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811158",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811159",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811160",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811161",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811162",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811163",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811164",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811165",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811166",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811167",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811168",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811169",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811170",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811171",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811172",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811173",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811174",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811175",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811176",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811177",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811178",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811179",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811180",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811181",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811182",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811183",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811184",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811185",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811186",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811187",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811188",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811189",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811190",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811191",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811192",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811193",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811194",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811195",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811196",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811197",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811198",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811199",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811200",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811201",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811202",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811203",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811204",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811205",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811206",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811207",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811208",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811209",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811210",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811211",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811212",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811213",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811214",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811215",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811216",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811217",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811218",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811219",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811220",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811221",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811222",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811223",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811224",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811225",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811226",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811227",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811228",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811229",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811230",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811231",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811232",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811233",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811234",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811235",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811236",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811237",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811238",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811239",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811240",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811241",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811242",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811243",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811244",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811245",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811246",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811247",
+      "values_compared": 247
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811248",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811249",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811250",
+      "values_compared": 14
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811251",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811252",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811253",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811254",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811255",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811256",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811257",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811258",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811259",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811260",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811261",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811262",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811263",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811264",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811265",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811266",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811267",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811268",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811269",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811270",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811271",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811272",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811273",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811274",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811275",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811276",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811277",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811278",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811279",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811280",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811281",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811282",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811283",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811284",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811285",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811286",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811287",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811288",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811289",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811290",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811291",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811292",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811293",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811294",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811295",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811296",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811297",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811298",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811299",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811300",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811301",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811302",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811303",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811304",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811305",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811306",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811307",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811308",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811309",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811310",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811311",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811312",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811313",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811314",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811315",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811316",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811317",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811318",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811319",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811320",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811321",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811322",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811323",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811324",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811325",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811326",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811327",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811328",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811329",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811330",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811331",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811332",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811333",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811334",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811335",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811336",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811337",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811338",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811339",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811340",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811341",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811342",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811343",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811344",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811345",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811346",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811347",
+      "values_compared": 35
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811348",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811349",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811350",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811351",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811352",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811353",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811354",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811355",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811356",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811357",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811358",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811359",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811360",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811361",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811362",
+      "values_compared": 167
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811363",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811364",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811365",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811366",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811367",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811368",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811369",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811370",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811371",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811372",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811373",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811374",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811375",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811376",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811377",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811378",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811379",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811380",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811381",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811382",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811383",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811384",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811385",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811386",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811387",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811388",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811389",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811390",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811391",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811392",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811393",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811394",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811395",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811396",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811397",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811398",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811399",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811400",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811401",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811402",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811403",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811404",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811405",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811406",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811407",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811408",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811409",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811410",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811411",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811412",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811413",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811414",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811415",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811416",
+      "values_compared": 47
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811417",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811418",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811419",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811420",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811421",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811422",
+      "values_compared": 47
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811423",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811424",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811425",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811426",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811427",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811428",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811429",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811430",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811431",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811432",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811433",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811434",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811435",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811436",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811437",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811438",
+      "values_compared": 14
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811439",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811440",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811441",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811442",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811443",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811444",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811445",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811446",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811447",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811448",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811449",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811450",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811451",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811452",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811453",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0310",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811454",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811455",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811456",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811457",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811458",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811459",
+      "values_compared": 231
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0316",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811460",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811461",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811462",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811463",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0320",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811464",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811465",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0322",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811466",
+      "values_compared": 247
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0323",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811467",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811468",
+      "values_compared": 14
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811469",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811470",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0327",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811471",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811472",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811473",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0330",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811474",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811475",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811476",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811477",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811478",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0335",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811479",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811480",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811481",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811482",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811483",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811484",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0341",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811485",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811486",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811487",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811488",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811489",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811490",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811491",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811492",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0349",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811493",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0350",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811494",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811495",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0352",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811496",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811497",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811498",
+      "values_compared": 47
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811499",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811500",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0357",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811501",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811502",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811503",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0360",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811504",
+      "values_compared": 231
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0361",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811505",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0362",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811506",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0363",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811507",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0364",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811508",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0365",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811509",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0366",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811510",
+      "values_compared": 263
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0367",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811511",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0368",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811512",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0369",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811513",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0370",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811514",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0371",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811515",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0372",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811516",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0373",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811517",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0374",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811518",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0375",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811519",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0376",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811520",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0377",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811521",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0378",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811522",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0379",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811523",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0380",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811524",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0381",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811525",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0382",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811526",
+      "values_compared": 303
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0383",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811527",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0384",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811528",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0385",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811529",
+      "values_compared": 359
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0386",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811530",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0387",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811531",
+      "values_compared": 14
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0388",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=15377569132031811532",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0389",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811533",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0390",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811534",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0391",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811535",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0392",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811536",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0393",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811537",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0394",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811538",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0395",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811539",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0396",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811540",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0397",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811541",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0398",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811542",
+      "values_compared": 47
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0399",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=15377569132031811543",
+      "values_compared": 359
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 43,
+  "cases_failed": 0,
+  "cases_passed": 718,
+  "cases_total": 761,
+  "deferred_by_unit": {
+    "surface.cone_p2": 43
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "sweep.rotational_sweep_geometry"
+}

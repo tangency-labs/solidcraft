@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**187 / 261 units ported** (99 green, 88 partial), **255,331 / 387,903 upstream lines (65.8%)**. 31 claimed, 0 blocked, 43 todo.
+**188 / 261 units ported** (108 green, 80 partial), **257,705 / 387,903 upstream lines (66.4%)**. 30 claimed, 0 blocked, 43 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -63,7 +63,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
 - [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (ready for review)
-- [ ] 🔨 `surface.surface_p8` (2374 lines) — in progress: #118 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p7` (2248 lines) — in progress: #65 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.curve_class_p2` (1928 lines) — in progress: #85 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.surface_drop_lib_p3` (2062 lines) — in progress: #136 @froglemonade2 (draft)
@@ -205,9 +204,9 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [x] ✅ `curve.curve_p9` (1783 lines) — green, 3093 cases
 
-### surface (36/40)
+### surface (37/40)
 
-- [ ] 🟡 `surface.volume_p1` (2014 lines) — partial, 2886 cases
+- [x] ✅ `surface.volume_p1` (2014 lines) — green, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
 - [x] ✅ `surface.twist_volume` (649 lines) — green, 1572 cases
 - [ ] 🟡 `surface.surface_p2` (2398 lines) — partial, 869 cases
@@ -220,33 +219,33 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.b_spline_volume_n_lib` (310 lines) — partial, 2420 cases
 - [x] ✅ `surface.bend_volume` (945 lines) — green, 2347 cases
 - [x] ✅ `surface.cone_p1` (1835 lines) — green, 20694 cases
-- [ ] 🟡 `surface.surf_of_extrusion_p1` (1865 lines) — partial, 2055 cases
+- [x] ✅ `surface.surf_of_extrusion_p1` (1865 lines) — green, 2055 cases
 - [ ] 🟡 `surface.surf_of_revolution_p3` (1620 lines) — partial, 26705 cases
 - [ ] 🟡 `surface.surface_cache_p2` (1245 lines) — partial, 905 cases
 - [x] ✅ `surface.torus` (1180 lines) — green, 563 cases
-- [ ] 🟡 `surface.unbend_volume` (920 lines) — partial, 1874 cases
+- [x] ✅ `surface.unbend_volume` (920 lines) — green, 1874 cases
 - [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
 - [ ] 🟡 `surface.surf_of_revolution_p2` (1369 lines) — partial, 1167 cases
 - [ ] 🟡 `surface.surface_cache_p3` (1703 lines) — partial, 600 cases
 - [ ] 🟡 `surface.volume_p2` (1490 lines) — partial, 11220 cases
 - [ ] 🟡 `surface.surface_p7` (2406 lines) — partial, 3660 cases
 - [ ] 🟡 `surface.plane_p2` (1627 lines) — partial, 2218 cases
-- [ ] 🟡 `surface.surface_p4` (2270 lines) — partial, 3000 cases
+- [x] ✅ `surface.surface_p4` (2270 lines) — green, 3000 cases
 - [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
 - [ ] 🟡 `surface.surf_of_extrusion_p2` (1420 lines) — partial, 1359 cases
-- [ ] 🟡 `surface.surface_p5` (2321 lines) — partial, 3046 cases
+- [x] ✅ `surface.surface_p5` (2321 lines) — green, 3046 cases
 - [ ] 🟡 `surface.cone_p3` (1939 lines) — partial
 - [ ] 🟡 `surface.surface_p1` (2458 lines) — partial, 806 cases
-- [ ] 🟡 `surface.surface_p6` (2150 lines) — partial, 2099 cases
+- [x] ✅ `surface.surface_p6` (2150 lines) — green, 2099 cases
 - [ ] 🟡 `surface.srf_in_volume` (779 lines) — partial, 2036 cases
 - [ ] 🟡 `surface.surface_p10` (2172 lines) — partial, 867 cases
-- [ ] 🟡 `surface.surface_p3` (1794 lines) — partial, 2500 cases
+- [x] ✅ `surface.surface_p3` (1794 lines) — green, 2500 cases
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (ready for review)
-- [ ] 🟡 `surface.surface_p11` (1789 lines) — partial
-- [ ] 🔨 `surface.surface_p8` (2374 lines) — in progress: #118 @froglemonade2 (ready for review)
+- [ ] 🟡 `surface.surface_p11` (1789 lines) — partial, 600 cases
+- [ ] 🟡 `surface.surface_p8` (2374 lines) — partial, 2054 cases
 - [x] ✅ `surface.surface_point_solve_p1` (1771 lines) — green, 1035 cases
-- [ ] 🟡 `surface.surface_point_solve_p2` (1882 lines) — partial, 1320 cases
-- [ ] 🟡 `surface.surface_point_solve_p3` (1282 lines) — partial, 1365 cases
+- [x] ✅ `surface.surface_point_solve_p2` (1882 lines) — green, 1320 cases
+- [x] ✅ `surface.surface_point_solve_p3` (1282 lines) — green, 1365 cases
 
 ### topology (16/31)
 

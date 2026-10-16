@@ -3220,7 +3220,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "51 fns; largest: SmTopologySweep::DoSweep, SmTopologySweep::SweepEdgeHigh, SmTopologySweep::SweepFaceSame, SmSweepStitchCallback::SelectTopologyToKeep; cycle back-edges (call into later units; stub or co-port): blend.hcr(5), boolean.merge_p1(1), boolean.merge_p2(1), boolean.merge_p3(1), boolean.merge_p4(1), boolean.topology_intersector_p1(1), sweep.rotational_sweep_geometry(1), sweep.trans_sweep_geometry(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "51 fns; largest: SmTopologySweep::DoSweep, SmTopologySweep::SweepEdgeHigh, SmTopologySweep::SweepFaceSame, SmSweepStitchCallback::SelectTopologyToKeep; cycle back-edges (call into later units; stub or co-port): blend.hcr(5), boolean.merge_p1(1), boolean.merge_p2(1), boolean.merge_p3(1), boolean.merge_p4(1), boolean.topology_intersector_p1(1), sweep.rotational_sweep_geometry(1), sweep.trans_sweep_geometry(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; CO-PORTED in sweep.rotational_sweep_geometry (PR #126): SmSweepGeometryCreation members m_bMakeAnalytics, m_dEps, constructor, SetMakeAnalytics, SmSweepCheckType -> solidcore::sweep::topology_sweep::{SweepGeometryCreation, SweepCheckType}"
 
 [[unit]]
 id = "boolean.topology_intersector_p3"
@@ -3245,10 +3245,10 @@ soft_depends_on = ["curve.curve_p4", "curve.curve_p8", "curve.line", "geom.exten
 est_lines = 1542
 layer = 52
 tests = ["prog_test:my_sweep_null_region_counts", "prog_test:my_test_dosweep_null_region", "SM_API_test:TestNonManifoldSweepDistinctTarget", "SM_API_test:TestNonManifoldSweepNullEntry", "SM_API_test:TestNonManifoldSweepStaleEntry", "SM_API_test:TestSmCreateLinearSweepCylinder"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "16 fns; largest: SmRotationalSweepGeometry::EdgeSweepHigher, SmRotationalSweepGeometry::CheckCurveSweep, sm_CheckEdgeOnAxis, SmRotationalSweepGeometry::EdgeSweepSame; unit-SCC #22 (220 units); 45 upstream test entry points reach this unit"
+notes = "16 fns; largest: SmRotationalSweepGeometry::EdgeSweepHigher, SmRotationalSweepGeometry::CheckCurveSweep, sm_CheckEdgeOnAxis, SmRotationalSweepGeometry::EdgeSweepSame; unit-SCC #22 (220 units); 45 upstream test entry points reach this unit; PR #126: 761 cases (361 fixtures, 400 generated), 718 passed, 43 deferred (surface.cone_p2: SmCone::IsNurbSurfaceCone via CopyAndAddAnalytics), max_rel_err 0; 4361 cases with --seeds 4000 also pass (396 deferred). Co-ports SmSweepGeometryCreation members into sweep::topology_sweep; UB-130 (sSolutions[1] with one solution) reads a zero-filled slot"
 
 [[unit]]
 id = "sweep.trans_sweep_geometry"
