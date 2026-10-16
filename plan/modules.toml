@@ -3329,10 +3329,10 @@ soft_depends_on = ["curve.curve_p2", "geom.a_object", "geom.extent1d", "geom.tol
 est_lines = 475
 layer = 55
 tests = ["prog_test:my_test_bbu", "SM_API_test:TestSmMaterialCensus", "SM_API_test:TestSmPiecewiseMerge", "SM_API_test:TestSmBooleanLists", "SM_API_test:TestKernelMergeBrepsInvalidInput", "SM_API_test:TestApiMergeBrepsInvalidOperation"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "1 fns; largest: SmMerge::ProcessWiresAndShellVertices; unit-SCC #22 (220 units); 105 upstream test entry points reach this unit"
+notes = "PARTIAL (PR #161): 140 cases, 108 bit-identical passes, zero failures, 32 deferred on query.brep (SmBrep::Point3DClassify); no absolute floors. ProcessWiresAndShellVertices ported with explicit operands, caller-owned marks and borrowed mate maps; real SmMerge/Relate oracle on native-order raw graphs, all 11 operations, reversed/shared marks, mapped face edges, closed/sub-domain/tiny/huge wires, isolated vertices, and solid box fixtures. Deletion/copy adapters remain Unported in topology.brep_p4 and boolean.merge_p1/p2; no attached Brep cache yet. No incoming UNPORTED back-edges or co-ported dependency types. Known UB-1 part-container inputs rejected before C++; guard regression included. Review regressions: unmated marked wires pass for the seven non-keep operations; null keep entries excluded only for Union/Intersection/Merge/PartialMerge; nonidentity mates preserve order; both runners reject duplicate Relate targets; generated operands, marks and mate permutations vary independently. Borrowed relation state must become mutable when copy adapters are wired. 1 fns; largest: SmMerge::ProcessWiresAndShellVertices; unit-SCC #22 (220 units); 105 upstream test entry points reach this unit"
 
 [[unit]]
 id = "boolean.merge_p4"
