@@ -31,7 +31,7 @@ sys.dont_write_bytecode = True  # keep harness/plan clean
 sys.path.insert(0, str(ROOT / "harness/plan"))
 import progress  # noqa: E402  (reuse the checklist's counting logic)
 
-REPO = os.environ.get("GITHUB_REPOSITORY", "bherbruck/solidcore")
+REPO = os.environ.get("GITHUB_REPOSITORY", "tangency-labs/solidcore")
 REPO_URL = f"https://github.com/{REPO}"
 UPSTREAM_URL = "https://github.com/NVIDIA-Omniverse/usd-brep"
 UPSTREAM_COMMIT = "c9c5979f04cea8c38213004d4f04df0dcfb40d05"

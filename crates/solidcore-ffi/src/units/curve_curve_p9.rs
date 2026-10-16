@@ -399,7 +399,7 @@ const EYE_ON_PLANE_TOL: f64 = 1e-3;
 /// or the plane normal (18), so non-unit ones are outside the contract. A
 /// perspective eye on (or within [`EYE_ON_PLANE_TOL`] of) the view plane is also
 /// excluded: Rust and C++ disagree there, see
-/// <https://github.com/bherbruck/solidcore/issues/59>.
+/// <https://github.com/tangency-labs/solidcore/issues/59>.
 fn check_projection_vectors(code: i32, vecs: &[[f64; 3]; 3]) -> Result<(), FfiError> {
     let [v0, v1, v2] = *vecs;
     let units_ok = match code {

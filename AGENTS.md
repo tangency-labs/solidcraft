@@ -54,7 +54,7 @@ documents one per key in `abs_floors()`, recorded in its report). Never loosen a
 goes in `plan/findings.md` (unit, inputs, both values, suspected cause) and the unit
 stays `blocked`.
 
-**Git.** Work happens through pull requests to github.com/bherbruck/solidcore. Never
+**Git.** Work happens through pull requests to github.com/tangency-labs/solidcore. Never
 push to `main` directly, never force-push shared branches, never rewrite `main`'s
 history, never `reset`/`checkout`/`restore` files you did not write. Stage explicit
 paths only (never `git add -A`/`git add .`). End every commit message with your

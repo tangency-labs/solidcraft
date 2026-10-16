@@ -6,7 +6,7 @@ license.workspace = true
 # 0.0.x until it is usable end to end (primitives, booleans, fillets).
 version = "0.0.1"
 rust-version.workspace = true
-repository = "https://github.com/bherbruck/solidcore"
+repository = "https://github.com/tangency-labs/solidcore"
 readme = "README.md"
 keywords = ["cad", "brep", "nurbs", "geometry", "solid-modeling"]
 categories = ["graphics", "mathematics", "science"]

@@ -49,7 +49,7 @@ No GPL/LGPL code is used anywhere in solidcore.
 
 Every ported Rust file begins with a header naming the upstream source file(s) it
 derives from and a table mapping its Rust items to upstream names (see
-[`AGENTS.md`](https://github.com/bherbruck/solidcore/blob/main/AGENTS.md#file-header)).
+[`AGENTS.md`](https://github.com/tangency-labs/solidcore/blob/main/AGENTS.md#file-header)).
 
 ## Test corpora
 
@@ -62,7 +62,7 @@ These are fetched at run time (never committed) and used only by difftest's
   `scripts/fetch-ssi-corpus.sh` into the gitignored `corpus/ssi/`)
 - Pinned commit: `b04c8a6`
 - Author: Iraklis Kourtis (jyviko), published for solidcore in
-  [issue #17](https://github.com/bherbruck/solidcore/issues/17)
+  [issue #17](https://github.com/tangency-labs/solidcore/issues/17)
 - Licence: MIT OR Apache-2.0
 - Copyright: (c) 2026 SolidCraft contributors
 - Use: 119 surface/surface intersection cases with exact ground truth. The scorer in
