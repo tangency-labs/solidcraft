@@ -9,9 +9,8 @@
 // the shared sc_edgeuse_graph.h; the export itself is topology.edgeuse_p1's Export op).
 // Layouts are documented in crates/solidcore-ffi/src/units/topology_edgeuse_p2.rs, which
 // validates every input. Outputs start with `0`, or `-1 status` when the B-rep could not
-// be built. `-2` is "upstream would dereference null" and `-3` "not run": the op would
-// reach a callee that is unported on the Rust side (whose cases are deferred) on an input
-// where upstream may crash, so the shim does not call it.
+// be built. `-2` is "upstream would dereference null": the op (through EvaluateBinormal,
+// topology.edgeuse_p3) would dereference a null pointer, so the shim does not call it.
 #include "sc_shim.h"
 
 #include "StdAfx.h"
@@ -46,7 +45,6 @@ enum Op2 : int32_t
 };
 
 const double ST_NULL_DEREF = -2.0;
-const double ST_NOT_RUN = -3.0;
 
 // GetMate/GetRadial/GetUVTrimCurve need the edge's primary edgeuse (loop edgeuses).
 bool has_prim(SmEdgeuse* p)
@@ -62,8 +60,12 @@ bool binormal_safe(SmEdgeuse* p)
            p->GetFace() && p->GetFace()->GetSurface() && p->GetVertexuse() && has_prim(p);
 }
 
+// EvaluateBinormal returns SM_ERR_INVALID_INPUT for an edge use that is not in a loop before
+// touching anything; otherwise the loop edge use must be binormal_safe.
+bool eval_safe(SmEdgeuse* p) { return p != nullptr && (!p->IsLoopEdgeuse() || binormal_safe(p)); }
+
 // Both members of a radial sector are safe.
-bool sector_safe(SmEdgeuse* p) { return binormal_safe(p) && binormal_safe(p->GetRadial()); }
+bool sector_safe(SmEdgeuse* p) { return eval_safe(p) && eval_safe(p->GetRadial()); }
 
 void put_gap_flags(std::vector<double>& o, SmEdgeuse* p)
 {
@@ -98,7 +100,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         else if (!has_prim(p))
             o.push_back(ST_NULL_DEREF);
         else if (!sector_safe(p))
-            o.push_back(ST_NOT_RUN);
+            o.push_back(ST_NULL_DEREF);
         else
             o.push_back(flg(p->IsTangentSector(tol, coin, ok_make)));
         break;
@@ -110,8 +112,8 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         double tol = rd.num();
         if (!has_prim(p) || p->GetEdge() == nullptr)
             o.push_back(ST_NULL_DEREF);
-        else if (n > 0 && !sector_safe(p))
-            o.push_back(ST_NOT_RUN);
+        else if (n > 0 && p->IsLoopEdgeuse() && !sector_safe(p))
+            o.push_back(ST_NULL_DEREF);
         else
             o.push_back(flg(p->IsConvexRadialSector(n, step, tol)));
         break;
@@ -125,9 +127,9 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         bool has_n = rd.flag();
         SmVector3d n = rd.vec();
         SmBoolean ok_make = rd.bflag();
-        if (!binormal_safe(p))
+        if (p->GetEdge() == nullptr || !eval_safe(p))
         {
-            o.push_back(ST_NOT_RUN);
+            o.push_back(ST_NULL_DEREF);
             break;
         }
         double t = p->GetEdge()->GetInterval().Evaluate(frac);
@@ -137,6 +139,9 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         SmStatus s = p->EvaluateBinormalStepOff(t, dist, pnt, bin, &tan, &nrm, has_c ? &c : NULL,
                                                 has_n ? &n : NULL, &uv, ok_make);
         o.push_back(st(s));
+        // the out-params are compared whatever the status: a failing call leaves what it
+        // wrote before failing (zeros from EvaluateBinormal's init, the edge point's
+        // values once that succeeded)
         put_vec(o, pnt);
         put_vec(o, bin);
         put_vec(o, tan);
@@ -147,9 +152,10 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     }
     case OP_REBUILD:
     {
-        if (!binormal_safe(p))
+        // a wire edge use has no face use: CreateUVTrimCurve returns its status first
+        if (p->GetFaceuse() != nullptr && !binormal_safe(p))
         {
-            o.push_back(ST_NOT_RUN);
+            o.push_back(ST_NULL_DEREF);
             break;
         }
         o.push_back(st(p->RebuildUVTrimCurve()));

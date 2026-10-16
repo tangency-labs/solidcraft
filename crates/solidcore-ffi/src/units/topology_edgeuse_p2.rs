@@ -7,15 +7,15 @@
 //! [`super::topology_edgeuse_p1`]; its `Export` op exports the graph) followed by the
 //! edge use's index in the export's traversal order. Outputs start with `0`, or with
 //! `-1 status` when the B-rep could not be built. `-2` in an output is "upstream would
-//! dereference null" and `-3` "not run" (the op would reach a callee that is unported
-//! on the Rust side, whose cases are deferred, on an input where upstream may crash).
+//! dereference null" (the op, through `EvaluateBinormal` of unit `topology.edgeuse_p3`,
+//! would dereference a null pointer, so the shim does not call it).
 //!
 //! | [`Op`]     | parameters after `eu`                         | outputs |
 //! |------------|-----------------------------------------------|---------|
-//! | `Tangent`  | `tol_deg coincidence ok_make`                 | `IsTangentSector` flag, `-2` or `-3` |
-//! | `Convex`   | `n step_off tol_deg`                          | `IsConvexRadialSector` flag, `-2` or `-3` |
-//! | `StepOff`  | `frac dist has_c C[3] has_n N[3] ok_make`     | `-3`, or `status P[3] B[3] T[3] N[3] u v` (`EvaluateBinormalStepOff` at the edge parameter `frac` of the interval) |
-//! | `Rebuild`  |                                               | `-3`, or `status` and the edge use's state |
+//! | `Tangent`  | `tol_deg coincidence ok_make`                 | `IsTangentSector` flag or `-2` |
+//! | `Convex`   | `n step_off tol_deg`                          | `IsConvexRadialSector` flag or `-2` |
+//! | `StepOff`  | `frac dist has_c C[3] has_n N[3] ok_make`     | `-2`, or `status P[3] B[3] T[3] N[3] u v` (`EvaluateBinormalStepOff` at the edge parameter `frac` of the interval) |
+//! | `Rebuild`  |                                               | `-2`, or `status` and the edge use's state |
 //! | `CheckSet` | `adjust has_fail fail_status curve`           | `-2`, or `status dmax replaced`, the edge use's and its mate's state, the edge tolerance, the record's B-rep flag (`dmax` is `-1` when not set) |
 //! | `Notify`   | `operation`                                   | `-2`, or `0`, the edge use's and its mate's state, their edge/face gap flags |
 //!

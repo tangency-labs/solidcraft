@@ -5,8 +5,10 @@
 //! one-face B-rep built with `SmBrepConstructor`: real `SmPlane`, `SmBSplineSurface` and
 //! `SmSurfOfRevolution` faces, `SmLine`, `SmCircle` and `SmBSplineCurve` edges, explicit
 //! 2D B-spline UV trim curves and explicit face / edge zone tolerances. Rust:
-//! `solidcore::query::r#loop::contains_uv_point` on the same data as a
-//! [`FaceLoop`] view.
+//! `solidcore::query::r#loop::contains_uv_point` on a one-face `Brep` built from the same
+//! data (the loop walks the B-rep, which it may edit where it creates UV trim curves).
+//! The arena surfaces carry no face owner; the face's zone tolerance is used as upstream's
+//! `GetZoneTol3d(pSurface)` of the face's own surface.
 //!
 //! A case is the face (surface, tolerance), its edges (curve, interval, tolerance), the
 //! loop's edge uses in loop order (edge, orientation, UV trim curve) and the point.
@@ -36,11 +38,15 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
-use solidcore::query::r#loop::{contains_uv_point, FaceLoop, LoopEdgeuse, LoopFace};
+use solidcore::query::r#loop::contains_uv_point;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::Surface;
-use solidcore::topology::EdgeId;
+use solidcore::topology::{
+    Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
+    LoopId, Loopuse, LoopuseId, LoopuseStart, Region, RegionId, Shell, ShellId, Vertex, VertexId,
+};
+use solidcore::SolidError;
 use solidcore_ffi::units::query_loop as ffi;
 
 use crate::case::CaseContext;
@@ -372,6 +378,108 @@ fn orient_code(o: OrientType) -> i64 {
     }
 }
 
+/// The one-face B-rep of a case, as the shim's `SmBrepConstructor` realises it: the
+/// face (surface owned by the face, zone tolerance), its loop (a vertex loop or the
+/// edge uses in the requested order, closed through the CCW links), the edges and
+/// every edge use's own UV trim curve.
+fn rust_brep(
+    k: &Kernel,
+    i: &Inputs,
+    surface: Surface,
+    curves: Vec<Curve>,
+    trims: Vec<Curve>,
+) -> Result<Brep, HarnessError> {
+    let err = |e: SolidError| harness(format!("brep: {e}"));
+    let lu = LoopuseId::from_index(0);
+    let n = u32::try_from(i.edgeuses.len()).map_err(|_| harness("edge uses"))?;
+    let uv_domain = surface.natural_uv_domain();
+    let mut b = Brep::new();
+    b.add_region_record(Region { in_brep: true }).map_err(err)?;
+    b.add_shell_record(Shell {
+        faces: vec![FaceId::from_index(0)],
+        region: Some(RegionId::from_index(0)),
+    })
+    .map_err(err)?;
+    b.add_face_record(Face {
+        loops: vec![LoopId::from_index(0)],
+        surface: Some(surface),
+        faceuse: Some(FaceuseId::from_index(0)),
+        uv_domain,
+        tolerance: zone_tol3d(k, i.face_tol),
+        ..Face::new(ShellId::from_index(0))
+    })
+    .map_err(err)?;
+    b.add_loop_record(Loop {
+        face: FaceId::from_index(0),
+        edges: Vec::new(),
+        loopuse: Some(lu),
+    })
+    .map_err(err)?;
+    b.add_faceuse_record(Faceuse {
+        shell: Some(ShellId::from_index(0)),
+        face: Some(FaceId::from_index(0)),
+        mate: None,
+        orientation: OrientType::Same,
+        loopuses: vec![lu],
+    })
+    .map_err(err)?;
+    b.add_loopuse_record(Loopuse {
+        faceuse: Some(FaceuseId::from_index(0)),
+        loop_: Some(LoopId::from_index(0)),
+        mate: None,
+        start: if i.vertex_loop {
+            LoopuseStart::Vertexuse(None)
+        } else {
+            LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(0)))
+        },
+        orientation: OrientType::Same,
+    })
+    .map_err(err)?;
+    b.add_vertex_record(Vertex::default()).map_err(err)?;
+    for (ei, (e, curve)) in i.edges.iter().zip(curves).enumerate() {
+        let ei = u32::try_from(ei).map_err(|_| harness("edges"))?;
+        let edgeuses = i
+            .edgeuses
+            .iter()
+            .enumerate()
+            .filter(|(_, eu)| eu.edge == ei as usize)
+            .map(|(j, _)| EdgeuseId::from_index(j as u32))
+            .collect();
+        b.add_edge_record(Edge {
+            vertices: [VertexId::from_index(0), VertexId::from_index(0)],
+            edgeuses,
+            interval: Extent1d::from_min_max(e.interval[0], e.interval[1]),
+            // SetTolerance takes an SmZoneTol3d
+            tolerance: zone_tol3d(k, e.tol),
+            curve: Some(curve),
+        })
+        .map_err(err)?;
+    }
+    if i.vertex_loop {
+        return Ok(b);
+    }
+    for (j, (eu, trim)) in i.edgeuses.iter().zip(trims).enumerate() {
+        let j = u32::try_from(j).map_err(|_| harness("edge uses"))?;
+        b.add_edgeuse_record(Edgeuse {
+            edge: Some(EdgeId::from_index(
+                u32::try_from(eu.edge).map_err(|_| harness("edge"))?,
+            )),
+            owner: EdgeuseOwner::Loopuse(Some(lu)),
+            ccw: Some(EdgeuseId::from_index((j + 1) % n)),
+            cw: Some(EdgeuseId::from_index((j + n - 1) % n)),
+            orientation: if eu.same {
+                OrientType::Same
+            } else {
+                OrientType::Opposite
+            },
+            uv_trim_curve: Some(trim),
+            ..Edgeuse::default()
+        })
+        .map_err(err)?;
+    }
+    Ok(b)
+}
+
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let Some(surface) = rust_surface(&k, &i.surface)? else {
@@ -382,37 +490,25 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         .iter()
         .map(|e| rust_curve(&k, &e.curve))
         .collect::<Result<Vec<_>, _>>()?;
+    for eu in &i.edgeuses {
+        if eu.edge >= i.edges.len() {
+            return Err(harness("edge index"));
+        }
+    }
     let trims = i
         .edgeuses
         .iter()
         .map(|eu| rust_nurb(&eu.trim, 2))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut edgeuses = Vec::new();
-    for (eu, trim) in i.edgeuses.iter().zip(&trims) {
-        let edge = i.edges.get(eu.edge).ok_or_else(|| harness("edge index"))?;
-        let curve = curves.get(eu.edge).ok_or_else(|| harness("edge index"))?;
-        edgeuses.push(LoopEdgeuse {
-            edge: EdgeId::from_index(u32::try_from(eu.edge).map_err(|_| harness("edge"))?),
-            curve,
-            interval: Extent1d::from_min_max(edge.interval[0], edge.interval[1]),
-            // SetTolerance takes an SmZoneTol3d
-            tolerance: zone_tol3d(&k, edge.tol),
-            orientation: if eu.same {
-                OrientType::Same
-            } else {
-                OrientType::Opposite
-            },
-            uv_trim_curve: Some(trim),
-        });
-    }
-    let lp = FaceLoop {
-        face: Some(LoopFace {
-            surface: &surface,
-            tolerance: zone_tol3d(&k, i.face_tol),
-        }),
-        edgeuses,
-    };
-    match contains_uv_point(&k, &lp, Point2::new(i.uv[0], i.uv[1]), i.tol3d) {
+    let mut b = rust_brep(&k, i, surface, curves, trims)?;
+    match contains_uv_point(
+        &k,
+        &mut b,
+        LoopId::from_index(0),
+        None,
+        Point2::new(i.uv[0], i.uv[1]),
+        i.tol3d,
+    ) {
         Ok(r) => Ok(answer(
             i64::from(r.containment.code()),
             r.on_edge.map_or(-1, |e| i64::from(e.index())),

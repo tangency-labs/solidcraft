@@ -28,7 +28,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
+use solidcore::curve::crv_on_surf::CrvOnSurf;
+use solidcore::curve::curve::p2::{BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE, LINE_TYPE};
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
@@ -47,7 +48,7 @@ use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p2::DropCurveFail;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::{
@@ -124,6 +125,9 @@ pub(crate) enum BrepIn {
     },
     Wire { curve: CrvIn, t0: f64, t1: f64 },
     Face { surface: SrfIn, dom: [f64; 4] },
+    /// A face as [`BrepIn::Face`] whose edges are `SmCrvOnSurf`s of the face's (B-spline)
+    /// surface over their UV trim curves: the `CrvOnSurf` path of `CreateUVTrimCurve`.
+    CrvOnSurfFace { surface: SrfIn, dom: [f64; 4] },
     Network,
     Vertices { points: Vec<[f64; 3]> },
     /// An optional face and `networks` copies of the wire network in one B-rep, so
@@ -274,6 +278,11 @@ pub(crate) fn brep_block_of(
         }
         BrepIn::Face { surface, dom } => {
             v.push(2.0);
+            push_surface(&mut v, surface)?;
+            v.extend(dom);
+        }
+        BrepIn::CrvOnSurfFace { surface, dom } => {
+            v.push(4.0);
             push_surface(&mut v, surface)?;
             v.extend(dom);
         }
@@ -670,6 +679,20 @@ fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError
         return Err(harness("export: a curve is not an SmBSplineCurve"));
     }
     let ty = ty as i64;
+    if ty == CRV_ON_SURF_TYPE {
+        // an SmCrvOnSurf: the UV curve block, then the (B-spline) base surface block
+        let uv_curve = read_curve(rd, true)?
+            .ok_or_else(|| harness("export: CrvOnSurf without UV curve"))?;
+        let surface = read_surface(rd)?
+            .ok_or_else(|| harness("export: CrvOnSurf without surface"))?;
+        let SurfaceKind::BSpline(base) = surface.kind() else {
+            return Err(harness("export: CrvOnSurf base is not a B-spline surface"));
+        };
+        let k = Kernel::default();
+        let cos = CrvOnSurf::new(&k, uv_curve, base.clone(), None, 0)
+            .map_err(|e| harness(format!("export CrvOnSurf: {e}")))?;
+        return Ok(Some(SmCurve::from(cos)));
+    }
     let dim = rd.num()? as u64;
     let has_nurb = rd.num()? != 0.0;
     let base = if has_nurb {
@@ -1330,7 +1353,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         }
         OpIn::Collect { fu, threshold } => {
             let mut list = Vec::new();
-            eu1::faceuse_collect_adjacent(b, FaceuseId::from_index(*fu as u32), &mut list, *threshold)?;
+            eu1::faceuse_collect_adjacent(&Kernel::default(), b, FaceuseId::from_index(*fu as u32), &mut list, *threshold)?;
             Ok(Output::new()
                 .int("status", 0)
                 .ints("list", list.into_iter().map(|x| i64::from(x.index())).collect::<Vec<_>>()))
@@ -1407,7 +1430,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let mut vals: Vec<f64> = Vec::new();
             match which {
                 0 => out.push(flag(eu1::max_edge_face_gap(&Kernel::default(), b, e, *f)?.is_some())),
-                1 => out.push(flag(eu1::edge_ccw_edge_gap(b, e, *f)?.is_some())),
+                1 => out.push(flag(eu1::edge_ccw_edge_gap(&Kernel::default(), b, e, *f)?.is_some())),
                 2 => match eu1::calc_max_edge_face_gap(&Kernel::default(), b, e, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(*want_out && g.is_init())]);
@@ -1418,7 +1441,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),
                 },
-                _ => match eu1::calc_edge_ccw_edge_gap(b, e, *want_out, *f) {
+                _ => match eu1::calc_edge_ccw_edge_gap(&Kernel::default(), b, e, *want_out, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
                         if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {

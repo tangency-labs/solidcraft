@@ -686,7 +686,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 uv_space_okay: *uv_ok,
                 trim_cache: None,
             };
-            let status = match qf::point_classify(&k, b, f, uv, &mut pc, opts) {
+            let status = match qf::point_classify(&k, &mut b.clone(), f, uv, &mut pc, opts) {
                 Ok(()) => 0.0,
                 Err(SolidError::Upstream { code, .. }) => f64::from(code),
                 Err(e) => return Ok(rust_err(&e)),
@@ -706,7 +706,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let uv = Point2::new(a(0), a(1));
             let d1 = Extent2d::from_points(Point2::new(a(4), a(5)), Point2::new(a(6), a(7)));
             let d2 = Extent2d::from_points(Point2::new(a(9), a(10)), Point2::new(a(11), a(12)));
-            match qf::classify_param_on_faces(&k, b, uv, zone_tol3d(&k, *tol), f1, &d1, f2, &d2) {
+            match qf::classify_param_on_faces(&k, &mut b.clone(), uv, zone_tol3d(&k, *tol), f1, &d1, f2, &d2) {
                 Ok(w) => Ok(Output::new().values("which", vec![f64::from(w)])),
                 Err(e) => Ok(rust_err(&e)),
             }

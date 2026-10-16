@@ -625,7 +625,8 @@ fn topology(k: &Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>>
         18 => o.push(f64::from(
             api::face_classify_uv(
                 k,
-                b,
+                // (the classification may attach missing UV trim curves: a copy)
+                &mut b.clone(),
                 f.ok_or_else(missing)?,
                 solidcore::math::Point2::new(a[11], a[12]),
             )?

@@ -92,10 +92,9 @@
 //!   constructor of a curve (`intersect.curve_class_p4`),
 //!   `SmCurveInterval::GetIvlBound_EdgeuseObj` (`intersect.curve_class_p4`),
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` (`topology.face_p1`),
-//!   `SmEdgeuse::NormalizedEvaluate` / `GetOrCreateUVTrimCurve`
-//!   (`topology.edgeuse_p3`), `SmSurface::IsSingularity` of a non-plane
-//!   (`surface.surface_p5`) return [`SolidError::Unported`]. A thick face's temporary
-//!   `SmOffsetSurface` is built over a copy of the face surface (upstream shares it).
+//!   `SmSurface::IsSingularity` of a non-plane
+//!   (`surface.surface_p5`) and `SmOffsetSurface` (`surface.offset_surface`) return
+//!   [`SolidError::Unported`].
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
@@ -121,6 +120,7 @@ use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::topology as topo;
 use crate::topology::vertexuse as vu1;
 use crate::topology::{
@@ -411,21 +411,18 @@ fn calculate_uv_domain_from_uv_trim_curves(k: &Kernel, b: &Brep, f: FaceId) -> R
 }
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation).
-fn normalized_evaluate_uv(_b: &Brep, _eu: EdgeuseId, _t: f64) -> Result<Point3> {
-    // UNPORTED(topology.edgeuse_p3): SmEdgeuse::NormalizedEvaluate
-    Err(SolidError::unported(
-        "SmEdgeuse::NormalizedEvaluate",
-        "topology.edgeuse_p3",
-    ))
+fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Result<Point3> {
+    Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)`.
-fn get_or_create_uv_trim_curve(_b: &Brep, _eu: EdgeuseId) -> Result<Curve> {
-    // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
-    Err(SolidError::unported(
-        "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "topology.edgeuse_p3",
-    ))
+/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (its status is ignored; the curve is then
+/// dereferenced).
+fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
+    let _ = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    eu1::uv_trim_curve(b, eu)?
+        .0
+        .cloned()
+        .ok_or_else(|| null("CreateCurvesFromFace: edge use without UV trim curve"))
 }
 
 /// `pSurf->IsSingularity(uv, eDir, dTol3d, TRUE)` (virtual: the plane override, the
@@ -1693,10 +1690,11 @@ pub struct FaceCurves {
 /// `SM_ERR` when neither curve kind is asked for; [`SolidError::NotFound`] for a
 /// dangling id; [`SolidError::InvalidInput`] for missing topology upstream dereferences;
 /// those of the evaluations and copies; [`SolidError::Unported`] for edge loops
-/// (`SmEdgeuse::NormalizedEvaluate`).
+/// (`SmSurface::DropCurve`, `SmSurface::DropPoint` and the others of
+/// [`crate::topology::edgeuse::p3`] when a UV trim curve must be made).
 pub fn create_curves_from_face(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     f: FaceId,
     orientation: OrientType,
     want_3d: bool,
@@ -1752,12 +1750,12 @@ pub fn create_curves_from_face(
         let last_eu = *edgeuses
             .last()
             .ok_or_else(|| null("CreateCurvesFromFace: edge loop without edge uses"))?;
-        let mut last_uv = normalized_evaluate_uv(b, last_eu, 1.0)?;
+        let mut last_uv = normalized_evaluate_uv(k, b, last_eu, 1.0)?;
 
         // iter every edgeuse in this loop
         for &eu in &edgeuses {
             // evaluate edgeuse start point
-            let curr_uv = normalized_evaluate_uv(b, eu, 0.0)?;
+            let curr_uv = normalized_evaluate_uv(k, b, eu, 0.0)?;
 
             // when saving just UVCurves
             if want_uv && !want_3d && last_uv.distance(curr_uv) > hundredth_size {
@@ -1773,14 +1771,14 @@ pub fn create_curves_from_face(
             }
 
             // move the lastUV point to end of this Edgeuse
-            last_uv = normalized_evaluate_uv(b, eu, 1.0)?;
+            last_uv = normalized_evaluate_uv(k, b, eu, 1.0)?;
 
             // put this curve's orientation into output
             out.curve_orients.push(eu1::orientation(b, eu)?);
 
             // when saving UVCurves
             if want_uv {
-                let uv_curve = get_or_create_uv_trim_curve(b, eu)?;
+                let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
                 let copy = uv_curve.copy(k)?;
                 // NER(SM_CAST_PTR(SmBSplineCurve, pNewUV))
                 if bspline_slice(&copy).is_none() {
@@ -2513,9 +2511,9 @@ mod tests {
         let s = b.add_shell().unwrap();
         let f = b.add_face(s).unwrap();
         let k = Kernel::default();
-        assert!(create_curves_from_face(&k, &b, f, OrientType::Same, false, false).is_err());
+        assert!(create_curves_from_face(&k, &mut b, f, OrientType::Same, false, false).is_err());
         assert!(matches!(
-            create_curves_from_face(&k, &b, f, OrientType::Same, true, false),
+            create_curves_from_face(&k, &mut b, f, OrientType::Same, true, false),
             Err(SolidError::InvalidInput { .. })
         ));
     }

@@ -776,14 +776,14 @@ fn orient_of(code: u8) -> OrientType {
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
-    let s = match scene(&k, i)? {
+    let mut s = match scene(&k, i)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
     let Some(r) = resolve(&s, &i.op) else {
         return Ok(no_entity());
     };
-    let br = &s.brep;
+    let br = &mut s.brep;
     let eid = |i: usize| EdgeId::from_index(i as u32);
     let euid = |i: usize| EdgeuseId::from_index(i as u32);
     let ok = Output::new().int("failed", 0);

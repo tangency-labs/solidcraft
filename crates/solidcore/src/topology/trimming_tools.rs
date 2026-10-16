@@ -1093,7 +1093,7 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
         let mut uv_box = Extent3d::new();
         for (jj, e) in lu1::loop_edges(b, l)?.into_iter().enumerate() {
             let e = e.ok_or_else(|| null("loop edge use without edge"))?;
-            let holder = crate::topology::edge::uv_trim_curve_of_surface(b, e, Some(f))?
+            let holder = crate::topology::edge::uv_trim_curve_of_surface(k, b, e, Some(f))?
                 .ok_or_else(|| null("edge without UV trim curve on the face's surface"))?;
             let crv = eu1::uv_trim_curve(b, holder)?
                 .0

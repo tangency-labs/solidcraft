@@ -131,8 +131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Mouse_0",
@@ -191,8 +191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Mouse_1",
@@ -251,8 +251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Mouse_2",
@@ -311,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Mouse_3",
@@ -371,8 +371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Mouse_4",
@@ -431,8 +431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Mouse_5",
@@ -563,8 +563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_0",
@@ -575,8 +575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_1",
@@ -587,8 +587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_2",
@@ -599,8 +599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_3",
@@ -611,8 +611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_4",
@@ -623,8 +623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_5",
@@ -635,8 +635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_6",
@@ -647,8 +647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_Endcap_7",
@@ -667,8 +667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_0_1e-06",
@@ -679,8 +679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_0_0.01",
@@ -711,8 +711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Endcap_0",
@@ -731,8 +731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_1_1e-06",
@@ -743,8 +743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_1_0.01",
@@ -775,8 +775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Endcap_1",
@@ -795,8 +795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_2_1e-06",
@@ -807,8 +807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_2_0.01",
@@ -839,8 +839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Endcap_2",
@@ -859,8 +859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_3_1e-06",
@@ -871,8 +871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_3_0.01",
@@ -903,8 +903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Endcap_3",
@@ -923,8 +923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_4_1e-06",
@@ -935,8 +935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_4_0.01",
@@ -967,8 +967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Endcap_4",
@@ -987,8 +987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_5_1e-06",
@@ -999,8 +999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_face_Endcap_5_0.01",
@@ -1031,8 +1031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_Endcap_5",
@@ -1091,8 +1091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_0",
@@ -1103,8 +1103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_6",
@@ -1115,8 +1115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_12",
@@ -1127,8 +1127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_18",
@@ -1139,8 +1139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_24",
@@ -1151,8 +1151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_30",
@@ -1163,8 +1163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extremes_Endcap_36",
@@ -1303,8 +1303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_box_with_large_fillet_0",
@@ -1363,8 +1363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_box_with_large_fillet_1",
@@ -1423,8 +1423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_box_with_large_fillet_2",
@@ -1483,8 +1483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_box_with_large_fillet_3",
@@ -1543,8 +1543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_box_with_large_fillet_4",
@@ -1603,8 +1603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_box_with_large_fillet_5",
@@ -1847,8 +1847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_cone_0",
@@ -1907,8 +1907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_cone_1",
@@ -1967,8 +1967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_cone_2",
@@ -2027,8 +2027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_cone_3",
@@ -2087,8 +2087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_cone_4",
@@ -2147,8 +2147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_cone_5",
@@ -2391,8 +2391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_disk_0",
@@ -2451,8 +2451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_disk_1",
@@ -2511,8 +2511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_disk_2",
@@ -2571,8 +2571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_disk_3",
@@ -2631,8 +2631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_disk_4",
@@ -2691,8 +2691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_disk_5",
@@ -2935,8 +2935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_ellips_ts2_0",
@@ -2995,8 +2995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_ellips_ts2_1",
@@ -3055,8 +3055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_ellips_ts2_2",
@@ -3115,8 +3115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_ellips_ts2_3",
@@ -3175,8 +3175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_ellips_ts2_4",
@@ -3235,8 +3235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_ellips_ts2_5",
@@ -3479,8 +3479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_circ_0",
@@ -3539,8 +3539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_circ_1",
@@ -3599,8 +3599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_circ_2",
@@ -3659,8 +3659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_circ_3",
@@ -3719,8 +3719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_circ_4",
@@ -3779,8 +3779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_circ_5",
@@ -4023,8 +4023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_square_0",
@@ -4083,8 +4083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_square_1",
@@ -4143,8 +4143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_square_2",
@@ -4203,8 +4203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_square_3",
@@ -4263,8 +4263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_square_4",
@@ -4323,8 +4323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_plane_square_5",
@@ -4567,8 +4567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_sphere_0",
@@ -4627,8 +4627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_sphere_1",
@@ -4687,8 +4687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_sphere_2",
@@ -4747,8 +4747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_sphere_3",
@@ -4807,8 +4807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_sphere_4",
@@ -4867,8 +4867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_sphere_5",
@@ -5111,8 +5111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_extrude_0",
@@ -5171,8 +5171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_extrude_1",
@@ -5231,8 +5231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_extrude_2",
@@ -5291,8 +5291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_extrude_3",
@@ -5351,8 +5351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_extrude_4",
@@ -5411,8 +5411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_extrude_5",
@@ -5655,8 +5655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_rev_0",
@@ -5715,8 +5715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_rev_1",
@@ -5775,8 +5775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_rev_2",
@@ -5835,8 +5835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_rev_3",
@@ -5895,8 +5895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_rev_4",
@@ -5955,8 +5955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_rev_5",
@@ -6199,8 +6199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_sphere150_0",
@@ -6259,8 +6259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_sphere150_1",
@@ -6319,8 +6319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_sphere150_2",
@@ -6379,8 +6379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_sphere150_3",
@@ -6439,8 +6439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_sphere150_4",
@@ -6499,8 +6499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_surf_sphere150_5",
@@ -6743,8 +6743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_torus_0",
@@ -6803,8 +6803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_torus_1",
@@ -6863,8 +6863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_torus_2",
@@ -6923,8 +6923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_torus_3",
@@ -6983,8 +6983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_torus_4",
@@ -7043,8 +7043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_torus_5",
@@ -7287,8 +7287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_toruswvy_0",
@@ -7347,8 +7347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_toruswvy_1",
@@ -7407,8 +7407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_toruswvy_2",
@@ -7467,8 +7467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_toruswvy_3",
@@ -7527,8 +7527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_toruswvy_4",
@@ -7587,8 +7587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_toruswvy_5",
@@ -7831,8 +7831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_vase_rev_0",
@@ -7891,8 +7891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_vase_rev_1",
@@ -7951,8 +7951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_vase_rev_2",
@@ -8011,8 +8011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_vase_rev_3",
@@ -8071,8 +8071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_vase_rev_4",
@@ -8131,8 +8131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "order_vase_rev_5",
@@ -16255,8 +16255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_0_0",
@@ -16283,8 +16283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_0_1",
@@ -16311,8 +16311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_1_0",
@@ -16339,8 +16339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_1_1",
@@ -16367,8 +16367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_2_0",
@@ -16395,8 +16395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_2_1",
@@ -16423,8 +16423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_3_0",
@@ -16451,8 +16451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_0_3_1",
@@ -16471,8 +16471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_mirror_Endcap_0",
@@ -16491,8 +16491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_0_0",
@@ -16519,8 +16519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_0_1",
@@ -16547,8 +16547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_1_0",
@@ -16575,8 +16575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_1_1",
@@ -16603,8 +16603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_2_0",
@@ -16631,8 +16631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_2_1",
@@ -16659,8 +16659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_3_0",
@@ -16687,8 +16687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_1_3_1",
@@ -16707,8 +16707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_mirror_Endcap_1",
@@ -16727,8 +16727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_0_0",
@@ -16755,8 +16755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_0_1",
@@ -16783,8 +16783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_1_0",
@@ -16811,8 +16811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_1_1",
@@ -16839,8 +16839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_2_0",
@@ -16867,8 +16867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_2_1",
@@ -16895,8 +16895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_3_0",
@@ -16923,8 +16923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_2_3_1",
@@ -16943,8 +16943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_mirror_Endcap_2",
@@ -16963,8 +16963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_0_0",
@@ -16991,8 +16991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_0_1",
@@ -17019,8 +17019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_1_0",
@@ -17047,8 +17047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_1_1",
@@ -17075,8 +17075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_2_0",
@@ -17103,8 +17103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_2_1",
@@ -17131,8 +17131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_3_0",
@@ -17159,8 +17159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "check_loop_mirror_Endcap_3_3_1",
@@ -17179,8 +17179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "tiny_mirror_Endcap_3",
@@ -17879,8 +17879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -18628,8 +18628,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -18792,8 +18792,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0118",
@@ -19318,8 +19318,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0182",
@@ -19638,8 +19638,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0219",
@@ -20007,8 +20007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0264",
@@ -20252,8 +20252,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0294",
@@ -20772,8 +20772,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0356",
@@ -20792,8 +20792,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0358",
@@ -20972,8 +20972,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0380",
@@ -21000,8 +21000,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0383",
@@ -22253,8 +22253,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0536",
@@ -22469,8 +22469,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0562",
@@ -22513,8 +22513,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0567",
@@ -22637,8 +22637,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0582",
@@ -22957,8 +22957,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0621",
@@ -23181,8 +23181,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0648",
@@ -23350,8 +23350,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0668",
@@ -23474,8 +23474,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0683",
@@ -23542,8 +23542,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0691",
@@ -23554,8 +23554,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0692",
@@ -24010,8 +24010,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0747",
@@ -24170,8 +24170,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0766",
@@ -24254,8 +24254,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0776",
@@ -24342,8 +24342,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0786",
@@ -24586,8 +24586,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0816",
@@ -24678,8 +24678,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0827",
@@ -24810,8 +24810,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0843",
@@ -24918,8 +24918,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0856",
@@ -25182,8 +25182,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0887",
@@ -25514,8 +25514,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0927",
@@ -25558,8 +25558,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0932",
@@ -25967,8 +25967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0981",
@@ -25979,8 +25979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0982",
@@ -26836,8 +26836,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1087",
@@ -27032,8 +27032,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::ComputeLoopOrientation",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1110",
@@ -27240,8 +27240,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1135",
@@ -27328,8 +27328,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1145",
@@ -27340,8 +27340,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1146",
@@ -27360,8 +27360,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1148",
@@ -27805,8 +27805,9 @@
   "cases_passed": 2842,
   "cases_total": 3263,
   "deferred_by_unit": {
-    "topology.edgeuse_p3": 193,
-    "topology.face_p3": 219,
+    "intersect.surface_drop_lib_p3": 7,
+    "topology.face_p2": 87,
+    "topology.face_p3": 318,
     "topology.face_p4": 9
   },
   "max_rel_err": 0.0,

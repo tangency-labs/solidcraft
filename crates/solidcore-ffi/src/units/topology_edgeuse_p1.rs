@@ -335,37 +335,7 @@ fn uv(rd: &mut Reader<'_>, dom: Domain) -> Result<(), FfiError> {
 
 /// A B-rep block.
 pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
-    brep_block_with_plane_limit(rd, path, 1e4)
-}
-
-/// The surface and parameter domain of a face block (`2`, and `5` with a face).
-fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result<(), FfiError> {
-        let dom = surface(rd)?;
-        let d = rd.finites(4)?;
-        let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
-        else {
-            return Err(bad("domain too short"));
-        };
-        if a >= c || b2 >= e {
-            return Err(bad("face domain not ordered"));
-        }
-        match dom {
-            Some([u0, v0, u1, v1]) => {
-                if a < u0 || c > u1 || b2 < v0 || e > v1 {
-                    return Err(bad("face domain outside the surface's"));
-                }
-            }
-            None => {
-                if d.iter().any(|x| x.abs() > plane_domain_limit) {
-                    return Err(bad("plane face domain too large"));
-                }
-            }
-        }
-    Ok(())
-}
-
-fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
-    match rd.index(5)? {
+    match rd.index(4)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -381,10 +351,19 @@ fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_lim
                 return Err(bad("wire edge interval outside the curve's"));
             }
         }
-        2 => face_block(rd, plane_domain_limit)?,
-        5 => {
-            if rd.flag()? {
-                face_block(rd, plane_domain_limit)?;
+        kind @ (2 | 4) => {
+            let dom = surface(rd)?;
+            // kind 4 (edges as `SmCrvOnSurf`) needs an `SmBSplineSurface` base
+            if kind == 4 && dom.is_none() {
+                return Err(bad("CrvOnSurf face: the base must be a B-spline surface"));
+            }
+            let d = rd.finites(4)?;
+            let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
+            else {
+                return Err(bad("domain too short"));
+            };
+            if a >= c || b2 >= e {
+                return Err(bad("face domain not ordered"));
             }
             rd.index(3)?;
         }

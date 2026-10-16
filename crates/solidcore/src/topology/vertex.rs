@@ -1088,7 +1088,9 @@ pub fn max_up_dim_gap_3d(
         // Vertex/Edge Gap, then Vertex/Face Gap
         for kind in [GapRef::Edge(vu), GapRef::Face(vu)] {
             let gap = match kind {
-                GapRef::Edge(_) => vertexuse::vertex_edge_gap(b, vu, false)?.map(VertexGap::Edge),
+                GapRef::Edge(_) => {
+                    vertexuse::vertex_edge_gap(k, b, vu, false)?.map(VertexGap::Edge)
+                }
                 GapRef::Face(_) => {
                     vertexuse::vertex_face_gap(k, b, vu, false)?.map(VertexGap::Face)
                 }

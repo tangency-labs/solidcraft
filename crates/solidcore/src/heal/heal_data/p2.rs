@@ -451,7 +451,7 @@ impl EdgeProps {
 
         // for every Edge->Edgeuse - Save MaxGap3d seen
         for eu in edgeuses {
-            let edge_ccw_edge_gap = eu1::edge_ccw_edge_gap(b, eu, false)?;
+            let edge_ccw_edge_gap = eu1::edge_ccw_edge_gap(k, b, eu, false)?;
             let edge_face_gap = eu1::max_edge_face_gap(k, b, eu, false)?;
 
             // save Max EdgeEndPt/CCWEdgeStartPt Gap
@@ -697,7 +697,7 @@ impl VertexProps {
         // for every Vertex->Vertexuse - Save MaxGap3d seen
         for vu in vertexuses {
             // Vertex/Edge Gap - Loop and Shell Vertices don't have Vertex/Edge gaps
-            if let Some(g) = vertexuse::vertex_edge_gap(b, vu, false)? {
+            if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, false)? {
                 let len = g.gap_3d;
                 let replace = match self.max_gap_3d_vtx_edge {
                     None => true,

@@ -80,8 +80,8 @@
 //!   ([`SolidError::Unported`] still propagates), leaving the outputs of a failed
 //!   evaluation at their `SM_UNDEF_DOUBLE` defaults. `sm_AreSeamCurves`' unused
 //!   edge use argument is dropped.
-//! - **Unported callees.** `SmEdgeuse::EvaluateBinormal` (`topology.edgeuse_p3`)
-//!   returns [`SolidError::Unported`]. The gap computations are [`crate::heal::gap`];
+//! - **Unported callees.** `SmEdgeuse::EvaluateBinormal` is wired
+//!   (`topology.edgeuse_p3`); its deferred callees return [`SolidError::Unported`]. The gap computations are [`crate::heal::gap`];
 //!   `CalcMaxEdgeFaceGap`'s cross-section tolerance is the context one with no
 //!   context (`SmTol::GetXSectTol3d(NULL)`: the B-rep records carry no context).
 //! - **Co-ports.** The small accessors of other units this unit reaches are ported
@@ -910,6 +910,7 @@ pub fn max_edge_face_gap(
 /// [`SolidError::InvalidInput`] from the calculation (its status is ignored, as
 /// upstream).
 pub fn edge_ccw_edge_gap(
+    k: &Kernel,
     b: &mut Brep,
     eu: EdgeuseId,
     force_calc: bool,
@@ -919,7 +920,7 @@ pub fn edge_ccw_edge_gap(
         return Ok(None);
     }
     if force_calc || !b.edgeuse(eu)?.edge_ccw_edge_gap.is_init() {
-        ignore_status(calc_edge_ccw_edge_gap(b, eu, false, true))?;
+        ignore_status(calc_edge_ccw_edge_gap(k, b, eu, false, true))?;
     }
     Ok(Some(b.edgeuse(eu)?.edge_ccw_edge_gap))
 }
@@ -992,6 +993,7 @@ pub fn calc_max_edge_face_gap(
     // set Edge/Face gap - assigns m_pEdgeuse, m_dEdgeT and m_sFaceUV and computes the
     // gap
     let gap = EdgeFaceGap::with(
+        k,
         b,
         Some(eu),
         sample.this_param().x,
@@ -1021,6 +1023,7 @@ pub fn calc_max_edge_face_gap(
 /// upstream dereferences null (no counter-clockwise neighbour or edge);
 /// those of [`EdgeEdgeGap::set_edge_edge_gap`] when the gap is cached or wanted.
 pub fn calc_edge_ccw_edge_gap(
+    k: &Kernel,
     b: &mut Brep,
     eu: EdgeuseId,
     want_output: bool,
@@ -1061,13 +1064,14 @@ pub fn calc_edge_ccw_edge_gap(
 
     // set m_sEdgeCCWEdgeGap3d
     if cache {
-        let g = EdgeEdgeGap::with(b, Some(eu), Some(ccw), edge_t, ccw_edge_t)?;
+        let g = EdgeEdgeGap::with(k, b, Some(eu), Some(ccw), edge_t, ccw_edge_t)?;
         b.edgeuse_mut(eu)?.edge_ccw_edge_gap = g;
     }
 
     // set output
     match out {
         Some(_) => Ok(Some(EdgeEdgeGap::with(
+            k,
             b,
             Some(eu),
             Some(ccw),
@@ -1335,6 +1339,19 @@ pub fn faceuse_neighbors(
     Ok(out)
 }
 
+/// `pEU->EvaluateBinormal(param, TRUE, point, binormal, NULL, &normal)` with its status
+/// ignored: the face use normal, a zero vector where the evaluation failed (upstream
+/// zeroes the output before it can fail). [`SolidError::Unported`] propagates.
+fn binormal_face_normal(k: &Kernel, b: &mut Brep, eu: EdgeuseId, param: f64) -> Result<Vec3> {
+    let options = crate::topology::edgeuse::p3::BinormalOptions::default();
+    Ok(
+        crate::error::ignored(crate::topology::edgeuse::p3::evaluate_binormal(
+            k, b, eu, param, true, &options,
+        ))?
+        .map_or(Vec3::new(0.0, 0.0, 0.0), |r| r.face_normal),
+    )
+}
+
 /// `SmFaceuse::CollectAdjacentFaceuses`: appends to `faceuses` the face uses reached
 /// from this one across radial partners, not crossing lamina edges (and, with an
 /// angle threshold, not across edges whose face normals differ by more).
@@ -1343,10 +1360,11 @@ pub fn faceuse_neighbors(
 ///
 /// Those of [`faceuse_edgeuses`] and [`radial`]; [`SolidError::InvalidInput`] where
 /// upstream dereferences null (no edge, radial partner or its face use);
-/// [`SolidError::Unported`] with a threshold (`SmEdgeuse::EvaluateBinormal`, unit
-/// `topology.edgeuse_p3`).
+/// [`SolidError::Unported`] and the binormal errors with a threshold
+/// (`SmEdgeuse::EvaluateBinormal`, [`crate::topology::edgeuse::p3`]).
 pub fn faceuse_collect_adjacent(
-    b: &Brep,
+    k: &Kernel,
+    b: &mut Brep,
     fu: FaceuseId,
     faceuses: &mut Vec<FaceuseId>,
     angle_threshold: Option<f64>,
@@ -1369,12 +1387,28 @@ pub fn faceuse_collect_adjacent(
                 .ok_or_else(|| null("CollectAdjacentFaceuses: edge use without radial partner"))?;
             let fu_rad = faceuse(b, rad)?;
 
-            if angle_threshold.is_some() {
-                // UNPORTED(topology.edgeuse_p3): SmEdgeuse::EvaluateBinormal
-                return Err(SolidError::unported(
-                    "SmEdgeuse::EvaluateBinormal",
-                    "topology.edgeuse_p3",
-                ));
+            if let Some(threshold) = angle_threshold {
+                // the face use normals at the start, middle and end of the edge must
+                // differ by no more than the threshold. The binormal statuses are
+                // ignored upstream: `EvaluateBinormal` zeroes `*pOptFaceuseNormal`
+                // before it can fail, so a failing evaluation leaves a zero normal, and
+                // `AngleBetween` of a zero vector fails with `rdAngRad == 0` (so the
+                // angle is 0 and the face use is kept). Only `Unported` propagates.
+                let ivl = b.edge(e)?.interval;
+                let mut too_far = false;
+                for param in [ivl.min(), ivl.mid(), ivl.max()] {
+                    let n_eu = binormal_face_normal(k, b, eu, param)?;
+                    let n_rad = binormal_face_normal(k, b, rad, param)?;
+                    // (status ignored; the angle is 0 on failure)
+                    let angle = crate::error::ignored(n_eu.angle_between(n_rad))?.unwrap_or(0.0);
+                    if angle > threshold {
+                        too_far = true;
+                        break;
+                    }
+                }
+                if too_far {
+                    continue;
+                }
             }
 
             if fu_rad != Some(fu) && !fu_rad.is_some_and(|x| faceuses.contains(&x)) {
@@ -1777,7 +1811,7 @@ mod tests {
 
     #[test]
     fn faceuse_collections() {
-        let b = square();
+        let mut b = square();
         let f0 = FaceuseId::from_index(0);
         assert_eq!(
             faceuse_region(&b, f0).unwrap(),
@@ -1796,7 +1830,7 @@ mod tests {
         );
         assert!(faceuse_neighbors(&b, f0, true).unwrap().is_empty());
         let mut out = vec![FaceuseId::from_index(1)];
-        faceuse_collect_adjacent(&b, f0, &mut out, None).unwrap();
+        faceuse_collect_adjacent(&Kernel::default(), &mut b, f0, &mut out, None).unwrap();
         assert_eq!(out, vec![FaceuseId::from_index(1)]);
     }
 
@@ -1947,11 +1981,13 @@ mod tests {
         ));
         // the caches were reset before
         assert!(!is_max_edge_face_gap_init(&b, a0).unwrap());
-        assert!(calc_edge_ccw_edge_gap(&mut b, a0, false, false)
-            .unwrap()
-            .is_none());
+        assert!(
+            calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, false, false)
+                .unwrap()
+                .is_none()
+        );
         assert!(matches!(
-            calc_edge_ccw_edge_gap(&mut b, a0, true, false),
+            calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, true, false),
             Err(SolidError::InvalidInput { .. })
         ));
         // With curves, both edge/edge and edge/face gaps are evaluated.
@@ -1963,7 +1999,7 @@ mod tests {
             line.set_owner(None, None);
             b.edge_mut(e).unwrap().curve = Some(line);
         }
-        let g = calc_edge_ccw_edge_gap(&mut b, a0, true, true)
+        let g = calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, true, true)
             .unwrap()
             .unwrap();
         assert!(g.is_init() && g.gap_3d.abs() < 1e-12);

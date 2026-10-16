@@ -27,6 +27,7 @@
 #include <SmFaceuse.h>
 #include <SmGap.h>
 #include <SmLocalSolveNd.h>
+#include <SmCrvOnSurf.h>
 #include <SmLine.h>
 #include <SmLoop.h>
 #include <SmLoopuse.h>
@@ -409,8 +410,18 @@ void walk(SmBrep* brep, Graph& g)
 
 // A curve block: `-1` (none), `-2` (not an SmBSplineCurve), else `type dim has_nurb
 // [n p m cpts(x y z w) knots]` and, for an SmLine, `P[3] V[3] a0 a1 scale inside_out`.
+void put_surface(std::vector<double>& o, const SmSurface* s);
 void put_curve(std::vector<double>& o, const SmCurve* c)
 {
+    if (c != nullptr && c->GetType() == SmCrvOnSurf_TYPE)
+    {
+        // an SmCrvOnSurf: `type` then the UV curve block and the base surface block
+        const SmCrvOnSurf* cs = (const SmCrvOnSurf*)c;
+        o.push_back((double)c->GetType());
+        put_curve(o, cs->GetUVCurve());
+        put_surface(o, cs->GetBaseSurface());
+        return;
+    }
     if (c == nullptr || !c->IsKindOf(SmBSplineCurve_TYPE))
     {
         o.push_back(c == nullptr ? -1.0 : -2.0);
@@ -647,12 +658,33 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
         SmEdge* pEdge = nullptr;
         status = brep->CreateWireEdgeFromCurve(c, SmExtent1d(t0, t1), pEdge);
     }
-    else if (kind == 2)
+    else if (kind == 2 || kind == 4)
     {
         SmSurface* s = read_surface(rd, ctx);
         SmPoint2d a = rd.uv(), b = rd.uv();
         SmFace* pFace = nullptr;
         status = brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
+        if (kind == 4 && status == SM_SUCCESS && pFace != nullptr && pFace->GetSurface() != nullptr)
+        {
+            // Kind 4: every edge's curve becomes an SmCrvOnSurf of the face's surface over a
+            // copy of its primary edge use's UV trim curve (the UV trim curves stay,
+            // `bCallNotify` FALSE), the CrvOnSurf path of `CreateUVTrimCurve`.
+            // (CreateFaceFromSurface attaches no UV trim curves: make them first)
+            double m1, m2, m3, m4, m5, m6;
+            pFace->CreateUVTrimCurves(FALSE, NULL, NULL, m1, m2, m3, m4, m5, m6); // status ignored: a face without UV curves just keeps its edge curves
+            Graph g;
+            walk(brep, g);
+            for (SmEdge* e : g.edges)
+            {
+                SmEdgeuse* prim = e->GetPrimaryEdgeuse();
+                SmBSplineCurve* uv = prim ? prim->*EuPeek::uv() : nullptr;
+                if (uv == nullptr)
+                    continue;
+                SmCrvOnSurf* cs = new (ctx) SmCrvOnSurf(*(SmCurve*)uv, *pFace->GetSurface(), NULL, 1, &ctx);
+                e->SetCurve(cs, TRUE, FALSE, FALSE);
+                cs->SetOwner(e);
+            }
+        }
     }
     else if (kind == 4)
     {

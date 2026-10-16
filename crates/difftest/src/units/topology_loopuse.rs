@@ -22,9 +22,11 @@
 //! `SmEdge::IsConnectedTo` (null dereference status when the loop has no loop use, or,
 //! for a vertex, a loop use whose vertices cannot be walked).
 //!
+//! `GetUVCornerBoundaries` of an edge loop runs `GetOrCreateUVTrimCurve` on both sides
+//! (`topology.edgeuse_p3`; creating a curve defers on its own callees).
+//!
 //! Deferred: `FlipLoopOrientation` of a loop on a face (`SmFace::Notify`,
-//! `topology.face_p3`), `GetUVCornerBoundaries` of an edge loop
-//! (`GetOrCreateUVTrimCurve`, `topology.edgeuse_p3`), and `IsMissingSeamAtVertices` past
+//! `topology.face_p3`), and `IsMissingSeamAtVertices` past
 //! the closure test (the sector computation's own deferrals). `IsClosed3d` on edges
 //! whose curve the export holds only as its B-spline part (ellipses and other
 //! `SmBSplineCurve` subclasses of the `.smb` files) and `IsMissingSeamAtVertices` on such

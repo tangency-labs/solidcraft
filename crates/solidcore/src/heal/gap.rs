@@ -41,7 +41,8 @@
 //!   [`SolidError::InvalidInput`]. Statuses upstream ignores (failed evaluations leave
 //!   the `SM_UNDEF_DOUBLE` point) are ignored; [`SolidError::Unported`] propagates.
 //! - `GetGapEndPoints` reads an existing UV trim curve through `GetOrCreateUVTrimCurve`;
-//!   creating a missing one is `UNPORTED(topology.edgeuse_p3)`.
+//!   a missing one is created (`topology.edgeuse_p3`), which needs the kernel and the
+//!   B-rep mutably: the gap constructors and setters take `k` and `&mut Brep`.
 //! - The gap functions borrow their geometry ([`GapGeometry`]); the local
 //!   neighbourhoods (`SmCurveClassification`, `BuildLocalNeighborhood`,
 //!   `EvaluateNeighborhoodBoundaries`) are not part of this unit and are left out.
@@ -148,9 +149,14 @@ impl VertexEdgeGap {
     /// # Errors
     ///
     /// As [`VertexEdgeGap::set`].
-    pub fn with(b: &Brep, vertexuse: Option<VertexuseId>, edge_t: f64) -> Result<Self> {
+    pub fn with(
+        k: &Kernel,
+        b: &mut Brep,
+        vertexuse: Option<VertexuseId>,
+        edge_t: f64,
+    ) -> Result<Self> {
         let mut g = Self::new();
-        g.set(b, vertexuse, edge_t)?;
+        g.set(k, b, vertexuse, edge_t)?;
         Ok(g)
     }
 
@@ -171,14 +177,20 @@ impl VertexEdgeGap {
     /// # Errors
     ///
     /// Those of [`Gap::cache_gap`].
-    pub fn set(&mut self, b: &Brep, vertexuse: Option<VertexuseId>, edge_t: f64) -> Result<()> {
+    pub fn set(
+        &mut self,
+        k: &Kernel,
+        b: &mut Brep,
+        vertexuse: Option<VertexuseId>,
+        edge_t: f64,
+    ) -> Result<()> {
         self.vertexuse = vertexuse;
         self.edge_t = edge_t;
         // (upstream: if(m_dEdgeT != SM_UNDEF_DOUBLE) CacheGap() else undefined)
         if self.edge_t == UNDEF_DOUBLE {
             self.gap_3d = -UNDEF_DOUBLE;
         } else {
-            self.gap_3d = Gap::from(*self).end_point_distance(b)?;
+            self.gap_3d = Gap::from(*self).end_point_distance(k, b)?;
         }
         Ok(())
     }
@@ -219,9 +231,14 @@ impl VertexFaceTrimCurveGap {
     /// # Errors
     ///
     /// As [`VertexFaceTrimCurveGap::set`].
-    pub fn with(b: &Brep, vertexuse: Option<VertexuseId>, uv_trim_curve_t: f64) -> Result<Self> {
+    pub fn with(
+        k: &Kernel,
+        b: &mut Brep,
+        vertexuse: Option<VertexuseId>,
+        uv_trim_curve_t: f64,
+    ) -> Result<Self> {
         let mut g = Self::new();
-        g.set(b, vertexuse, uv_trim_curve_t)?;
+        g.set(k, b, vertexuse, uv_trim_curve_t)?;
         Ok(g)
     }
 
@@ -244,14 +261,15 @@ impl VertexFaceTrimCurveGap {
     /// Those of [`Gap::cache_gap`].
     pub fn set(
         &mut self,
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         vertexuse: Option<VertexuseId>,
         uv_trim_curve_t: f64,
     ) -> Result<()> {
         self.vertexuse = vertexuse;
         self.uv_trim_curve_t = uv_trim_curve_t;
         if self.vertexuse.is_some() && self.uv_trim_curve_t != UNDEF_DOUBLE {
-            self.gap_3d = Gap::from(*self).end_point_distance(b)?;
+            self.gap_3d = Gap::from(*self).end_point_distance(k, b)?;
         } else {
             self.gap_3d = -UNDEF_DOUBLE;
         }
@@ -292,9 +310,14 @@ impl VertexFaceGap {
     /// # Errors
     ///
     /// As [`VertexFaceGap::set`].
-    pub fn with(b: &Brep, vertexuse: Option<VertexuseId>, face_uv: Option<Point2>) -> Result<Self> {
+    pub fn with(
+        k: &Kernel,
+        b: &mut Brep,
+        vertexuse: Option<VertexuseId>,
+        face_uv: Option<Point2>,
+    ) -> Result<Self> {
         let mut g = Self::new();
-        g.set(b, vertexuse, face_uv)?;
+        g.set(k, b, vertexuse, face_uv)?;
         Ok(g)
     }
 
@@ -319,7 +342,8 @@ impl VertexFaceGap {
     /// Those of [`Gap::cache_gap`].
     pub fn set(
         &mut self,
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         vertexuse: Option<VertexuseId>,
         face_uv: Option<Point2>,
     ) -> Result<()> {
@@ -327,7 +351,7 @@ impl VertexFaceGap {
         match face_uv {
             Some(uv) if vertexuse.is_some() && uv.is_initialized() => {
                 self.face_uv = uv;
-                self.gap_3d = Gap::from(*self).end_point_distance(b)?;
+                self.gap_3d = Gap::from(*self).end_point_distance(k, b)?;
             }
             _ => {
                 self.face_uv.set_uninitialized();
@@ -379,14 +403,15 @@ impl EdgeEdgeGap {
     ///
     /// As [`EdgeEdgeGap::set_edge_edge_gap`].
     pub fn with(
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         edgeuse0: Option<EdgeuseId>,
         edgeuse1: Option<EdgeuseId>,
         edge_t0: f64,
         edge_t1: f64,
     ) -> Result<Self> {
         let mut g = Self::new();
-        g.set_edge_edge_gap(b, edgeuse0, edgeuse1, edge_t0, edge_t1)?;
+        g.set_edge_edge_gap(k, b, edgeuse0, edgeuse1, edge_t0, edge_t1)?;
         Ok(g)
     }
 
@@ -418,7 +443,8 @@ impl EdgeEdgeGap {
     /// Those of [`Gap::cache_gap`].
     pub fn set_edge_edge_gap(
         &mut self,
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         edgeuse0: Option<EdgeuseId>,
         edgeuse1: Option<EdgeuseId>,
         edge_t0: f64,
@@ -429,7 +455,7 @@ impl EdgeEdgeGap {
         self.edge_t0 = edge_t0;
         self.edge_t1 = edge_t1;
         if self.edge_t0 != UNDEF_DOUBLE && self.edge_t1 != UNDEF_DOUBLE {
-            self.gap_3d = Gap::from(*self).end_point_distance(b)?;
+            self.gap_3d = Gap::from(*self).end_point_distance(k, b)?;
         } else {
             self.gap_3d = -UNDEF_DOUBLE;
         }
@@ -475,13 +501,14 @@ impl EdgeFaceTrimCurveGap {
     ///
     /// As [`EdgeFaceTrimCurveGap::set`].
     pub fn with(
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         edgeuse: Option<EdgeuseId>,
         edge_t: f64,
         uv_trim_curve_t: f64,
     ) -> Result<Self> {
         let mut g = Self::new();
-        g.set(b, edgeuse, edge_t, uv_trim_curve_t)?;
+        g.set(k, b, edgeuse, edge_t, uv_trim_curve_t)?;
         Ok(g)
     }
 
@@ -504,7 +531,8 @@ impl EdgeFaceTrimCurveGap {
     /// Those of [`Gap::cache_gap`].
     pub fn set(
         &mut self,
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         edgeuse: Option<EdgeuseId>,
         edge_t: f64,
         uv_trim_curve_t: f64,
@@ -516,7 +544,7 @@ impl EdgeFaceTrimCurveGap {
             && self.edge_t != UNDEF_DOUBLE
             && self.uv_trim_curve_t != UNDEF_DOUBLE
         {
-            self.gap_3d = Gap::from(*self).end_point_distance(b)?;
+            self.gap_3d = Gap::from(*self).end_point_distance(k, b)?;
         } else {
             self.gap_3d = -UNDEF_DOUBLE;
         }
@@ -561,13 +589,14 @@ impl EdgeFaceGap {
     ///
     /// As [`EdgeFaceGap::set`].
     pub fn with(
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         edgeuse: Option<EdgeuseId>,
         edge_t: f64,
         face_uv: Option<Point2>,
     ) -> Result<Self> {
         let mut g = Self::new();
-        g.set(b, edgeuse, edge_t, face_uv)?;
+        g.set(k, b, edgeuse, edge_t, face_uv)?;
         Ok(g)
     }
 
@@ -599,7 +628,8 @@ impl EdgeFaceGap {
     /// Those of [`Gap::cache_gap`].
     pub fn set(
         &mut self,
-        b: &Brep,
+        k: &Kernel,
+        b: &mut Brep,
         edgeuse: Option<EdgeuseId>,
         edge_t: f64,
         face_uv: Option<Point2>,
@@ -609,7 +639,7 @@ impl EdgeFaceGap {
         match face_uv {
             Some(uv) if edgeuse.is_some() && edge_t != UNDEF_DOUBLE && uv.is_initialized() => {
                 self.face_uv = uv;
-                self.gap_3d = Gap::from(*self).end_point_distance(b)?;
+                self.gap_3d = Gap::from(*self).end_point_distance(k, b)?;
             }
             _ => {
                 self.face_uv.set_uninitialized();
@@ -706,19 +736,15 @@ fn trim_curve_uv(b: &Brep, eu: Option<EdgeuseId>, t: f64) -> Result<Point2> {
     }
 }
 
-/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)`: the attached UV trim curve (of the
-/// edge use or its mate); creating a missing one is not ported.
-fn get_or_create_uv_trim_curve(b: &Brep, eu: EdgeuseId) -> Result<&Curve> {
-    match eu1::uv_trim_curve(b, eu)?.0 {
-        Some(c) => Ok(c),
-        None => {
-            // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
-            Err(SolidError::unported(
-                "SmEdgeuse::GetOrCreateUVTrimCurve",
-                "topology.edgeuse_p3",
-            ))
-        }
-    }
+/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)` (both optional outputs `NULL`,
+/// `bUVSpaceOkay` `TRUE`; the returned status is not tested by `GetGapEndPoints`): the
+/// attached UV trim curve of the edge use or its mate, built first when missing. A
+/// failed build leaves `NULL` (`None`). [`SolidError::Unported`] and the null
+/// dereferences propagate.
+fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Option<Curve>> {
+    let _ =
+        crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    Ok(eu1::uv_trim_curve(b, eu)?.0.cloned())
 }
 
 /// The end points `GetGapEndPoints` found: the first two it set (`SM_UNDEF_DOUBLE`
@@ -1018,7 +1044,7 @@ impl Gap {
     /// # Errors
     ///
     /// As [`Gap::gap_end_points`] but `SM_ERR`.
-    pub fn end_points(&self, b: &Brep) -> Result<GapEndPoints> {
+    pub fn end_points(&self, k: &Kernel, b: &mut Brep) -> Result<GapEndPoints> {
         // rather than a bunch of derived methods - build the logic here to get end points
         let vertex = self.vertex(b)?;
         let edge0 = self.edge(b, 0)?;
@@ -1090,12 +1116,16 @@ impl Gap {
         if uv_trim_curve_t != UNDEF_DOUBLE {
             let eu = edgeuse0
                 .ok_or_else(|| null("GetGapEndPoints: a UVTrimCurve without an Edgeuse"))?;
+            let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
             let surface = match face {
                 Some(f) => b.face(f)?.surface.as_ref(),
                 None => None,
             };
-            let uv_curve = get_or_create_uv_trim_curve(b, eu)?;
-            let pt_uv = point_or_undef(uv_curve.evaluate_point(uv_trim_curve_t))?;
+            // (a missing curve leaves `sPtUV` at its constructed `SM_UNDEF_DOUBLE`s)
+            let pt_uv = match uv_curve.as_ref() {
+                Some(c) => point_or_undef(c.evaluate_point(uv_trim_curve_t))?,
+                None => Vec3::UNDEF,
+            };
             if let Some(s) = surface {
                 if let Some(p) = ignored(s.evaluate_point(Point2::new(pt_uv.x, pt_uv.y)))? {
                     put(&mut out, second, p);
@@ -1130,8 +1160,8 @@ impl Gap {
     /// `SM_ERR` unless exactly two points were found; [`SolidError::InvalidInput`]
     /// where upstream dereferences null; [`SolidError::NotFound`] for a dangling id;
     /// [`SolidError::Unported`] for a missing UV trim curve.
-    pub fn gap_end_points(&self, b: &Brep) -> Result<(Point3, Point3)> {
-        let e = self.end_points(b)?;
+    pub fn gap_end_points(&self, k: &Kernel, b: &mut Brep) -> Result<(Point3, Point3)> {
+        let e = self.end_points(k, b)?;
         if e.count == 2 {
             Ok((e.point1, e.point2))
         } else {
@@ -1140,8 +1170,8 @@ impl Gap {
     }
 
     /// The distance `CacheGap` stores: between the end points, whatever their count.
-    fn end_point_distance(&self, b: &Brep) -> Result<f64> {
-        let e = self.end_points(b)?;
+    fn end_point_distance(&self, k: &Kernel, b: &mut Brep) -> Result<f64> {
+        let e = self.end_points(k, b)?;
         Ok(e.point1.distance(e.point2))
     }
 
@@ -1151,8 +1181,8 @@ impl Gap {
     /// # Errors
     ///
     /// Those of [`Gap::gap_end_points`] but `SM_ERR`.
-    pub fn cache_gap(&mut self, b: &Brep) -> Result<()> {
-        let d = self.end_point_distance(b)?;
+    pub fn cache_gap(&mut self, k: &Kernel, b: &mut Brep) -> Result<()> {
+        let d = self.end_point_distance(k, b)?;
         *self.length_mut() = d;
         Ok(())
     }
@@ -2749,9 +2779,10 @@ mod tests {
                 ..crate::topology::Vertexuse::default()
             })
             .unwrap();
-        let g = VertexEdgeGap::with(&b, Some(vu), 0.0).unwrap();
+        let k = Kernel::default();
+        let g = VertexEdgeGap::with(&k, &mut b, Some(vu), 0.0).unwrap();
         assert!((g.gap_3d - 1e-3).abs() < 1e-15);
-        let (p, q) = Gap::from(g).gap_end_points(&b).unwrap();
+        let (p, q) = Gap::from(g).gap_end_points(&k, &mut b).unwrap();
         assert_eq!(p, Vec3::new(0.0, 0.0, 1e-3));
         assert_eq!(q, Vec3::ZERO);
     }

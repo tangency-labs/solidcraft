@@ -1241,9 +1241,9 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let v = vid(*vu);
             let mut out = Vec::new();
             let r = match which {
-                0 => vu1::vertex_edge_gap(b, v, *f).map(|g| vec![flag(g.is_some())]),
+                0 => vu1::vertex_edge_gap(&k, b, v, *f).map(|g| vec![flag(g.is_some())]),
                 1 => vu1::vertex_face_gap(&k, b, v, *f).map(|g| vec![flag(g.is_some())]),
-                2 => vu1::calc_vertex_edge_gap(b, v, *want_out, *f).map(|g| {
+                2 => vu1::calc_vertex_edge_gap(&k, b, v, *want_out, *f).map(|g| {
                     vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]
                 }),
                 3 => match vu1::calc_vertex_face_gap(&k, b, v, *want_out, *f) {

@@ -184,6 +184,24 @@ bool has_prim(SmEdgeuse* e)
 // ---- vertex use guards (copy of the topology.vertexuse shim's) -------------------------
 
 SmTopology* owner_of(SmVertexuse* p) { return p->*VuPeek::owner(); }
+// Every pointer a loop edgeuse's UV trim curve creation dereferences: the edge with its
+// curve, the faceuse, face and surface, the vertexuse, the primary edgeuse with its mate and
+// both their vertexuses (SetUVTrimCurve), the edge's two vertices (as in topology.edgeuse_p3).
+bool loop_safe(SmEdgeuse* p)
+{
+    if (p == nullptr || !p->IsLoopEdgeuse() || !p->GetEdge() || !p->GetEdge()->GetCurve() || !p->GetFaceuse() ||
+        !p->GetFace() || !p->GetFace()->GetSurface() || !p->GetVertexuse() || !has_prim(p))
+        return false;
+    SmEdgeuse* prim = p->GetEdge()->GetPrimaryEdgeuse();
+    SmEdgeuse* pm = prim->GetMate();
+    if (pm == nullptr || prim->GetVertexuse() == nullptr || pm->GetVertexuse() == nullptr)
+        return false;
+    SmEdgeuse* mate = p->GetMate();
+    if (mate && mate->GetVertexuse() == nullptr)
+        return false;
+    return p->GetEdge()->GetStartVertex() != nullptr && p->GetEdge()->GetEndVertex() != nullptr;
+}
+
 bool ok_faceuse(SmVertexuse* p) { return !p->IsLoopVertexuse() || owner_of(p) != nullptr; }
 bool ok_loopuse(SmVertexuse* p) { return !p->IsEdgeVertexuse() || owner_of(p) != nullptr; }
 bool ok_shell(SmVertexuse* p)
@@ -764,10 +782,25 @@ void run_graph_op(int32_t op, Rd& rd, Graph& g, size_t n_eu, std::vector<double>
                 o.push_back(ST_NULL_DEREF);
                 break;
             }
-            if (!w.empty())
+            // GetOrCreateUVTrimCurve on every edge use: it builds a missing UV trim curve, which
+            // dereferences what loop_safe lists (the edge use's face, surface, vertex uses, ...)
+            bool deref_ok = true;
+            for (SmEdgeuse* x : w)
             {
-                // GetOrCreateUVTrimCurve on every edge use (deferred on the Rust side)
-                o.push_back(ST_NOT_RUN);
+                if (!has_prim(x))
+                {
+                    deref_ok = false;
+                    break;
+                }
+                if (x->GetUVTrimCurve() == nullptr && x->GetFaceuse() != nullptr && !loop_safe(x))
+                {
+                    deref_ok = false;
+                    break;
+                }
+            }
+            if (!deref_ok)
+            {
+                o.push_back(ST_NULL_DEREF);
                 break;
             }
         }

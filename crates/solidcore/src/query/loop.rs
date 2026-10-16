@@ -9,25 +9,23 @@
 //! |------------------------------|------------------------------------------------|
 //! | [`contains_uv_point`]        | `SmLoop::ContainsUVPoint`                      |
 //! | [`UvContainment`]            | its return value and out-params                |
-//! | [`FaceLoop`], [`LoopEdgeuse`] | the `SmLoop` / `SmLoopuse` / `SmEdgeuse` / `SmEdge` / `SmFace` data it reads (see Deviations) |
-//! | [`uv_corner_boundaries`]     | `SmLoop::GetUVCornerBoundaries` (CO-PORTED from `topology.loopuse`) |
-//! | [`UvCornerBoundaries`]       | its return value and out-params                |
 //! | `calc_quad_num` (private)    | `sm_CalcQuadNum` (file static, unit `topology.loopuse`) |
 //!
 //! Deviations:
-//! - **Topology view.** The arena topology ([`crate::topology`]) does not bind
-//!   geometry yet (faces have no surface, edges no curve, there are no edge uses), so
-//!   the loop is passed as a borrowed [`FaceLoop`]: the owning face's surface and zone
-//!   tolerance (`SmFace::GetTolerance`, which is what `SmTol::GetZoneTol3d(pSurface)`
-//!   returns for a surface with a face under `SM_USE_OLDTOL`) and the edge uses of
-//!   the primary loopuse in `GetEdgeuses` order, each with its edge id, 3D curve,
-//!   interval, zone tolerance (`SmEdge::GetTolerance`), orientation and UV trim
-//!   curve. A face without surface is `None` (upstream: `SM_POC_UNKNOWN`). The edge
-//!   out-param is the [`EdgeId`] given in the view.
-//! - **UV trim curves.** `SmEdgeuse::GetOrCreateUVTrimCurve` returns the existing
-//!   trim curve (of the edge use or its mate) as given in [`LoopEdgeuse::uv_trim_curve`];
-//!   when there is none it would build one (`SmEdgeuse::CreateUVTrimCurve`, unit
-//!   `topology.edgeuse_p3`), which returns [`SolidError::Unported`].
+//! - **Topology.** The loop is a [`LoopId`] of a [`Brep`], taken mutably: upstream's
+//!   `SmEdgeuse::GetOrCreateUVTrimCurve` (`topology.edgeuse_p3`) attaches the missing
+//!   UV trim curves to the B-rep while the walk goes on, and edits the edge (interval,
+//!   tolerance) it dropped the curve for. Every edge value is read from the B-rep where
+//!   upstream reads it, after the creation. `SmLoop::GetUVCornerBoundaries` is
+//!   [`crate::topology::loopuse::uv_corner_boundaries`]. `surface` is the caller's copy
+//!   of the face's surface (`SmFace::PointClassify` evaluates with out-of-bounds
+//!   evaluation enabled on it), else the face's own; the zone tolerance is the face's
+//!   (`SmTol::GetZoneTol3d(pSurface)` of the face's own surface, whose owner is the
+//!   face; the arena surfaces carry no owner). A face without surface gives
+//!   [`PointContainment::Unknown`], as upstream.
+//! - **UV trim curves.** A failing status of `GetOrCreateUVTrimCurve` (a recorded drop
+//!   failure of the existing curve, or a failed creation) or a missing curve gives
+//!   `SM_POC_UNKNOWN`, as upstream.
 //! - **Poles.** `SmSurface::GetSingularities` (unit `surface.surface_p3`) is only
 //!   reached when the point lies on a side of the surface's natural domain and an edge
 //!   use end of the loop does too.
@@ -46,7 +44,6 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
-use crate::geom::extent2d::{Extent2d, SS_NONE};
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::point_set::PointContainment;
@@ -56,50 +53,13 @@ use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::Surface;
-use crate::topology::EdgeId;
+use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
+use crate::topology::{Brep, EdgeId, EdgeuseId, LoopId};
 
 /// Upper bound of the steps along one edge use and of the re-evaluations of one step
 /// (upstream's infinite-loop guards).
 const MAX_LOOP_COUNT: u32 = 1000;
-
-/// One edge use of a loop as [`contains_uv_point`] reads it (`SmEdgeuse` with its
-/// `SmEdge`).
-#[derive(Debug, Clone, Copy)]
-pub struct LoopEdgeuse<'a> {
-    /// The edge (`GetEdge`), reported back as the on-boundary edge.
-    pub edge: EdgeId,
-    /// The edge's 3D curve (`SmEdge::GetCurve`).
-    pub curve: &'a Curve,
-    /// The edge's parameter interval (`SmEdge::GetInterval`).
-    pub interval: Extent1d,
-    /// The edge's zone tolerance (`SmEdge::GetTolerance`, the stored `m_sZoneTol3d`).
-    pub tolerance: f64,
-    /// The edge use's orientation relative to its edge (`GetOrientation`).
-    pub orientation: OrientType,
-    /// The UV trim curve of the edge use or its mate (`GetUVTrimCurve`); `None` when
-    /// neither has one.
-    pub uv_trim_curve: Option<&'a Curve>,
-}
-
-/// The face a loop bounds, as [`contains_uv_point`] reads it.
-#[derive(Debug, Clone, Copy)]
-pub struct LoopFace<'a> {
-    /// The face's surface (`SmFace::GetSurface`).
-    pub surface: &'a Surface,
-    /// The face's zone tolerance (`SmFace::GetTolerance`).
-    pub tolerance: f64,
-}
-
-/// A face loop (`SmLoop`) as [`contains_uv_point`] reads it.
-#[derive(Debug, Clone)]
-pub struct FaceLoop<'a> {
-    /// The owning face with its surface (`GetFace`, `GetSurface`); `None` for a loop
-    /// without face or a face without surface.
-    pub face: Option<LoopFace<'a>>,
-    /// The edge uses of the primary loopuse in loop order (`m_pLU->GetEdgeuses`);
-    /// empty for a vertex loop.
-    pub edgeuses: Vec<LoopEdgeuse<'a>>,
-}
 
 /// The result of [`contains_uv_point`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,88 +97,28 @@ impl UvContainment {
     }
 }
 
-/// The result of [`uv_corner_boundaries`].
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct UvCornerBoundaries {
-    /// `SM_SS_NONE` or an OR of `SM_SS_UMIN`, `SM_SS_VMIN`, `SM_SS_UMAX`, `SM_SS_VMAX`.
-    pub boundaries: u32,
-    /// `rOnEdges`: the edges with an end on a side, one entry per end.
-    pub on_edges: Vec<EdgeId>,
-    /// `rOnBndries`: the sides each of those ends is on.
-    pub on_boundaries: Vec<u32>,
-    /// `rOnParams`: the trim curve parameter of each of those ends.
-    pub on_params: Vec<f64>,
-}
-
-/// `GetOrCreateUVTrimCurve` of an edge use: its existing trim curve.
-fn uv_trim_curve<'a>(eu: &LoopEdgeuse<'a>) -> Result<&'a Curve> {
-    eu.uv_trim_curve.ok_or_else(|| {
-        // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
-        SolidError::unported("SmEdgeuse::GetOrCreateUVTrimCurve", "topology.edgeuse_p3")
-    })
-}
-
-/// `SmLoop::GetUVCornerBoundaries`: the sides of `uv_domain` touched (within `tol`)
-/// by the start or end of a UV trim curve of the loop, with the edge and trim curve
-/// parameter of every touching end.
-///
-/// # Errors
-///
-/// [`SolidError::Unported`] for an edge use without UV trim curve
-/// (`SmEdgeuse::GetOrCreateUVTrimCurve`, `topology.edgeuse_p3`); those of the trim
-/// curve evaluations.
-pub fn uv_corner_boundaries(
-    lp: &FaceLoop<'_>,
-    uv_domain: &Extent2d,
-    tol: f64,
-) -> Result<UvCornerBoundaries> {
-    // init return values
-    let mut out = UvCornerBoundaries {
-        boundaries: SS_NONE,
-        ..UvCornerBoundaries::default()
-    };
-
-    // for every edgeuse - classify the end points
-    for eu in &lp.edgeuses {
-        // get UVTrimCurve (the recovery branch for a missing trim curve is behind
-        // its creation)
-        let trim = uv_trim_curve(eu)?;
-
-        // end points
-        let ivl = trim.natural_interval();
-        let uv_beg = trim.evaluate_point(ivl.evaluate(0.0))?;
-        let uv_end = trim.evaluate_point(ivl.evaluate(1.0))?;
-        let uv_pnt_beg = Point2::new(uv_beg.x, uv_beg.y);
-        let uv_pnt_end = Point2::new(uv_end.x, uv_end.y);
-
-        // classify the BegPoint
-        let these = uv_domain.point_boundaries(uv_pnt_beg, tol);
-        out.boundaries |= these;
-        if these != 0 {
-            out.on_edges.push(eu.edge);
-            out.on_boundaries.push(these);
-            out.on_params.push(ivl.evaluate(0.0));
-        }
-
-        // classify the endPoint - in a perfect world we can skip this, but allow for
-        // tolerance errors
-        let these = uv_domain.point_boundaries(uv_pnt_end, tol);
-        out.boundaries |= these;
-        if these != 0 {
-            out.on_edges.push(eu.edge);
-            out.on_boundaries.push(these);
-            out.on_params.push(ivl.evaluate(1.0));
-        }
-    }
-
-    // all done
-    Ok(out)
-}
-
 /// `sm_CalcQuadNum` (unit `topology.loopuse`): the quadrant of `test` in a frame
 /// centred on `origin` (`1 | 0` above, `2 | 3` below).
 fn calc_quad_num(origin: Point3, test: Point3) -> i32 {
     crate::topology::loopuse::calc_quad_num(origin, test) as i32
+}
+
+fn null(reason: &'static str) -> SolidError {
+    SolidError::invalid_input("query::loop::contains_uv_point", reason)
+}
+
+/// `pEU->GetOrCreateUVTrimCurve(pUVCurve)` with its status tested as `ContainsUVPoint`
+/// does (`stat != SM_SUCCESS || pUVCurve == NULL`): whether the edge use now has a UV
+/// trim curve and the status is a success. The B-rep is edited (the curve attached,
+/// the edge trimmed) where upstream edits it.
+fn ensure_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<bool> {
+    let fetch = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    Ok(fetch.status.is_ok() && eu1::uv_trim_curve(b, eu)?.0.is_some())
+}
+
+/// The edge of an edge use (`GetEdge`, dereferenced by `ContainsUVPoint`).
+fn edge_of(b: &Brep, eu: EdgeuseId) -> Result<EdgeId> {
+    eu1::edge(b, eu)?.ok_or_else(|| null("ContainsUVPoint: edge use without edge"))
 }
 
 /// `SmSurface::GetSingularities`: the sides of the natural domain that are poles.
@@ -229,10 +129,16 @@ fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u32> {
 /// `DropPoint` of the test point onto an edge curve (`SM_SO_INTERSECT`, no snapping
 /// vector, no guess): the parameter when it lies within `tol`. A failing drop is no
 /// drop (its status is ignored upstream).
-fn drop_on_edge(k: &Kernel, eu: &LoopEdgeuse<'_>, point: Point3, tol: f64) -> Result<Option<f64>> {
-    match eu.curve.drop_point(
+fn drop_on_edge(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    point: Point3,
+    tol: f64,
+) -> Result<Option<f64>> {
+    match curve.drop_point(
         k,
-        &eu.interval,
+        interval,
         point,
         None,
         tol,
@@ -294,41 +200,72 @@ fn unit_from(origin: Point3, p: Point3) -> (Vec3, f64) {
     (v, dist)
 }
 
-/// `SmLoop::ContainsUVPoint`: classifies the parameter-space point `uv` against this
-/// loop only (other loops of the face are not looked at) by counting the quadrant
-/// changes of the loop's UV trim curves around it: `±4` is inside (counter-clockwise
-/// [`OrientType::Same`], clockwise [`OrientType::Opposite`]), `0` outside, with one
-/// quadrant of noise allowed. The point is on the boundary when its surface point
-/// lies on an edge curve within the edge's zone tolerance, when a trim curve passes
-/// within the face's zone tolerance mapped to UV space, or when it lies on a gap
-/// between consecutive edge uses (a pole); a point on a pole side shared by the loop
-/// is on the boundary too. A vertex loop contains nothing. `_tol_3d` is unused, as
-/// upstream.
+/// `SmLoop::ContainsUVPoint`: classifies the parameter-space point `uv` against loop
+/// `l` of the B-rep only (other loops of the face are not looked at) by counting the
+/// quadrant changes of the loop's UV trim curves around it: `±4` is inside
+/// (counter-clockwise [`OrientType::Same`], clockwise [`OrientType::Opposite`]), `0`
+/// outside, with one quadrant of noise allowed. The point is on the boundary when its
+/// surface point lies on an edge curve within the edge's zone tolerance, when a trim
+/// curve passes within the face's zone tolerance mapped to UV space, or when it lies
+/// on a gap between consecutive edge uses (a pole); a point on a pole side shared by
+/// the loop is on the boundary too. A vertex loop contains nothing. A UV trim curve
+/// the edge use does not have is made (`GetOrCreateUVTrimCurve`) and attached to the
+/// B-rep. `_tol_3d` is unused, as upstream.
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`]: `SmEdgeuse::GetOrCreateUVTrimCurve` for an edge use
-/// without trim curve (`topology.edgeuse_p3`), and those of the callees (the
-/// tolerance of a face-owned surface in `SmSurface::GetSingularities`); the errors of the surface and trim curve
-/// evaluations (see the module Deviations).
+/// [`SolidError::InvalidInput`] where upstream dereferences null (a loop without loop
+/// use, a loop use without face use, a face use without face, an edge use without
+/// edge, an edge without curve); [`SolidError::Unported`] from the callees (module
+/// docs); the errors of the surface and trim curve evaluations (see the module
+/// Deviations).
 pub fn contains_uv_point(
     k: &Kernel,
-    lp: &FaceLoop<'_>,
+    b: &mut Brep,
+    l: LoopId,
+    surface: Option<&Surface>,
     uv: Point2,
     _tol_3d: f64,
 ) -> Result<UvContainment> {
     // Work from Loopuses, because they will give us an ordered list of Edgeuses.
-    let eus = &lp.edgeuses;
-    let Some(last_eu) = eus.last() else {
+    let lu = b
+        .loop_(l)?
+        .loopuse
+        .ok_or_else(|| null("ContainsUVPoint: loop without loop use"))?;
+    let eus = eu1::loopuse_edgeuses(b, lu)?;
+    let Some(&last_eu) = eus.last() else {
         // could be a vertex loopuse
         return Ok(UvContainment::of(PointContainment::Outside));
     };
 
     // check state - must have a Face and surface
-    let Some(face) = lp.face else {
-        return Ok(UvContainment::of(PointContainment::Unknown));
+    let fu = b
+        .loopuse(lu)?
+        .faceuse
+        .ok_or_else(|| null("ContainsUVPoint: loop use without face use"))?;
+    let f = b
+        .faceuse(fu)?
+        .face
+        .ok_or_else(|| null("ContainsUVPoint: face use without face"))?;
+    let face_rec = b.face(f)?;
+    let own_surface;
+    let surface: &Surface = match surface {
+        Some(s) => s,
+        None => match face_rec.surface.as_ref() {
+            Some(s) => {
+                // (a copy: the B-rep is edited while the walk uses the surface; the
+                // copy constructor resets the owner, which the face's surface keeps)
+                let mut copy = s.clone();
+                copy.set_owner(s.owner());
+                own_surface = copy;
+                &own_surface
+            }
+            None => return Ok(UvContainment::of(PointContainment::Unknown)),
+        },
     };
-    let surface = face.surface;
+    // `SmTol::GetZoneTol3d(pSurface)`: the surface is the face's (the face is its owner
+    // upstream), so the face's tolerance
+    let zone_tol = face_rec.tolerance;
 
     let srf_uv_domain = surface.natural_uv_domain();
     let point_3d = surface.evaluate_point(uv)?;
@@ -336,7 +273,6 @@ pub fn contains_uv_point(
 
     // Get a tolerance in uv space.
     // Scale the input tolerance by the UV deriv size.
-    let zone_tol = face.tolerance;
     let mut tol_uv = map_to_2d(zone_tol, uv, surface)?;
 
     // minimize pole checking - if UVPnt on boundary -then-> if Loop on boundary -then->
@@ -348,9 +284,9 @@ pub fn contains_uv_point(
     // When crUVPoint is on Surface UVBoundary - does Loop have any edgeuse ends on
     // Surface Natural UVBoundary
     let corners = if uv_boundaries != 0 {
-        uv_corner_boundaries(lp, &srf_uv_domain, tol_uv)?
+        crate::topology::loopuse::uv_corner_boundaries(k, b, l, &srf_uv_domain, tol_uv)?
     } else {
-        UvCornerBoundaries::default()
+        crate::topology::loopuse::UvCorners::default()
     };
     let loop_boundaries = corners.boundaries;
 
@@ -375,7 +311,7 @@ pub fn contains_uv_point(
             .zip(&corners.on_params)
         {
             if bnd & common_poles != 0 {
-                out.on_edge = Some(*edge);
+                out.on_edge = *edge;
                 out.edge_param = *param;
                 break;
             }
@@ -400,29 +336,57 @@ pub fn contains_uv_point(
     let mut this_uv = Vec3::UNDEF;
 
     // Start with the end of the final Edgeuse.
-    let mut last_end_eu = last_eu;
-    let mut last_end_param = if last_end_eu.orientation == OrientType::Same {
-        last_end_eu.interval.max()
-    } else {
-        last_end_eu.interval.min()
+    let mut last_end_edge = edge_of(b, last_eu)?;
+    let mut last_end_param = {
+        let ivl = b.edge(last_end_edge)?.interval;
+        if eu1::orientation(b, last_eu)? == OrientType::Same {
+            ivl.max()
+        } else {
+            ivl.min()
+        }
     };
-    let last_trim = uv_trim_curve(last_end_eu)?;
-    let mut last_end_uv = last_trim.evaluate_point(last_end_param)?;
+    if !ensure_trim_curve(k, b, last_eu)? {
+        // stat != SM_SUCCESS || pThisUVCurve == NULL
+        return Ok(UvContainment::of(PointContainment::Unknown));
+    }
+    let mut last_end_uv = {
+        let last_trim = eu1::uv_trim_curve(b, last_eu)?
+            .0
+            .ok_or_else(|| null("ContainsUVPoint: edge use without UV trim curve"))?;
+        last_trim.evaluate_point(last_end_param)?
+    };
     let mut last_end_quad_num = calc_quad_num(uv_pt, last_end_uv);
 
     // Now start the outer loop, on Edgeuses.
-    for this_eu in eus {
+    for &this_eu in &eus {
+        let this_edge = edge_of(b, this_eu)?;
+
         // low work: see if TgtPoint is on this EdgeCurve
-        if let Some(param) = drop_on_edge(k, this_eu, point_3d, this_eu.tolerance)? {
+        let on_edge_curve = {
+            let edge = b.edge(this_edge)?;
+            let curve = edge
+                .curve
+                .as_ref()
+                .ok_or_else(|| null("ContainsUVPoint: edge without curve"))?;
+            drop_on_edge(k, curve, &edge.interval, point_3d, edge.tolerance)?
+        };
+        if let Some(param) = on_edge_curve {
             // TgtPoint is on EdgeCurve - set output and return
-            return Ok(UvContainment::on(this_eu.edge, param));
+            return Ok(UvContainment::on(this_edge, param));
         }
 
-        let trim = uv_trim_curve(this_eu)?;
+        if !ensure_trim_curve(k, b, this_eu)? {
+            // we can't work
+            return Ok(UvContainment::of(PointContainment::Unknown));
+        }
+        let trim = eu1::uv_trim_curve(b, this_eu)?
+            .0
+            .ok_or_else(|| null("ContainsUVPoint: edge use without UV trim curve"))?;
 
-        // Grab some info about this EU and its uv curve.
-        let orient = this_eu.orientation;
-        let domain = this_eu.interval;
+        // Grab some info about this EU and its uv curve (the edge as the creation left
+        // it).
+        let orient = eu1::orientation(b, this_eu)?;
+        let domain = b.edge(this_edge)?.interval;
         let (mut prev_param, end_param) = if orient == OrientType::Opposite {
             (domain.max(), domain.min())
         } else {
@@ -445,12 +409,12 @@ pub fn contains_uv_point(
         // Note: if dPrevDist < tol, then this uv pt is on the edge.
         if prev_dist < tol_uv {
             // We should refine the point.
-            if let Some(sol) = local_minimize(trim, &this_eu.interval, uv_pt, tol_uv, prev_param)? {
+            if let Some(sol) = local_minimize(trim, &domain, uv_pt, tol_uv, prev_param)? {
                 // since the guess was good enough - we expect the refined solution to
                 // be as good or better
                 if sol.start.solution_value <= tol_uv {
                     // return the refined answer.
-                    return Ok(UvContainment::on(this_eu.edge, sol.start.param(0)?));
+                    return Ok(UvContainment::on(this_edge, sol.start.param(0)?));
                 }
             }
             // Should not arrive here... (inconsistent classification; continue)
@@ -470,9 +434,9 @@ pub fn contains_uv_point(
             if seg_dist <= tol_uv && seg_param > -EFF_ZERO && seg_param < 1.0 + EFF_ZERO {
                 // On. Return closer end point.
                 return Ok(if seg_param <= 0.5 {
-                    UvContainment::on(last_end_eu.edge, last_end_param)
+                    UvContainment::on(last_end_edge, last_end_param)
                 } else {
-                    UvContainment::on(this_eu.edge, prev_param)
+                    UvContainment::on(this_edge, prev_param)
                 });
             }
 
@@ -637,7 +601,7 @@ pub fn contains_uv_point(
 
                     if let Some(sol) = local_minimize(trim, &crv_ivl, uv_pt, tol_uv, guess_t)? {
                         if sol.start.solution_value <= tol_uv {
-                            return Ok(UvContainment::on(this_eu.edge, sol.start.param(0)?));
+                            return Ok(UvContainment::on(this_edge, sol.start.param(0)?));
                         }
 
                         // We have a local min/max to the curve: do another point at
@@ -684,7 +648,7 @@ pub fn contains_uv_point(
         } // end while stepping along this EU
 
         // Update the last-end stuff, for checking non-closed loops.
-        last_end_eu = this_eu;
+        last_end_edge = this_edge;
         last_end_param = this_param;
         last_end_uv = this_uv;
         last_end_quad_num = this_quad_num;
@@ -729,11 +693,17 @@ fn inside(accum: i32) -> UvContainment {
 mod tests {
     use super::*;
     use crate::curve::line::Line;
+    use crate::geom::extent1d::Extent1d;
+    use crate::geom::extent2d::Extent2d;
     use crate::math::Vec2;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::plane::Plane;
+    use crate::topology::{
+        Edge, Edgeuse, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop, Loopuse, LoopuseId,
+        LoopuseStart, Region, RegionId, Shell, ShellId, Vertex, VertexId,
+    };
 
     fn plane() -> Surface {
         Surface::from(Plane::new(
@@ -754,110 +724,148 @@ mod tests {
         Curve::from(BSplineCurve::from_nurb(cur, 2, false))
     }
 
-    /// The square `[-5, 5]^2` counter-clockwise (or clockwise) as 4 line edges.
-    fn square(ccw: bool) -> (Vec<Curve>, Vec<Curve>) {
+    /// A one-face B-rep on `surface` whose loop is the square `[-5, 5]^2`
+    /// counter-clockwise (or clockwise) as 4 line edges, each edge use with its UV
+    /// trim curve (except the ones in `without_trim`).
+    fn square(surface: Surface, ccw: bool, without_trim: &[usize]) -> Brep {
         let mut v = [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]];
         if !ccw {
             v.reverse();
         }
-        let mut edges = Vec::new();
-        let mut trims = Vec::new();
-        for i in 0..4 {
-            let (a, b) = (v[i], v[(i + 1) % 4]);
-            edges.push(Curve::from(Line::from_points(
-                Vec3::new(a[0], a[1], 0.0),
-                Vec3::new(b[0], b[1], 0.0),
-                3,
-            )));
-            trims.push(trim(a, b));
+        let mut b = Brep::new();
+        b.add_region_record(Region { in_brep: true }).unwrap();
+        b.add_shell_record(Shell {
+            faces: vec![FaceId::from_index(0)],
+            region: Some(RegionId::from_index(0)),
+        })
+        .unwrap();
+        b.add_face_record(Face {
+            loops: vec![LoopId::from_index(0)],
+            surface: Some(surface),
+            faceuse: Some(FaceuseId::from_index(0)),
+            tolerance: 1e-6,
+            ..Face::new(ShellId::from_index(0))
+        })
+        .unwrap();
+        b.add_loop_record(Loop {
+            face: FaceId::from_index(0),
+            edges: Vec::new(),
+            loopuse: Some(LoopuseId::from_index(0)),
+        })
+        .unwrap();
+        b.add_faceuse_record(Faceuse {
+            shell: Some(ShellId::from_index(0)),
+            face: Some(FaceId::from_index(0)),
+            mate: None,
+            orientation: OrientType::Same,
+            loopuses: vec![LoopuseId::from_index(0)],
+        })
+        .unwrap();
+        b.add_loopuse_record(Loopuse {
+            faceuse: Some(FaceuseId::from_index(0)),
+            loop_: Some(LoopId::from_index(0)),
+            mate: None,
+            start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(0))),
+            orientation: OrientType::Same,
+        })
+        .unwrap();
+        for i in 0..4_u32 {
+            let (p, q) = (v[i as usize], v[(i as usize + 1) % 4]);
+            b.add_vertex_record(Vertex {
+                point: Vec3::new(p[0], p[1], 0.0),
+                tolerance: 1e-6,
+                ..Vertex::default()
+            })
+            .unwrap();
+            b.add_edge_record(Edge {
+                vertices: [VertexId::from_index(i), VertexId::from_index((i + 1) % 4)],
+                edgeuses: vec![EdgeuseId::from_index(i)],
+                interval: Extent1d::from_min_max(0.0, 1.0),
+                tolerance: 1e-6,
+                curve: Some(Curve::from(Line::from_points(
+                    Vec3::new(p[0], p[1], 0.0),
+                    Vec3::new(q[0], q[1], 0.0),
+                    3,
+                ))),
+            })
+            .unwrap();
+            b.add_edgeuse_record(Edgeuse {
+                edge: Some(EdgeId::from_index(i)),
+                owner: EdgeuseOwner::Loopuse(Some(LoopuseId::from_index(0))),
+                ccw: Some(EdgeuseId::from_index((i + 1) % 4)),
+                cw: Some(EdgeuseId::from_index((i + 3) % 4)),
+                orientation: OrientType::Same,
+                uv_trim_curve: (!without_trim.contains(&(i as usize))).then(|| trim(p, q)),
+                ..Edgeuse::default()
+            })
+            .unwrap();
         }
-        (edges, trims)
+        b
     }
 
-    fn view<'a>(s: &'a Surface, edges: &'a [Curve], trims: &'a [Curve]) -> FaceLoop<'a> {
-        FaceLoop {
-            face: Some(LoopFace {
-                surface: s,
-                tolerance: 1e-6,
-            }),
-            edgeuses: edges
-                .iter()
-                .zip(trims)
-                .enumerate()
-                .map(|(i, (c, t))| LoopEdgeuse {
-                    edge: EdgeId::from_index(i as u32),
-                    curve: c,
-                    interval: Extent1d::from_min_max(0.0, 1.0),
-                    tolerance: 1e-6,
-                    orientation: OrientType::Same,
-                    uv_trim_curve: Some(t),
-                })
-                .collect(),
-        }
+    fn contains(b: &mut Brep, uv: [f64; 2]) -> Result<UvContainment> {
+        contains_uv_point(
+            &Kernel::default(),
+            b,
+            LoopId::from_index(0),
+            None,
+            Point2::new(uv[0], uv[1]),
+            0.0,
+        )
     }
 
     #[test]
     fn square_inside_outside_on() {
-        let k = Kernel::default();
-        let s = plane();
-        let (e, t) = square(true);
-        let lp = view(&s, &e, &t);
-        let r = contains_uv_point(&k, &lp, Point2::new(0.0, 0.0), 0.0).unwrap();
+        let mut b = square(plane(), true, &[]);
+        let r = contains(&mut b, [0.0, 0.0]).unwrap();
         assert_eq!(r.containment, PointContainment::Inside);
         assert_eq!(r.orientation, OrientType::Same);
-        let r = contains_uv_point(&k, &lp, Point2::new(8.0, 1.0), 0.0).unwrap();
+        let r = contains(&mut b, [8.0, 1.0]).unwrap();
         assert_eq!(r.containment, PointContainment::Outside);
         assert_eq!(r.on_edge, None);
-        let r = contains_uv_point(&k, &lp, Point2::new(5.0, 0.0), 0.0).unwrap();
+        let r = contains(&mut b, [5.0, 0.0]).unwrap();
         assert_eq!(r.containment, PointContainment::OnBoundary);
         assert_eq!(r.on_edge, Some(EdgeId::from_index(1)));
         assert!((r.edge_param - 0.5).abs() < 1e-12);
 
-        let (e, t) = square(false);
-        let lp = view(&s, &e, &t);
-        let r = contains_uv_point(&k, &lp, Point2::new(1.0, -2.0), 0.0).unwrap();
+        let mut b = square(plane(), false, &[]);
+        let r = contains(&mut b, [1.0, -2.0]).unwrap();
         assert_eq!(r.containment, PointContainment::Inside);
         assert_eq!(r.orientation, OrientType::Opposite);
     }
 
     #[test]
     fn vertex_loop_face_and_missing_trim() {
-        let k = Kernel::default();
-        let s = plane();
-        let empty = FaceLoop {
-            face: None,
-            edgeuses: Vec::new(),
-        };
-        let r = contains_uv_point(&k, &empty, Point2::new(0.0, 0.0), 0.0).unwrap();
+        // a loop use without edge uses (a vertex loop) contains nothing
+        let mut b = square(plane(), true, &[]);
+        b.loopuse_mut(LoopuseId::from_index(0)).unwrap().start = LoopuseStart::Vertexuse(None);
+        let r = contains(&mut b, [0.0, 0.0]).unwrap();
         assert_eq!(r, UvContainment::of(PointContainment::Outside));
 
-        let (e, t) = square(true);
-        let mut lp = view(&s, &e, &t);
-        lp.face = None;
-        let r = contains_uv_point(&k, &lp, Point2::new(0.0, 0.0), 0.0).unwrap();
+        // a face without surface cannot classify
+        let mut b = square(plane(), true, &[]);
+        b.face_mut(FaceId::from_index(0)).unwrap().surface = None;
+        let r = contains(&mut b, [0.0, 0.0]).unwrap();
         assert_eq!(r.containment, PointContainment::Unknown);
 
-        let mut lp = view(&s, &e, &t);
-        if let Some(eu) = lp.edgeuses.last_mut() {
-            eu.uv_trim_curve = None;
-        }
-        let err = contains_uv_point(&k, &lp, Point2::new(0.0, 0.0), 0.0).unwrap_err();
-        assert!(matches!(err, SolidError::Unported { .. }));
+        // a missing trim curve is made (GetOrCreateUVTrimCurve): the lines drop onto the
+        // plane or the creation defers on a callee that is not ported yet, but the
+        // missing curve itself is not a stub
+        let mut b = square(plane(), true, &[3]);
+        let r = contains(&mut b, [0.0, 0.0]);
+        assert!(!matches!(
+            r,
+            Err(SolidError::Unported {
+                unit: "topology.edgeuse_p3",
+                ..
+            })
+        ));
     }
 
     #[test]
     fn corner_boundaries_and_poles() {
-        let k = Kernel::default();
-        let s = plane();
-        let (e, t) = square(true);
-        let lp = view(&s, &e, &t);
-        let dom = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
-        let b = uv_corner_boundaries(&lp, &dom, 1e-9).unwrap();
-        assert_eq!(b.boundaries, 15);
-        assert_eq!(b.on_edges.len(), 8);
-        assert_eq!(b.on_params.first(), Some(&0.0));
-
         // a point on a domain side with the loop on that side reaches GetSingularities
+        let dom = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
         let s2 = Surface::from(Plane::new(
             Vec3::ZERO,
             Vec3::X,
@@ -865,9 +873,9 @@ mod tests {
             Vec2::new(1.0, 1.0),
             &dom,
         ));
-        let lp = view(&s2, &e, &t);
+        let mut b = square(s2, true, &[]);
         // a plane has no singular sides, so GetSingularities is wired and no longer defers
-        let r = contains_uv_point(&k, &lp, Point2::new(-5.0, 0.0), 0.0);
+        let r = contains(&mut b, [-5.0, 0.0]);
         assert!(!matches!(r, Err(SolidError::Unported { .. })));
     }
 

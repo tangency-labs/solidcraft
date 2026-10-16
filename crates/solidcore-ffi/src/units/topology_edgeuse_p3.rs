@@ -1,0 +1,118 @@
+//! FFI wrappers for unit `topology.edgeuse_p3`.
+//!
+//! Shim: `harness/cpp/shim/topology_edgeuse_p3.cpp` (`sc_topology_edgeuse_p3_eval`).
+//! Upstream: `source/SMLib/src/SmEdgeuse.cpp`.
+//!
+//! Every op starts with a B-rep block of unit `topology.edgeuse_p1` (see
+//! [`super::topology_edgeuse_p1`]; its `Export` op exports the graph) followed by the
+//! edge use's index in the export's traversal order. Outputs start with `0`, or with
+//! `-1 status` when the B-rep could not be built. `-2` in an output is "upstream would
+//! dereference null". An edge use state is that of the `topology.edgeuse_p1` `SetUv` op
+//! (`put_eu_state`); the edge state is its interval and tolerance.
+//!
+//! | [`Op`]         | parameters after `eu`                  | outputs |
+//! |----------------|----------------------------------------|---------|
+//! | `Create`       | `want_dev has_fail`                    | `-2`, or `status`; without a wire edge use also `dist dev` (`-1` without a curve), the curve's fingerprint, the record's path type (`-1` without record) and B-rep flag, the edge use's and its mate's state and the edge state |
+//! | `Binormal`     | `frac use_3d want_uv_vector`           | `-2`, or `status` and, on success, `P[3] B[3] T[3] N[3] u v du dv`, then the two states and the edge state (`CreateUVTrimCurve` may attach a curve) |
+//! | `Normalized`   | `t parameter_space want_deriv ok_make` | `-2`, or `status` and, on success, `P[3] D[3]`, then the states |
+//! | `GetOrCreate`  | `ok_make want_dist want_dev`           | `-2`, or `status dist dev has_curve`, then the states (`dist`/`dev` are `-2` when not asked) |
+//!
+//! [`eval`] accepts what [`super::topology_edgeuse_p1::eval`] accepts for the block, an
+//! edge use index inside the export and finite parameters.
+
+use super::topology_edgeuse_p1::{self as p1, bad, brep_block, Reader};
+use crate::{call_with_buffer, FfiError};
+
+/// Shim operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum Op {
+    Create = 1,
+    Binormal = 2,
+    Normalized = 3,
+    GetOrCreate = 4,
+}
+
+mod sys {
+    extern "C" {
+        pub fn sc_topology_edgeuse_p3_eval(
+            op: i32,
+            path: *const std::ffi::c_char,
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+    }
+}
+
+fn args(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
+    match op {
+        Op::Create => {
+            rd.flag()?;
+            rd.flag()?;
+        }
+        Op::Binormal => {
+            rd.finite()?;
+            rd.flag()?;
+            rd.flag()?;
+        }
+        Op::Normalized => {
+            rd.finite()?;
+            rd.flag()?;
+            rd.flag()?;
+            rd.flag()?;
+        }
+        Op::GetOrCreate => {
+            rd.flag()?;
+            rd.flag()?;
+            rd.flag()?;
+        }
+    }
+    Ok(())
+}
+
+fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    let cpath = std::ffi::CString::new(path).map_err(|_| bad("path has a NUL byte"))?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: cpath is a valid NUL-terminated string; input is valid for
+        // input.len() reads and holds what the shim reads for `op` (validated by
+        // `eval`); buf is valid for buf.len() writes and the shim honours the capacity;
+        // len is valid.
+        unsafe {
+            sys::sc_topology_edgeuse_p3_eval(
+                op as i32,
+                cpath.as_ptr(),
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// Runs `op` on `input` (see the module docs); `path` is the `.smb` file of a file
+/// B-rep block (ignored otherwise).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
+/// failure.
+pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    brep_block(&mut rd, path)?;
+    let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
+    let export = p1::eval(p1::Op::Export, path, block)?;
+    let Some(c) = p1::counts(&export) else {
+        // the B-rep could not be built: the op reports the same failure
+        return Ok(export);
+    };
+    let n_eu = c.get(6).copied().unwrap_or(0);
+    rd.below(n_eu)?;
+    args(op, &mut rd)?;
+    rd.done()?;
+    raw(op, path, input)
+}

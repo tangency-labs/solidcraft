@@ -70,8 +70,9 @@
 //!   reads the missing-seam flags of the sector it returns.
 //! - **Unported callees.** `SmFace::Notify` (`topology.face_p3`, the `PRE_EDIT` /
 //!   `POST_EDIT` around `FlipLoopOrientation` of a loop on a face),
-//!   and `SmEdgeuse::GetOrCreateUVTrimCurve` (`topology.edgeuse_p3`) return
-//!   [`SolidError::Unported`]. `SmShell::GetRegion` is the co-port
+//!   and `SmSurface::DropPoint` (`surface.surface_p5`) return
+//!   [`SolidError::Unported`]; `SmEdgeuse::GetOrCreateUVTrimCurve` is wired
+//!   (`topology.edgeuse_p3`, whose own deferred callees still return it). `SmShell::GetRegion` is the co-port
 //!   [`eu1::shell_region`].
 //! - The `std::unordered_set` overloads of `GetEdges` / `GetVertices`,
 //!   `GetEdgeusesAndVertexuses`, `CalculateBoundingBox`, `GetTurningAngDeg`,
@@ -1071,17 +1072,14 @@ pub struct UvCorners {
     pub on_params: Vec<f64>,
 }
 
-/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)` (unit `topology.edgeuse_p3`).
-fn get_or_create_uv_trim_curve(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _eu: EdgeuseId,
-) -> Result<Option<Curve>> {
-    // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
-    Err(SolidError::unported(
-        "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "topology.edgeuse_p3",
-    ))
+/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)`: the curve after the call (its status
+/// is ignored upstream; `None` when it could not be made).
+fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Option<Curve>> {
+    let _ =
+        crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    Ok(crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
+        .0
+        .cloned())
 }
 
 /// `pS->DropPoint(point, domain, NULL, bSuccess, uv, dGap, bIsMulti)` (unit

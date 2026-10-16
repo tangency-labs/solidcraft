@@ -461,6 +461,27 @@ void put_curve(std::vector<double>& o, const SmCurve* c)
 
 void put_surface(std::vector<double>& o, const SmSurface* s)
 {
+    // an SmPlane is an SmBSplineSurface upstream but is its own kind (RadialSectorClassify
+    // tests IsKindOf(SmPlane_TYPE)): exported whole as `1 O[3] X[3] Y[3] scale[2]
+    // anal_domain[4]`, as sc_edgeuse_graph.h (the importer builds Plane::new)
+    if (s != nullptr && s->GetType() == SmPlane_TYPE)
+    {
+        const SmPlane* pl = (const SmPlane*)s;
+        const SmAxis2Placement& pos = pl->GetPosition();
+        o.push_back(1.0);
+        put_vec(o, pos.GetOrigin());
+        put_vec(o, pos.GetXAxis());
+        put_vec(o, pos.GetYAxis());
+        SmVector2d sc = pl->GetUVScale();
+        o.push_back(sc.x);
+        o.push_back(sc.y);
+        SmExtent2d d = pl->GetSTEPUVDomain();
+        o.push_back(d.GetMin().x);
+        o.push_back(d.GetMin().y);
+        o.push_back(d.GetMax().x);
+        o.push_back(d.GetMax().y);
+        return;
+    }
     if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE))
     {
         o.push_back(s == nullptr ? -1.0 : -2.0);
