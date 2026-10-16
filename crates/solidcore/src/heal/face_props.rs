@@ -2278,7 +2278,7 @@ mod tests {
     fn reset_stages() {
         let mut p: FaceProps<H> = FaceProps::for_face(FaceId::from_index(3), 7);
         assert_eq!(p.prop_stage, PropStage::Stage0);
-        assert_eq!(p.face_index, UNDEF_ULONG);
+        assert_eq!(p.face_index, 7);
         assert_eq!(p.pole_points.len(), 4);
         p.prop_stage = PropStage::Stage3;
         p.face = Some(FaceId::from_index(1));
@@ -2370,6 +2370,10 @@ mod tests {
     #[test]
     fn loop_props_has_problems() {
         let mut lp = LoopProps::for_loop(lid(0));
+        // the unset seam crossing counts (SM_UNDEF_ULONG) are problems
+        assert!(lp.has_problems());
+        lp.seam_crossing_cnt_u = 0;
+        lp.seam_crossing_cnt_v = 0;
         assert!(!lp.has_problems());
         lp.seam_crossing_cnt_u = 1;
         assert!(lp.has_problems());
@@ -2451,7 +2455,10 @@ mod tests {
     #[test]
     fn looptree_pole_vertex() {
         let mut t = Looptree::new();
-        let r = t.push(LooptreeItem::with_loop(Some(lid(0)), None, None));
+        // (an item without partner loop also matches a pole search: NULL == NULL upstream)
+        let mut root = LooptreeItem::with_loop(Some(lid(0)), None, None);
+        root.partner_loop = Some(lid(5));
+        let r = t.push(root);
         let mut pole = LooptreeItem::with_loop(None, None, None);
         assert!(pole.pole_vertex);
         let p = t.push(pole);
