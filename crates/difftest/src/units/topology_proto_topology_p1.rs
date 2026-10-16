@@ -3678,7 +3678,7 @@ fn run_proto(
                 }
             }
             p::RESOLVE => {
-                // a proto edge listed twice in the manager crashes the C++ (UB-127)
+                // a proto edge listed twice in the manager crashes the C++ (UB-132)
                 if r.mgr
                     .proto_edges()
                     .iter()
@@ -5413,7 +5413,7 @@ pub fn edge_cases_p3() -> Vec<(String, Value)> {
         // rejected inputs (the C++ crashes on them: a one-way overlap leaves an edge outside its
         // own group, a repeated overlap processes a deleted edge): both sides must skip RESOLVE
         // (and a proto edge listed twice in the manager: `AddProtoEdge` does not de-duplicate and
-        // `RemoveProtoEdge` removes the first copy only, UB-127)
+        // `RemoveProtoEdge` removes the first copy only, UB-132)
         for (name, overlaps, dup) in [
             ("one_way_overlap", vec![(0.0, 1.0)], None),
             ("repeated_overlap", vec![(0.0, 1.0), (0.0, 1.0), (1.0, 0.0)], None),

@@ -4996,7 +4996,7 @@ mutated scales and accepted/reduced step counts are compared.
   `AppendOverlappingPEs` do not de-duplicate. The shim and the Rust runner refuse RESOLVE unless
   every overlap is symmetric, no list repeats an edge and each edge is in its own group, and
   when a proto edge is listed twice in the manager (`AddProtoEdge` does not de-duplicate,
-  `RemoveProtoEdge` removes the first copy only; UB-127, found by the maintainer); the crashing
+  `RemoveProtoEdge` removes the first copy only; UB-132, found by the maintainer); the crashing
   scripts are the cases `edge_proto_p3_rejected_*`. The guard over-rejects three shapes that do
   not crash (a duplicate in a non-first edge's list, a one-way 3-cycle, a hub 0<->1 plus 0->2);
   narrowing it is left for later. The glue guard now refuses a pair of distinct final vertices

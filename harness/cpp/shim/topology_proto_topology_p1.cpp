@@ -4672,7 +4672,7 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
             if (skip)
                 break;
             // a proto edge listed twice in the manager crashes upstream (AddProtoEdge does not
-            // de-duplicate, RemoveProtoEdge removes the first copy only: UB-127)
+            // de-duplicate, RemoveProtoEdge removes the first copy only: UB-132)
             for (ULONG a = 0; a < r.mgr->GetProtoEdges().GetSize() && !skip; a++)
                 for (ULONG b = a + 1; b < r.mgr->GetProtoEdges().GetSize(); b++)
                     if (r.mgr->GetProtoEdges()[a] == r.mgr->GetProtoEdges()[b])
