@@ -44,9 +44,10 @@ or `io::write_design_container_with_compression` from Rust.
 
 ## Bounds and recovery
 
-Input and individual expanded parts are capped at 256 MiB. Total declared expanded
-parts and resolved payloads are each capped at 512 MiB, including repeated references
-in the latter budget. There are at most 10,000 entries. Duplicate/ambiguous entry names,
+Design input and ordinary parts use the configured design limit (256 MiB by default).
+STEP and mesh parts use the import limit (512 MiB by default). Total declared expanded
+parts and resolved payloads are each capped at the sum of those limits, including repeated
+references in the latter budget. There are at most 10,000 entries. Duplicate/ambiguous entry names,
 path traversal, ZIP64 and multi-disk packages are refused. Entries are read in memory;
 no archive paths are extracted to the filesystem. Exact part lengths and ZIP CRCs are
 checked, along with blob hashes. Hashes detect correspondence and corruption, not trust.

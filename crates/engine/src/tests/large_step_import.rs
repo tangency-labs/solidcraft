@@ -150,6 +150,20 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     assert!(limits::check(Kind::Step, 512 * MB + 1).is_ok());
     let error = s.execute("doc.open", &json!({"path": design})).unwrap_err().to_string();
     assert!(!error.contains("too large"), "{error}");
+    // The reader's raised limit must reach STEP parsing and the saved source payload too.
+    let large_step = step_file("raised-source", 1);
+    let mut text = std::fs::read(&large_step).unwrap();
+    text.resize(513 << 20, b' ');
+    std::fs::write(&large_step, text).unwrap();
+    s.execute("doc.open", &json!({"path": large_step})).unwrap();
+    let original = step_text(&s);
+    let saved = dir.join("large.sc");
+    s.execute("file.save", &json!({"path": saved})).unwrap();
+    let mut reopened = Session::default();
+    reopened.execute("doc.open", &json!({"path": saved})).unwrap();
+    assert_eq!(reopened.world_state().bodies.len(), 1);
+    assert!(step_text(&reopened) == original, "the saved STEP source differs");
+    let _ = std::fs::remove_file(large_step);
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();
     assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
