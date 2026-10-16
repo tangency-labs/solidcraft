@@ -75,7 +75,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         let Some(feature) = app.session.doc.features.get(index) else { continue };
         let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
         let selected = app.session.selection.contains(&Sel::Feature { id });
-        app.tree.order.push(format!("f:{id}"));
+        app.tree.remember(&format!("f:{id}"));
         let r = draw_row(ui, ui.id().with(("browser_feature", id)), &Row { depth: depth + 1, icon, label: &label, selected, ..Default::default() });
         if let Some(rect) = r.rect {
             crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
