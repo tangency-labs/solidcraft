@@ -29,7 +29,8 @@
 //!   `SqueezeEdge` / `DeleteEdge` (`topology.brep_p5` / `_p3` / `_p4`),
 //!   `SmTopologyIntersector::GetOtherMate` / `RemoveRelationship`
 //!   (`boolean.topology_intersector_p1` / `_p2`) and the `SmCurveClassification`
-//!   constructor and `ExtractGeometry` (`intersect.curve_class_p4` / `_p5`). The code
+//!   constructor (`intersect.curve_class_p4`). `ExtractGeometry` calls part 5 and
+//!   currently reaches part 6's `Homogenize` dependency. The code
 //!   after a stub is ported in full. The callees of `topology.proto_topology_p2` are
 //!   its methods on [`ProtoTopologyManager`].
 //! - **Deleted curves.** Functions that delete curves (through `Destruct` or the
@@ -54,6 +55,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::{xsect_tol3d, zone_tol3d, USE_DEFAULT};
+use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassification,
@@ -159,15 +161,6 @@ fn new_curve_classification<O: ClassObject>(
     Err(SolidError::unported(
         "SmCurveClassification::SmCurveClassification",
         "intersect.curve_class_p4",
-    ))
-}
-
-/// `SmCurveClassification::ExtractGeometry` (the curves it makes are deleted again).
-fn extract_geometry<O>(_cc1: &CurveClassification<O>, _cc2: &CurveClassification<O>) -> Result<()> {
-    // UNPORTED(intersect.curve_class_p5): SmCurveClassification::ExtractGeometry
-    Err(SolidError::unported(
-        "SmCurveClassification::ExtractGeometry",
-        "intersect.curve_class_p5",
     ))
 }
 
@@ -1480,7 +1473,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         ignore_soft(geometry.face_curve_on_classify(k, face2, true, &mut cc2))?;
 
                         // a curve for every common interval classified in both
-                        extract_geometry(&cc1, &cc2)?;
+                        let _ = cc1.extract_geometry(
+                            k,
+                            &*geometry,
+                            &mut cc2,
+                            ExtractOptions::default(),
+                        )?;
 
                         // Make sure that a parameter is set in each PointClass object.
                         ignore_soft(cc1.set_point_class_parameters(k, &*geometry, false))?;
@@ -1526,7 +1524,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     &mut cc2,
                 ))?;
 
-                extract_geometry(&cc1, &cc2)?;
+                let _ = cc1.extract_geometry(k, &*geometry, &mut cc2, ExtractOptions::default())?;
                 ignore_soft(cc1.set_point_class_parameters(k, &*geometry, false))?;
                 ignore_soft(cc2.set_point_class_parameters(k, &*geometry, false))?;
                 cc1s.push(cc1);

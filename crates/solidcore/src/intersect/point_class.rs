@@ -245,6 +245,26 @@ pub trait ClassGeometry<O> {
     fn volume(&self, o: O) -> Option<&Volume>;
     /// The point of a [`ClassObjectKind::Point`] handle.
     fn point(&self, o: O) -> Option<Point3>;
+    /// The point of a vertex handle resolved through its owning B-rep. `None`
+    /// reports unresolved caller data; part 5 returns an invalid-input error.
+    fn classification_vertex_point(&self, vertex: O) -> Option<Point3> {
+        let _ = vertex;
+        None
+    }
+    /// Stored topology zone tolerance, for a resolved vertex/edge/face/edgeuse.
+    /// `None` preserves the existing opaque-handle deferral.
+    fn topology_zone_tol_3d(&self, object: O) -> Option<f64> {
+        let _ = object;
+        None
+    }
+    /// Vertex-to-face gap length for the face of `surface`, preferring the explicit
+    /// classification `face`. `Some(0.0)` denotes a known absent gap; `None` means
+    /// that the vertexuse/face relationship could not be resolved and part 5
+    /// returns an invalid-input error when a face requires this lookup.
+    fn vertex_face_gap(&self, vertex: O, surface: &Surface, face: Option<O>) -> Option<f64> {
+        let _ = (vertex, surface, face);
+        None
+    }
     /// The owner of an intermediate owner on a curve's owner chain (`GetOwner` of a
     /// generating curve or an edgeuse), for `SmCurve::GetEdge`
     /// ([`Curve::edge`]); `None` (the default) ends the chain.
@@ -1342,6 +1362,17 @@ pub fn object_zone_tol_3d<O: ClassObject>(
     let Some(o) = object else {
         return Ok(system);
     };
+    if matches!(
+        o.class_kind(),
+        ClassObjectKind::Vertex
+            | ClassObjectKind::Edge
+            | ClassObjectKind::Face
+            | ClassObjectKind::Edgeuse
+    ) {
+        if let Some(tolerance) = geometry.topology_zone_tol_3d(o) {
+            return Ok(tolerance);
+        }
+    }
     match o.class_kind() {
         ClassObjectKind::Vertex => {
             // UNPORTED(topology.vertex): SmVertex::GetTolerance

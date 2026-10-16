@@ -1,0 +1,5095 @@
+{
+  "cases": [
+    {
+      "name": "point_shape0_scale1e-06_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_0_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_0_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_0_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1e-06_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1e-06_0.79",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            7.900000000000001e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1e-06_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            8e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1e-06_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1e-06_1.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1e-06_1.21",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2099999999999999e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "reversed_range_shape0_scale1e-06",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "noncollapsed_range_shape0_scale1e-06",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1e-06_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1e-06_3.141592653589793",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 3.141592653589793,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1e-06_1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1e-06_0.043633231295494915",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 0.043633231295494915,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1e-06_0.04363323130422156",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 0.04363323130422156,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1e-06_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "shape": 0,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1e-06_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "shape": 0,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1e-06_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1e-06_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "shape": 0,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1e-06_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "shape": 0,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1e-06_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "shape": 0,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1_0.79",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            7.900000000000001e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            8e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1_1.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1_1.21",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2099999999999999e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "reversed_range_shape0_scale1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "noncollapsed_range_shape0_scale1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1_3.141592653589793",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "ignore": true,
+        "angle": 3.141592653589793,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1_1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1_0.043633231295494915",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "ignore": true,
+        "angle": 0.043633231295494915,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1_0.04363323130422156",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1,
+        "ignore": true,
+        "angle": 0.04363323130422156,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "shape": 0,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "shape": 0,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "shape": 0,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "shape": 0,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "shape": 0,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape0_scale1000000.0_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1000000.0_0.79",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            7.900000000000001e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1000000.0_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            8e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1000000.0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1000000.0_1.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape0_scale1000000.0_1.21",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2099999999999999e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "reversed_range_shape0_scale1000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "noncollapsed_range_shape0_scale1000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1000000.0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1000000.0_3.141592653589793",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 3.141592653589793,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1000000.0_1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1000000.0_0.043633231295494915",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 0.043633231295494915,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape0_scale1000000.0_0.04363323130422156",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 0,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 0.04363323130422156,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "shape": 0,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "shape": 0,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1000000.0_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1000000.0_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "shape": 0,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1000000.0_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "shape": 0,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape0_scale1000000.0_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "shape": 0,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1e-06_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1e-06_0.79",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            7.900000000000001e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1e-06_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            8e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1e-06_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1e-06_1.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1e-06_1.21",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "xsect_tol": 1e-08,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2099999999999999e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "reversed_range_shape1_scale1e-06",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "noncollapsed_range_shape1_scale1e-06",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1e-06_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1e-06_3.141592653589793",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 3.141592653589793,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1e-06_1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1e-06_0.043633231295494915",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 0.043633231295494915,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1e-06_0.04363323130422156",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1e-06,
+        "ignore": true,
+        "angle": 0.04363323130422156,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1e-06_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "shape": 1,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1e-06_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "shape": 1,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1e-06_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1e-06_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "shape": 1,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1e-06_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "shape": 1,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1e-06_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "shape": 1,
+        "scale": 1e-06,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1_0.79",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            7.900000000000001e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            8e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1_1.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1_1.21",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "xsect_tol": 0.01,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2099999999999999e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "reversed_range_shape1_scale1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "noncollapsed_range_shape1_scale1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1_3.141592653589793",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "ignore": true,
+        "angle": 3.141592653589793,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1_1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1_0.043633231295494915",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "ignore": true,
+        "angle": 0.043633231295494915,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1_0.04363323130422156",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1,
+        "ignore": true,
+        "angle": 0.04363323130422156,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "shape": 1,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "shape": 1,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "shape": 1,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "shape": 1,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "shape": 1,
+        "scale": 1,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.4,
+            0.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_1.2e-14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-14,
+            0.4,
+            1.2e-14,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_1.2e-08",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.2e-08,
+            0.4,
+            1.2e-08,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.25,
+            0.4,
+            0.25,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.4,
+            0.5,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_0.99999999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.99999999999999,
+            0.4,
+            0.99999999999999,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 0,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_shape1_scale1000000.0_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "target": 1,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            1.0,
+            0.4,
+            1.0,
+            0.4,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1000000.0_0.79",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            7.900000000000001e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1000000.0_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            8e-09
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1000000.0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1000000.0_1.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "collapse_shape1_scale1000000.0_1.21",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "xsect_tol": 1.0,
+        "solutions": [
+          [
+            2,
+            0.4,
+            0.2,
+            0.40000000010000003,
+            0.20000000010000002,
+            1e-08,
+            1.2099999999999999e-08
+          ]
+        ]
+      }
+    },
+    {
+      "name": "reversed_range_shape1_scale1000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "noncollapsed_range_shape1_scale1000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1000000.0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1000000.0_3.141592653589793",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 3.141592653589793,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1000000.0_1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1000000.0_0.043633231295494915",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 0.043633231295494915,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tangency_shape1_scale1000000.0_0.04363323130422156",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "scale": 1000000.0,
+        "ignore": true,
+        "angle": 0.04363323130422156,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "shape": 1,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "shape": 1,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1000000.0_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1000000.0_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "shape": 1,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1000000.0_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "shape": 1,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "empty_solutions_or_skip_shape1_scale1000000.0_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "shape": 1,
+        "scale": 1000000.0,
+        "bounds": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1
+        ],
+        "flag1": true
+      }
+    },
+    {
+      "name": "topology_point_index0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 0,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_point_index0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_point_index0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 0,
+        "solutions": [
+          [
+            1,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_range_index0_0.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 0,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_range_index0_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 0,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_point_index1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 1,
+        "solutions": [
+          [
+            1,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_point_index1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 1,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_point_index1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 1,
+        "solutions": [
+          [
+            1,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_range_index1_0.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 1,
+        "solutions": [
+          [
+            2,
+            0.2,
+            0.2,
+            0.8,
+            0.8,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "topology_range_index1_0.8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 1,
+        "index": 1,
+        "solutions": [
+          [
+            2,
+            0.8,
+            0.8,
+            0.2,
+            0.2,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "vertex_0_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 0,
+        "flag1": true,
+        "flag2": false,
+        "angle": 0.0
+      }
+    },
+    {
+      "name": "vertex_0_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 0,
+        "flag1": true,
+        "flag2": false,
+        "angle": 0.25
+      }
+    },
+    {
+      "name": "vertex_0_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 0,
+        "flag1": true,
+        "flag2": false,
+        "angle": 0.5
+      }
+    },
+    {
+      "name": "vertex_0_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 0,
+        "flag1": true,
+        "flag2": false,
+        "angle": 1.0
+      }
+    },
+    {
+      "name": "vertex_0_1.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 0,
+        "flag1": true,
+        "flag2": false,
+        "angle": 1.5
+      }
+    },
+    {
+      "name": "vertex_1_0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 1,
+        "flag1": true,
+        "flag2": false,
+        "angle": 0.0
+      }
+    },
+    {
+      "name": "vertex_1_0.25",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 1,
+        "flag1": true,
+        "flag2": false,
+        "angle": 0.25
+      }
+    },
+    {
+      "name": "vertex_1_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 1,
+        "flag1": true,
+        "flag2": false,
+        "angle": 0.5
+      }
+    },
+    {
+      "name": "vertex_1_1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 1,
+        "flag1": true,
+        "flag2": false,
+        "angle": 1.0
+      }
+    },
+    {
+      "name": "vertex_1_1.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "target": 2,
+        "shape": 1,
+        "flag1": true,
+        "flag2": false,
+        "angle": 1.5
+      }
+    },
+    {
+      "name": "zero_intervals_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 2,
+        "bounds": [
+          0.0
+        ],
+        "flag1": false
+      }
+    },
+    {
+      "name": "zero_intervals_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 4,
+        "bounds": [
+          0.0
+        ],
+        "flag1": false
+      }
+    },
+    {
+      "name": "zero_intervals_5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 5,
+        "bounds": [
+          0.0
+        ],
+        "flag1": false
+      }
+    },
+    {
+      "name": "zero_intervals_6",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions); tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join line geometry); tests/prog_test/src/smCurveTest.cpp:455 (drop-point cases)",
+      "inputs": {
+        "op": 6,
+        "bounds": [
+          0.0
+        ],
+        "flag1": false
+      }
+    },
+    {
+      "name": "extract_common_face_0_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_common_face_0_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "bounds": [
+          0.0,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_common_face_1_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_common_face_1_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "bounds": [
+          0.0,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_0_0.049999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 0,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.049999999999,
+            0.049999999999,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_0_0.05",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 0,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.05,
+            0.05,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_0_0.050000000001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 0,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.050000000001,
+            0.050000000001,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_0_0.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 0,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.2,
+            0.2,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_1_0.049999999999",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 1,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.049999999999,
+            0.049999999999,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_1_0.05",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 1,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.05,
+            0.05,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_1_0.050000000001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 1,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.050000000001,
+            0.050000000001,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_range_threshold_1_0.2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14515 (face range length threshold, pass 3)",
+      "inputs": {
+        "op": 1,
+        "target": 3,
+        "index": 1,
+        "solutions": [
+          [
+            2,
+            0.0,
+            0.0,
+            0.2,
+            0.2,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "extract_common_face_0_1_uv",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102
+        ],
+        "flag1": true,
+        "flag2": true
+      }
+    },
+    {
+      "name": "extract_common_face_0_3_uv",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "bounds": [
+          0.0,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "flag1": true,
+        "flag2": true
+      }
+    },
+    {
+      "name": "extract_common_face_1_1_uv",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102
+        ],
+        "flag1": true,
+        "flag2": true
+      }
+    },
+    {
+      "name": "extract_common_face_1_3_uv",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13465 (ExtractGeometry common intervals)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "bounds": [
+          0.0,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "flag1": true,
+        "flag2": true
+      }
+    },
+    {
+      "name": "fixup_classified_curve_interval",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14096 (FixupClassification)",
+      "inputs": {
+        "op": 2,
+        "classes": [
+          100,
+          106,
+          100
+        ]
+      }
+    },
+    {
+      "name": "uv_curve_in_3d_on_analytic_plane_dispatch",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14678 (2D curve-on-surface setup before the vertex loop)",
+      "inputs": {
+        "op": 6,
+        "dim2": true,
+        "flag1": false,
+        "flag3": false
+      }
+    },
+    {
+      "name": "extract_isolated_points_0_False_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "flag3": false,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_0_False_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "flag3": false,
+        "bounds": [
+          0.0,
+          0.3333333333333333,
+          0.6666666666666666,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_0_True_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "flag3": true,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_0_True_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 0,
+        "target": 3,
+        "flag3": true,
+        "bounds": [
+          0.0,
+          0.3333333333333333,
+          0.6666666666666666,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_1_False_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "flag3": false,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_1_False_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "flag3": false,
+        "bounds": [
+          0.0,
+          0.3333333333333333,
+          0.6666666666666666,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_1_True_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "flag3": true,
+        "bounds": [
+          0.0,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "extract_isolated_points_1_True_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13562 (isolated lower boundaries; weighted point overwritten by source location)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "flag3": true,
+        "bounds": [
+          0.0,
+          0.3333333333333333,
+          0.6666666666666666,
+          1.0
+        ],
+        "classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ],
+        "other_classes": [
+          102,
+          100,
+          102,
+          102,
+          100,
+          102,
+          102,
+          100,
+          102
+        ]
+      }
+    },
+    {
+      "name": "regression_uv_line_bases_materialized",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:13524-13534; UB-134 native crash on a lazy SmLine B-spline base",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "scale": 1000000.0,
+        "tol": 1e-06,
+        "flag1": true,
+        "flag2": true,
+        "flag3": true,
+        "bounds": [
+          0,
+          0.2,
+          0.4,
+          0.6,
+          0.8,
+          1
+        ],
+        "classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ]
+      }
+    },
+    {
+      "name": "zero_source_tolerance_literal_setter",
+      "upstream_ref": "source/SMLib/inc/SmCurveClass.h:498 (SetSrcZoneTol3d); fixture setup must not substitute ReSet zero semantics",
+      "inputs": {
+        "op": 0,
+        "tol": 0,
+        "bounds": [
+          0,
+          0.5,
+          1
+        ]
+      }
+    }
+  ]
+}

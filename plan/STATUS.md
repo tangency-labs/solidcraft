@@ -955,6 +955,20 @@ suite passes 173 units
 perturbation also pass (6,463/6,463 detected). Committed reports total 435,272 cases:
 422,654 compared, 12,618 deferred, zero failed.
 
+## Independent curve-classification part 5
+
+The p5 implementation and oracle remain independent of the open p2/p7 PRs.
+Part 6 landed independently through PR #138 and is inherited from main; all four
+p6 call sites are wired. Fresh validation on 9e495b12 compares 275/1,081 cases
+exactly, with zero failures and 806 explicit deferrals (p2 493, p7 312,
+curve.crv_on_surf 1). Perturbation detects all 275 compared cases. All nine affected
+native runners, plain/native Clippy, 1,215 kernel tests, WASM and the focused FFI
+regression pass. The eight other reports are unchanged.
+The edge-target insertion and SSS blocks remain unported; nonempty large-gap
+projection and tangent-flag behavior remain uncertified. Shared interfaces are
+recorded as CO-PORTED. The proto-topology p3 extraction back-edge is wired and the
+lazy-UV issue remains UB-134.
+
 ## Curve-classification interval integration (2026-10-16, PR #138)
 
 `intersect.curve_class_p6` is partial: 4438 cases: 3927 bit-identical kernel comparisons,
