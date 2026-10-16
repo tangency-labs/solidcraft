@@ -232,6 +232,17 @@ pub enum ClassObjectKind {
 pub trait ClassObject: Copy + PartialEq {
     /// The object's kind.
     fn class_kind(&self) -> ClassObjectKind;
+
+    /// The handle naming the `index`-th temporary object of `kind` (a boundary
+    /// curve or plane) that a classification builds and records as an interval end
+    /// object (upstream stores the temporary's pointer). Handles for distinct
+    /// indices must differ from each other and from the caller's objects. `None`
+    /// (the default): the handle type cannot name temporaries, and an insertion
+    /// that needs one returns an invalid-input error.
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        let _ = (index, kind);
+        None
+    }
 }
 
 /// The geometry behind classification handles: what upstream reaches by casting

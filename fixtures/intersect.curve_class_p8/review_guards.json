@@ -194,6 +194,66 @@
       "name": "guard_op2_kind2_outside_natural_domain",
       "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
       "inputs": { "record": [2, 2, 2, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_bottom_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 0.5, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_top_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, 0.5, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_downward_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.6, 0.2, 2, 0.6, 0, 0, 1, 1, 1, 1, 0.2, -1, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_slanted_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.1, 0.2, -0.5, 0.8, 0, 0, 1, 1, 1, 1, 0.7, 1.5, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 1, 2, 0, 0.5, 100, 0.5, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_bottom_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 0.5, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_top_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, 0.5, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_downward_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.6, 0.2, 2, 0.6, 0, 0, 1, 1, 1, 1, 0.2, -1, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_slanted_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.1, 0.2, -0.5, 0.8, 0, 0, 1, 1, 1, 1, 0.7, 1.5, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 0, 2, 0, 0.5, 100, 0.5, 1, 100] }
     }
   ]
 }

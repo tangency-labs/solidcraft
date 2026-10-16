@@ -41,14 +41,19 @@ enum H {
     Curve,
     Surface,
     Volume,
+    /// A temporary boundary curve (`false`) or plane (`true`) built by the call.
+    Temporary(usize, bool),
 }
 impl ClassObject for H {
     fn class_kind(&self) -> ClassObjectKind {
         match self {
-            Self::Curve => ClassObjectKind::Curve,
-            Self::Surface => ClassObjectKind::Surface,
+            Self::Curve | Self::Temporary(_, false) => ClassObjectKind::Curve,
+            Self::Surface | Self::Temporary(_, true) => ClassObjectKind::Surface,
             Self::Volume => ClassObjectKind::Volume,
         }
+    }
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        Some(Self::Temporary(index, kind == ClassObjectKind::Surface))
     }
 }
 struct Geometry {
@@ -238,6 +243,9 @@ fn rust(input: Input) -> Result<Output, HarnessError> {
         _ => 1001,
     };
     let mut o = vec![f64::from(status), cc.size() as f64];
+    // The shim numbers objects other than the curve/surface/volume from 3 in order of
+    // first appearance; temporaries (dangling after the native call) get the same ids.
+    let mut temporaries: Vec<H> = Vec::new();
     for iv in cc.intervals() {
         o.extend([iv.min(), iv.max()]);
         for p in [&iv.start, &iv.mid, &iv.end] {
@@ -248,6 +256,13 @@ fn rust(input: Input) -> Result<Output, HarnessError> {
                     Some(H::Surface) => 1.,
                     Some(H::Volume) => 2.,
                     Some(H::Curve) => 0.,
+                    Some(t @ H::Temporary(..)) => {
+                        if !temporaries.contains(&t) {
+                            temporaries.push(t);
+                        }
+                        let at = temporaries.iter().position(|x| *x == t).unwrap_or(0);
+                        (3 + at) as f64
+                    }
                 },
                 p.t_param(),
                 p.deviation(),

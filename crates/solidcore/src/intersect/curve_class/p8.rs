@@ -9,6 +9,8 @@
 //! | [`CurveClassification::intersect_uv_discontinuities`] | `IntersectUVDiscontinuties` |
 //! | [`CurveClassification::intersect_3d_discontinuities`] | `Intersect3DDiscontinuties` (surface) |
 //! | [`CurveClassification::intersect_volume_discontinuities`] | `Intersect3DDiscontinuities` (volume) |
+//! | `insert_solutions` (private) | `sm_InsertSolutions` call adapter (part 5) |
+//! | `plane_intersections` (private) | `SmSurface::GlobalCurveIntersect` call on a boundary plane |
 //!
 //! Deviations: handles and caller-supplied geometry replace pointers; Kernel is explicit.
 //! Temporary boundaries have local ownership; a detached surface copy replaces the
@@ -18,10 +20,18 @@
 //! Empty knot lists/interval arrays and out-of-range native volume W/V indexing return
 //! errors instead of native undefined behaviour. The native V+V solution-slot formulas,
 //! W-plane coordinates taken from V, and U-only unaligned test are retained.
-//! Volume solution arrays use independent storage rather than the native aliased
-//! borrowed buffer (WR-155); the entire plane-intersection path remains deferred.
-//! Solution insertion defers to part 5; general plane/curve intersection defers to
-//! `surface.surface_p8`; generic `CrvOnSurf` construction defers to `curve.crv_on_surf`.
+//! Volume slots 4 and 5 share one 20-solution borrowed buffer natively (WR-155): slot
+//! 5's final solutions overwrite slot 4's leading entries while slot 4 fits the buffer;
+//! an overflowing slot 5 over a borrowed slot 4 returns an error (native buffer state
+//! then depends on intermediate writes). Plane intersection keeps its ignored status but
+//! an ordinary failure yields no solutions (native may keep partial output).
+//! Temporary boundary curves/planes are named by [`ClassObject::temporary`] handles
+//! (native stores the temporaries' pointers, dangling after return) and resolved by a
+//! geometry wrapper for the rest of the call; a handle type without temporaries gets an
+//! invalid-input error at its first insertion. Solutions passed to part 5 name the
+//! classification curve for its curve (and analytic replacement) and the temporary for
+//! the boundary (and its analytic replacement); collapsed ranges are copied back.
+//! Generic `CrvOnSurf` construction defers to `curve.crv_on_surf`.
 //! No input-driven recursion: dimension forwarding dispatches once through shared helpers.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
@@ -40,7 +50,7 @@ use crate::geom::tol::{
 use crate::intersect::curve_class::{
     CurveClassification, FoundInterval, IntervalPosition, NO_INTERVAL,
 };
-use crate::intersect::point_class::{ClassGeometry, ClassObject, PointClassType};
+use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface::SurfParamType;
@@ -52,44 +62,170 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::volume::{Discontinuities3d, Volume};
 
+/// Solution-object tag: 0/2 the classification curve (and its analytic replacement),
+/// 1/3 the boundary curve (and its analytic replacement), [`PLANE_TAG`] a boundary plane.
 #[derive(Clone, Copy, PartialEq)]
 struct BoundaryObject(u8, crate::geom::extent1d::Extent1d);
 impl SolutionObject for BoundaryObject {
     fn kind(&self) -> ObjectKind {
-        ObjectKind::Curve
+        if self.0 == PLANE_TAG {
+            ObjectKind::Surface
+        } else {
+            ObjectKind::Curve
+        }
     }
     fn natural_interval(&self) -> Option<crate::geom::extent1d::Extent1d> {
-        Some(self.1)
+        (self.0 != PLANE_TAG).then_some(self.1)
     }
 }
+
+const PLANE_TAG: u8 = 4;
+
+/// Native volume solution slots 4 and 5 borrow one 20-solution buffer (WR-155).
+const BORROWED_SOLUTIONS: usize = 20;
 
 const OP: &str = "intersect::curve_class::p8";
 
-fn insert_solutions<O: ClassObject>(
-    _cc: &mut CurveClassification<O>,
-    _solutions: &[Solution<BoundaryObject>],
-    _curve: Option<&Curve>,
-    _plane: Option<&Plane>,
-    _tol: f64,
-) -> Result<()> {
-    // UNPORTED(intersect.curve_class_p5): sm_InsertSolutions
-    Err(SolidError::unported(
-        "sm_InsertSolutions",
-        "intersect.curve_class_p5",
-    ))
+/// The caller's geometry plus the temporary boundaries of one p8 call: native keeps
+/// every temporary alive (and resolvable through the end objects that insertion
+/// records) until the member returns.
+struct WithTemporaries<'a, G, O> {
+    inner: &'a G,
+    curves: Vec<(O, &'a Curve)>,
+    surfaces: Vec<(O, &'a Surface)>,
 }
 
+impl<'a, G: ClassGeometry<O>, O: ClassObject> WithTemporaries<'a, G, O> {
+    fn curves(inner: &'a G, curves: &'a [Curve]) -> Self {
+        Self {
+            inner,
+            curves: curves
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| O::temporary(i, ClassObjectKind::Curve).map(|h| (h, c)))
+                .collect(),
+            surfaces: Vec::new(),
+        }
+    }
+    fn surfaces(inner: &'a G, surfaces: &'a [Surface]) -> Self {
+        Self {
+            inner,
+            curves: Vec::new(),
+            surfaces: surfaces
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| O::temporary(i, ClassObjectKind::Surface).map(|h| (h, s)))
+                .collect(),
+        }
+    }
+}
+
+impl<G: ClassGeometry<O>, O: ClassObject> ClassGeometry<O> for WithTemporaries<'_, G, O> {
+    fn curve(&self, o: O) -> Option<&Curve> {
+        match self.curves.iter().find(|(h, _)| *h == o) {
+            Some((_, c)) => Some(*c),
+            None => self.inner.curve(o),
+        }
+    }
+    fn surface(&self, o: O) -> Option<&Surface> {
+        match self.surfaces.iter().find(|(h, _)| *h == o) {
+            Some((_, s)) => Some(*s),
+            None => self.inner.surface(o),
+        }
+    }
+    fn volume(&self, o: O) -> Option<&Volume> {
+        self.inner.volume(o)
+    }
+    fn point(&self, o: O) -> Option<Point3> {
+        self.inner.point(o)
+    }
+    fn classification_vertex_point(&self, vertex: O) -> Option<Point3> {
+        self.inner.classification_vertex_point(vertex)
+    }
+    fn topology_zone_tol_3d(&self, object: O) -> Option<f64> {
+        self.inner.topology_zone_tol_3d(object)
+    }
+    fn vertex_face_gap(&self, vertex: O, surface: &Surface, face: Option<O>) -> Option<f64> {
+        self.inner.vertex_face_gap(vertex, surface, face)
+    }
+    fn owner_of(
+        &self,
+        owner: crate::geom::object::ObjectRef,
+    ) -> Option<crate::geom::object::ObjectRef> {
+        self.inner.owner_of(owner)
+    }
+}
+
+/// `sm_InsertSolutions(this, sols, pTemporary, &tol)`: the solutions name the
+/// classification curve and the temporary boundary `index` of `kind`; they are
+/// updated in place as native (short ranges collapse to points).
+fn insert_solutions<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    cc: &mut CurveClassification<O>,
+    solutions: &mut [Solution<BoundaryObject>],
+    index: usize,
+    kind: ClassObjectKind,
+    tol: f64,
+) -> Result<()> {
+    let target = O::temporary(index, kind).ok_or(SolidError::invalid_input(
+        OP,
+        "classification handle type cannot name temporary boundaries",
+    ))?;
+    let curve = cc.curve();
+    let mut mapped: Vec<Solution<O>> = solutions
+        .iter()
+        .map(|s| Solution {
+            solution_type: s.solution_type,
+            num_variables: s.num_variables,
+            start: s.start,
+            end: s.end,
+            num_objects: s.num_objects,
+            objects: s.objects.map(|o| {
+                o.and_then(|b| {
+                    if b.0 == 0 || b.0 == 2 {
+                        curve
+                    } else {
+                        Some(target)
+                    }
+                })
+            }),
+            nodes: s.nodes,
+        })
+        .collect();
+    super::p5::insert_solutions(k, geometry, cc, &mut mapped, target, Some(tol))?;
+    for (s, m) in solutions.iter_mut().zip(&mapped) {
+        s.solution_type = m.solution_type;
+        s.num_variables = m.num_variables;
+        s.start = m.start;
+        s.end = m.end;
+    }
+    Ok(())
+}
+
+/// `pBdryPlane->GlobalCurveIntersect(pBdryPlane->GetNaturalUVDomain(), *m_cpCurve,
+/// m_cpCurve->GetNaturalInterval(), tol, sols)`: `[curve t, plane u, plane v]`.
 fn plane_intersections(
-    _k: &Kernel,
-    _plane: &Plane,
-    _curve: &Curve,
-    _tol: f64,
+    k: &Kernel,
+    plane: &Surface,
+    curve: &Curve,
+    tol: f64,
 ) -> Result<Vec<Solution<BoundaryObject>>> {
-    // UNPORTED(surface.surface_p8): SmSurface::GlobalCurveIntersect
-    Err(SolidError::unported(
-        "SmSurface::GlobalCurveIntersect",
-        "surface.surface_p8",
-    ))
+    let natural = curve.natural_interval();
+    Ok(plane
+        .global_curve_intersect(
+            k,
+            [
+                BoundaryObject(0, natural),
+                BoundaryObject(PLANE_TAG, natural),
+            ],
+            &plane.natural_uv_domain(),
+            curve,
+            &natural,
+            tol,
+        )?
+        .as_slice()
+        .to_vec())
 }
 
 fn pv(curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
@@ -175,7 +311,7 @@ fn intersections(
 
 impl<O: ClassObject> CurveClassification<O> {
     /// Intersect natural boundaries, forwarding UV curves to the UV algorithm.
-    /// Errors from geometry, intersection and missing solution insertion propagate.
+    /// Errors from geometry, intersection and solution insertion propagate.
     pub fn intersect_natural_bounds(
         &mut self,
         k: &Kernel,
@@ -188,7 +324,7 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// Intersect natural UV boundaries, forwarding 3D curves to the 3D algorithm.
-    /// Errors from geometry, intersection and missing solution insertion propagate.
+    /// Errors from geometry, intersection and solution insertion propagate.
     pub fn intersect_natural_uv_bounds(
         &mut self,
         k: &Kernel,
@@ -250,18 +386,27 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             (b.curves_3d, b.orients)
         };
+        let geometry = &WithTemporaries::curves(geometry, &boundaries);
         let mut solutions = Vec::new();
         let mut degenerate = Vec::new();
-        for boundary in &boundaries {
+        for (ii, boundary) in boundaries.iter().enumerate() {
             let deg = !uv && boundary.is_degenerate(EFF_ZERO, None)?;
             degenerate.push(deg);
-            let sols = if deg {
+            let mut sols = if deg {
                 Vec::new()
             } else {
                 intersections(k, curve, &self.interval(), boundary, tol, uv)?
             };
             if !sols.is_empty() {
-                insert_solutions(self, &sols, Some(boundary), None, tol)?;
+                insert_solutions(
+                    k,
+                    geometry,
+                    self,
+                    &mut sols,
+                    ii,
+                    ClassObjectKind::Curve,
+                    tol,
+                )?;
             }
             solutions.push(sols);
         }
@@ -389,7 +534,7 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// Intersect UV knot lines, forwarding 3D curves to the surface's 3D algorithm.
-    /// Missing geometry adapters and solution insertion return `Unported`.
+    /// Missing geometry adapters and deeper insertion callees return `Unported`.
     pub fn intersect_uv_discontinuities(
         &mut self,
         k: &Kernel,
@@ -402,7 +547,7 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// Intersect surface knot iso-curves, forwarding UV curves to the UV algorithm.
-    /// Missing geometry adapters and solution insertion return `Unported`.
+    /// Missing geometry adapters and deeper insertion callees return `Unported`.
     pub fn intersect_3d_discontinuities(
         &mut self,
         k: &Kernel,
@@ -471,10 +616,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 iso_curve(k, surface, line.clone())?
             });
         }
+        let geometry = &WithTemporaries::curves(geometry, &boundaries);
         let mut solutions: [Vec<Solution<BoundaryObject>>; 4] =
             core::array::from_fn(|_| Vec::new());
         for (ii, boundary) in boundaries.iter().enumerate() {
-            let sols = intersections(k, curve, &self.interval(), boundary, tol, uv)?;
+            let mut sols = intersections(k, curve, &self.interval(), boundary, tol, uv)?;
             // Preserve upstream's V+V typo rather than silently repairing it.
             let slot = if ii == 0 {
                 Some(0)
@@ -488,7 +634,15 @@ impl<O: ClassObject> CurveClassification<O> {
                 None
             };
             if !sols.is_empty() {
-                insert_solutions(self, &sols, Some(boundary), None, tol)?;
+                insert_solutions(
+                    k,
+                    geometry,
+                    self,
+                    &mut sols,
+                    ii,
+                    ClassObjectKind::Curve,
+                    tol,
+                )?;
             }
             if let Some(s) = slot {
                 *solutions.get_mut(s).ok_or_else(|| SolidError::sm_err(OP))? = sols;
@@ -576,7 +730,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
     /// Intersect volume discontinuity planes, using parameter or input space as requested.
     /// UV curves return `SM_ERR`; no-discontinuity volumes leave all intervals unchanged.
-    /// Native plane intersections and part-5 insertion may return `Unported`.
+    /// Plane intersections and part-5 insertion may return `Unported` from deeper callees.
     pub fn intersect_volume_discontinuities(
         &mut self,
         k: &Kernel,
@@ -643,23 +797,24 @@ impl<O: ClassObject> CurveClassification<O> {
                     y = ignored(volume.orient_vector(origin, y, [true; 3]))?.unwrap_or(y);
                     origin = ignored(volume.orient_point(origin))?.unwrap_or(origin);
                 }
-                planes.push(Plane::new(
+                planes.push(Surface::from(Plane::new(
                     origin,
                     x,
                     y,
                     scale,
                     &Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
-                ));
+                )));
             }
         }
         let nu = d.u.params.len();
         let nv = d.v.params.len();
         let nw = d.w.params.len();
+        let geometry = &WithTemporaries::surfaces(geometry, &planes);
         let mut solutions: [Vec<Solution<BoundaryObject>>; 6] =
             core::array::from_fn(|_| Vec::new());
         for (i, plane) in planes.iter().enumerate() {
             // Native uses the curve's natural interval (not the classification interval).
-            let sols = ignored(plane_intersections(k, plane, curve, tol))?.unwrap_or_default();
+            let mut sols = ignored(plane_intersections(k, plane, curve, tol))?.unwrap_or_default();
             let slot = if i == 0 {
                 Some(0)
             } else if i == nu - 1 {
@@ -676,9 +831,33 @@ impl<O: ClassObject> CurveClassification<O> {
                 None
             };
             if !sols.is_empty() {
-                insert_solutions(self, &sols, None, Some(plane), tol)?;
+                insert_solutions(
+                    k,
+                    geometry,
+                    self,
+                    &mut sols,
+                    i,
+                    ClassObjectKind::Surface,
+                    tol,
+                )?;
             }
             if let Some(s) = slot {
+                if s == 5 {
+                    // WR-155: slot 4 still borrows the shared buffer when it fits, so
+                    // slot 5's (inserted) solutions overwrite its leading entries.
+                    let shared = solutions.get_mut(4).ok_or_else(|| SolidError::sm_err(OP))?;
+                    if !shared.is_empty() && shared.len() <= BORROWED_SOLUTIONS {
+                        if sols.len() > BORROWED_SOLUTIONS {
+                            return Err(SolidError::invalid_input(
+                                OP,
+                                "volume W-plane solutions overflow the native shared buffer",
+                            ));
+                        }
+                        for (aliased, sol) in shared.iter_mut().zip(&sols) {
+                            *aliased = *sol;
+                        }
+                    }
+                }
                 *solutions.get_mut(s).ok_or_else(|| SolidError::sm_err(OP))? = sols;
             }
         }
@@ -689,7 +868,13 @@ impl<O: ClassObject> CurveClassification<O> {
                 .zip(&solutions)
                 .enumerate()
             {
-                let plane = planes.get(index).ok_or_else(|| SolidError::sm_err(OP))?;
+                let SurfaceKind::Plane(plane) = planes
+                    .get(index)
+                    .ok_or_else(|| SolidError::sm_err(OP))?
+                    .kind()
+                else {
+                    return Err(SolidError::sm_err(OP));
+                };
                 for sol in sols {
                     if sol.solution_type != SolutionType::SingleValue {
                         continue;
