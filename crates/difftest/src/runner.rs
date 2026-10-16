@@ -19,7 +19,8 @@ pub trait UnitDiff {
 
     /// Runs the upstream C++ (via `solidcore_ffi::units::*`).
     /// Return `Ok(Output::err(..))` when the *operation* fails and `Err` only
-    /// for harness problems (bad inputs); `Err` always fails the case.
+    /// for harness problems (bad inputs); `Err` always fails the case. Native fixture
+    /// construction failures may use [`Output::rejected`], never operation errors.
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError>;
 
     /// Runs the solidcore Rust port on the same inputs. Return
@@ -75,7 +76,7 @@ pub struct CaseResult {
     pub name: String,
     /// Provenance.
     pub source: CaseSource,
-    /// Case inputs (written to the report only on failure).
+    /// Case inputs (written to the report on failure or fixture rejection).
     pub inputs: Value,
     /// Comparison result.
     pub diff: CaseDiff,
@@ -83,6 +84,8 @@ pub struct CaseResult {
     pub harness_error: Option<String>,
     /// Both sides reported the same operation error.
     pub both_errored: bool,
+    /// Native fixture construction was rejected before running the operation.
+    pub rejected: Option<String>,
     /// The Rust side hit an unported callee (case deferred, nothing compared).
     pub deferred: Option<Deferred>,
     /// In perturb mode: what was perturbed (`value`, `int`, `topology`, `error`),
@@ -95,6 +98,8 @@ pub struct CaseResult {
 pub enum CaseOutcome {
     /// Both sides ran and agree.
     Pass,
+    /// The native fixture could not be constructed; no parity comparison ran.
+    Rejected,
     /// Mismatch or harness error.
     Fail,
     /// The Rust side returned `Unported` (and the C++ side ran without a harness
@@ -103,10 +108,11 @@ pub enum CaseOutcome {
 }
 
 impl CaseOutcome {
-    /// `pass`, `fail` or `deferred`.
+    /// `pass`, `fail`, `deferred` or `rejected`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pass => "pass",
+            Self::Rejected => "rejected",
             Self::Fail => "fail",
             Self::Deferred => "deferred",
         }
@@ -114,10 +120,13 @@ impl CaseOutcome {
 }
 
 impl CaseResult {
-    /// Pass, fail or deferred. A harness error always fails.
+    /// Classification, excluding native fixture rejections from parity results.
+    /// A harness error always fails.
     pub fn outcome(&self) -> CaseOutcome {
         if self.harness_error.is_some() {
             CaseOutcome::Fail
+        } else if self.rejected.is_some() {
+            CaseOutcome::Rejected
         } else if self.deferred.is_some() {
             CaseOutcome::Deferred
         } else if self.diff.pass() {
@@ -146,11 +155,11 @@ impl CaseResult {
 /// Status of a unit run (AGENTS.md section 4a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitStatus {
-    /// At least one case, every case passes, none deferred.
+    /// At least one parity pass, no failures or deferrals (fixture rejections excluded).
     Green,
     /// No failing case and at least one deferred case.
     Partial,
-    /// Any failing case, a harness error, or no cases at all.
+    /// Any failing case, a harness error, no cases, or only rejected fixtures.
     Fail,
 }
 
@@ -183,7 +192,11 @@ pub struct UnitResult {
 impl UnitResult {
     /// Green, partial or fail (see [`UnitStatus`]).
     pub fn status(&self) -> UnitStatus {
-        if self.harness_error.is_some() || self.cases.is_empty() || self.failed() > 0 {
+        if self.harness_error.is_some()
+            || self.cases.is_empty()
+            || self.failed() > 0
+            || self.cases.len() == self.rejected()
+        {
             UnitStatus::Fail
         } else if self.deferred() > 0 {
             UnitStatus::Partial
@@ -205,6 +218,14 @@ impl UnitResult {
     /// Number of failing cases.
     pub fn failed(&self) -> usize {
         self.cases.iter().filter(|c| c.fail()).count()
+    }
+
+    /// Number of cases rejected by the native fixture constructor.
+    pub fn rejected(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|c| c.outcome() == CaseOutcome::Rejected)
+            .count()
     }
 
     /// Number of deferred cases.
@@ -338,7 +359,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             }
         }
         let cpp = guarded(|| unit.run_cpp(&case), "cpp");
-        let rust = guarded(|| unit.run_rust(&case), "rust");
+
         let mut cr = CaseResult {
             name: case.name.clone(),
             source: case.source.clone(),
@@ -346,10 +367,23 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             diff: CaseDiff::default(),
             harness_error: None,
             both_errored: false,
+            rejected: None,
             deferred: None,
             perturbed: None,
         };
+        if let Ok(c) = &cpp {
+            if let Some(reason) = &c.rejected {
+                cr.rejected = Some(reason.clone());
+                res.cases.push(cr);
+                continue;
+            }
+        }
+        let rust = guarded(|| unit.run_rust(&case), "rust");
         match (cpp, rust) {
+            (_, Ok(r)) if r.rejected.is_some() => {
+                cr.harness_error =
+                    Some("rust: fixture rejection must originate in the native constructor".into());
+            }
             (Ok(_), Ok(r)) if r.deferred.is_some() => {
                 cr.deferred = r.deferred;
             }
@@ -422,6 +456,7 @@ mod tests {
             },
             harness_error: None,
             both_errored: false,
+            rejected: None,
             deferred,
             perturbed: None,
         };
@@ -450,6 +485,86 @@ mod tests {
         let mut h = case(d(), true);
         h.harness_error = Some("cpp: bad".into());
         assert_eq!(h.outcome(), CaseOutcome::Fail);
+    }
+
+    struct RejectedFixture {
+        only_rejected: bool,
+    }
+
+    impl UnitDiff for RejectedFixture {
+        fn id(&self) -> &'static str {
+            "rejected.fixture"
+        }
+        fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+            if case.get::<u8>("i")? == 0 {
+                Ok(Output::rejected("constructor failed"))
+            } else {
+                Ok(Output::new().scalar("value", 2.))
+            }
+        }
+        fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+            assert_ne!(
+                case.get::<u8>("i")?,
+                0,
+                "a rejected fixture must not run Rust"
+            );
+            Ok(Output::new().scalar("value", 2.))
+        }
+        fn cases(&self, _: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+            Ok((0..if self.only_rejected { 1 } else { 2 })
+                .map(|i| Case {
+                    unit: self.id().into(),
+                    name: format!("case{i}"),
+                    source: CaseSource::Inline,
+                    inputs: serde_json::json!({"i": i}),
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn rejected_fixtures_are_recorded_without_running_rust_or_claiming_parity() {
+        let ctx = CaseContext {
+            root: std::path::PathBuf::new(),
+            seeds: 0,
+        };
+        let r = run_unit(
+            &RejectedFixture {
+                only_rejected: false,
+            },
+            &ctx,
+            &RunOptions::default(),
+        );
+        assert_eq!(
+            (r.passed(), r.failed(), r.deferred(), r.rejected()),
+            (1, 0, 0, 1)
+        );
+        let report = crate::report::unit_report(&r);
+        assert_eq!(report["cases"][0]["outcome"], "rejected");
+        assert_eq!(report["cases"][0]["pass"], false);
+        assert_eq!(report["cases"][0]["inputs"]["i"], 0);
+        assert_eq!(report["cases_rejected"], 1);
+        assert!(crate::report::summary_line(&r).contains("rejected=1"));
+        let only = run_unit(
+            &RejectedFixture {
+                only_rejected: true,
+            },
+            &ctx,
+            &RunOptions::default(),
+        );
+        assert_eq!(only.status(), UnitStatus::Fail);
+        let sensitivity = run_unit(
+            &RejectedFixture {
+                only_rejected: false,
+            },
+            &ctx,
+            &RunOptions {
+                perturb: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(sensitivity.perturb_stats(), (1, 1));
+        assert_eq!(sensitivity.rejected(), 1);
     }
 
     /// Fake unit: case `i` returns `Unported` on the Rust side when `i` is odd.

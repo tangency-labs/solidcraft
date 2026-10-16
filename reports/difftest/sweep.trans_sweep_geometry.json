@@ -1,0 +1,6787 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_5_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#0",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_5_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#1",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_5_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#2",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_5_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#3",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_6_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#4",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_6_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#5",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_6_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#6",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_6_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#7",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_7_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#8",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_7_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#9",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_7_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#10",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_7_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#11",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_8_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#12",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_8_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#13",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_8_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#14",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_0_8_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#15",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_5_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#16",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_5_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#17",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_5_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#18",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_5_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#19",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_6_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#20",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_6_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#21",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_6_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#22",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_6_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#23",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_7_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#24",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_7_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#25",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_7_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#26",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_7_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#27",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_8_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#28",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_8_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#29",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_8_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#30",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_1_8_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#31",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_5_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#32",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_5_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#33",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_5_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#34",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_5_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#35",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_6_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#36",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_6_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#37",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_6_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#38",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_6_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#39",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_7_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#40",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_7_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#41",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_7_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#42",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_2_7_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#43",
+      "values_compared": 755
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "interval_2_8_zero",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#44",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "interval_2_8_short",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#45",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "interval_2_8_outside",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#46",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "interval_2_8_full",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#47",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_5_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#48",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_5_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#49",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_5_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#50",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_5_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#51",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_6_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#52",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_6_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#53",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_6_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#54",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_6_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#55",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_7_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#56",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_7_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#57",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_7_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#58",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_7_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#59",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_8_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#60",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_8_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#61",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_8_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#62",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_3_8_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#63",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_5_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#64",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_5_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#65",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_5_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#66",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_5_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#67",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_6_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#68",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_6_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#69",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_6_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#70",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_6_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#71",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_7_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#72",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_7_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#73",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_7_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#74",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_7_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#75",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_8_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#76",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_8_short",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#77",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_8_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#78",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interval_4_8_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#79",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e-150_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#80",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e-150_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#81",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e-150_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#82",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e-150_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#83",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e+150_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#84",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e+150_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#85",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e+150_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#86",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_2_1e+150_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#87",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e-150_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#88",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e-150_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#89",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e-150_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#90",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e-150_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#91",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e+150_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#92",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e+150_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#93",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e+150_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#94",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "weight_18_1e+150_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#95",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_5_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#0",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_5_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#1",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_5_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#2",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_5_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#3",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_6_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#4",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_6_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#5",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_6_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#6",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_6_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#7",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_7_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#8",
+      "values_compared": 755
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ellipse_7_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#9",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ellipse_7_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#10",
+      "values_compared": 755
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ellipse_7_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#11",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 0,
+        "kind": 0,
+        "op": 5,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_0_5",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#12",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 0,
+        "kind": 0,
+        "op": 6,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_0_6",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#13",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 0,
+        "kind": 0,
+        "op": 7,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_0_7",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#14",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 1,
+        "kind": 0,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_0_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#15",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 0,
+        "kind": 2,
+        "op": 5,
+        "points": [
+          [0, 0, 0, 1e-15],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_2_5",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#16",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 0,
+        "kind": 2,
+        "op": 6,
+        "points": [
+          [0, 0, 0, 1e-15],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_2_6",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#17",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 0,
+        "kind": 2,
+        "op": 7,
+        "points": [
+          [0, 0, 0, 1e-15],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_2_7",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#18",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "face_kind": 1,
+        "kind": 2,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1e-15],
+          [1e-15, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1]
+      },
+      "max_rel_err": 0.0,
+      "name": "rejected_constructor_2_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#19",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_0_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#20",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_0_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#21",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_0_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#22",
+      "values_compared": 755
+    },
+    {
+      "inputs": {
+        "epsilon": 1e-14,
+        "face_kind": 1,
+        "kind": 0,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-9, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_0_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#23",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_1_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#24",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_1_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#25",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_1_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#26",
+      "values_compared": 755
+    },
+    {
+      "inputs": {
+        "epsilon": 1e-14,
+        "face_kind": 1,
+        "kind": 1,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-9, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_1_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#27",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_2_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#28",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_2_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#29",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_2_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#30",
+      "values_compared": 755
+    },
+    {
+      "inputs": {
+        "epsilon": 1e-14,
+        "face_kind": 1,
+        "kind": 2,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1e-9],
+          [1e-9, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_2_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#31",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_3_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#32",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_3_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#33",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_3_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#34",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_3_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#35",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_4_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#36",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_4_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#37",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_4_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#38",
+      "values_compared": 755
+    },
+    {
+      "inputs": {
+        "epsilon": 1e-14,
+        "face_kind": 1,
+        "kind": 4,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1],
+          [1e-9, 0, 0, 1]
+        ],
+        "sweep": [0, 0, 1e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_4_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#39",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_5_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#40",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_5_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#41",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_5_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#42",
+      "values_compared": 755
+    },
+    {
+      "inputs": {
+        "epsilon": 1e-14,
+        "face_kind": 1,
+        "kind": 5,
+        "op": 8,
+        "points": [
+          [0, 0, 0, 1e-9],
+          [1e-9, 0, 0, 5e-10]
+        ],
+        "sweep": [0, 0, 1e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "nanoscale_fixture_5_8",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/review.json#43",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#0 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#1 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#2 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#3 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#4 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#5 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#6 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#7 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_translate_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#8 (upstream tests/prog_test/src/smSweepTest.cpp:1370)",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#9",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_0_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#10",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_0_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#11",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_0_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#12",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#13",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_1_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#14",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_1_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#15",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_1_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#16",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_2_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#17",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_2_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#18",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_2_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#19",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_2_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#20",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_3_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#21",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_3_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#22",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_3_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#23",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_3_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#24",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_4_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#25",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_4_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#26",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_4_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#27",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_4_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#28",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_6_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#29",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_6_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#30",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_6_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#31",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_6_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#32",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_7_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#33",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_7_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#34",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_7_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#35",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_7_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#36",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_8_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#37",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_8_1.999999999e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#38",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_8_2e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#39",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "length_boundary_8_2.000000001e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#40",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(1, 0, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#41",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(1, 0, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#42",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(0, 1, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#43",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(0, 1, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#44",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(0, 0, 1)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#45",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(0, 0, 1)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#46",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(1, 1, 1)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#47",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(1, 1, 1)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#48",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(1, 2, 3)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#49",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(1, 2, 3)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#50",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(-1, -2, -3)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#51",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(-1, -2, -3)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#52",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(1e-15, 0, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#53",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(1e-15, 0, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#54",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_0_(1e-13, 0, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#55",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "frame_1_(1e-13, 0, 0)",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#56",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_5_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#57",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_5_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#58",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_5_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#59",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_5_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#60",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_6_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#61",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_6_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#62",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_6_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#63",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_6_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#64",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_7_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#65",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_7_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#66",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_7_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#67",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_0_7_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#68",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_5_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#69",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_5_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#70",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_5_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#71",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_5_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#72",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_6_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#73",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_6_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#74",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_6_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#75",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_6_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#76",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_7_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#77",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_7_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#78",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_7_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#79",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_1_7_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#80",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_5_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#81 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_5_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#82 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_5_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#83 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_5_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#84 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_6_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#85 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_6_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#86 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_6_True_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#87 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_6_True_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#88 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_7_False_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#89 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "geometry_2_7_False_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#90 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 755
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "geometry_2_7_True_False",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#91 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "geometry_2_7_True_True",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#92 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "parallel_5_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#93",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "parallel_5_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#94",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "parallel_7_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#95",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "parallel_7_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#96",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "distinct_tolerances_6_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#97",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "distinct_tolerances_6_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#98",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "distinct_tolerances_7_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#99",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "distinct_tolerances_7_True",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#100",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curved_surface_7_False",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#101",
+      "values_compared": 755
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "curved_surface_7_True",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#102",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "curved_surface_8_False",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#103",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "curved_surface_8_True",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#104",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closed_cubic_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#105",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rational_cubic_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#106",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closed_cubic_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#107",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rational_cubic_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#108",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closed_cubic_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#109",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rational_cubic_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#110",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e-99_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#111",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e-99_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#112",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e-99_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#113",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e-99_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#114",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e-99_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#115",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+99_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#116",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+99_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#117",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+99_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#118",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+99_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#119",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+99_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#120",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+150_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#121",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+150_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#122",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+150_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#123",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+150_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#124",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extreme_scale_1e+150_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#125",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_interval_[0.5, 0.5]",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#126",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_interval_[-0.1, 1.1]",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#127",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_interval_[0.0, 1e-14]",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#128",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_glue_threshold_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#129 (upstream source/SMLib/src/SmBrep.cpp:2289)",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_glue_threshold_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#130 (upstream source/SMLib/src/SmBrep.cpp:2289)",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "hermite_dispatch_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#131",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "hermite_dispatch_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#132",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "hermite_dispatch_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#133",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "planar_curve_dimension_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#134",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "planar_curve_dimension_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#135",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667757",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667758",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667759",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667760",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667761",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667762",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667763",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667764",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667765",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667766",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667767",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667768",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667769",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667770",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667771",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667772",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667773",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667774",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667775",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667776",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667777",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667778",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667779",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667780",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667781",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667782",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667783",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667784",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667785",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667786",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667787",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667788",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667789",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667790",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667791",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667792",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667793",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667794",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667795",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667796",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667797",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667798",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667799",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667800",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667801",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667802",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667803",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667804",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667805",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667806",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667807",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667808",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667809",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667810",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667811",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667812",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667813",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667814",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667815",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667816",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667817",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667818",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667819",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667820",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667821",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667822",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667823",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667824",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667825",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667826",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667827",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667828",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667829",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667830",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667831",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667832",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667833",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667834",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667835",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667836",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667837",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667838",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667839",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667840",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667841",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667842",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667843",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667844",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667845",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667846",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667847",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667848",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667849",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667850",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667851",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667852",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667853",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667854",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667855",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667856",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667857",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667858",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667859",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667860",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667861",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667862",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667863",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667864",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667865",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667866",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667867",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667868",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667869",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667870",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667871",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667872",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667873",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667874",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667875",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667876",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667877",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667878",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667879",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667880",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667881",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667882",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667883",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667884",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667885",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667886",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667887",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667888",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667889",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667890",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667891",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667892",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667893",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667894",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667895",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667896",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667897",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667898",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667899",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667900",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667901",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667902",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667903",
+      "values_compared": 2
+    },
+    {
+      "inputs": {
+        "analytics": true,
+        "epsilon": 1.0000000000000002e-14,
+        "face_kind": 1,
+        "interval": [0.0, 1.0],
+        "kind": 0,
+        "op": 8,
+        "point": [-8.72796506765915e-10, 6.302361631418542e-10, 4.1400053997564506e-10],
+        "points": [
+          [0.0, -8.109820042440883e-10, -7.57483351680406e-10, 1.6348492575158358],
+          [5.012082186165608e-10, 1.115810224138126e-10, 6.814763355888275e-11, 0.5012082186165607],
+          [3.291234616917177e-9, -4.348386664373151e-10, -7.844201303874141e-10, 1.6456173084585886]
+        ],
+        "swap": true,
+        "sweep": [1.189627962045305e-9, 1.8041657899101447e-9, 1.0983876439920617e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "generated:seed=12482191920730667904",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667905",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667906",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667907",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667908",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667909",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667910",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667911",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667912",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667913",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667914",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667915",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667916",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667917",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667918",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667919",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667920",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667921",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667922",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667923",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667924",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667925",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667926",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667927",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667928",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667929",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667930",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667931",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667932",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667933",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667934",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667935",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667936",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667937",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667938",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667939",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667940",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667941",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667942",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667943",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667944",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667945",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667946",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667947",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667948",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667949",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667950",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667951",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667952",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667953",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667954",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667955",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667956",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667957",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667958",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667959",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667960",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667961",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667962",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667963",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667964",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667965",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667966",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667967",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667968",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667969",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667970",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667971",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667972",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667973",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667974",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667975",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667976",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667977",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667978",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667979",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667980",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667981",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667982",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667983",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667984",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667985",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667986",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667987",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667988",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667989",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667990",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667991",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667992",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667993",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730667994",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667995",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667996",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667997",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667998",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730667999",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668000",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668001",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668002",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668003",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668004",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668005",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668006",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668007",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668008",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668009",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668010",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668011",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668012",
+      "values_compared": 5
+    },
+    {
+      "inputs": {
+        "analytics": false,
+        "epsilon": 1.0000000000000002e-14,
+        "face_kind": 1,
+        "interval": [0.0, 1.0],
+        "kind": 0,
+        "op": 8,
+        "point": [7.507646027405886e-11, 9.047115965342486e-10, -6.300763607401334e-10],
+        "points": [
+          [0.0, 7.894621776681513e-10, -7.164602206101312e-11, 1.0],
+          [1e-9, 8.282640858107371e-10, 4.3459438163813837e-10, 1.0],
+          [2e-9, -7.009728386498063e-10, -4.577511449017746e-10, 1.0],
+          [3.0000000000000004e-9, 7.044518885081368e-10, -2.642627579357642e-10, 1.0]
+        ],
+        "swap": false,
+        "sweep": [4.964153744080725e-10, -1.0055622249361411e-9, 2.4710770106172747e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "generated:seed=12482191920730668013",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668014",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668015",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668016",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668017",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668018",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668019",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668020",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668021",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668022",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668023",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668024",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668025",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668026",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668027",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668028",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668029",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668030",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668031",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668032",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668033",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668034",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668035",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668036",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668037",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668038",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668039",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668040",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668041",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668042",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668043",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668044",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668045",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668046",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668047",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668048",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668049",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668050",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668051",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668052",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668053",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668054",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668055",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668056",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668057",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668058",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668059",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668060",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668061",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668062",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668063",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668064",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668065",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668066",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0310",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668067",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668068",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668069",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668070",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668071",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668072",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0316",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668073",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668074",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668075",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668076",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0320",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668077",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668078",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0322",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668079",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0323",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668080",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668081",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668082",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668083",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0327",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668084",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668085",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668086",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0330",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668087",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668088",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668089",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668090",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668091",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0335",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668092",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668093",
+      "values_compared": 13
+    },
+    {
+      "inputs": {
+        "analytics": false,
+        "epsilon": 1.0000000000000002e-14,
+        "face_kind": 1,
+        "interval": [0.2, 0.8],
+        "kind": 0,
+        "op": 8,
+        "point": [2.4842438442706767e-10, -4.823665969696633e-10, -5.603316777780298e-11],
+        "points": [
+          [0.0, -8.812036072563774e-10, -5.425617179534759e-10, 1.0],
+          [1e-9, -8.455698801208609e-10, -5.2404310320173454e-11, 1.0]
+        ],
+        "swap": false,
+        "sweep": [-1.5830490129859066e-10, -5.851359605344886e-11, 1.696174557147205e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "generated:seed=12482191920730668094",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668095",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668096",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668097",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0341",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668098",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668099",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668100",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668101",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668102",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668103",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668104",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668105",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0349",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668106",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0350",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668107",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668108",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0352",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668109",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668110",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668111",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668112",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668113",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0357",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668114",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668115",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668116",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0360",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668117",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0361",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668118",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0362",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668119",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0363",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668120",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0364",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668121",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0365",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668122",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0366",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668123",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0367",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668124",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0368",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668125",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0369",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668126",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0370",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668127",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0371",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668128",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0372",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668129",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0373",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668130",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0374",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668131",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0375",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668132",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0376",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668133",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0377",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668134",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0378",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668135",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0379",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668136",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0380",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668137",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0381",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668138",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0382",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668139",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0383",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668140",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0384",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668141",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0385",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668142",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "analytics": true,
+        "epsilon": 1.0000000000000002e-14,
+        "face_kind": 1,
+        "interval": [0.2, 0.8],
+        "kind": 0,
+        "op": 8,
+        "point": [2.4910491425812464e-10, -5.040787504490263e-10, 5.67525072488116e-10],
+        "points": [
+          [0.0, -7.863564272269543e-10, -7.601608415807329e-10, 1.0],
+          [1e-9, 5.962623963545055e-11, -1.8685548489322002e-10, 1.0],
+          [2e-9, -3.993957334436567e-10, 6.150169735960331e-10, 1.0],
+          [3.0000000000000004e-9, 1.1900864606402119e-10, 9.62929124911043e-10, 1.0]
+        ],
+        "swap": true,
+        "sweep": [-3.3092137466176875e-10, -2.4147694029977185e-10, 2.1200792102315688e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0386",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "generated:seed=12482191920730668143",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0387",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668144",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0388",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668145",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0389",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668146",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0390",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668147",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0391",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668148",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0392",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668149",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0393",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668150",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0394",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668151",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0395",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668152",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0396",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668153",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0397",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668154",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0398",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668155",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0399",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668156",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0400",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668157",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0401",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668158",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0402",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668159",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0403",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668160",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0404",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668161",
+      "values_compared": 13
+    },
+    {
+      "inputs": {
+        "analytics": false,
+        "epsilon": 1.0000000000000002e-14,
+        "face_kind": 1,
+        "interval": [0.0, 1.0],
+        "kind": 4,
+        "op": 8,
+        "point": [4.515650460434597e-10, 9.158261432014782e-10, -9.276275837096455e-10],
+        "points": [
+          [0.0, 9.747328335154149e-11, -5.849632171299413e-10, 1.0],
+          [1e-9, -5.934907621401602e-10, -4.4672088478566566e-10, 1.0]
+        ],
+        "swap": true,
+        "sweep": [-1.7096994047895998e-10, -1.596843749724113e-10, 1.8539861149960007e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0405",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "generated:seed=12482191920730668162",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0406",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668163",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0407",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668164",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0408",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668165",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0409",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668166",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0410",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668167",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0411",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668168",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0412",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668169",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0413",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668170",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0414",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668171",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0415",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668172",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0416",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668173",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0417",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668174",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0418",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668175",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0419",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668176",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0420",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668177",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0421",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668178",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0422",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668179",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0423",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668180",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0424",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668181",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0425",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668182",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0426",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668183",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0427",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668184",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0428",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668185",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0429",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668186",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0430",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668187",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0431",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668188",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0432",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668189",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0433",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668190",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0434",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668191",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0435",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668192",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0436",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668193",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0437",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668194",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0438",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668195",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0439",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668196",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0440",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668197",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0441",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668198",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0442",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668199",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0443",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668200",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0444",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668201",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0445",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668202",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0446",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668203",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0447",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668204",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0448",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668205",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0449",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668206",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0450",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668207",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0451",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668208",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0452",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668209",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0453",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668210",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0454",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668211",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0455",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668212",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0456",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668213",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0457",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668214",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0458",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668215",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0459",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668216",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0460",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668217",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0461",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668218",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0462",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668219",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0463",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668220",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0464",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668221",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0465",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668222",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0466",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668223",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0467",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668224",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0468",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668225",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0469",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668226",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0470",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668227",
+      "values_compared": 13
+    },
+    {
+      "inputs": {
+        "analytics": true,
+        "epsilon": 1.0000000000000002e-14,
+        "face_kind": 1,
+        "interval": [0.0, 1.0],
+        "kind": 5,
+        "op": 8,
+        "point": [-7.22472120351679e-10, 5.089777793316373e-10, -5.978580795086311e-12],
+        "points": [
+          [0.0, 9.311234016015267e-10, -8.395465832652217e-10, 6.797137610906548e-10],
+          [1e-9, 7.040890564092353e-10, 3.2768653853515906e-10, 1.0],
+          [2e-9, 8.189709987517226e-10, 7.322641195075533e-10, 1.0],
+          [3.0000000000000004e-9, -9.246114037899078e-11, -3.7137018160155914e-10, 1.0],
+          [4e-9, -2.0772608235433367e-11, 8.262012686201333e-10, 3.398568805453274e-10]
+        ],
+        "swap": false,
+        "sweep": [-3.888798031869616e-10, -7.879960177576e-10, 1.0895499602282603e-9],
+        "tolerances": [1e-15, 1e-15, 1e-15, 1e-15]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0471",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor rejected the geometry before the sweep",
+      "source": "generated:seed=12482191920730668228",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0472",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668229",
+      "values_compared": 755
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0473",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668230",
+      "values_compared": 68
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0474",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668231",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0475",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668232",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0476",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668233",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0477",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668234",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0478",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668235",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0479",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668236",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0480",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668237",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0481",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668238",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0482",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668239",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0483",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668240",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0484",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668241",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0485",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668242",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0486",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668243",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0487",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668244",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0488",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668245",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0489",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668246",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0490",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668247",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0491",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668248",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0492",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668249",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0493",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668250",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0494",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668251",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0495",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668252",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0496",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668253",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0497",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668254",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0498",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668255",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0499",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668256",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0500",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668257",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0501",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12482191920730668258",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0502",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668259",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0503",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668260",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0504",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668261",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0505",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668262",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0506",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668263",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0507",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668264",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0508",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668265",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0509",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668266",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0510",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668267",
+      "values_compared": 68
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0511",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12482191920730668268",
+      "values_compared": 13
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 50,
+  "cases_failed": 0,
+  "cases_passed": 719,
+  "cases_rejected": 19,
+  "cases_total": 788,
+  "deferred_by_unit": {
+    "surface.cone_p2": 50
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "sweep.trans_sweep_geometry"
+}

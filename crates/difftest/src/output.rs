@@ -15,6 +15,8 @@ use solidcore::SolidError;
 ///   [`Output::unported`]) when the port reached code that is not ported yet
 ///   ([`SolidError::Unported`]). The case is then *deferred*: neither pass nor
 ///   fail, and nothing is compared (AGENTS.md section 4a).
+/// * `rejected`: set by the C++ side only when fixture construction failed before
+///   the operation ran. No Rust call or parity comparison is made.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Output {
     /// Named float arrays.
@@ -27,6 +29,8 @@ pub struct Output {
     pub error: Option<String>,
     /// The Rust side hit an unported callee; the case is deferred.
     pub deferred: Option<Deferred>,
+    /// The native fixture constructor rejected the input before the operation ran.
+    pub rejected: Option<String>,
 }
 
 /// Why a case is deferred: the unported upstream callee and the unit that will port it.
@@ -42,6 +46,15 @@ impl Output {
     /// Empty output.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Native fixture construction failed before the operation under test ran.
+    /// This is neither a parity pass nor a failure; only the C++ side may set it.
+    pub fn rejected(reason: impl Into<String>) -> Self {
+        Self {
+            rejected: Some(reason.into()),
+            ..Self::default()
+        }
     }
 
     /// Output representing a failed operation.

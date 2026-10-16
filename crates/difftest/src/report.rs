@@ -21,6 +21,10 @@ fn case_json(c: &CaseResult) -> Value {
     m.insert("source".into(), json!(c.source.describe()));
     m.insert("pass".into(), json!(c.pass()));
     m.insert("outcome".into(), json!(c.outcome().as_str()));
+    if let Some(reason) = &c.rejected {
+        m.insert("rejected".into(), json!(reason));
+        m.insert("inputs".into(), c.inputs.clone());
+    }
     if let Some(d) = &c.deferred {
         m.insert(
             "deferred".into(),
@@ -77,6 +81,9 @@ pub fn unit_report(r: &UnitResult) -> Value {
     m.insert("cases_passed".into(), json!(r.passed()));
     m.insert("cases_failed".into(), json!(r.failed()));
     m.insert("cases_deferred".into(), json!(r.deferred()));
+    if r.rejected() > 0 {
+        m.insert("cases_rejected".into(), json!(r.rejected()));
+    }
     let by_unit: Map<String, Value> = r
         .deferred_by_unit()
         .into_iter()
@@ -123,6 +130,9 @@ pub fn summary_line(r: &UnitResult) -> String {
         r.deferred(),
         r.max_rel_err()
     );
+    if r.rejected() > 0 {
+        let _ = write!(s, " rejected={}", r.rejected());
+    }
     let blocked: Vec<String> = r
         .deferred_by_unit()
         .iter()
@@ -135,6 +145,8 @@ pub fn summary_line(r: &UnitResult) -> String {
         let _ = write!(s, " harness_error={h:?}");
     } else if r.cases.is_empty() {
         s.push_str(" (no cases)");
+    } else if r.cases.len() == r.rejected() {
+        s.push_str(" (no comparable cases)");
     }
     s
 }

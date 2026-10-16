@@ -43,6 +43,10 @@
 //!   what `smgu_FrenetFromDerivatives` wrote before failing (see
 //!   `evaluate_geometric_partial`).
 
+//!
+//! The crate-private `global_property_analysis_into` retains solutions when a later
+//! solve fails, for callers that ignore the upstream status and inspect its outputs.
+
 use crate::curve::curve::p2::{
     at, evaluate_continuity, CciGlobalSolver, Curve, CurvePropertyGs, CurvePropertyType,
 };
@@ -1045,10 +1049,30 @@ impl Curve {
         dist_tol: f64,
         opts: &PropertyAnalysisOptions<'_, O>,
     ) -> Result<PropertyAnalysis<O>> {
+        let mut out = PropertyAnalysis {
+            solutions: SolutionArray::new(),
+            comb_points: Vec::new(),
+            comb_vecs: Vec::new(),
+        };
+        self.global_property_analysis_into(k, interval, property, dist_tol, opts, &mut out)?;
+        Ok(out)
+    }
+
+    /// `GlobalPropertyAnalysis` with outputs retained even when a later solve fails.
+    /// For upstream callers that ignore its status but inspect partial solutions.
+    pub(crate) fn global_property_analysis_into<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        property: CurvePropertyType,
+        dist_tol: f64,
+        opts: &PropertyAnalysisOptions<'_, O>,
+        out: &mut PropertyAnalysis<O>,
+    ) -> Result<()> {
         type P = CurvePropertyType;
 
         // init output
-        let mut out = PropertyAnalysis {
+        *out = PropertyAnalysis {
             solutions: SolutionArray::new(),
             comb_points: Vec::new(),
             comb_vecs: Vec::new(),
@@ -1077,7 +1101,7 @@ impl Curve {
         if property == P::PerpendicularToVector {
             // For a line, either every point or no point is a solution.
             if self.is_linear(EFF_ZERO, false)?.linear {
-                return Ok(out);
+                return Ok(());
             }
 
             let planar = self.is_planar(k, EFF_ZERO)?;
@@ -1085,7 +1109,7 @@ impl Curve {
                 // (status ignored: a failed angle is 0)
                 let angle = planar.normal.angle_between(opt(0)?).unwrap_or(0.0);
                 if angle < EFF_ZERO {
-                    return Ok(out);
+                    return Ok(());
                 }
             }
         } // end perp-to-vector check
@@ -1361,7 +1385,7 @@ impl Curve {
             }
         } // end pOptCombPoints && pOptCombVecs existence check
 
-        Ok(out)
+        Ok(())
     }
 }
 

@@ -75,6 +75,16 @@ The report records `status`, `cases_passed`/`cases_failed`/`cases_deferred`,
 blocking unit lands and its stubs are wired, re-run: the deferred count drops
 and the unit can move from `partial` to `green`.
 
+## Rejected native fixtures
+
+When a native fixture constructor rejects geometry before the operation under test
+runs, its runner may return `Output::rejected(reason)` from `run_cpp`. The harness
+records the inputs and reason with `outcome: "rejected"`, skips the Rust call and
+excludes the case from parity passes, failures and sensitivity counts. Reports and
+summaries include a rejected count when nonzero. A run containing only rejected
+fixtures fails the gate: rejection cannot establish parity. Layout errors, native
+exceptions and errors from the operation itself must not be classified this way.
+
 ## Pass criteria (fixed; never weaken)
 
 * **Topology / integers / error strings**: identical, same counts and order.

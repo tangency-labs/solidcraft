@@ -221,9 +221,17 @@ fn main() -> ExitCode {
         if args.perturb {
             let (n, caught) = res.perturb_stats();
             let ok = n > 0 && n == caught;
-            let unperturbed = res.cases.len().saturating_sub(n + res.deferred());
+            let unperturbed = res
+                .cases
+                .len()
+                .saturating_sub(n + res.deferred() + res.rejected());
+            let rejected = if res.rejected() == 0 {
+                String::new()
+            } else {
+                format!(" rejected={}", res.rejected())
+            };
             println!(
-                "{} {id} perturbed={n} detected={caught} unperturbed={unperturbed} deferred={} \
+                "{} {id} perturbed={n} detected={caught} unperturbed={unperturbed} deferred={}{rejected} \
                  (perturb mode: every perturbed case must FAIL)",
                 if ok { "SENSITIVE" } else { "INSENSITIVE" },
                 res.deferred()
