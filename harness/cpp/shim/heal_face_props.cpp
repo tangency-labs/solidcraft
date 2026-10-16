@@ -8,7 +8,7 @@
 // AdjustSTEPUVDomain: cylinder, cone, sphere and torus kinds, open or closed) owned by the
 // face, with one vertex loop or edge loops of SmLine edges (the first loop outer, the others
 // holes). Layout and ops: crates/solidcore-ffi/src/units/heal_face_props.rs (which validates
-// the script, including UB-127: a script that makes SetProps_Stage2 / Stage3 dereference the
+// the script, including UB-131: a script that makes SetProps_Stage2 / Stage3 dereference the
 // NULL m_pFace is rejected there; and UB-128: Stage 3 on a degenerate plane with edge loops). After every op the shim appends a snapshot of the face
 // props (SNAP_LEN values; for op 8 the SmLoopProps of the first loops).
 //

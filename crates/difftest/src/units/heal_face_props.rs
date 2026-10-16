@@ -20,7 +20,7 @@
 //! face tolerance reaches `GetSingularities` through `SmFace::GetTolerance`.
 //!
 //! **Scripts are guarded.** [`ffi::validate`] runs on both sides and rejects what crashes or is
-//! undefined upstream (including the scripts of UB-127: `SetProps_Stage2` / `Stage3` on a
+//! undefined upstream (including the scripts of UB-131: `SetProps_Stage2` / `Stage3` on a
 //! stage past `GAPSa` with no face pointer, `plan/upstream-issues.md`). A fixture case with
 //! `expect_rejected` is a regression case for the guard: both sides must reject it (the
 //! error `rejected`); the C++ is never called for it.
@@ -1044,7 +1044,7 @@ fn gen_op(rng: &mut Rng) -> [f64; 5] {
         8 | 9 => [8.0, 0.0, 0.0, 0.0, 0.0],
         _ => {
             // a seed; the stage seed is followed by a face seed (a stage past the gaps
-            // with no face would be dereferenced upstream, UB-127)
+            // with no face would be dereferenced upstream, UB-131)
             let field = rng.range_i64(0, 25);
             let v = match field {
                 1 | 2 => *rng.choose(&[1e-5, 1e-3, 0.0, 0.5]).unwrap_or(&1e-5),

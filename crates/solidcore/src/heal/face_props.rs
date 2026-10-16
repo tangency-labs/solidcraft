@@ -1612,7 +1612,7 @@ impl<O: LoopObject> FaceProps<O> {
         }
 
         // extra work - get props that need to be built before these props
-        // (UB-127: for a stage at or past GapsA the call returns at once, so the re-run
+        // (UB-131: for a stage at or past GapsA the call returns at once, so the re-run
         // that `self.face != Some(face)` asks for never happens; upstream then reads
         // `m_pFace` unchecked below. Here a missing face is `InvalidInput`, and the
         // props keep the other face's values if the face differs.)

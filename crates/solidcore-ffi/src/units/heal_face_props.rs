@@ -31,7 +31,7 @@
 //! `1e-3`, stage and heal op codes in range, field ids in range with values in the range
 //! of their field (an unsigned member takes no negative value: the cast is undefined),
 //! and scripts that would dereference the null face pointer of upstream's `SetProps_Stage2` /
-//! `SetProps_Stage3` ([`validate`] simulates the stage and face pointer; UB-127,
+//! `SetProps_Stage3` ([`validate`] simulates the stage and face pointer; UB-131,
 //! `plan/upstream-issues.md`).
 
 use crate::{call_with_buffer, FfiError};
@@ -286,7 +286,7 @@ fn sim_gaps(s: State) -> State {
     }
 }
 
-/// `SetProps_Stage2`; `None` when it would dereference a null `m_pFace` (UB-127).
+/// `SetProps_Stage2`; `None` when it would dereference a null `m_pFace` (UB-131).
 fn sim_stage2(s: State, heal: f64) -> Option<Outcomes> {
     if s.0 >= STAGE2_A {
         return Some(vec![(s, true)]);
@@ -305,7 +305,7 @@ fn sim_stage2(s: State, heal: f64) -> Option<Outcomes> {
     Some(vec![((STAGE2_A, true), false), ((STAGE2, true), true)])
 }
 
-/// `SetProps_Stage3`; `None` when it would dereference a null `m_pFace` (UB-127).
+/// `SetProps_Stage3`; `None` when it would dereference a null `m_pFace` (UB-131).
 fn sim_stage3(s: State, heal: f64) -> Option<Outcomes> {
     if s.0 >= STAGE3_A {
         return Some(vec![(s, true)]);
@@ -337,7 +337,7 @@ fn sim_stage3(s: State, heal: f64) -> Option<Outcomes> {
 }
 
 /// `SetProps(stage, face, index, heal)`: the calls it makes, in order, on every state it
-/// can be in; `None` when one of them would dereference a null `m_pFace` (UB-127).
+/// can be in; `None` when one of them would dereference a null `m_pFace` (UB-131).
 fn sim_set_props(s: State, stage: i64, heal: f64) -> Option<Vec<State>> {
     let mut cur: Vec<State> = vec![s];
     // SetProps_Gaps (HasProps_Stage1: stage >= GAPS)
@@ -376,7 +376,7 @@ fn sim_set_props(s: State, stage: i64, heal: f64) -> Option<Vec<State>> {
 }
 
 /// Rejects scripts in which `SetProps_Stage2` or `SetProps_Stage3` would dereference a null
-/// `m_pFace` (UB-127): `SetProps_Gaps` returns early from `GAPSa` on, so the re-run that
+/// `m_pFace` (UB-131): `SetProps_Gaps` returns early from `GAPSa` on, so the re-run that
 /// `m_pFace != cpFace` asks for never sets the face.
 fn simulate(ops: &[Op]) -> Result<(), FfiError> {
     let mut states: Vec<State> = vec![(0, false)];
@@ -419,7 +419,7 @@ fn simulate(ops: &[Op]) -> Result<(), FfiError> {
                 Some(v) => next.extend(v),
                 None => {
                     return bad(
-                        "script would dereference the null face of SetProps_Stage2/3 (UB-127)",
+                        "script would dereference the null face of SetProps_Stage2/3 (UB-131)",
                     )
                 }
             }
@@ -723,14 +723,14 @@ mod tests {
         Op { op, p }
     }
 
-    /// UB-127: `ReSet(2a)` then `SetProps(2)` dereferences the null face upstream.
+    /// UB-131: `ReSet(2a)` then `SetProps(2)` dereferences the null face upstream.
     #[test]
     fn rejects_reset_then_stage2() {
         let ops = [op(1, [3.0, 0.0, 0.0, 0.0]), op(0, [4.0, 26.0, 0.0, 0.0])];
         assert!(validate(&plane(), &ops).is_err());
     }
 
-    /// UB-127: a seeded stage `GAPS` then Stage2.
+    /// UB-131: a seeded stage `GAPS` then Stage2.
     #[test]
     fn rejects_seeded_gaps_then_stage2() {
         let ops = [op(5, [0.0, 0.0, 2.0, 0.0]), op(6, [2.0, 26.0, 0.0, 0.0])];
