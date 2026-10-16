@@ -1887,10 +1887,10 @@ soft_depends_on = ["curve.curve_p4", "curve.ellipse_p1", "curve.ellipse_p2", "cu
 est_lines = 1939
 layer = 29
 tests = ["prog_test:my_test_surface_interface", "prog_test:my_test_ssi", "prog_test:my_test_tsurf_section", "prog_test:my_test_planar_section", "prog_test:my_test_section", "prog_test:my_test_edge_geometry_repairs", "pt_TestFiles/shovel.srf"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "4 fns; largest: SmCone::IntersectWithPlane, SmCone::IntersectWithCone, sm_AddEllipseIntervalsTrimmedToTwoCones, SmCone::GlobalSurfaceIntersect; cycle back-edges (call into later units; stub or co-port): surface.surf_of_extrusion_p2(1), surface.surface_p11(1); unit-SCC #22 (220 units); 144 upstream test entry points reach this unit"
+notes = "PARTIAL (PR #131): 1308 difftest cases (108 fixtures + 1200 generated), 1187 pass bit-identical, 0 failed, 121 deferred (surface.cone_p2 91: sm_GetEllipseTrimIntervals; surface.surface_p2 30: Cone/Cylinder SurfaceKind adapter for the merged IntersectSurfaceBoundaries), max_rel_err 0, no absolute floors; 10108-case stress run clean (9048 pass, 1060 deferred), all 1187 default perturbations detected. Review follow-up adds optional/zero/negative/system-default tolerance fixtures, 320 native dispatch combinations and 14 constructor probes; native FFI tests are validated locally, separately from the unchanged CI workflow. Maintainer review: UB-123 documented; boundary bundles checked before duplicate removal; general fallback resets outputs. Global dispatch retains original arguments through a typed general-intersector callback until SurfaceKind can hold cones; sphere/shared Surface dispatch remains a documented gap (issue #76). 4 fns; largest: SmCone::IntersectWithPlane, SmCone::IntersectWithCone, sm_AddEllipseIntervalsTrimmedToTwoCones, SmCone::GlobalSurfaceIntersect; cycle back-edges (call into later units; stub or co-port): surface.surf_of_extrusion_p2(1), surface.surface_p11(1); unit-SCC #22 (220 units); 144 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_p1"
