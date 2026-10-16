@@ -5228,7 +5228,7 @@ mutated scales and accepted/reduced step counts are compared.
 - **Maintainer review (PR #138).** `MergeInterval` with fillets now requires
   equally sized partner classifications in both `validate` and the raw C++ shim,
   preventing `sm_SetDoFilletingGeometry` from indexing an absent partner interval
-  (UB-133). Six `rejected_fillets_*` fixtures cover empty, short and long partners,
+  (UB-136). Six `rejected_fillets_*` fixtures cover empty, short and long partners,
   both full and vertices-only merges, and VERTEX/EDGE/VERTEX, FACE and REGION
   classifications. Another 660 subprocesses check wrapper rejection and raw-shim
   rejection independently at first/last indices of 1/2/3/32 intervals across all
