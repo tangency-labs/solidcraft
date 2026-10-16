@@ -2,13 +2,12 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**185 / 261 units ported** (99 green, 86 partial), **251,541 / 387,903 upstream lines (64.8%)**. 29 claimed, 0 blocked, 47 todo.
+**186 / 261 units ported** (99 green, 87 partial), **253,118 / 387,903 upstream lines (65.3%)**. 29 claimed, 0 blocked, 46 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
 ## Ready to claim now
 
-- [ ] ▶️ `surface.cone_p2` (1656 lines) — ready
 - [ ] ▶️ `topology.shell` (750 lines) — ready
 
 ## Claimable now, dependencies still missing
@@ -31,7 +30,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `heal.heal_data_p3` (1967 lines) — missing: `heal.heal_data_p1`, `topology.brep_p5`
 - [ ] `heal.stitch_p2` (1906 lines) — missing: `heal.stitch_p1`, `topology.brep_p1`, `topology.face_p3`
 - [ ] `blend.fillet_solver_p4` (1404 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_intersector`, `blend.fillet_solver_p1`, `surface.offset_surface`
-- [ ] `boolean.topology_intersector_p2` (2195 lines) — missing: `boolean.topology_intersector_p1`, `topology.face_p4`, `topology.proto_topology_p3`
+- [ ] `boolean.topology_intersector_p2` (2195 lines) — missing: `boolean.topology_intersector_p1`, `topology.face_p4`
 - [ ] `offset.offset_geometry_creation` (2652 lines) — missing: `surface.offset_surface`
 - [ ] `sweep.topology_sweep` (2456 lines) — missing: `heal.stitch_p1`, `topology.brep_p1`, `topology.brep_p3`, `topology.brep_p5` +2 more
 - [ ] `boolean.topology_intersector_p3` (1849 lines) — missing: `boolean.topology_intersector_p1`, `boolean.topology_intersector_p2`
@@ -63,6 +62,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 ## In progress
 
+- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
 - [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (ready for review)
 - [ ] 🔨 `surface.surface_p8` (2374 lines) — in progress: #118 @froglemonade2 (ready for review)
@@ -71,7 +71,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `intersect.surface_drop_lib_p3` (2062 lines) — in progress: #136 @froglemonade2 (draft)
 - [ ] 🔨 `intersect.curve_class_p4` (2022 lines) — in progress: #137 @froglemonade2 (draft)
 - [ ] 🔨 `intersect.curve_class_p6` (2213 lines) — in progress: #138 @damgru (ready for review)
-- [ ] 🔨 `intersect.curve_class_p5` (2017 lines) — in progress: #150 @Karl-VonRichter (draft)
+- [ ] 🔨 `intersect.curve_class_p5` (2017 lines) — in progress: #150 @Karl-VonRichter (ready for review)
 - [ ] 🔨 `intersect.curve_class_p8` (1900 lines) — in progress: #152 @Karl-VonRichter (draft)
 - [ ] 🔨 `intersect.curve_class_p9` (1220 lines) — in progress: #151 @Karl-VonRichter (draft)
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
@@ -88,7 +88,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_geom_p1` (2113 lines) — in progress: #147 @bluecmd (draft)
 - [ ] 🔨 `query.brep` (517 lines) — in progress: #101 @0xlillith (draft)
 - [ ] 🔨 `heal.heal_data_p1` (922 lines) — in progress: #109 @bherbruck (ready for review)
-- [ ] 🔨 `topology.proto_topology_p3` (1577 lines) — in progress: #121 @froglemonade2 (ready for review)
 - [ ] 🔨 `boolean.topology_intersector_p1` (2491 lines) — in progress: #146 @bluecmd (draft)
 - [ ] 🔨 `sweep.rotational_sweep_geometry` (1542 lines) — in progress: #126 @bherbruck (ready for review)
 - [ ] 🔨 `sweep.trans_sweep_geometry` (817 lines) — in progress: #127 @damgru (ready for review)
@@ -226,7 +225,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_cache_p2` (1245 lines) — partial, 905 cases
 - [x] ✅ `surface.torus` (1180 lines) — green, 563 cases
 - [ ] 🟡 `surface.unbend_volume` (920 lines) — partial, 1874 cases
-- [ ] ▶️ `surface.cone_p2` (1656 lines) — ready
+- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
 - [ ] 🟡 `surface.surf_of_revolution_p2` (1369 lines) — partial, 1167 cases
 - [ ] 🟡 `surface.surface_cache_p3` (1703 lines) — partial, 600 cases
 - [ ] 🟡 `surface.volume_p2` (1490 lines) — partial, 11220 cases
@@ -249,7 +248,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_point_solve_p2` (1882 lines) — partial, 1320 cases
 - [ ] 🟡 `surface.surface_point_solve_p3` (1282 lines) — partial, 1365 cases
 
-### topology (15/31)
+### topology (16/31)
 
 - [x] ✅ `topology.database_io` (363 lines) — green, 2059 cases
 - [x] ✅ `topology.topology` (389 lines) — green, 657 cases
@@ -281,7 +280,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `topology.brep_p5` (2193 lines) — waiting
 - [ ] ⏳ `topology.brep_p3` (2503 lines) — waiting
 - [ ] 🟡 `topology.proto_topology_p2` (2091 lines) — partial, 1533 cases
-- [ ] 🔨 `topology.proto_topology_p3` (1577 lines) — in progress: #121 @froglemonade2 (ready for review)
+- [ ] 🟡 `topology.proto_topology_p3` (1577 lines) — partial, 3013 cases
 
 ### intersect (17/25)
 
@@ -306,7 +305,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `intersect.curve_class_p6` (2213 lines) — in progress: #138 @damgru (ready for review)
 - [ ] 🟡 `intersect.surface_intersector_p4` (1570 lines) — partial, 1542 cases
 - [ ] 🟡 `intersect.topology_solver_p2` (1391 lines) — partial, 2429 cases
-- [ ] 🔨 `intersect.curve_class_p5` (2017 lines) — in progress: #150 @Karl-VonRichter (draft)
+- [ ] 🔨 `intersect.curve_class_p5` (2017 lines) — in progress: #150 @Karl-VonRichter (ready for review)
 - [ ] 🟡 `intersect.surface_intersector_p5` (622 lines) — partial, 1725 cases
 - [ ] 🔨 `intersect.curve_class_p8` (1900 lines) — in progress: #152 @Karl-VonRichter (draft)
 - [ ] 🔨 `intersect.curve_class_p9` (1220 lines) — in progress: #151 @Karl-VonRichter (draft)

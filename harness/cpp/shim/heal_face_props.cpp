@@ -3,31 +3,45 @@
 // (source/SMLib/src/SmFaceProps.cpp, SmLoopProps.cpp, inc/SmLoopProps.h).
 //
 // sc_heal_face_props_run(in, n_in, out, cap, out_len): a script on one SmFaceProps of a one-face
-// B-rep (a plane with one vertex loop, built with SmBrepConstructor like the query.loop shim).
-// Layout and ops: crates/solidcore-ffi/src/units/heal_face_props.rs (which validates the script).
-// After every op the shim appends a snapshot of the face props (SNAP_LEN values).
+// B-rep built with SmBrepConstructor like the query.loop shim: a real SmPlane or an
+// SmSurfOfRevolution (CreateCanonical, optionally with a swept angle below 360 degrees through
+// AdjustSTEPUVDomain: cylinder, cone, sphere and torus kinds, open or closed) owned by the
+// face, with one vertex loop or edge loops of SmLine edges (the first loop outer, the others
+// holes). Layout and ops: crates/solidcore-ffi/src/units/heal_face_props.rs (which validates
+// the script, including UB-127: a script that makes SetProps_Stage2 / Stage3 dereference the
+// NULL m_pFace is rejected there; and UB-128: Stage 3 on a degenerate plane with edge loops). After every op the shim appends a snapshot of the face
+// props (SNAP_LEN values; for op 8 the SmLoopProps of the first loops).
 //
 // sc_heal_face_props_tree(in, n_in, out, cap, out_len): SmLooptreeItem building and FindItem on
 // fake loop pointers (small integers that are only ever compared, never dereferenced).
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmBSplineCurve.h>
 #include <SmBrep.h>
 #include <SmBrepData.h>
+#include <SmCircle.h>
 #include <SmContext.h>
+#include <SmEdge.h>
+#include <SmEdgeuse.h>
+#include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmFace.h>
 #include <SmFaceProps.h>
+#include <SmLine.h>
 #include <SmLoop.h>
 #include <SmLoopProps.h>
+#include <SmLoopuse.h>
 #include <SmPlane.h>
+#include <SmSurfOfRevolution.h>
+#include <SmTArray.h>
 #include <SmVector3d.h>
 
 #include <vector>
 
 namespace
 {
-const int SNAP_LEN = 70;
+const int SNAP_LEN = 82;
 
 struct Rd
 {
@@ -35,6 +49,13 @@ struct Rd
     int64_t at;
     double num() { return in[at++]; }
     int64_t idx() { return (int64_t)in[at++]; }
+    SmVector3d vec()
+    {
+        double x = num();
+        double y = num();
+        double z = num();
+        return SmVector3d(x, y, z);
+    }
 };
 
 void put(std::vector<double>& o, double v) { o.push_back(v); }
@@ -100,6 +121,14 @@ void snapshot(std::vector<double>& o, SmFaceProps& p, SmFace* face)
     put(o, p.m_sNaturalUVDomain.GetUMax());
     put(o, p.m_sNaturalUVDomain.GetVMax());
     put(o, (double)p.m_sFlatCornerPoints.GetSize());
+    // the flat corner points (an unset corner stays SetUninitialized)
+    for (int i = 0; i < 4; i++)
+    {
+        bool ok = (ULONG)i < p.m_sFlatCornerPoints.GetSize();
+        put(o, ok ? p.m_sFlatCornerPoints[i].x : 0.0);
+        put(o, ok ? p.m_sFlatCornerPoints[i].y : 0.0);
+        put(o, ok ? p.m_sFlatCornerPoints[i].z : 0.0);
+    }
     while (o.size() < start + SNAP_LEN)
         o.push_back(0.0);
 }
@@ -142,6 +171,64 @@ void seed(SmFaceProps& p, SmFace* face, int64_t field, int64_t idx, double v)
     }
 }
 
+// The face's surface block: `0 O[3] X[3] Y[3] umin vmin umax vmax` SmPlane, or `1 gen P[3] A[3]
+// swap sweep` SmSurfOfRevolution::CreateCanonical (generator `0 a[3] b[3]` line with its NURB
+// made, or `1 c[3] x[3] y[3] d0 d1 r` circle), the angle domain then adjusted to `sweep` degrees
+// when that is below 360. NULL on failure.
+SmSurface* read_surface(Rd& rd, const SmContext& ctx)
+{
+    int64_t kind = rd.idx();
+    if (kind == 0)
+    {
+        SmPoint3d o = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double a = rd.num(), bb = rd.num(), c = rd.num(), d = rd.num();
+        return new (ctx) SmPlane(o, x, y, SmVector2d(1.0, 1.0), SmExtent2d(a, bb, c, d), &ctx);
+    }
+    int64_t gk = rd.idx();
+    SmBSplineCurve* gen = NULL;
+    if (gk == 0)
+    {
+        SmPoint3d a = rd.vec();
+        SmPoint3d b = rd.vec();
+        SmLine* l = new (ctx) SmLine(a, b, 3, &ctx);
+        l->GetOrCreateGwNurbPointer();
+        gen = l;
+    }
+    else
+    {
+        SmPoint3d c = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double d0 = rd.num();
+        double d1 = rd.num();
+        double r = rd.num();
+        gen = new (ctx) SmCircle(c, x, y, SmExtent1d(d0, d1), r, 3, &ctx);
+    }
+    SmPoint3d pt = rd.vec();
+    SmVector3d ax = rd.vec();
+    bool swap = rd.num() != 0.0;
+    double sweep = rd.num();
+    SmSurfOfRevolution* rev = NULL;
+    if (SmSurfOfRevolution::CreateCanonical(ctx, gen, pt, ax, rev, swap ? TRUE : FALSE) != SM_SUCCESS || rev == NULL)
+    {
+        delete rev;
+        return NULL;
+    }
+    if (sweep < 360.0)
+    {
+        SmExtent2d d = rev->GetSTEPUVDomain();
+        SmExtent2d nd(d.GetUMin(), d.GetVMin(), d.GetUMin() + sweep, d.GetVMax());
+        if (rev->AdjustSTEPUVDomain(nd) != SM_SUCCESS)
+        {
+            delete rev;
+            return NULL;
+        }
+    }
+    return rev;
+}
+
 int32_t run(Rd& rd, std::vector<double>& out)
 {
     SmContext ctx;
@@ -157,15 +244,66 @@ int32_t run(Rd& rd, std::vector<double>& out)
     SmFace* face = b.StartFace(SM_OT_SAME);
     if (face == NULL)
         return SC_ERR_ARG;
-    SmPoint3d o(rd.num(), rd.num(), rd.num());
-    SmVector3d x(rd.num(), rd.num(), rd.num());
-    SmVector3d y(rd.num(), rd.num(), rd.num());
-    double a = rd.num(), bb = rd.num(), c = rd.num(), d = rd.num();
-    SmSurface* srf = new (ctx) SmPlane(o, x, y, SmVector2d(1.0, 1.0), SmExtent2d(a, bb, c, d), &ctx);
+    SmSurface* srf = read_surface(rd, ctx);
     if (srf == NULL || b.SetFaceSurface(srf, srf->GetNaturalUVDomain()) != SM_SUCCESS)
         return SC_ERR_ARG;
-    SmLoop* loop = b.StartAndEndSingleVertexLoop(SmPoint3d(0, 0, 0));
-    if (loop == NULL || b.EndFace() != SM_SUCCESS || b.EndShell(FALSE) != SM_SUCCESS || b.EndBrep() != SM_SUCCESS)
+
+    // loops: `0 P[3]` one vertex loop, or `1 n_loops` then per loop `n_pts pts[3 n_pts]` an edge
+    // loop of SmLine edges p[i] -> p[i + 1]
+    int64_t loops_kind = rd.idx();
+    if (loops_kind == 0)
+    {
+        SmPoint3d at = rd.vec();
+        SmLoop* loop = b.StartAndEndSingleVertexLoop(at);
+        if (loop == NULL)
+            return SC_ERR_ARG;
+    }
+    else
+    {
+        int64_t n_loops = rd.idx();
+        for (int64_t li = 0; li < n_loops; li++)
+        {
+            int64_t n = rd.idx();
+            std::vector<SmPoint3d> pts;
+            for (int64_t i = 0; i < n; i++)
+                pts.push_back(rd.vec());
+            SmLoop* loop = b.StartLoop(SM_OT_SAME);
+            if (loop == NULL)
+                return SC_ERR_ARG;
+            // The loopuse starts at the edge use added last and walks the others in the
+            // order added: add L[1], .., L[n-1], L[0] to get L (as the query.loop shim).
+            for (int64_t k = 0; k < n; k++)
+            {
+                int64_t i = (k + 1) % n;
+                SmEdge* edge = b.StartEdge(SM_OT_SAME, NULL, NULL, NULL);
+                if (edge == NULL)
+                    return SC_ERR_ARG;
+                SmCurve* c = new (ctx) SmLine(pts[(size_t)i], pts[(size_t)((i + 1) % n)], 3, &ctx);
+                SmExtent1d ivl = c->GetNaturalInterval();
+                if (b.SetEdgeCurve(c, FALSE) != SM_SUCCESS ||
+                    b.SetLimits(SmVertexNode(ivl.GetMin()), SmVertexNode(ivl.GetMax())) != SM_SUCCESS ||
+                    b.EndEdge() != SM_SUCCESS)
+                    return SC_ERR_ARG;
+            }
+            if (b.EndLoop() != SM_SUCCESS)
+                return SC_ERR_ARG;
+            // the realised loop must be the requested one (the Rust B-rep is built that way)
+            SmTArray<SmEdgeuse*> eus;
+            loop->GetEdgeuses(eus);
+            if ((int64_t)eus.GetSize() != n)
+                return SC_ERR_ARG;
+            for (int64_t i = 0; i < n; i++)
+            {
+                SmEdgeuse* eu = eus[(ULONG)i];
+                SmPoint3d p;
+                if (eu->GetOrientation() != SM_OT_SAME ||
+                    eu->GetEdge()->GetCurve()->EvaluatePoint(eu->GetEdge()->GetInterval().GetMin(), p) != SM_SUCCESS ||
+                    p.DistanceBetweenSquared(pts[(size_t)i]) > 1e-18)
+                    return SC_ERR_ARG;
+            }
+        }
+    }
+    if (b.EndFace() != SM_SUCCESS || b.EndShell(FALSE) != SM_SUCCESS || b.EndBrep() != SM_SUCCESS)
         return SC_ERR_ARG;
     face->SetTolerance(face_tol, FALSE, FALSE);
 
@@ -176,6 +314,8 @@ int32_t run(Rd& rd, std::vector<double>& out)
         int64_t op = rd.idx();
         double p0 = rd.num(), p1 = rd.num(), p2 = rd.num(), p3 = rd.num();
         double res = 0.0;
+        std::vector<double> alt;
+        bool use_alt = false;
         switch (op)
         {
         case 0: // SetProps(stage, face, index, healOp)
@@ -200,11 +340,44 @@ int32_t run(Rd& rd, std::vector<double>& out)
                 res = (double)props.SetProps_Stage3(face, (ULONG)p2, (SmHealerOpType)(int)p1);
             break;
         case 7: res = (double)props.IsPeriodicU() + 2.0 * (double)props.IsPeriodicV(); break;
+        case 8: // SmLoopProps::SetProps of every loop of the face (SetProps_Stage3's loop)
+        {
+            SmTArray<SmLoop*> loops;
+            face->GetLoops(loops);
+            res = (double)loops.GetSize();
+            use_alt = true;
+            for (ULONG li = 0; li < loops.GetSize() && li < 4; li++)
+            {
+                SmLoopProps lp(&ctx);
+                lp.SetProps(loops[li], props);
+                alt.push_back((double)lp.m_tLoopuseType);
+                alt.push_back((double)lp.m_bVertexLoopOnPole);
+                alt.push_back((double)lp.m_lEdgeCnt);
+                alt.push_back((double)lp.m_lEdgeuseCnt);
+                alt.push_back((double)lp.m_bClosed3d);
+                alt.push_back((double)lp.m_bClosedPtrs);
+                alt.push_back((double)lp.m_bGoodClosed);
+                alt.push_back((double)lp.m_lSeamCrossingCntU);
+                alt.push_back((double)lp.m_lSeamWindingCntU);
+                alt.push_back((double)lp.m_eWindingOrientU);
+                alt.push_back((double)lp.m_lSeamCrossingCntV);
+                alt.push_back((double)lp.m_lSeamWindingCntV);
+                alt.push_back((double)lp.m_eWindingOrientV);
+                alt.push_back((double)lp.m_bArea_Loop);
+            }
+            break;
+        }
         default: break;
         }
         (void)p3;
         out.push_back(res);
-        snapshot(out, props, face);
+        if (use_alt)
+        {
+            alt.resize((size_t)SNAP_LEN, 0.0);
+            out.insert(out.end(), alt.begin(), alt.end());
+        }
+        else
+            snapshot(out, props, face);
     }
     return SC_OK;
 }

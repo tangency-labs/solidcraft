@@ -12,7 +12,7 @@
 //! |---------------------------------------------------|--------------------------------------------------|
 //! | [`Surface::evaluate_geometric`], [`evaluate_geometric_of`] | `SmSurface::EvaluateGeometric`          |
 //! | [`Surface::evaluate_normal_section`], [`evaluate_normal_section_of`], [`SurfaceNormalSection`] | `SmSurface::EvaluateNormalSection` |
-//! | [`Surface::get_singularities`], [`Singularities`] | `SmSurface::GetSingularities`                    |
+//! | [`Surface::get_singularities`], [`Surface::get_singularities_of_face`], [`Singularities`] | `SmSurface::GetSingularities`                    |
 //! | [`Surface::cover_coincident_surface`], [`CoverCoincident`] | `SmSurface::CoverCoincidentSurface`     |
 //! | [`check_shape_match`]                             | `smsurf_CheckShapeMatch`                         |
 //! | [`FindPsNormalEnfo`] (`EvalNFunctions`)           | `SmFindPSNormalENFO::Evaluate` (struct: `surface.surface_p1`) |
@@ -35,7 +35,9 @@
 //!   and still propagates [`SolidError::Unported`].
 //! - **Tolerance of a surface.** `SmTol::GetApproxTol3d(this)` is the system value for a
 //!   surface without an owner; for an owned surface it needs the face tolerance
-//!   (`topology.face_p2`) and returns [`SolidError::Unported`].
+//!   (`topology.face_p2`) and returns [`SolidError::Unported`], unless the caller that
+//!   has the face passes it ([`Surface::get_singularities_of_face`], used by the face
+//!   props).
 //! - **Unported callees** (return [`SolidError::Unported`]): `SmFace::RemoveUVTrimCurves`
 //!   (`topology.face_p1`) when the surface is owned by a face.
 
@@ -49,7 +51,7 @@ use crate::geom::local_solve_nd::{
     BoundaryHandler, EvalNFunctions, LocalSolveNd, TerminationReason,
 };
 use crate::geom::matrix::Matrix;
-use crate::geom::tol::{approx_tol_3d, SmallTopoType};
+use crate::geom::tol::{approx_tol3d, approx_tol_3d, SmallTopoType};
 use crate::geom::vector3d::sqrt as sm_sqrt;
 use crate::kernel::Kernel;
 use crate::math::{
@@ -91,10 +93,26 @@ const fn side(from_left: bool) -> Side {
 }
 
 /// The tolerance a surface is solved at, `SmTol::GetApproxTol3d(const SmObject*)` of a
-/// surface: half the zone tolerance, the system one for a surface without owner.
-fn surface_approx_tol_3d(k: &Kernel, surface: &Surface) -> Result<f64> {
+/// surface: half the zone tolerance of its face (`SmSurface::GetFace()->GetTolerance()`),
+/// the system one for a surface without face.
+///
+/// A [`Surface`] holds only an owner handle, not the B-rep, so the face's tolerance
+/// (`SmFace::GetTolerance`, `topology.face_p2`) is passed by a caller that has the face:
+/// `face_tolerance` is `Some` for a surface known to be that face's own surface, and the
+/// zone tolerance of the face is then used whether or not the handle is set.
+fn surface_approx_tol_3d(
+    k: &Kernel,
+    surface: &Surface,
+    face_tolerance: Option<f64>,
+) -> Result<f64> {
+    if let Some(zone) = face_tolerance {
+        // SmApproxTol3d(.5 * GetZoneTol3d(pSurf)), the face's stored zone tolerance
+        return Ok(approx_tol3d(k, 0.5 * zone));
+    }
     if surface.owner().is_some() {
-        // UNPORTED(topology.face_p2): SmFace::GetTolerance
+        // UNPORTED(topology.face_p2): SmFace::GetTolerance of the owner, for the callers
+        // that cannot pass it (a surface does not reach its B-rep; justified: plan/findings.md,
+        // heal.face_props, "Why UNPORTED(topology.face_p2) stays"); the face props pass it through `get_singularities_of_face`
         return Err(SolidError::unported(
             "SmFace::GetTolerance",
             "topology.face_p2",
@@ -458,6 +476,34 @@ impl Surface {
         want_pole_points: bool,
         want_pole_normals: bool,
     ) -> Result<Singularities> {
+        self.get_singularities_at(k, None, want_pole_points, want_pole_normals)
+    }
+
+    /// [`Surface::get_singularities`] of the face's own surface: the approximation
+    /// tolerance is half `face_tolerance`, the zone tolerance of the face that owns the
+    /// surface (`SmFace::GetTolerance`; the caller has the B-rep, the surface only an
+    /// owner handle), so an owned surface does not stop at `SmFace::GetTolerance`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    pub fn get_singularities_of_face(
+        &self,
+        k: &Kernel,
+        face_tolerance: f64,
+        want_pole_points: bool,
+        want_pole_normals: bool,
+    ) -> Result<Singularities> {
+        self.get_singularities_at(k, Some(face_tolerance), want_pole_points, want_pole_normals)
+    }
+
+    fn get_singularities_at(
+        &self,
+        k: &Kernel,
+        face_tolerance: Option<f64>,
+        want_pole_points: bool,
+        want_pole_normals: bool,
+    ) -> Result<Singularities> {
         // init return and output values
         let mut singularities: u32 = SS_NONE;
         let mut approx_singularities: u32 = SS_NONE;
@@ -466,7 +512,7 @@ impl Surface {
         let uv_domain = self.natural_uv_domain();
         let u_ivl = uv_domain.u_interval();
         let v_ivl = uv_domain.v_interval();
-        let approx_tol = surface_approx_tol_3d(k, self)?;
+        let approx_tol = surface_approx_tol_3d(k, self, face_tolerance)?;
 
         // Get a tolerance for zero deriv length.  At a singularity, even if all
         // involved control points are exactly identical, for the derivatives, they get

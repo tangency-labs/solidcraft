@@ -1197,14 +1197,25 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB.
 - **Rust port:** `Surface::intersect_surface_boundaries` always returns the curves.
 
-#### UB-132. `SmProtoTopologyManager::ResolveOverlappingProtoEdges` reads a deleted proto edge when an edge is listed twice in the manager
-- **Location:** `source/SMLib/src/SmProtoTopology.cpp:7032`-`7035` (`ResolveOverlappingProtoEdges`, the `rPEs[ii]` loop whose index repeats after a group was removed) with `source/SMLib/inc/SmProtoTopology.h:798` (`AddProtoEdge` does not de-duplicate) and `SmProtoTopology.cpp:4346` (`RemoveProtoEdge` removes the first copy only).
-- **What happens:** Removing an overlap group deletes its proto edges and `RemoveProtoEdge` drops only the first entry of each from `m_sPEs`; a second entry of the same pointer stays in the list, so the repeated-index loop calls `GetOverlappingPEGroup` on the deleted edge (use after free).
-- **Trigger:** two proto edges overlapping each other symmetrically (0 and 1) where one of them was added to the manager twice (`AddProtoEdge` repeated), then `ResolveOverlappingProtoEdges`. The C++ reference run exits with signal 11.
-- **How found:** adversarial review of the difftest guard (the maintainer's crashing script).
-- **Confirmed:** yes (the script was run on the C++ reference; the case `edge_proto_p3_rejected_duplicate_manager_entry_0`/`_1` now refuses it on both sides).
-- **Severity:** crash/UB.
-- **Rust port:** proto edges are arena ids that are never freed, so the repeat reads a deleted-edge slot and finds no group; nothing is read after free.
+#### UB-127. `SmFaceProps::SetProps_Gaps` returns early, so the "face changed: re-run Gaps" path of `SetProps_Stage2` / `Stage3` cannot work
+- **Location:** `source/SMLib/src/SmFaceProps.cpp:768` `SetProps_Gaps` (`if(m_ePropStage >= SM_PROPSTAGE_GAPSa) return(SM_SUCCESS)` before `m_pFace = cpFace`), `:875`-`:878` `SetProps_Stage2` (`if(m_ePropStage < SM_PROPSTAGE_GAPS || m_pFace != cpFace) SER(SetProps_Gaps(...))`, then `:898` `m_pFace->GetSurface()`), `:1258`-`:1261` `SetProps_Stage3` (the same test around `SetProps_Stage2`); reached through the public `SmFaceProps::SetProps` / `SetProps_Stage2` / `SetProps_Stage3`.
+- **What happens:** Stage 2 and 3 call `SetProps_Gaps` (and `SetProps_Stage2`) again when the props belong to another face (`m_pFace != cpFace`), to recompute them for `cpFace`. But those functions return at once once the stage is at or past `GAPSa` (`2a`), and that stage is exactly what the props are in when the face differs, so `m_pFace` never changes. With `m_pFace == NULL` (a `ReSet` past the gaps clears the stage only to `GAPS`/`2`, a stage seeded without a face) the next line dereferences it: a crash. With `m_pFace` set to another face the stage computes the surface, poles, loops and tolerance of the old face and stores them as the props of `cpFace`.
+- **Trigger:** `SmFaceProps p; p.ReSet(SM_PROPSTAGE_2a); p.SetProps(SM_PROPSTAGE_2, face, 0, SM_HO_FIX_TOLSIZES)` (a stage past `GAPS` and no face); or `p.SetProps_Stage2(face)` on props that were set for another face. No crafted file is needed: only a call sequence of the calling code, so this is not marked [PSIRT].
+- **How found:** crash in the C++ reference run (the FFI guard of `heal.face_props` rejected the two scripts a maintainer's probes found, `[[1,3,0,0,0],[0,4,26,0,0]]` and `[[5,0,0,2,0],[6,2,26,0,0]]`).
+- **Confirmed:** yes (segfault of the C++ reference in those two scripts; they are now regression fixtures of the guard, `fixtures/heal.face_props/upstream.json` cases `rejected_*`).
+- **Severity:** crash/UB (needs a bad call sequence from the calling code); wrong result when the face differs.
+- **Cause:** the early return of `SetProps_Gaps` was written for "already done or being done" and also swallows the "recompute for a new face" request.
+- **Rust port:** `heal::face_props::FaceProps` keeps upstream's early return (same results where upstream is defined); a stage past the gaps without face gives `SolidError::InvalidInput` instead of dereferencing. The `ffi::validate` of the unit simulates the stage and face pointer and rejects the scripts that would crash.
+
+#### UB-128. `SmFace::ClassifyLoops` crashes for a plane with a degenerate parameter domain and edge loops (`SetProps_Stage3`)
+- **Location:** `source/SMLib/src/SmFaceProps.cpp` `SetProps_Stage3` -> `SmFace::ClassifyLoops` -> `sms_FindAndClassifyLoopBisector` -> `CurveOnClassify` -> `SmCurveClassification::IntersectVertices` -> `GlobalPointSolve` -> ... -> `SmCrvOnSurf::GetKnots`, which ends in a SIGSEGV in `SmCurveClassification::IntersectUVDiscontinuties`. Reached through the public `SmFaceProps::SetProps(SM_PROPSTAGE_3, ...)` and `SetProps_Stage3`.
+- **What happens:** the face's surface is an `SmPlane` whose domain is `[0, 0, t, t]` for a tiny `t`, and the face has edge loops: the discontinuity search of the curve classification dereferences an invalid pointer. A vertex loop, or stopping at `SetProps(2)` (or `SmLoopProps::SetProps`), does not crash.
+- **Trigger:** plane domain `[0, 0, t, t]` with an outer edge loop, then `SetProps(SM_PROPSTAGE_3, face, 0, 26)` or `SetProps_Stage3`. The result is not monotone in `t`: the reference crashes at `t` = 1e-300, 1e-100, 1e-14, 1e-12 and 1e-10 and survives at 1e-11 and 1e-9. No crafted file is needed (a bad parameter domain from the calling code), so this is not marked [PSIRT].
+- **How found:** crash in the C++ reference run (a maintainer's adversarial probes of `heal.face_props`).
+- **Confirmed:** yes (segfault of the C++ reference; regression fixtures `rejected_degenerate_plane_stage3_*` of `fixtures/heal.face_props/upstream.json`, which the guard rejects without calling the C++).
+- **Severity:** crash/UB (needs a degenerate surface domain from the calling code).
+- **Cause:** not analysed beyond the backtrace; the discontinuity search of the surface-curve knots is not prepared for a (nearly) zero-size parameter domain.
+- **Rust port:** `FaceProps::set_props_stage3` reaches `SmFace::ClassifyLoops` only through `UNPORTED(query.face_p4)`, so it returns `Unported` there (no crash). The `ffi::validate` guard of `heal.face_props` rejects a script that can reach Stage 3 on a plane with edge loops whose domain side is below 1e-6 (the bound is deliberately wider than the crashing values, since the crash is not monotone in the size).
 
 ## Hang
 
