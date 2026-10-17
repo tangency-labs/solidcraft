@@ -613,6 +613,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(3, 1)).show(ui, |ui| {
             ui.set_max_width(popup_width);
             let r = ui.add(egui::TextEdit::singleline(&mut e.expr).id(id).desired_width(popup_width.min(90.0)));
+            crate::theme::TabAccent::number_focus(ui, &r);
             let completed = crate::params_dialog::complete(ui, &r, &mut e.expr);
             if let Some(live) = e.live.as_mut() {
                 live.typed |= r.changed() || completed;

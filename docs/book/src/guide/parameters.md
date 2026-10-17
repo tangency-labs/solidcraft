@@ -5,8 +5,8 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 **Change Parameters** (`parameters.change`). The timeline rebuilds from the first feature that
 uses them.
 
-In the SOLID toolbar's CONFIGURE panel, click **Parameters** to open the user and model
-parameter editor. The separate **Configurations** button opens the configuration table;
+In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user and model
+parameter editor. The **Configurations** button in CONFIGURATIONS opens the configuration table;
 **Configure** remains in the dropdown for configuring columns.
 
 Press **Enter** in the new parameter's name, expression or comment field to add it.
