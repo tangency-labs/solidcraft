@@ -12,6 +12,11 @@ use std::collections::BTreeMap;
 pub(crate) struct RegionScene {
     storage: Brep,
     objects: BTreeMap<ObjectKey, RegionId>,
+    /// Objects replaced by the infinite region of a B-rep of their own (the shim's
+    /// `new SmBrep()`), each with the identity of that B-rep.
+    infinite: BTreeMap<ObjectKey, (Brep, BrepId)>,
+    /// B-reps made so far: every `new SmBrep()` is a distinct owner.
+    breps_made: u32,
 }
 
 impl RegionScene {
@@ -32,15 +37,63 @@ impl RegionScene {
         Ok(Self {
             storage,
             objects: mapping,
+            infinite: BTreeMap::new(),
+            breps_made: 0,
         })
     }
+
+    /// `SmRegion::SetIsVoid` on the object's region record.
+    pub(crate) fn set_is_void(&mut self, object: ObjectKey, value: i32) -> Result<()> {
+        if let Some((brep, _)) = self.infinite.get_mut(&object) {
+            let id = brep.infinite_region().ok_or_else(unregistered)?;
+            brep.region_mut(id)?.set_is_void(value);
+            return Ok(());
+        }
+        let id = self
+            .objects
+            .get(&object)
+            .copied()
+            .ok_or_else(unregistered)?;
+        self.storage.region_mut(id)?.set_is_void(value);
+        Ok(())
+    }
+
+    /// The object becomes the infinite region of a fresh B-rep (`new SmBrep()`),
+    /// with the default (non-void) state, as the shim's replacement object has.
+    pub(crate) fn make_infinite(&mut self, object: ObjectKey) -> Result<()> {
+        if !self.objects.contains_key(&object) {
+            return Err(unregistered());
+        }
+        let mut brep = Brep::new();
+        let mut region = Region::new();
+        region.in_brep = true;
+        let id = brep.add_region_record(region)?;
+        brep.set_infinite_region_record(Some(id));
+        self.breps_made += 1;
+        let identity = BrepId::from_index(self.breps_made);
+        self.infinite.insert(object, (brep, identity));
+        Ok(())
+    }
+}
+
+fn unregistered() -> SolidError {
+    SolidError::invalid_input("fixtures::regions", "object is not a registered region")
 }
 
 impl RegionLookup for RegionScene {
     fn resolve_region(&self, object: ObjectKey) -> Result<RegionRef<'_>> {
-        let region_id = self.objects.get(&object).copied().ok_or_else(|| {
-            SolidError::invalid_input("fixtures::regions", "object is not a registered region")
-        })?;
+        if let Some((brep, brep_id)) = self.infinite.get(&object) {
+            return Ok(RegionRef {
+                brep,
+                brep_id: *brep_id,
+                region_id: brep.infinite_region().ok_or_else(unregistered)?,
+            });
+        }
+        let region_id = self
+            .objects
+            .get(&object)
+            .copied()
+            .ok_or_else(unregistered)?;
         Ok(RegionRef {
             brep: &self.storage,
             brep_id: BrepId::from_index(0),

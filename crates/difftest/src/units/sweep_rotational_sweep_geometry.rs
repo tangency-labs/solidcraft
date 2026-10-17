@@ -548,11 +548,15 @@ fn new_brep(k: &Kernel, s: &SweepIn) -> Result<(Brep, solidcore::topology::Shell
     if s.brep_tol > 0.0 {
         b.set_tolerance(zone_tol3d(k, s.brep_tol));
     }
-    let r = b.add_region_record(Region { in_brep: true }).map_err(hb)?;
+    let r = b.add_region_record(Region {
+        in_brep: true,
+        ..Region::default()
+    }).map_err(hb)?;
     let shell = b
         .add_shell_record(Shell {
             faces: Vec::new(),
             region: Some(r),
+            ..Shell::default()
         })
         .map_err(hb)?;
     Ok((b, shell))

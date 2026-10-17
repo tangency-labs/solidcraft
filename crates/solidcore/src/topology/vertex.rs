@@ -1268,11 +1268,17 @@ mod tests {
     /// with optional line curves; plus a shell vertex v3.
     fn chain(curves: bool, d1: Vec3, d2: Vec3) -> (Brep, [VertexId; 4], [EdgeId; 2]) {
         let mut b = Brep::new();
-        let r = b.add_region_record(Region { in_brep: true }).unwrap();
+        let r = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
         let s = b
             .add_shell_record(Shell {
                 faces: Vec::new(),
                 region: Some(r),
+                ..Shell::default()
             })
             .unwrap();
         let p = [Vec3::ZERO, d1, d1 + d2, Vec3::new(5.0, 5.0, 5.0)];

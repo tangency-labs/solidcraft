@@ -7495,7 +7495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#11 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7503,7 +7503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#12 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7511,7 +7511,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#13 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7519,7 +7519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#14 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7527,7 +7527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#15 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7535,7 +7535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#16 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7543,7 +7543,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#17 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7551,7 +7551,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#18 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7559,7 +7559,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#19 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7567,7 +7567,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#20 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7575,7 +7575,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#21 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7583,7 +7583,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#22 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7591,7 +7591,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#23 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7599,7 +7599,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#24 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7607,7 +7607,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#25 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7615,7 +7615,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#26 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7623,7 +7623,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#27 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7631,7 +7631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#28 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7639,7 +7639,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#29 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7647,7 +7647,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#30 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7655,7 +7655,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#31 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7663,7 +7663,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#32 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7671,7 +7671,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#33 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7679,7 +7679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#34 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7687,7 +7687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#35 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7695,7 +7695,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#36 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7703,7 +7703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#37 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -7759,7 +7759,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#44 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7855,7 +7855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#56 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7863,7 +7863,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#57 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7871,7 +7871,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#58 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7879,7 +7879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#59 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7887,7 +7887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#60 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7895,7 +7895,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#61 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7903,7 +7903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#62 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7911,7 +7911,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#63 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7919,7 +7919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#64 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7927,7 +7927,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#65 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7935,7 +7935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#66 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7943,7 +7943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#67 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7951,7 +7951,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#68 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7959,7 +7959,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#69 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7967,7 +7967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#70 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7975,7 +7975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#71 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -7983,7 +7983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#72 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7991,7 +7991,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#73 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -7999,7 +7999,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#74 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8007,7 +8007,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#75 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8015,7 +8015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#76 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8023,7 +8023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#77 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8031,7 +8031,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#78 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8039,7 +8039,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#79 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8047,7 +8047,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#80 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8055,7 +8055,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#81 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8063,7 +8063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#82 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8119,7 +8119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#89 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8215,7 +8215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#101 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8223,7 +8223,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#102 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8231,7 +8231,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#103 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8239,7 +8239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#104 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8247,7 +8247,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#105 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8255,7 +8255,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#106 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8263,7 +8263,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#107 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8271,7 +8271,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#108 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8279,7 +8279,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#109 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8287,7 +8287,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#110 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8295,7 +8295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#111 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8303,7 +8303,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#112 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8311,7 +8311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#113 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8319,7 +8319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#114 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8327,7 +8327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#115 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8335,7 +8335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#116 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8343,7 +8343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#117 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8351,7 +8351,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#118 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8359,7 +8359,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#119 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8367,7 +8367,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#120 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8375,7 +8375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#121 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8383,7 +8383,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#122 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8391,7 +8391,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#123 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8399,7 +8399,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#124 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8407,7 +8407,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#125 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8415,7 +8415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#126 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8423,7 +8423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#127 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8479,7 +8479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#134 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8575,7 +8575,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#146 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8583,7 +8583,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#147 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8591,7 +8591,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#148 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8599,7 +8599,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#149 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8607,7 +8607,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#150 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8615,7 +8615,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#151 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8623,7 +8623,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#152 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8631,7 +8631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#153 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8639,7 +8639,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#154 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8647,7 +8647,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#155 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8655,7 +8655,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#156 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8663,7 +8663,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#157 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8671,7 +8671,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#158 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8679,7 +8679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#159 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8687,7 +8687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#160 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8695,7 +8695,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#161 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -8703,7 +8703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#162 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8711,7 +8711,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#163 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8719,7 +8719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#164 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8727,7 +8727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#165 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8735,7 +8735,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#166 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8743,7 +8743,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#167 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8751,7 +8751,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#168 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8759,7 +8759,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#169 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8767,7 +8767,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#170 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8775,7 +8775,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#171 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8783,7 +8783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#172 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -8839,7 +8839,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#179 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8935,7 +8935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#191 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8943,7 +8943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#192 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8951,7 +8951,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#193 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8959,7 +8959,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#194 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8967,7 +8967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#195 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8975,7 +8975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#196 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8983,7 +8983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#197 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8991,7 +8991,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#198 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -8999,7 +8999,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#199 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9007,7 +9007,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#200 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9015,7 +9015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#201 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9023,7 +9023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#202 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9031,7 +9031,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#203 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9039,7 +9039,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#204 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9047,7 +9047,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#205 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9055,7 +9055,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#206 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9063,7 +9063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#207 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9071,7 +9071,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#208 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9079,7 +9079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#209 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9087,7 +9087,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#210 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9095,7 +9095,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#211 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9103,7 +9103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#212 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9111,7 +9111,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#213 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9119,7 +9119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#214 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9127,7 +9127,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#215 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9135,7 +9135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#216 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9143,7 +9143,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#217 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9199,7 +9199,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#224 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9295,7 +9295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#236 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9303,7 +9303,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#237 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9311,7 +9311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#238 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9319,7 +9319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#239 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9327,7 +9327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#240 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9335,7 +9335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#241 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9343,7 +9343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#242 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9351,7 +9351,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#243 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9359,7 +9359,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#244 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9367,7 +9367,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#245 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9375,7 +9375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#246 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9383,7 +9383,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#247 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9391,7 +9391,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#248 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9399,7 +9399,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#249 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9407,7 +9407,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#250 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9415,7 +9415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#251 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9423,7 +9423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#252 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9431,7 +9431,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#253 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9439,7 +9439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#254 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9447,7 +9447,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#255 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9455,7 +9455,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#256 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9463,7 +9463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#257 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9471,7 +9471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#258 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9479,7 +9479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#259 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9487,7 +9487,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#260 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9495,7 +9495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#261 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9503,7 +9503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#262 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9559,7 +9559,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#269 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9655,7 +9655,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#281 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9663,7 +9663,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#282 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9671,7 +9671,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#283 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9679,7 +9679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#284 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9687,7 +9687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#285 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9695,7 +9695,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#286 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9703,7 +9703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#287 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9711,7 +9711,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#288 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9719,7 +9719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#289 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9727,7 +9727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#290 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9735,7 +9735,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#291 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9743,7 +9743,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#292 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9751,7 +9751,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#293 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9759,7 +9759,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#294 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9767,7 +9767,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#295 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9775,7 +9775,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#296 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -9783,7 +9783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#297 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9791,7 +9791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#298 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9799,7 +9799,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#299 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9807,7 +9807,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#300 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -9815,7 +9815,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#301 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9823,7 +9823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#302 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9831,7 +9831,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#303 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9839,7 +9839,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#304 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9847,7 +9847,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#305 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9855,7 +9855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#306 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9863,7 +9863,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#307 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -9919,7 +9919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#314 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10015,7 +10015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#326 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10023,7 +10023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#327 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10031,7 +10031,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#328 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10039,7 +10039,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#329 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10047,7 +10047,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#330 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10055,7 +10055,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#331 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10063,7 +10063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#332 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10071,7 +10071,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#333 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10079,7 +10079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#334 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10087,7 +10087,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#335 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10095,7 +10095,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#336 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10103,7 +10103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#337 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10111,7 +10111,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#338 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10119,7 +10119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#339 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10127,7 +10127,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#340 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10135,7 +10135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#341 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10143,7 +10143,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#342 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10151,7 +10151,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#343 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10159,7 +10159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#344 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10167,7 +10167,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#345 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10175,7 +10175,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#346 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10183,7 +10183,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#347 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10191,7 +10191,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#348 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10199,7 +10199,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#349 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10207,7 +10207,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#350 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10215,7 +10215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#351 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10223,7 +10223,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#352 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10279,7 +10279,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#359 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10375,7 +10375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#371 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10383,7 +10383,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#372 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10391,7 +10391,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#373 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10399,7 +10399,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#374 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10407,7 +10407,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#375 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10415,7 +10415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#376 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10423,7 +10423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#377 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10431,7 +10431,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#378 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10439,7 +10439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#379 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10447,7 +10447,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#380 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10455,7 +10455,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#381 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10463,7 +10463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#382 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10471,7 +10471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#383 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10479,7 +10479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#384 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10487,7 +10487,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#385 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10495,7 +10495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#386 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10503,7 +10503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#387 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10511,7 +10511,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#388 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10519,7 +10519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#389 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10527,7 +10527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#390 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10535,7 +10535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#391 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10543,7 +10543,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#392 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10551,7 +10551,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#393 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10559,7 +10559,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#394 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10567,7 +10567,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#395 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10575,7 +10575,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#396 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10583,7 +10583,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#397 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10639,7 +10639,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#404 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10735,7 +10735,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#416 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10743,7 +10743,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#417 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10751,7 +10751,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#418 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10759,7 +10759,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#419 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10767,7 +10767,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#420 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10775,7 +10775,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#421 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10783,7 +10783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#422 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10791,7 +10791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#423 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10799,7 +10799,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#424 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10807,7 +10807,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#425 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10815,7 +10815,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#426 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10823,7 +10823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#427 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10831,7 +10831,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#428 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10839,7 +10839,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#429 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10847,7 +10847,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#430 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10855,7 +10855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#431 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -10863,7 +10863,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#432 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10871,7 +10871,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#433 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10879,7 +10879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#434 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10887,7 +10887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#435 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -10895,7 +10895,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#436 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10903,7 +10903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#437 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10911,7 +10911,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#438 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10919,7 +10919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#439 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10927,7 +10927,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#440 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10935,7 +10935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#441 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10943,7 +10943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#442 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -10999,7 +10999,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#449 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11095,7 +11095,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#461 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11103,7 +11103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#462 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11111,7 +11111,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#463 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11119,7 +11119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#464 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11127,7 +11127,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#465 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11135,7 +11135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#466 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11143,7 +11143,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#467 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11151,7 +11151,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#468 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11159,7 +11159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#469 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11167,7 +11167,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#470 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11175,7 +11175,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#471 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11183,7 +11183,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#472 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11191,7 +11191,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#473 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11199,7 +11199,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#474 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11207,7 +11207,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#475 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11215,7 +11215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#476 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11223,7 +11223,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#477 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11231,7 +11231,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#478 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11239,7 +11239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#479 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11247,7 +11247,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#480 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11255,7 +11255,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#481 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11263,7 +11263,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#482 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11271,7 +11271,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#483 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11279,7 +11279,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#484 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11287,7 +11287,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#485 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11295,7 +11295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#486 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11303,7 +11303,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#487 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11359,7 +11359,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#494 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11455,7 +11455,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#506 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11463,7 +11463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#507 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11471,7 +11471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#508 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11479,7 +11479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#509 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11487,7 +11487,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#510 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11495,7 +11495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#511 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11503,7 +11503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#512 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11511,7 +11511,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#513 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11519,7 +11519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#514 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11527,7 +11527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#515 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11535,7 +11535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#516 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11543,7 +11543,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#517 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11551,7 +11551,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#518 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11559,7 +11559,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#519 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11567,7 +11567,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#520 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11575,7 +11575,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#521 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11583,7 +11583,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#522 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11591,7 +11591,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#523 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11599,7 +11599,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#524 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11607,7 +11607,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#525 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11615,7 +11615,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#526 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11623,7 +11623,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#527 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11631,7 +11631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#528 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11639,7 +11639,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#529 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11647,7 +11647,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#530 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11655,7 +11655,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#531 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11663,7 +11663,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#532 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11719,7 +11719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#539 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11815,7 +11815,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#551 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11823,7 +11823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#552 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11831,7 +11831,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#553 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11839,7 +11839,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#554 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11847,7 +11847,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#555 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11855,7 +11855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#556 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11863,7 +11863,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#557 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11871,7 +11871,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#558 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11879,7 +11879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#559 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11887,7 +11887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#560 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11895,7 +11895,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#561 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11903,7 +11903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#562 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11911,7 +11911,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#563 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11919,7 +11919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#564 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11927,7 +11927,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#565 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11935,7 +11935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#566 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -11943,7 +11943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#567 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11951,7 +11951,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#568 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11959,7 +11959,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#569 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11967,7 +11967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#570 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -11975,7 +11975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#571 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11983,7 +11983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#572 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11991,7 +11991,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#573 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11999,7 +11999,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#574 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12007,7 +12007,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#575 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12015,7 +12015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#576 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12023,7 +12023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#577 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12079,7 +12079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#584 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12175,7 +12175,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#596 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12183,7 +12183,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#597 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12191,7 +12191,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#598 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12199,7 +12199,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#599 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12207,7 +12207,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#600 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12215,7 +12215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#601 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12223,7 +12223,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#602 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12231,7 +12231,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#603 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12239,7 +12239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#604 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12247,7 +12247,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#605 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12255,7 +12255,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#606 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12263,7 +12263,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#607 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12271,7 +12271,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#608 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12279,7 +12279,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#609 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12287,7 +12287,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#610 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12295,7 +12295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#611 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12303,7 +12303,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#612 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12311,7 +12311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#613 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12319,7 +12319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#614 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12327,7 +12327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#615 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12335,7 +12335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#616 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12343,7 +12343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#617 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12351,7 +12351,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#618 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12359,7 +12359,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#619 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12367,7 +12367,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#620 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12375,7 +12375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#621 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12383,7 +12383,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#622 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12439,7 +12439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#629 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12535,7 +12535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#641 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12543,7 +12543,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#642 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12551,7 +12551,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#643 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12559,7 +12559,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#644 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12567,7 +12567,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#645 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12575,7 +12575,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#646 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12583,7 +12583,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#647 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12591,7 +12591,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#648 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12599,7 +12599,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#649 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12607,7 +12607,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#650 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12615,7 +12615,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#651 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12623,7 +12623,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#652 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12631,7 +12631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#653 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12639,7 +12639,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#654 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12647,7 +12647,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#655 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12655,7 +12655,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#656 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12663,7 +12663,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#657 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12671,7 +12671,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#658 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12679,7 +12679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#659 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12687,7 +12687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#660 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12695,7 +12695,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#661 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12703,7 +12703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#662 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12711,7 +12711,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#663 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12719,7 +12719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#664 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12727,7 +12727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#665 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12735,7 +12735,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#666 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12743,7 +12743,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#667 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -12799,7 +12799,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#674 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12895,7 +12895,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#686 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12903,7 +12903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#687 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12911,7 +12911,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#688 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12919,7 +12919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#689 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12927,7 +12927,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#690 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12935,7 +12935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#691 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12943,7 +12943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#692 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12951,7 +12951,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#693 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -12959,7 +12959,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#694 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12967,7 +12967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#695 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12975,7 +12975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#696 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12983,7 +12983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#697 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12991,7 +12991,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#698 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -12999,7 +12999,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#699 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -13007,7 +13007,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#700 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -13015,7 +13015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#701 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 6
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -13023,7 +13023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#702 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -13031,7 +13031,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#703 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -13039,7 +13039,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#704 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -13047,7 +13047,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#705 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -13055,7 +13055,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#706 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13063,7 +13063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#707 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13071,7 +13071,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#708 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13079,7 +13079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#709 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13087,7 +13087,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#710 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13095,7 +13095,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#711 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13103,7 +13103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#712 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 4
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -13159,7 +13159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#719 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 5
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,

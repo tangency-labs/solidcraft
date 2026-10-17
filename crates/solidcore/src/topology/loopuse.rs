@@ -1259,10 +1259,15 @@ mod tests {
     /// `gap` along x on edge 1's end).
     fn square(gap: f64) -> Brep {
         let mut b = Brep::new();
-        b.add_region_record(Region { in_brep: true }).unwrap();
+        b.add_region_record(Region {
+            in_brep: true,
+            ..Region::default()
+        })
+        .unwrap();
         b.add_shell_record(Shell {
             faces: vec![FaceId::from_index(0)],
             region: Some(RegionId::from_index(0)),
+            ..Shell::default()
         })
         .unwrap();
         b.add_face_record(Face {
@@ -1289,6 +1294,7 @@ mod tests {
                 mate: Some(FaceuseId::from_index(1 - k)),
                 orientation: o,
                 loopuses: vec![lu(k)],
+                sibling_links: None,
             })
             .unwrap();
             b.add_loopuse_record(Loopuse {

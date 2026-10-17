@@ -124,6 +124,8 @@ const OPS: &[(&str, i64)] = &[
     ("read_indexed", op::READ_INDEXED),
     ("find", op::FIND),
     ("from_clear", op::FROM_CLEAR),
+    ("set_is_void", op::SET_IS_VOID),
+    ("make_infinite", op::MAKE_INFINITE),
 ];
 
 // ---- script decoding ------------------------------------------------------------
@@ -595,6 +597,24 @@ impl RustRun {
                     Attribute::tag(a[1] as u64, TagData::from_array(t), behavior(a[2])?),
                     out,
                 )?;
+                return Ok(Step::Status(0));
+            }
+            op::SET_IS_VOID => {
+                let o = self.obj(a[1])?;
+                let value = i32::try_from(a[2])
+                    .ok()
+                    .filter(|v| (0..=2).contains(v))
+                    .ok_or_else(|| HarnessError::new("void state"))?;
+                self.regions.set_is_void(o, value).map_err(|e| harness(&e))?;
+                return Ok(Step::Status(0));
+            }
+            op::MAKE_INFINITE => {
+                let o = self.obj(a[1])?;
+                // Attributes made earlier would keep naming the replaced object.
+                if !self.handles.is_empty() || !self.all.is_empty() {
+                    return Ok(Step::Status(ST_SKIP));
+                }
+                self.regions.make_infinite(o).map_err(|e| harness(&e))?;
                 return Ok(Step::Status(0));
             }
             op::NEW_MERGE_REGION => {
@@ -1331,10 +1351,27 @@ fn generate_case(rng: &mut Rng) -> Value {
         vec_handles: Vec::new(),
         ops: Vec::new(),
     };
+    // Region states are set before any attribute exists (MAKE_INFINITE replaces the
+    // object), so merge-region attributes meet infinite and void regions as well as
+    // plain solid ones.
+    if allow_mr {
+        for _ in 0..=g.rng.below(2) {
+            let o = g.obj();
+            g.push(serde_json::json!(["make_infinite", o]));
+        }
+        for _ in 0..=g.rng.below(3) {
+            let (o, v) = (g.obj(), g.rng.below(3) as i64);
+            g.push(serde_json::json!(["set_is_void", o, v]));
+        }
+    }
     for _ in 0..2 + g.rng.below(3) {
         g.create();
     }
     for _ in 0..n_ops {
+        if allow_mr && g.rng.chance(0.04) {
+            let (o, v) = (g.obj(), g.rng.below(3) as i64);
+            g.push(serde_json::json!(["set_is_void", o, v]));
+        }
         g.step(stream.is_some());
     }
     serde_json::json!({"n_objects": n_obj, "ops": g.ops, "stream": stream})

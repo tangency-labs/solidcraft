@@ -1147,7 +1147,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#2 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 67
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -1155,7 +1155,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#3 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 50
+      "values_compared": 156
     },
     {
       "max_rel_err": 0.0,
@@ -1171,7 +1171,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#5 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1179,7 +1179,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#6 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1187,7 +1187,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#7 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1195,7 +1195,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#8 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 47
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -1311,7 +1311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#22 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1319,7 +1319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#23 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1327,7 +1327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#24 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1335,7 +1335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#25 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1343,7 +1343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#26 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1351,7 +1351,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#27 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1359,7 +1359,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#28 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1367,7 +1367,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#29 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1375,7 +1375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#30 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1383,7 +1383,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#31 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1391,7 +1391,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#32 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1399,7 +1399,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#33 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1407,7 +1407,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#34 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -1415,7 +1415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#35 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -1515,7 +1515,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#47 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 67
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -1523,7 +1523,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#48 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 50
+      "values_compared": 156
     },
     {
       "max_rel_err": 0.0,
@@ -1539,7 +1539,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#50 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1547,7 +1547,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#51 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1555,7 +1555,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#52 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1563,7 +1563,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#53 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 47
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -1679,7 +1679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#67 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1687,7 +1687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#68 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1695,7 +1695,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#69 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1703,7 +1703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#70 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1711,7 +1711,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#71 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1719,7 +1719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#72 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1727,7 +1727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#73 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1735,7 +1735,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#74 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1743,7 +1743,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#75 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1751,7 +1751,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#76 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1759,7 +1759,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#77 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1767,7 +1767,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#78 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1775,7 +1775,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#79 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -1783,7 +1783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#80 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -1791,7 +1791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#81 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 12
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1883,7 +1883,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#92 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 67
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -1891,7 +1891,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#93 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 50
+      "values_compared": 156
     },
     {
       "max_rel_err": 0.0,
@@ -1907,7 +1907,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#95 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1915,7 +1915,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#96 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1923,7 +1923,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#97 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -1931,7 +1931,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#98 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 47
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -2047,7 +2047,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#112 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2055,7 +2055,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#113 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2063,7 +2063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#114 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2071,7 +2071,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#115 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2079,7 +2079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#116 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2087,7 +2087,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#117 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2095,7 +2095,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#118 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2103,7 +2103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#119 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2111,7 +2111,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#120 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2119,7 +2119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#121 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2127,7 +2127,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#122 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2135,7 +2135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#123 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2143,7 +2143,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#124 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -2151,7 +2151,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#125 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -2159,7 +2159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#126 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 12
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -2251,7 +2251,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#137 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 67
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -2259,7 +2259,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#138 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 50
+      "values_compared": 156
     },
     {
       "max_rel_err": 0.0,
@@ -2275,7 +2275,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#140 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -2283,7 +2283,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#141 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -2291,7 +2291,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#142 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -2299,7 +2299,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#143 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 47
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -2415,7 +2415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#157 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2423,7 +2423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#158 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2431,7 +2431,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#159 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2439,7 +2439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#160 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2447,7 +2447,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#161 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2455,7 +2455,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#162 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2463,7 +2463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#163 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2471,7 +2471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#164 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2479,7 +2479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#165 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2487,7 +2487,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#166 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2495,7 +2495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#167 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2503,7 +2503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#168 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2511,7 +2511,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#169 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -2519,7 +2519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#170 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -2527,7 +2527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#171 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 12
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2619,7 +2619,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#182 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 67
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -2627,7 +2627,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#183 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 50
+      "values_compared": 156
     },
     {
       "max_rel_err": 0.0,
@@ -2643,7 +2643,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#185 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -2651,7 +2651,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#186 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -2659,7 +2659,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#187 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 28
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -2667,7 +2667,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#188 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 47
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -2783,7 +2783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#202 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2791,7 +2791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#203 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2799,7 +2799,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#204 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2807,7 +2807,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#205 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2815,7 +2815,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#206 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2823,7 +2823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#207 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2831,7 +2831,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#208 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2839,7 +2839,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#209 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2847,7 +2847,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#210 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2855,7 +2855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#211 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2863,7 +2863,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#212 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2871,7 +2871,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#213 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2879,7 +2879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#214 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -2887,7 +2887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#215 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 45
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -2895,7 +2895,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#216 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 12
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -2967,7 +2967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#225 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2975,7 +2975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#226 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2983,7 +2983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#227 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2991,7 +2991,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#228 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -2999,7 +2999,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#229 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -3007,7 +3007,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#230 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -3015,7 +3015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#231 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -3023,7 +3023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#232 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 29
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -3119,16 +3119,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_uv_of_surface",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#8 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3144,7 +3140,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#10 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 653
+      "values_compared": 1508
     },
     {
       "max_rel_err": 0.0,
@@ -3192,7 +3188,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#16 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 16
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3249,7 +3245,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#23 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 11
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -3422,7 +3418,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#44 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 317
+      "values_compared": 353
     },
     {
       "max_rel_err": 0.0,
@@ -3527,7 +3523,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#57 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 9
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3624,7 +3620,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#68 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 353
+      "values_compared": 321
     },
     {
       "max_rel_err": 0.0,
@@ -3672,7 +3668,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#74 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 4
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3729,7 +3725,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#81 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 8
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -3931,7 +3927,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#105 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 9
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4003,16 +3999,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_uv_of_surface",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#114 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4028,7 +4020,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#116 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 353
+      "values_compared": 321
     },
     {
       "max_rel_err": 0.0,
@@ -4076,7 +4068,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#122 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 4
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -4133,7 +4125,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#129 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 11
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4205,16 +4197,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_uv_of_surface",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#138 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4230,7 +4218,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#140 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 653
+      "values_compared": 1508
     },
     {
       "max_rel_err": 0.0,
@@ -4278,7 +4266,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#146 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 16
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -4335,7 +4323,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#153 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 11
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -4422,16 +4410,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e0_uv_of_surface",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#163",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4551,7 +4535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#178",
-      "values_compared": 11
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -4710,12 +4694,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
+        "unit": "topology.edgeuse_p3"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e2_uv_of_surface",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#197",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -5070,61 +5058,64 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_seam",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#240",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_seam_f",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#241",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#242",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormal",
+        "unit": "topology.edgeuse_p3"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#243",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#244",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_uv_of_surface",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#245",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5140,7 +5131,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#247",
-      "values_compared": 761
+      "values_compared": 759
     },
     {
       "max_rel_err": 0.0,
@@ -5188,7 +5179,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#253",
-      "values_compared": 8
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -5231,13 +5222,12 @@
       "values_compared": 730
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_radial",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#259",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5245,7 +5235,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#260",
-      "values_compared": 9
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5272,54 +5262,47 @@
       "values_compared": 4
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_seam",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#264",
-      "values_compared": 1
+      "values_compared": 0
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_seam_f",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#265",
-      "values_compared": 1
+      "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_topological",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#266",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormal",
-        "unit": "topology.edgeuse_p3"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_tangent",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#267",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_blend",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#268",
       "values_compared": 0
     },
@@ -5349,7 +5332,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#271",
-      "values_compared": 759
+      "values_compared": 761
     },
     {
       "max_rel_err": 0.0,
@@ -5397,7 +5380,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#277",
-      "values_compared": 4
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -5440,12 +5423,13 @@
       "values_compared": 730
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_radial",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#283",
-      "values_compared": 3
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -5532,16 +5516,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rb_e0_uv_of_surface",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#293",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5661,7 +5641,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#308",
-      "values_compared": 11
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -14793,14 +14773,14 @@
     }
   ],
   "cases_both_errored": 186,
-  "cases_deferred": 77,
+  "cases_deferred": 72,
   "cases_failed": 0,
-  "cases_passed": 1710,
+  "cases_passed": 1715,
   "cases_total": 1787,
   "deferred_by_unit": {
     "topology.brep_p1": 5,
     "topology.brep_p2": 5,
-    "topology.edgeuse_p3": 67
+    "topology.edgeuse_p3": 62
   },
   "max_rel_err": 0.0,
   "pass": true,

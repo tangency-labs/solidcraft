@@ -6437,7 +6437,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245777",
-      "values_compared": 43
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,

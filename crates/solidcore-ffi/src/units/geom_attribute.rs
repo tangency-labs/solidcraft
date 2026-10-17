@@ -104,6 +104,11 @@ pub mod op {
     pub const FIND: i64 = 30;
     /// `fromClearAttributes` `[ref, obj]`.
     pub const FROM_CLEAR: i64 = 31;
+    /// `SmRegion::SetIsVoid` `[obj, value]` (value 0 FALSE, 1 TRUE, 2 UNSURE).
+    pub const SET_IS_VOID: i64 = 32;
+    /// Makes the object the infinite region of a fresh `SmBrep` `[obj]`; skipped
+    /// (status -2) once any attribute exists.
+    pub const MAKE_INFINITE: i64 = 33;
 }
 
 /// Most objects a script may use.
@@ -177,7 +182,7 @@ pub fn run(
             | op::NEW_COLOR
             | op::NEW_TAG => Some(b),
             op::NEW_LONG | op::NEW_POINTER => Some(c),
-            op::MAKE_COPY..=op::FROM_CLEAR | op::NEW_MERGE_REGION => None,
+            op::MAKE_COPY..=op::MAKE_INFINITE | op::NEW_MERGE_REGION => None,
             _ => return Err(FfiError::InvalidArgument(format!("op {code}"))),
         };
         if beh.is_some_and(|x| !behavior_ok(x)) {

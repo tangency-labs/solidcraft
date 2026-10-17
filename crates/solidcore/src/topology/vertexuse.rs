@@ -1602,7 +1602,7 @@ mod tests {
                 b.add_vertex_record(Vertex {
                     point: Vec3::new(f64::from(i), 0.0, 0.0),
                     tolerance: ZONE_TOL_3D,
-                    vertexuses: Vec::new(),
+                    ..Vertex::default()
                 })
                 .unwrap()
             })

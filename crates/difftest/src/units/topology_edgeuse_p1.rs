@@ -126,6 +126,20 @@ pub(crate) enum BrepIn {
     Face { surface: SrfIn, dom: [f64; 4] },
     Network,
     Vertices { points: Vec<[f64; 3]> },
+    /// An optional face and `networks` copies of the wire network in one B-rep, so
+    /// face-use shells and wire shells coexist (native constructors only).
+    Mixed {
+        #[serde(default)]
+        face: Option<FaceIn>,
+        networks: usize,
+    },
+}
+
+/// The face of a [`BrepIn::Mixed`] B-rep (as [`BrepIn::Face`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct FaceIn {
+    surface: SrfIn,
+    dom: [f64; 4],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +281,14 @@ pub(crate) fn brep_block_of(
         BrepIn::Vertices { points } => {
             v.extend([4.0, points.len() as f64]);
             for point in points { v.extend(point); }
+        }
+        BrepIn::Mixed { face, networks } => {
+            v.extend([5.0, flag(face.is_some())]);
+            if let Some(face) = face {
+                push_surface(&mut v, &face.surface)?;
+                v.extend(face.dom);
+            }
+            v.push(*networks as f64);
         }
     }
     v.push(flag(validate_only));
@@ -923,7 +945,7 @@ pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), Harne
     for _ in 0..n_v {
         let point = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
         let tolerance = rd.num()?;
-        vertices.push(Vertex { point, tolerance, vertexuses: Vec::new() });
+        vertices.push(Vertex { point, tolerance, ..Vertex::default() });
     }
     if rd.idx()? != 3 {
         return Err(harness("export: unsupported shell extension version"));
@@ -963,6 +985,7 @@ pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), Harne
     let mut b = Brep::new();
     b.set_validate_only(validate_only);
     b.set_infinite_region_record(infinite_region);
+    b.set_tolerance(brep_tolerance);
     for r in regions {
         b.add_region_record(r).map_err(|e| harness(e.to_string()))?;
     }

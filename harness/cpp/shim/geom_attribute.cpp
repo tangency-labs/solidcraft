@@ -34,6 +34,7 @@
 #include <SmApiGeneral.h>
 #include <SmAttribute.h>
 #include <SmDatabaseIO.h>
+#include <SmBrep.h>
 #include <SmRegion.h>
 
 #include <cctype>
@@ -80,7 +81,9 @@ enum Op : int64_t
     OP_READ_INDEXED = 29,
     OP_FIND = 30,
     OP_FROM_CLEAR = 31,
-    OP_LAST = 31,
+    OP_SET_IS_VOID = 32,
+    OP_MAKE_INFINITE = 33,
+    OP_LAST = 33,
 };
 
 const int64_t ST_INVALID = -1;
@@ -152,7 +155,7 @@ bool standalone(const SmAttribute* a)
 struct Run
 {
     const SmContext* ctx = nullptr;
-    std::vector<ShimRegion*> objs;
+    std::vector<SmRegion*> objs;
     std::vector<SmAttribute*> handles;
     std::vector<bool> alive;
     SmTArray<SmAttribute*> all;
@@ -365,6 +368,24 @@ int64_t run_op(Run& r, const int64_t* a, std::vector<int64_t>& out)
                                                             t[7], (SmAttributeBehaviorType)a[2])));
         return 0;
     }
+    case OP_SET_IS_VOID:
+        // SmRegion::SetIsVoid(TRUE / UNSURE / FALSE) on a script object.
+        if (!r.valid_obj(a[1]) || a[2] < 0 || a[2] > 2) return SC_ERR_ARG;
+        r.objs[(size_t)a[1]]->SetIsVoid((SmBoolean)a[2]);
+        return 0;
+    case OP_MAKE_INFINITE:
+    {
+        // Replace the object with the infinite region of a fresh B-rep, so
+        // IsInfiniteRegion()/GetBrep() are TRUE/non-NULL. Attributes created earlier
+        // keep pointing at the old object, so this is only defined before any
+        // attribute exists (the Rust runner applies the same rule).
+        if (!r.valid_obj(a[1])) return SC_ERR_ARG;
+        if (!r.handles.empty() || r.all.GetSize() > 0) return ST_SKIP;
+        SmBrep* brep = new (*r.ctx) SmBrep();
+        if (brep->GetInfiniteRegion() == nullptr) return SC_ERR_ARG;
+        r.objs[(size_t)a[1]] = brep->GetInfiniteRegion();
+        return 0;
+    }
     case OP_NEW_MERGE_REGION:
         if (!r.valid_obj(a[1]) || !r.valid_obj(a[3])) return SC_ERR_ARG;
         out.push_back(r.add_handle(new (ctx) SmMergeRegionAttribute(r.objs[(size_t)a[1]], (ULONG)a[2],
@@ -434,7 +455,7 @@ int64_t run_op(Run& r, const int64_t* a, std::vector<int64_t>& out)
         if (!r.valid_obj(a[1])) return SC_ERR_ARG;
         SmAttribute* at = r.resolve(a[2]);
         if (at == nullptr) return ST_INVALID;
-        ShimRegion* o = r.objs[(size_t)a[1]];
+        SmRegion* o = r.objs[(size_t)a[1]];
         if (op == OP_ADD_ATTRIBUTE)
         {
             o->AddAttribute(at);

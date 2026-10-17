@@ -254,8 +254,24 @@ pub struct Vertex {
     pub point: Point3,
     /// `m_sZoneTol3d` (`SM_USE_OLDTOL`): the vertex tolerance.
     pub tolerance: f64,
-    /// Native vertex-use circular list, in order from its head (CO-PORTED in shell).
+    /// `m_pList` / `m_lListSize`: the vertex's vertex uses in list order from the head
+    /// (the primary vertex use, `GetPrimaryVertexuse`, is first).
     pub vertexuses: Vec<VertexuseId>,
+    /// `m_pPolyVertex3D`: the temporary back pointer to the 3D poly vertex made from the
+    /// vertex during tessellation.
+    pub poly_vertex: Option<PolyVertexId>,
+}
+
+impl Default for Vertex {
+    /// `SmVertex()`: at the origin, tolerance `0`, no vertex uses, no poly vertex.
+    fn default() -> Self {
+        Self {
+            point: Point3::new(0.0, 0.0, 0.0),
+            tolerance: 0.0,
+            vertexuses: Vec::new(),
+            poly_vertex: None,
+        }
+    }
 }
 
 /// An edge (`SmEdge`): a bounded curve between two vertices.
@@ -878,7 +894,7 @@ impl Brep {
         self.vertices.insert(Vertex {
             point,
             tolerance: ZONE_TOL_3D,
-            vertexuses: Vec::new(),
+            ..Vertex::default()
         })
     }
 

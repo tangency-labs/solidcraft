@@ -40,6 +40,7 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::vertexuse as vu1;
+use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId,
     Loop, LoopId, Loopuse, LoopuseId, LoopuseStart, ObjectHandle, Region, RegionId, Shell,
@@ -401,6 +402,78 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError
     Ok((Some(Surface::from(b)), exact))
 }
 
+/// Reads an exported region record's shell list (`SmRegion::m_pList` from its head).
+pub(crate) fn region_shell_list(list: Vec<i64>) -> Result<Vec<ShellId>, HarnessError> {
+    list.into_iter()
+        .map(|x| opt(x, ShellId::from_index)?.ok_or_else(|| harness("null shell")))
+        .collect()
+}
+
+/// An exported shell record's type and face-use list (`m_tShellType`, `m_pList`).
+pub(crate) fn shell_members(ty: i64, list: Vec<i64>) -> Result<(ShellType, ShellMembers), HarnessError> {
+    let list = list
+        .into_iter()
+        .map(|x| opt(x, FaceuseId::from_index)?.ok_or_else(|| harness("null face use")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let members = if list.is_empty() {
+        ShellMembers::Empty
+    } else {
+        ShellMembers::Faceuses(list)
+    };
+    Ok((ShellType::from_code(ty), members))
+}
+
+/// Reads the version-3 shell/region state block that the shims append after the vertices
+/// (`sc_topology_fixture::append_shell_state`, shared with `topology.edgeuse_p1`'s
+/// export): the infinite region, each region's raw void flag, each wire or vertex shell's
+/// list head, each vertex's use list and each face use's `m_pNext` / `m_pLast`. Every value
+/// is read from the native record; nothing is inferred. Returns the infinite region.
+pub(crate) fn read_shell_state(
+    ex: &[f64],
+    at: &mut usize,
+    regions: &mut [Region],
+    shells: &mut [Shell],
+    vertices: &mut [Vertex],
+    faceuses: &mut [Faceuse],
+) -> Result<Option<RegionId>, HarnessError> {
+    let mut rd = Rd { v: ex, at: *at };
+    if rd.idx()? != 3 {
+        return Err(harness("export: unsupported shell extension version"));
+    }
+    let infinite_region = opt(rd.idx()?, RegionId::from_index)?;
+    for region in regions.iter_mut() {
+        region.is_void = i32::try_from(rd.idx()?)
+            .map_err(|_| harness("export: void flag outside native int range"))?;
+    }
+    for shell in shells.iter_mut() {
+        let head = rd.idx()?;
+        if shell.is_wire_shell() {
+            shell.members = opt(head, EdgeuseId::from_index)?
+                .map_or(ShellMembers::Empty, ShellMembers::Edgeuse);
+        } else if shell.is_vertex_shell() {
+            shell.members = opt(head, VertexuseId::from_index)?
+                .map_or(ShellMembers::Empty, ShellMembers::Vertexuse);
+        } else if head != -1 {
+            return Err(harness("export: unexpected shell head"));
+        }
+    }
+    for vertex in vertices.iter_mut() {
+        vertex.vertexuses = rd
+            .list()?
+            .into_iter()
+            .map(|x| opt(x, VertexuseId::from_index)?.ok_or_else(|| harness("null vertex use")))
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    for faceuse in faceuses.iter_mut() {
+        faceuse.sibling_links = Some((
+            opt(rd.idx()?, FaceuseId::from_index)?,
+            opt(rd.idx()?, FaceuseId::from_index)?,
+        ));
+    }
+    *at = rd.at;
+    Ok(infinite_region)
+}
+
 /// Builds the Rust B-rep from the shim's export (see the module docs), with whether
 /// each face's surface was imported exactly.
 pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
@@ -410,21 +483,28 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     let validate_only = rd.num()? != 0.0;
     rd.at = 12;
 
+    // Region shell lists, shell types and face-use lists are the native lists from
+    // their heads; the void flags, the infinite region, the wire/vertex shell heads, the
+    // vertex-use lists and the face-use links follow the vertices (`read_shell_state`).
     let mut regions = Vec::new();
     for _ in 0..n_r {
         let in_brep = rd.num()? != 0.0;
-        rd.list()?;
-        regions.push(Region { in_brep, ..Region::default() });
+        let shells = region_shell_list(rd.list()?)?;
+        regions.push(Region {
+            in_brep,
+            shells,
+            ..Region::default()
+        });
     }
     let mut shells = Vec::new();
     for _ in 0..n_s {
         let region = opt(rd.idx()?, RegionId::from_index)?;
-        rd.idx()?;
-        rd.list()?;
+        let (shell_type, members) = shell_members(rd.idx()?, rd.list()?)?;
         shells.push(Shell {
             faces: Vec::new(),
             region,
-            ..Shell::default()
+            shell_type,
+            members,
         });
     }
     let mut faceuses = Vec::new();
@@ -595,8 +675,20 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     for _ in 0..n_v {
         let point = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
         let tolerance = rd.num()?;
-        vertices.push(Vertex { point, tolerance, vertexuses: Vec::new() });
+        vertices.push(Vertex {
+            point,
+            tolerance,
+            ..Vertex::default()
+        });
     }
+    let infinite_region = read_shell_state(
+        ex,
+        &mut rd.at,
+        &mut regions,
+        &mut shells,
+        &mut vertices,
+        &mut faceuses,
+    )?;
     if rd.at != ex.len() {
         return Err(harness("export: trailing data"));
     }
@@ -604,6 +696,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     // assemble (skeleton fields filled minimally)
     let mut b = Brep::new();
     b.set_validate_only(validate_only);
+    b.set_infinite_region_record(infinite_region);
     for r in regions {
         b.add_region_record(r).map_err(|e| harness(e.to_string()))?;
     }
@@ -680,14 +773,6 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     }
     for vu in vertexuses {
         b.add_vertexuse_record(vu).map_err(|e| harness(e.to_string()))?;
-    }
-    // the vertex use lists are not exported: each vertex lists its uses in arena order
-    let uses: Vec<(VertexuseId, Option<VertexId>)> =
-        b.vertexuses().iter().map(|(id, r)| (id, r.vertex)).collect();
-    for (id, v) in uses {
-        if let Some(v) = v {
-            b.vertex_mut(v).map_err(|e| harness(e.to_string()))?.vertexuses.push(id);
-        }
     }
     Ok((b, exact_faces))
 }

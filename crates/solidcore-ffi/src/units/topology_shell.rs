@@ -73,6 +73,8 @@ pub fn wire_edges(path: &str, block: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// Native child transfer plus all affected raw topology state and wire queries.
 /// Empty shells use the real native constructor in the B-rep's context. At most
 /// 64 extra shells and 64 candidate entries are accepted by this fixture adapter.
+/// `pre` lists (source, recipient) transfers without a candidate list that run first
+/// (their statuses end the output).
 ///
 /// # Errors
 /// Malformed fixture data, out-of-range identities, failed native setup or a
@@ -85,6 +87,7 @@ pub fn transfer(
     recipient: usize,
     candidates: Option<&[Option<usize>]>,
     split_faceuse: bool,
+    pre: &[(usize, usize)],
 ) -> Result<Vec<f64>, FfiError> {
     let export = fixture::eval(Op::Export, path, block)?;
     let counts = fixture::counts(&export)
@@ -106,6 +109,17 @@ pub fn transfer(
         .ok_or_else(|| invalid("missing edge count"))?;
     if source >= shell_count || recipient >= shell_count {
         return Err(invalid("shell index out of range"));
+    }
+    if pre.len() > 8 {
+        return Err(invalid("too many preliminary transfers"));
+    }
+    let mut pre_flat = Vec::new();
+    for &(from, to) in pre {
+        if from >= shell_count || to >= shell_count {
+            return Err(invalid("preliminary shell index out of range"));
+        }
+        pre_flat.push(i64::try_from(from).map_err(|_| invalid("shell index overflow"))?);
+        pre_flat.push(i64::try_from(to).map_err(|_| invalid("shell index overflow"))?);
     }
     let entries = candidates.unwrap_or(&[]);
     if entries.len() > 64 {
@@ -142,6 +156,8 @@ pub fn transfer(
                 flat.as_ptr(),
                 flat.len() as i64,
                 i32::from(split_faceuse),
+                pre_flat.as_ptr(),
+                pre.len() as i64,
                 buffer.as_mut_ptr(),
                 buffer.len() as i64,
                 &raw mut *len,
@@ -227,7 +243,9 @@ pub fn degeneracy(path: &str, block: &[f64], tolerance: Option<f64>) -> Result<V
 /// Execute native shell ray queries, retaining output writes on ordinary errors.
 ///
 /// # Errors
-/// Non-finite input, malformed fixtures, failed native setup or unsafe references.
+/// Malformed fixtures, failed native setup, or a status of `SC_ERR_ARG` for inputs
+/// that would crash native code (non-finite ray values once a shell has boundary
+/// faces, which reach the intersection solver).
 pub fn ray_fire(
     path: &str,
     block: &[f64],
@@ -236,12 +254,6 @@ pub fn ray_fire(
     tolerance: f64,
     radius: Option<f64>,
 ) -> Result<Vec<f64>, FfiError> {
-    if start.iter().chain(direction.iter()).any(|v| !v.is_finite())
-        || !tolerance.is_finite()
-        || radius.is_some_and(|r| !r.is_finite())
-    {
-        return Err(invalid("non-finite ray input"));
-    }
     let export = fixture::eval(Op::Export, path, block)?;
     if fixture::counts(&export).is_none() {
         return Err(invalid("native ray fixture build failed"));
@@ -415,6 +427,8 @@ mod sys {
             candidates: *const i64,
             candidate_count: i64,
             split_faceuse: i32,
+            pre: *const i64,
+            pre_count: i64,
             output: *mut f64,
             capacity: i64,
             output_len: *mut i64,

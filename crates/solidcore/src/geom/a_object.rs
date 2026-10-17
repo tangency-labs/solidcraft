@@ -62,12 +62,10 @@
 //!   pointers through borrowed live typed records, preserving raw void flags.
 //!   The legacy entry point returns an explicit context error only when a region
 //!   query is actually needed; generic attribute operations remain available.
-//! - **Unported.** Building a new `SmBrepCache` needs unit
-//!   `topology.brep_cache`; the surface `CacheMakeOrValidate` override belongs to
-//!   `surface.surface_p1`. These return [`SolidError::Unported`]. The curve override
-//!   (unit `curve.curve_p5`) checks the type and reuses an existing cache; a new curve
-//!   cache is built from the curve ([`crate::curve::curve::p5::make_curve_cache`]),
-//!   which this object-level call does not have: `InvalidInput`.
+//! - **Cache factories.** A new B-rep, curve or surface cache requires its source
+//!   geometry. The object-level validators reuse existing caches; callers building
+//!   new ones use `make_brep_cache`, `make_curve_cache` or the surface factories.
+//!   Calling without that geometry returns [`SolidError::InvalidInput`].
 //! - **Graphics and debug.** The display list of `SmSAGObject` (reset on edits and
 //!   destruction), `SE_MSG` / `SM_ASSERT*` (compiled out of the release reference
 //!   build) and `Dump` are not ported. `SmAObject::AssertValid`'s two checks (the
@@ -618,12 +616,13 @@ fn region_is_void(
     region: ObjectKey,
     regions: Option<&dyn topology::shell::RegionLookup>,
 ) -> Result<bool> {
-    let lookup = regions.ok_or_else(|| {
-        SolidError::invalid_input(
-            "geom::a_object::region_lookup",
-            "region lookup context required",
-        )
-    })?;
+    // UNPORTED(topology.shell): SmRegion::IsVoid (justified: plan/findings.md "topology.shell: borrowed region context for attribute backedges")
+    // REGION-LOOKUP(#86): no library `RegionLookup` exists yet, so a region handler
+    // reached without a caller-supplied context defers here instead of inferring
+    // region state. The owner of issue #86 replaces this with the real lookup
+    // (grep REGION-LOOKUP).
+    let lookup =
+        regions.ok_or_else(|| SolidError::unported("SmRegion::IsVoid", "topology.shell"))?;
     Ok(lookup.resolve_region(region)?.void_state()? != 0)
 }
 
@@ -1356,8 +1355,8 @@ mod tests {
         );
         assert!(matches!(
             e,
-            Err(SolidError::InvalidInput {
-                operation: "geom::a_object::region_lookup",
+            Err(SolidError::Unported {
+                unit: "topology.shell",
                 ..
             })
         ));

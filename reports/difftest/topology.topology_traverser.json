@@ -6871,86 +6871,58 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::Remove",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op5_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#838 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::Remove",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op5_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#839 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::Remove",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op5_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#840 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::Remove",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op5_03",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#841 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::Remove",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op5_04",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#842 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::Remove",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op5_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#843 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmShell::TransferChildrenTo",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op6_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#844 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -7503,14 +7475,13 @@
     }
   ],
   "cases_both_errored": 120,
-  "cases_deferred": 27,
+  "cases_deferred": 20,
   "cases_failed": 0,
-  "cases_passed": 882,
+  "cases_passed": 889,
   "cases_total": 909,
   "deferred_by_unit": {
     "topology.face_p3": 5,
-    "topology.face_p4": 15,
-    "topology.shell": 7
+    "topology.face_p4": 15
   },
   "max_rel_err": 0.0,
   "pass": true,

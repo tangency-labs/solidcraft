@@ -1497,17 +1497,20 @@ fn goto_next_attline(s: &mut InputStream) -> Result<()> {
 }
 
 /// Resolve the native pointer through a live caller-supplied topology context.
-fn resolve_region(
+/// Without one the region query is a deferral (`Unported`), not an invalid input:
+/// the native pointer is always reachable upstream.
+fn resolve_region<'a>(
     region: ObjectKey,
-    regions: Option<&dyn crate::topology::shell::RegionLookup>,
-) -> Result<crate::topology::shell::RegionRef<'_>> {
+    regions: Option<&'a dyn crate::topology::shell::RegionLookup>,
+    symbol: &'static str,
+) -> Result<crate::topology::shell::RegionRef<'a>> {
+    // UNPORTED(topology.shell): SmRegion::GetBrep / IsInfiniteRegion / IsVoid (justified: plan/findings.md "topology.shell: borrowed region context for attribute backedges")
+    // REGION-LOOKUP(#86): no library `RegionLookup` exists yet, so a region handler
+    // reached without a caller-supplied context defers here instead of inferring
+    // region state. The owner of issue #86 replaces this with the real lookup
+    // (grep REGION-LOOKUP).
     regions
-        .ok_or_else(|| {
-            SolidError::invalid_input(
-                "geom::attribute::region_lookup",
-                "region lookup context required",
-            )
-        })?
+        .ok_or_else(|| SolidError::unported(symbol, "topology.shell"))?
         .resolve_region(region)
 }
 
@@ -1516,7 +1519,7 @@ fn region_brep(
     region: ObjectKey,
     regions: Option<&dyn crate::topology::shell::RegionLookup>,
 ) -> Result<Option<crate::topology::BrepId>> {
-    resolve_region(region, regions)?.owning_brep()
+    resolve_region(region, regions, "SmRegion::GetBrep")?.owning_brep()
 }
 
 /// `SmRegion::IsInfiniteRegion` on the actual arena record.
@@ -1524,7 +1527,7 @@ fn region_is_infinite(
     region: ObjectKey,
     regions: Option<&dyn crate::topology::shell::RegionLookup>,
 ) -> Result<bool> {
-    resolve_region(region, regions)?.is_infinite()
+    resolve_region(region, regions, "SmRegion::IsInfiniteRegion")?.is_infinite()
 }
 
 /// Native truth semantics: every nonzero `SmBoolean`, including `UNSURE`, is true.
@@ -1532,7 +1535,7 @@ fn region_is_void(
     region: ObjectKey,
     regions: Option<&dyn crate::topology::shell::RegionLookup>,
 ) -> Result<bool> {
-    Ok(resolve_region(region, regions)?.void_state()? != 0)
+    Ok(resolve_region(region, regions, "SmRegion::IsVoid")?.void_state()? != 0)
 }
 
 #[cfg(test)]
@@ -1772,8 +1775,8 @@ mod tests {
         s.add_attribute(O1, m).unwrap();
         assert!(matches!(
             s.merge(m, O1, O3, O1),
-            Err(SolidError::InvalidInput {
-                operation: "geom::attribute::region_lookup",
+            Err(SolidError::Unported {
+                unit: "topology.shell",
                 ..
             })
         ));

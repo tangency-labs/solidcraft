@@ -538,20 +538,28 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
     let validate_only = rd.num()? != 0.0;
     rd.at = 12;
 
+    // Region shell lists, shell types and face-use lists as exported (void flags
+    // are not exported and stay 0); wire/vertex shell heads are set after import.
     let mut regions = Vec::new();
     for _ in 0..n_r {
         let in_brep = rd.num()? != 0.0;
-        rd.list()?;
-        regions.push(Region { in_brep });
+        let shells = super::topology_vertexuse::region_shell_list(rd.list()?)?;
+        regions.push(Region {
+            in_brep,
+            shells,
+            ..Region::default()
+        });
     }
     let mut shells = Vec::new();
     for _ in 0..n_s {
         let region = opt(rd.idx()?, RegionId::from_index)?;
-        rd.idx()?;
-        rd.list()?;
+        let (shell_type, members) =
+            super::topology_vertexuse::shell_members(rd.idx()?, rd.list()?)?;
         shells.push(Shell {
             faces: Vec::new(),
             region,
+            shell_type,
+            members,
         });
     }
     let mut faceuses = Vec::new();
@@ -571,6 +579,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
             mate,
             orientation,
             loopuses,
+            sibling_links: None,
         });
     }
     let mut surfaces = Vec::new();
@@ -734,6 +743,14 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
             ..Vertex::default()
         });
     }
+    let infinite_region = super::topology_vertexuse::read_shell_state(
+        ex,
+        &mut rd.at,
+        &mut regions,
+        &mut shells,
+        &mut vertices,
+        &mut faceuses,
+    )?;
     if rd.at != ex.len() {
         return Err(harness("export: trailing data"));
     }
@@ -741,6 +758,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
     // assemble (skeleton fields filled minimally)
     let mut b = Brep::new();
     b.set_validate_only(validate_only);
+    b.set_infinite_region_record(infinite_region);
     for r in regions {
         b.add_region_record(r).map_err(|e| harness(e.to_string()))?;
     }

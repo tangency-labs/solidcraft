@@ -16852,7 +16852,7 @@
   "cases_passed": 1909,
   "cases_total": 2040,
   "deferred_by_unit": {
-    "topology.brep_cache": 131
+    "query.brep": 131
   },
   "max_rel_err": 0.0,
   "pass": true,

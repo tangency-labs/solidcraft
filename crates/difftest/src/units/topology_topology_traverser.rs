@@ -231,7 +231,7 @@ impl UnitDiff for Runner {
                 5 => tr::faceuse_shell_replacement(
                     &mut k, &mut b, &mut marks, start_fu, target, &mut fus, &lock,
                 ),
-                6 => tr::remove_shell(&mut b, ShellId::from_index(r.start as u32), target),
+                6 => tr::remove_shell(&mut k, &mut b, ShellId::from_index(r.start as u32), target),
                 _ => tr::is_inner_shell(
                     &mut k,
                     &b,

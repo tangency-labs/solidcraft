@@ -9,6 +9,9 @@
 #define SC_EDGEUSE_GRAPH_H
 
 #include "sc_shim.h"
+#include "support/topology_fixture.h"
+#include <algorithm>
+#include <memory>
 
 #include "StdAfx.h"
 #include <SmBSplineCurve.h>
@@ -169,6 +172,10 @@ struct VuPeek : SmVertexuse
     static SmTopology* SmVertexuse::*owner() { return &VuPeek::m_pSorLUorEU; }
     static SmVertexFaceGap SmVertexuse::*face_gap() { return &VuPeek::m_sVertexFaceGap3d; }
 };
+struct RegionPeek : SmRegion
+{
+    static SmBoolean SmRegion::*is_void() { return &RegionPeek::m_bIsVoidFlag; }
+};
 struct ShPeek : SmShell
 {
     static SM_TYPE SmShell::*type() { return &ShPeek::m_tShellType; }
@@ -316,7 +323,12 @@ void walk(SmBrep* brep, Graph& g)
     brep->GetRegions(regs);
     for (ULONG i = 0; i < regs.GetSize(); i++)
         g.region(regs[i]);
-    size_t r = 0, s = 0, fu = 0, lu = 0, eu = 0, vu = 0, l = 0, e = 0, f = 0;
+    // Brep's global edge-list order is observable in GetWireEdges, and wires
+    // owned by a face shell are not necessarily reachable from its faceuses.
+    SmTArray<SmEdge*> all_edges;
+    brep->GetEdges(all_edges);
+    for (ULONG i = 0; i < all_edges.GetSize(); ++i) g.edge(all_edges[i]);
+    size_t r = 0, s = 0, fu = 0, lu = 0, eu = 0, vu = 0, l = 0, e = 0, f = 0, v = 0;
     bool more = true;
     while (more)
     {
@@ -382,6 +394,12 @@ void walk(SmBrep* brep, Graph& g)
             g.vertex((SmVertex*)p->GetOwner());
             g.typed(p->GetVertexuseType(), p->*VuPeek::owner());
         }
+        // A vertex can connect to more wire edges than the shell's initial
+        // radial head reaches. Register every native vertex-use list member,
+        // then let the next iteration follow its edge-use/owner links.
+        for (; v < g.vertices.size(); v++, more = true)
+            for (SmTopology* t : list_of(g.vertices[v]->GetList()))
+                g.vertexuse((SmVertexuse*)t);
         for (; l < g.loops.size(); l++, more = true)
             g.loopuse(g.loops[l]->GetLoopuse());
         for (; f < g.faces.size(); f++)
@@ -604,6 +622,9 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         put_vec(o, p->GetPoint());
         o.push_back((double)p->GetTolerance());
     }
+    sc_topology_fixture::append_shell_state(
+        {*brep,g.regions,g.shells,g.faceuses,g.faces,g.loopuses,g.loops,
+         g.edgeuses,g.edges,g.vertexuses,g.vertices},o);
     o.push_back((double)brep->GetTolerance());
 }
 
@@ -632,6 +653,37 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
         SmPoint2d a = rd.uv(), b = rd.uv();
         SmFace* pFace = nullptr;
         status = brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
+    }
+    else if (kind == 4)
+    {
+        const int64_t count = rd.idx();
+        for (int64_t i = 0; i < count; ++i)
+        {
+            const SmPoint3d point = rd.vec();
+            if (status == SM_SUCCESS)
+            {
+                SmShell* shell = nullptr;
+                SmVertex* vertex = nullptr;
+                status = brep->MakeShellVertex(brep->GetInfiniteRegion(), point, shell, vertex);
+            }
+        }
+    }
+    else if (kind == 5)
+    {
+        // `5 has_face [surface u0 v0 u1 v1] networks`: an optional face and `networks`
+        // copies of the wire network, all in one B-rep (native constructors only), so
+        // that face-use shells and wire shells coexist for TransferChildrenTo.
+        const bool has_face = rd.flag();
+        if (has_face)
+        {
+            SmSurface* s = read_surface(rd, ctx);
+            SmPoint2d a = rd.uv(), b = rd.uv();
+            SmFace* pFace = nullptr;
+            status = brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
+        }
+        const int64_t networks = rd.idx();
+        for (int64_t i = 0; i < networks && status == SM_SUCCESS; ++i)
+            status = build_wire_network(ctx, brep);
     }
     else
     {

@@ -360,11 +360,17 @@ macro_rules! next_id {
 fn rust_brep(k: &Kernel, f: &FaceIn) -> Result<(Brep, FaceId), HarnessError> {
     let mut b = Brep::new();
     let e = |e: solidcore::SolidError| harness(e.to_string());
-    let region = b.add_region_record(Region { in_brep: true }).map_err(e)?;
+    let region = b
+        .add_region_record(Region {
+            in_brep: true,
+            ..Region::default()
+        })
+        .map_err(e)?;
     let shell = b
         .add_shell_record(Shell {
             faces: Vec::new(),
             region: Some(region),
+            ..Shell::default()
         })
         .map_err(e)?;
 

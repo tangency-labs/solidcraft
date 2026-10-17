@@ -1,9 +1,9 @@
 //! Shell and region topology, with typed arena links and native traversal order.
 //!
 //! Upstream: `source/SMLib/inc/SmShell.h`, `source/SMLib/src/SmShell.cpp`,
-//! `source/SMLib/inc/SmRegion.h`, `source/SMLib/src/SmRegion.cpp`,
-//! and the minimum default-argument branches of `source/SMLib/src/SmEdge.cpp`
-//! and `source/SMLib/src/SmVertex.cpp` used by wire-edge traversal;
+//! `source/SMLib/inc/SmRegion.h`, `source/SMLib/src/SmRegion.cpp`.
+//! The `SmEdge`/`SmVertex` callees of wire-edge traversal are called through their
+//! owners' ports (`topology::edge`, `topology::vertex`), not re-ported here;
 //! `source/SMLib/inc/SmTopology.h` supplies literal sibling links and
 //! `source/SMLib/inc/SmObject.h` defines the checked `SM_CAST_PTR` semantics.
 //!
@@ -20,29 +20,47 @@
 //! | [`wire_edges`] | `SmShell::GetWireEdges` |
 //! | [`ray_fire`] | `SmShell::RayFire` (partial output state retained) |
 //! | [`transfer_children`] | `SmShell::TransferChildrenTo` |
+//! | [`move_faceuse`] | `SmOwningTopology::Remove` + `PostInsert` of a face use (typed list) |
 //! | [`shell_is_degenerate`], [`region_is_degenerate`] | `IsDegenerate` (native default tolerance) |
 //! | `shell_bounds_for_degeneracy`, `region_bounds_for_degeneracy` | minimum default-tight `CalculateBoundingBox` branches (`query.face_p1`) |
 //! | [`faceuse_sibling_links`] | typed `SmTopology::GetNext` / `GetLast` for face uses |
-//! | `query::edge::edge_vertices`, `topology::vertexuse::edge_is_wire` | `SmEdge::GetVertices` (PR #89), `IsWire` (PR #88) |
-//! | `vertex_edges_for_shell` | `SmVertex::GetVertexuses`, `GetEdges` (no face filter) |
+//! | `topology::edge::{vertices, edgeuses, is_wire}`, `topology::vertex::edges` | `SmEdge::GetVertices`, `GetEdgeuses`, `IsWire`, `SmVertex::GetEdges` (callees, no filters) |
 //! | [`Region::get_shells`], [`Region::is_void`], [`Region::set_is_void`] | `GetShells`, `IsVoid`, `SetIsVoid` |
 //! | [`Region::is_infinite_region`] | `IsInfiniteRegion` |
 //! | [`Shell::is_inner_shell`], [`order_region_shells`] | `IsInnerShell`, `OrderShells` |
+//! | [`region_remove_shell`] | `SmOwningTopology::Remove` of a shell from its region |
 //!
 //! Deviations: circular lists are typed vectors in head-first order, as in the
-//! shared Brep arena model. Temporary marks use a local set without changing
-//! first-seen order. Incompatible array reinterpret casts return `InvalidInput`;
+//! shared Brep arena model. `GetWireEdges`, `GetMatedShells` and `RayFire` claim and
+//! lock a context mark (`SmNewMarkAndLock`) and mark through
+//! [`crate::topology::topology_traverser::Marks`] (per-call, as the mark values on the
+//! objects are unique per claim), advancing the kernel context's mark counters as upstream. Incompatible array reinterpret casts return `InvalidInput`;
 //! checked member casts retain native NULL. Native
 //! notification/logging side effects are not represented by these arena records.
 //! Face-use sibling links survive a cleared owner head, as in native self-transfer.
+//! `SmOwningTopology::Remove` / `PostInsert` of a face use are CO-PORTED on the
+//! typed face-use list (`move_faceuse`; unit `topology.proto_topology_p1` works on
+//! object-key records). `SmBrep::GetEdges` without a filter (unit `topology.brep_p1`)
+//! is CO-PORTED as `brep_get_edges`: the B-rep's edge arena in insertion order
+//! (`m_pEdgeListHead`).
+//! `TransferChildrenTo` ignores the status of `Remove`/`PostInsert` (`SE(...)`) and goes on;
+//! here a face use whose owner is not the source (or a `Remove` that cannot find it)
+//! returns `InvalidInput` instead. That state needs an inconsistent graph (a face use
+//! listed in a shell that its back link does not name); native code would corrupt
+//! the lists. Face-use sibling links, once `Some` (`Faceuse::sibling_links`), win
+//! over `Shell::members`: code that edits `members` directly (e.g. a later unit that
+//! rebuilds face-use lists) must keep them in step or reset them to `None`.
 //! There is no recursion. Missing external callees return explicit `Unported` errors.
 
 use crate::error::{Result, SolidError};
+use crate::geom::context::{with_mark_lock, ALL_MARKS};
+use crate::geom::object::Shape;
+use crate::kernel::Kernel;
 use crate::topology::proto_topology::p1::owning_topology;
+use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::{
     Brep, EdgeId, EdgeuseId, FaceuseId, Region, RegionId, Shell, ShellId, VertexId, VertexuseId,
 };
-use std::collections::BTreeSet;
 
 /// The native shell member class, independently stored from its list head.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -230,37 +248,44 @@ impl Shell {
         }
         Ok(false)
     }
-    /// Distinct mate shells in first-seen face-use order.
+    /// Distinct mate shells in first-seen face-use order. Like `SmShell::GetMatedShells`
+    /// this claims and locks a context mark (`SmNewMarkAndLock`, all marks) for the
+    /// duration of the call, so the context's mark counters advance.
     ///
     /// # Errors
-    /// Missing native mates/owners or dangling arena references.
-    pub fn mated_shells(&self, brep: &Brep) -> Result<Vec<ShellId>> {
+    /// Missing native mates/owners or dangling arena references; every mark is still
+    /// released.
+    pub fn mated_shells(&self, kernel: &mut Kernel, brep: &Brep) -> Result<Vec<ShellId>> {
         let mut output = Vec::new();
         if !self.is_faceuse_shell() {
             return Ok(output);
         }
-        let mut seen = BTreeSet::new();
-        for faceuse in self.get_faceuses()? {
-            let mate = brep.faceuse(faceuse)?.mate.ok_or(invalid_members())?;
-            let shell = brep.faceuse(mate)?.shell.ok_or(invalid_members())?;
-            brep.shell(shell)?;
-            if seen.insert(shell) {
+        with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
+            let mut marks = Marks::default();
+            for faceuse in self.get_faceuses()? {
+                let mate = brep.faceuse(faceuse)?.mate.ok_or(invalid_members())?;
+                let shell = brep.faceuse(mate)?.shell.ok_or(invalid_members())?;
+                brep.shell(shell)?;
+                if marks.is_marked(kernel, Entity::Shell(shell), mark) {
+                    continue;
+                }
+                marks.mark(kernel, Entity::Shell(shell), mark);
                 output.push(shell);
             }
-        }
+            Ok(())
+        })??;
         Ok(output)
     }
-    /// Classify whether this is an inner shell through the topology traverser.
+    /// Classify whether this is an inner shell: `SmTopologyTraverser::IsInnerShell`
+    /// on this shell's face uses (`GetFaceuses`).
     ///
     /// # Errors
-    /// Invalid member classes or the unported topology traversal callee.
-    pub fn is_inner_shell(&self) -> Result<bool> {
-        let _faceuses = self.get_faceuses()?;
-        // UNPORTED(topology.topology_traverser): SmTopologyTraverser::IsInnerShell
-        Err(SolidError::unported(
-            "SmTopologyTraverser::IsInnerShell",
-            "topology.topology_traverser",
-        ))
+    /// Invalid member classes and the errors of
+    /// [`crate::topology::topology_traverser::is_inner_shell`] (its `SM_ERR` for an
+    /// empty or inconclusive set, `Unported` from its ray intersections).
+    pub fn is_inner_shell(&self, kernel: &mut Kernel, brep: &Brep) -> Result<bool> {
+        let faceuses = self.get_faceuses()?;
+        crate::topology::topology_traverser::is_inner_shell(kernel, brep, &faceuses)
     }
 }
 
@@ -364,7 +389,7 @@ impl Region {
 ///
 /// # Errors
 /// Invalid arena references or an unported inner-shell classification.
-pub fn order_region_shells(brep: &mut Brep, id: RegionId) -> Result<()> {
+pub fn order_region_shells(kernel: &mut Kernel, brep: &mut Brep, id: RegionId) -> Result<()> {
     let shells = brep.region(id)?.shells.clone();
     if shells.len() < 2 {
         return Ok(());
@@ -383,7 +408,7 @@ pub fn order_region_shells(brep: &mut Brep, id: RegionId) -> Result<()> {
     if faceuse_shells.len() > 1 {
         for &shell in &faceuse_shells {
             if brep.shell(shell)?.is_closed(brep, shell)? {
-                match brep.shell(shell)?.is_inner_shell() {
+                match brep.shell(shell)?.is_inner_shell(kernel, brep) {
                     Ok(true) => {
                         chosen = Some(shell);
                         break;
@@ -404,42 +429,53 @@ pub fn order_region_shells(brep: &mut Brep, id: RegionId) -> Result<()> {
     Ok(())
 }
 
-/// Wire edges of a shell, preserving native stack and first-seen order.
+/// Wire edges of a shell, preserving native stack and first-seen order. A wire
+/// shell claims and locks a context mark (`SmNewMarkAndLock`, all marks) for its
+/// traversal, so the context's mark counters advance as upstream's do.
 ///
 /// # Errors
 /// Dangling topology links, native undefined pointer accesses, or the missing
-/// vertex edge-list traversal. There is no recursion.
-pub fn wire_edges(brep: &Brep, id: ShellId) -> Result<Vec<EdgeId>> {
+/// vertex edge-list traversal; the mark is released on every path. There is no
+/// recursion.
+pub fn wire_edges(kernel: &mut Kernel, brep: &Brep, id: ShellId) -> Result<Vec<EdgeId>> {
+    const WIRE_OP: &str = "topology::shell::wire_edges";
     let shell = brep.shell(id)?;
     let mut output = Vec::new();
     if shell.is_vertex_shell() {
         return Ok(output);
     }
     if shell.is_wire_shell() {
-        let first = shell.wire_edge(brep)?.ok_or(invalid_members())?;
-        let mut stack = vec![first];
-        let mut seen_vertices = BTreeSet::new();
-        let mut seen_edges = BTreeSet::new();
-        while let Some(edge) = stack.pop() {
-            for vertex in crate::query::edge::edge_vertices(brep, edge)? {
-                if !seen_vertices.insert(vertex) {
-                    continue;
-                }
-                for adjacent in vertex_edges_for_shell(brep, vertex)? {
-                    if seen_edges.insert(adjacent) {
+        with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
+            let first = shell.wire_edge(brep)?.ok_or(invalid_members())?;
+            let mut marks = Marks::default();
+            let mut stack = vec![first];
+            while let Some(edge) = stack.pop() {
+                for vertex in crate::topology::edge::vertices(brep, edge, None)? {
+                    // Upstream marks every listed vertex: a NULL start vertex is a
+                    // NULL dereference.
+                    let vertex = vertex.ok_or_else(|| SolidError::null_pointer(WIRE_OP))?;
+                    if marks.is_marked(kernel, Entity::Vertex(vertex), mark) {
+                        continue;
+                    }
+                    marks.mark(kernel, Entity::Vertex(vertex), mark);
+                    for adjacent in crate::topology::vertex::edges(brep, vertex, None)? {
+                        if marks.is_marked(kernel, Entity::Edge(adjacent), mark) {
+                            continue;
+                        }
+                        marks.mark(kernel, Entity::Edge(adjacent), mark);
                         output.push(adjacent);
                         stack.push(adjacent);
                     }
                 }
             }
-        }
+            Ok(())
+        })??;
         return Ok(output);
     }
-    // The shared arena model represents SmBrep's edge list in insertion order.
     // GetBrep is required even when the edge list happens to be empty.
     let owner = shell_brep(brep, id)?.ok_or(invalid_members())?;
-    for (edge, _) in owner.edges().iter() {
-        if edge_is_wire_for_shell(owner, edge)? {
+    for edge in brep_get_edges(owner) {
+        if crate::topology::edge::is_wire(owner, edge)? {
             let primary = crate::topology::edgeuse::p1::primary_edgeuse(owner, edge)?
                 .ok_or(invalid_members())?;
             if owner.edgeuse(primary)?.owner == crate::topology::EdgeuseOwner::Shell(Some(id)) {
@@ -450,26 +486,34 @@ pub fn wire_edges(brep: &Brep, id: ShellId) -> Result<Vec<EdgeId>> {
     Ok(output)
 }
 
-fn edge_is_wire_for_shell(brep: &Brep, edge: EdgeId) -> Result<bool> {
-    crate::topology::vertexuse::edge_is_wire(brep, edge)
+/// CO-PORT of `SmBrep::GetEdges` without a filter (unit `topology.brep_p1`): the
+/// B-rep's edges in `m_pEdgeListHead` order. The shared arena model keeps edges in
+/// that insertion order, so this equals the edge arena, provided the importer
+/// registered `GetEdges` first (every C++ fixture walk feeding this unit does).
+/// Replace with the owner's port when `topology.brep_p1` lands.
+pub(crate) fn brep_get_edges(brep: &Brep) -> Vec<EdgeId> {
+    brep.edges().ids().collect()
 }
 
-fn vertex_edges_for_shell(brep: &Brep, vertex: VertexId) -> Result<Vec<EdgeId>> {
-    use crate::topology::edgeuse::p1;
-    use crate::topology::VertexuseOwner;
-    let mut output = Vec::new();
-    for &vertexuse in &brep.vertex(vertex)?.vertexuses {
-        if let VertexuseOwner::Edgeuse(edgeuse) = brep.vertexuse(vertexuse)?.owner {
-            let edgeuse = edgeuse.ok_or(invalid_members())?;
-            // Upstream asks for the face even when its optional filter is NULL.
-            let _face = p1::face(brep, edgeuse)?;
-            let edge = brep.edgeuse(edgeuse)?.edge.ok_or(invalid_members())?;
-            if !output.contains(&edge) {
-                output.push(edge);
-            }
-        }
+/// `pRegion->Remove(pShell)` (`SmOwningTopology::Remove`, inline in
+/// `SmOwningTopology.h`): takes the shell off the region's list and clears its
+/// owner, leaving every other shell's relative order.
+///
+/// # Errors
+/// Native `SM_ERR` (as `InvalidInput`) when the shell is not in this region's list,
+/// and dangling ids.
+pub fn region_remove_shell(brep: &mut Brep, region: RegionId, shell: ShellId) -> Result<()> {
+    if brep.shell(shell)?.region != Some(region) {
+        return Err(invalid_members());
     }
-    Ok(output)
+    let list = &mut brep.region_mut(region)?.shells;
+    let index = list
+        .iter()
+        .position(|id| *id == shell)
+        .ok_or(invalid_members())?;
+    list.remove(index);
+    brep.shell_mut(shell)?.region = None;
+    Ok(())
 }
 
 /// Move a shell's vertex, wire edges and face uses to another shell.
@@ -483,6 +527,7 @@ fn vertex_edges_for_shell(brep: &Brep, vertex: VertexId) -> Result<Vec<EdgeId>> 
 /// Native `SM_ERR` for an illegal vertex-shell move, dangling graph links, or
 /// incompatible native list classes. The caller must supply connected topology.
 pub fn transfer_children(
+    kernel: &mut Kernel,
     brep: &mut Brep,
     source: ShellId,
     recipient: ShellId,
@@ -530,7 +575,7 @@ pub fn transfer_children(
         }
         wires
     } else {
-        wire_edges(brep, source)?
+        wire_edges(kernel, brep, source)?
     };
     if let Some(&first) = wires.first() {
         if brep.shell(recipient)?.is_unknown_shell() {
@@ -542,9 +587,9 @@ pub fn transfer_children(
             // model retains that list on Edge::edgeuses rather than separately.
         }
         for edge in wires {
-            // SmEdge::GetEdgeuses with neither optional filter. The shared edge
-            // record already retains its native circular radial list order.
-            let edgeuses = brep.edge(edge)?.edgeuses.clone();
+            // SmEdge::GetEdgeuses with neither optional filter: the native
+            // circular radial list order.
+            let edgeuses = crate::topology::edge::edgeuses(brep, edge, None, None)?;
             for edgeuse in edgeuses {
                 brep.edgeuse_mut(edgeuse)?.owner = EdgeuseOwner::Shell(Some(recipient));
             }
@@ -562,31 +607,68 @@ pub fn transfer_children(
             if brep.faceuse(faceuse)?.shell != Some(source) {
                 return Err(invalid_members());
             }
-            // Remove, then PostInsert: the member moves to the recipient's tail
-            // without changing either list's remaining relative order.
-            match &mut brep.shell_mut(source)?.members {
-                ShellMembers::Faceuses(members) => {
-                    let index = members
-                        .iter()
-                        .position(|id| *id == faceuse)
-                        .ok_or(invalid_members())?;
-                    members.remove(index);
-                }
-                _ => return Err(invalid_members()),
-            }
-            let target = &mut brep.shell_mut(recipient)?.members;
-            match target {
-                ShellMembers::Empty => *target = ShellMembers::Faceuses(vec![faceuse]),
-                ShellMembers::Faceuses(members) => members.push(faceuse),
-                _ => return Err(invalid_members()),
-            }
-            brep.faceuse_mut(faceuse)?.shell = Some(recipient);
+            remove_and_post_insert(brep, faceuse, source, recipient)?;
         }
         // Self-transfer clears the shell head but leaves this face-use cycle
         // connected. Preserve those native links independently of the head.
         refresh_faceuse_sibling_links(brep, recipient)?;
     }
     clear_shell_members(brep, source)
+}
+
+// `source->Remove(faceuse)` then `recipient->PostInsert(faceuse)`
+// (`SmOwningTopology`, inline in `SmOwningTopology.h`): the member moves to the
+// recipient's tail without changing either list's remaining relative order; a
+// list left without members gets a NULL head. Sibling links are not refreshed.
+fn remove_and_post_insert(
+    brep: &mut Brep,
+    faceuse: FaceuseId,
+    source: ShellId,
+    recipient: ShellId,
+) -> Result<()> {
+    let members = &mut brep.shell_mut(source)?.members;
+    match members {
+        ShellMembers::Faceuses(list) => {
+            let index = list
+                .iter()
+                .position(|id| *id == faceuse)
+                .ok_or(invalid_members())?;
+            list.remove(index);
+            if list.is_empty() {
+                *members = ShellMembers::Empty;
+            }
+        }
+        _ => return Err(invalid_members()),
+    }
+    let target = &mut brep.shell_mut(recipient)?.members;
+    match target {
+        ShellMembers::Empty => *target = ShellMembers::Faceuses(vec![faceuse]),
+        ShellMembers::Faceuses(list) => list.push(faceuse),
+        _ => return Err(invalid_members()),
+    }
+    brep.faceuse_mut(faceuse)?.shell = Some(recipient);
+    Ok(())
+}
+
+/// Move one face use from its shell to the tail of `recipient`
+/// (`pOldShell->Remove(pFU); pNewShell->PostInsert(pFU)` with
+/// `pOldShell = pFU->GetShell()`, as `SmTopologyTraverser::FaceuseShellReplacement`
+/// does). Both shells' face-use sibling links are refreshed. The caller skips a
+/// face use already in `recipient`.
+///
+/// # Errors
+/// A face use without a shell (a NULL dereference upstream), a face use missing
+/// from its shell's face-use list, a recipient holding wire/vertex members, or
+/// dangling ids.
+pub fn move_faceuse(brep: &mut Brep, faceuse: FaceuseId, recipient: ShellId) -> Result<()> {
+    let source = brep
+        .faceuse(faceuse)?
+        .shell
+        .ok_or_else(|| SolidError::null_pointer("topology::shell::move_faceuse"))?;
+    brep.shell(recipient)?;
+    remove_and_post_insert(brep, faceuse, source, recipient)?;
+    refresh_faceuse_sibling_links(brep, source)?;
+    refresh_faceuse_sibling_links(brep, recipient)
 }
 
 fn clear_shell_members(brep: &mut Brep, id: ShellId) -> Result<()> {
@@ -653,7 +735,7 @@ fn refresh_faceuse_sibling_links(brep: &mut Brep, owner: ShellId) -> Result<()> 
 /// Invalid graph references, an undefined native pointer access, or an unported
 /// bounding-box dependency. Ordinary native box errors retain the partial box.
 pub fn shell_is_degenerate(
-    kernel: &crate::kernel::Kernel,
+    kernel: &mut Kernel,
     brep: &Brep,
     id: ShellId,
     tolerance: Option<f64>,
@@ -675,7 +757,7 @@ pub fn shell_is_degenerate(
 /// Invalid graph references or an unported bounding-box dependency. Ordinary
 /// native box errors are ignored while retaining the initialized/partial box.
 pub fn region_is_degenerate(
-    kernel: &crate::kernel::Kernel,
+    kernel: &mut Kernel,
     brep: &Brep,
     id: RegionId,
     tolerance: Option<f64>,
@@ -696,7 +778,7 @@ struct BoundsAttempt {
 // CO-PORTED minimum default-tight=false branches from query.face_p1. Keeping the
 // status beside its box preserves partial writes and Native SER before Union.
 fn region_bounds_for_degeneracy(
-    kernel: &crate::kernel::Kernel,
+    kernel: &mut Kernel,
     brep: &Brep,
     id: RegionId,
 ) -> Result<BoundsAttempt> {
@@ -725,7 +807,7 @@ fn region_bounds_for_degeneracy(
 }
 
 fn shell_bounds_for_degeneracy(
-    kernel: &crate::kernel::Kernel,
+    kernel: &mut Kernel,
     brep: &Brep,
     id: ShellId,
 ) -> Result<BoundsAttempt> {
@@ -737,7 +819,7 @@ fn shell_bounds_for_degeneracy(
             bounds.add_point(brep.vertex(vertex)?.point);
         }
         16005 => {
-            for edge in wire_edges(brep, id)? {
+            for edge in wire_edges(kernel, brep, id)? {
                 let child = edge_bounds_for_shell(kernel, brep, edge, false)?;
                 if let Err(error) = child.status {
                     return Ok(BoundsAttempt {
@@ -770,7 +852,7 @@ fn shell_bounds_for_degeneracy(
 }
 
 fn edge_bounds_for_shell(
-    kernel: &crate::kernel::Kernel,
+    kernel: &mut Kernel,
     brep: &Brep,
     id: EdgeId,
     tight: bool,
@@ -806,7 +888,7 @@ fn edge_bounds_for_shell(
 }
 
 fn face_bounds_for_shell(
-    _kernel: &crate::kernel::Kernel,
+    _kernel: &Kernel,
     brep: &Brep,
     id: crate::topology::FaceId,
     _tight: bool,
@@ -878,7 +960,7 @@ pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjec
     /// Default B-rep bounding box when no radius was supplied.
     fn shell_ray_bounds(
         &self,
-        _kernel: &crate::kernel::Kernel,
+        _kernel: &Kernel,
         _brep: crate::topology::BrepId,
     ) -> Result<crate::geom::extent3d::Extent3d> {
         // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
@@ -886,6 +968,13 @@ pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjec
             "SmBrep::CalculateBoundingBox",
             "query.brep",
         ))
+    }
+
+    /// The shape of the shell's boundary faces (`SmShape(sBreps, sFaces, ...)`).
+    /// Worlds that cannot build the real shape (a harness without the B-rep's cached
+    /// geometry) defer here instead of failing later.
+    fn shell_ray_shape(&self, faces: &[crate::geom::object::FaceKey]) -> Result<Shape> {
+        Shape::new(&[], faces, &[], &[])
     }
 
     /// Classify the incoming line segment at its known intersection.
@@ -905,7 +994,7 @@ pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjec
 /// Native partial output writes survive an error in the returned attempt.
 /// Missing geometry queries are explicit dependency errors.
 pub fn ray_fire<O, W>(
-    kernel: &crate::kernel::Kernel,
+    kernel: &mut Kernel,
     brep: &Brep,
     brep_id: crate::topology::BrepId,
     shell_id: ShellId,
@@ -917,7 +1006,6 @@ where
     W: ShellRayWorld<O>,
 {
     use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-    use crate::geom::object::Shape;
     use crate::intersect::point_class::PointClassType;
     use crate::intersect::topology_solver::{p1::TopologySolver, p2::TopologySolveOptions};
     use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -943,23 +1031,28 @@ where
                 code: 1007, // SmVector3d::Unitize returns SM_ERR_INVALID_INPUT.
                 entity: None,
             })?;
-        let mut seen = BTreeSet::new();
-        let mut faces = Vec::new();
-        for id in brep.shell(shell_id)?.get_faceuses()? {
-            let faceuse = brep.faceuse(id)?;
-            let face = faceuse.face.ok_or(SolidError::null_pointer(OP))?;
-            if !seen.insert(face) {
-                continue;
+        // `SmNewMarkAndLock` with the default (all marks) mask, released on every path.
+        let faces = with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
+            let mut marks = Marks::default();
+            let mut faces = Vec::new();
+            for id in brep.shell(shell_id)?.get_faceuses()? {
+                let faceuse = brep.faceuse(id)?;
+                let face = faceuse.face.ok_or(SolidError::null_pointer(OP))?;
+                if marks.is_marked(kernel, Entity::Face(face), mark) {
+                    continue;
+                }
+                marks.mark(kernel, Entity::Face(face), mark);
+                let mate = brep.faceuse(faceuse.mate.ok_or(SolidError::null_pointer(OP))?)?;
+                if mate.shell != Some(shell_id) {
+                    faces.push((brep_id, face));
+                }
             }
-            let mate = brep.faceuse(faceuse.mate.ok_or(SolidError::null_pointer(OP))?)?;
-            if mate.shell != Some(shell_id) {
-                faces.push((brep_id, face));
-            }
-        }
-        let shape = Shape::new(&[], &faces, &[], &[])?;
+            Ok::<_, SolidError>(faces)
+        })??;
+        let shape = world.shell_ray_shape(&faces)?;
         let vectors = [direction];
         let solutions = TopologySolver::shape_point_solve(
-            kernel,
+            &*kernel,
             world,
             &shape,
             input.start,
@@ -1123,7 +1216,7 @@ mod tests {
                 ..Region::default()
             })
             .unwrap();
-        order_region_shells(&mut brep, region).unwrap();
+        order_region_shells(&mut Kernel::default(), &mut brep, region).unwrap();
         assert_eq!(
             brep.region(region).unwrap().shells,
             vec![ids[2], ids[3], ids[0], ids[1]]
@@ -1157,7 +1250,10 @@ mod tests {
         shell.shell_type = ShellType::Faceuse;
         shell.members = ShellMembers::Faceuses(sources);
         assert_eq!(
-            brep.shell(source).unwrap().mated_shells(&brep).unwrap(),
+            brep.shell(source)
+                .unwrap()
+                .mated_shells(&mut Kernel::default(), &brep)
+                .unwrap(),
             vec![b, a]
         );
         assert!(brep
@@ -1179,5 +1275,45 @@ mod tests {
         assert!(shell.get_faceuses().unwrap().is_empty());
         shell.set_shell_type(16022);
         assert_eq!(shell.get_faceuses().unwrap(), members);
+    }
+
+    #[test]
+    fn move_faceuse_removes_then_post_inserts_and_relinks_siblings() {
+        let mut brep = Brep::new();
+        let from = brep.add_shell_record(Shell::default()).unwrap();
+        let to = brep.add_shell_record(Shell::default()).unwrap();
+        let mut ids = Vec::new();
+        for shell in [from, from, to] {
+            ids.push(
+                brep.add_faceuse_record(Faceuse {
+                    shell: Some(shell),
+                    ..Faceuse::default()
+                })
+                .unwrap(),
+            );
+        }
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+        for (shell, list) in [(from, vec![a, b]), (to, vec![c])] {
+            let s = brep.shell_mut(shell).unwrap();
+            s.shell_type = ShellType::Faceuse;
+            s.members = ShellMembers::Faceuses(list);
+        }
+        // the head moves: the source list keeps its order, the recipient gains a tail
+        move_faceuse(&mut brep, a, to).unwrap();
+        assert_eq!(brep.shell(from).unwrap().get_faceuses().unwrap(), vec![b]);
+        assert_eq!(brep.shell(to).unwrap().get_faceuses().unwrap(), vec![c, a]);
+        assert_eq!(brep.faceuse(a).unwrap().shell, Some(to));
+        assert_eq!(faceuse_sibling_links(&brep, a).unwrap(), (Some(c), Some(c)));
+        assert_eq!(faceuse_sibling_links(&brep, b).unwrap(), (Some(b), Some(b)));
+        // the last member leaves a NULL head
+        move_faceuse(&mut brep, b, to).unwrap();
+        assert_eq!(brep.shell(from).unwrap().members, ShellMembers::Empty);
+        assert_eq!(
+            brep.shell(to).unwrap().get_faceuses().unwrap(),
+            vec![c, a, b]
+        );
+        // a face use missing from its shell's list is an inconsistent B-rep
+        brep.faceuse_mut(c).unwrap().shell = Some(from);
+        assert!(move_faceuse(&mut brep, c, to).is_err());
     }
 }

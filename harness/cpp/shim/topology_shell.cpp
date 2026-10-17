@@ -28,6 +28,26 @@ void text(std::vector<double>& out,const TCHAR* value) {
     out.push_back((double)chars.size());
     out.insert(out.end(),chars.begin(),chars.end());
 }
+// Mark-counter advance of a context over one call: per mark type (MARK, MARK2, MARK3,
+// MARKIO, MARKASSERT) the change of the current mark, then whether it is still
+// locked. The shim's context is shared by all cases, so only deltas compare.
+struct MarkSnap {
+    const SmContext* ctx;
+    ULONG before[5];
+    explicit MarkSnap(const SmContext* c) : ctx(c) {
+        for (int i = 0; i < 5; ++i) before[i] = c->GetCurrentMark(kind(i));
+    }
+    static SmMarkType kind(int i) {
+        const SmMarkType kinds[5] = {SM_MT_MARK, SM_MT_MARK2, SM_MT_MARK3, SM_MT_MARKIO, SM_MT_MARKASSERT};
+        return kinds[i];
+    }
+    void put(std::vector<double>& out) const {
+        for (int i = 0; i < 5; ++i)
+            out.push_back((double)(ctx->GetCurrentMark(kind(i)) - before[i]));
+        for (int i = 0; i < 5; ++i)
+            out.push_back(ctx->IsMarkLocked(kind(i)) ? 1.0 : 0.0);
+    }
+};
 template<class T> void list(std::vector<double>& out, const SmTArray<T*>& values,
                             const std::vector<T*>& identities) {
     out.push_back((double)values.GetSize());
@@ -55,6 +75,7 @@ SC_EXPORT int32_t sc_topology_shell_query(const char* path, const double* input,
                     if (!faceuses[i]->GetMate() || !faceuses[i]->GetMate()->GetShell())
                         return SC_ERR_ARG;
                 SmTArray<SmShell*> mates;
+                const MarkSnap marks(shell->GetContext());
                 if (shell->GetMatedShells(mates) != SM_SUCCESS) return SC_ERR_ARG;
                 out.push_back((double)shell->GetType());
                 out.push_back((double)shell->IsVertexShell());
@@ -73,6 +94,7 @@ SC_EXPORT int32_t sc_topology_shell_query(const char* path, const double* input,
                 text(out,shell->GetClassString());
                 list(out, faceuses, fixture.faceuses);
                 list(out, mates, fixture.shells);
+                marks.put(out);
             }
             for (SmRegion* region : fixture.regions) {
                 if (set_void) region->SetIsVoid(void_state);
@@ -104,9 +126,11 @@ SC_EXPORT int32_t sc_topology_shell_wire_edges(const char* path, const double* i
             for (SmShell* shell : fixture.shells) {
                 if (shell->IsWireShell() && !shell->GetWireEdge()) return SC_ERR_ARG;
                 SmTArray<SmEdge*> wires;
+                const MarkSnap marks(shell->GetContext());
                 const SmStatus status = shell->GetWireEdges(wires);
                 out.push_back(status == SM_SUCCESS ? 0.0 : (double)status);
                 list(out, wires, fixture.edges);
+                marks.put(out);
             }
             return sc_copy_out(out.data(), (int64_t)out.size(), output, cap, output_len);
         });
@@ -230,10 +254,12 @@ void snapshot(std::vector<double>& out, const sc_topology_fixture::View& view,
 SC_EXPORT int32_t sc_topology_shell_transfer(const char* path, const double* input,
     int64_t count, int32_t extra_empty, int64_t source, int64_t recipient,
     int32_t has_candidates, const int64_t* candidates, int64_t candidate_count,
-    int32_t split_faceuse, double* output, int64_t cap, int64_t* output_len) {
+    int32_t split_faceuse, const int64_t* pre, int64_t pre_count,
+    double* output, int64_t cap, int64_t* output_len) {
     if (!output_len || cap<0 || (cap && !output) || extra_empty<0 || extra_empty>64
         || source<0 || recipient<0 || (has_candidates!=0 && has_candidates!=1)
         || candidate_count<0 || candidate_count>64 || (candidate_count && !candidates)
+        || pre_count<0 || pre_count>8 || (pre_count && !pre)
         || (!has_candidates && candidate_count) || (split_faceuse!=0 && split_faceuse!=1)) return SC_ERR_ARG;
     SC_TRY
     return sc_topology_fixture::apply(path,input,count,
@@ -262,10 +288,36 @@ SC_EXPORT int32_t sc_topology_shell_transfer(const char* path, const double* inp
                 if (extra->PostInsert(head)!=SM_SUCCESS) return SC_ERR_ARG;
             }
             if (source>=(int64_t)shells.size() || recipient>=(int64_t)shells.size()) return SC_ERR_ARG;
+            // GetWireEdges (reached when no candidate list is given, and by the final
+            // per-shell snapshot) dereferences the first wire edge of a wire shell;
+            // SmShell::GetWireEdge() is NULL for a wire shell without list head.
+            const auto crashes_wire_edges=[](SmShell* shell) {
+                return shell->IsWireShell() && !shell->GetWireEdge();
+            };
+            // Candidate edges are dereferenced (GetPrimaryEdgeuse()->m_pSorLU) only on
+            // the branches that reach the ownership filter.
+            const auto reads_candidates_of=[](SmShell* from,SmShell* to) {
+                return !(to->GetSize()==0 && from->IsVertexShell())
+                    && !(to->GetSize()!=0 && (to->IsVertexShell() || from->IsVertexShell()));
+            };
+            // Steps run before the compared one (no candidate list): their statuses
+            // lead the snapshot. State is restored for deletion after the whole run.
+            transfer_detail::Restore restore(view,shells);
+            std::vector<double> pre_status;
+            for (int64_t i=0;i<pre_count;++i) {
+                if (pre[2*i]<0 || pre[2*i+1]<0 || pre[2*i]>=(int64_t)shells.size()
+                    || pre[2*i+1]>=(int64_t)shells.size()) return SC_ERR_ARG;
+                SmShell* a=shells[(size_t)pre[2*i]];
+                SmShell* b=shells[(size_t)pre[2*i+1]];
+                // Conservative: no native fixture reaches such a shell (see above).
+                for (SmShell* other : shells)
+                    if (crashes_wire_edges(other)) return SC_ERR_ARG;
+                const SmStatus st=a->TransferChildrenTo(b,nullptr);
+                pre_status.push_back(st==SM_SUCCESS ? 0.0 : (double)st);
+            }
             SmShell* from=shells[(size_t)source];
             SmShell* to=shells[(size_t)recipient];
-            const bool reads_candidates=!(to->GetSize()==0 && from->IsVertexShell())
-                && !(to->GetSize()!=0 && (to->IsVertexShell() || from->IsVertexShell()));
+            const bool reads_candidates=reads_candidates_of(from,to);
             SmTArray<SmEdge*> wires;
             for (int64_t i=0;i<candidate_count;++i) {
                 const auto index=candidates[i];
@@ -274,20 +326,30 @@ SC_EXPORT int32_t sc_topology_shell_transfer(const char* path, const double* inp
                 if (reads_candidates && (!edge || !edge->GetPrimaryEdgeuse())) return SC_ERR_ARG;
                 wires.Add(edge);
             }
+            // The post-transfer snapshot calls GetWireEdges on every shell: `from` ends
+            // Unknown; a shell other than from/to is unchanged.
+            for (SmShell* other : shells)
+                if (other!=from && other!=to && crashes_wire_edges(other)) return SC_ERR_ARG;
+            if (!has_candidates && reads_candidates && crashes_wire_edges(from)) return SC_ERR_ARG;
             // Snapshot the result before restoring canonical links for deletion.
             // Self-transfer is compared, including its detached face-use cycle.
-            transfer_detail::Restore restore(view,shells);
+            const MarkSnap transfer_marks(from->GetContext());
             const auto status=from->TransferChildrenTo(to,has_candidates ? &wires : nullptr);
             std::vector<double> out{status==SM_SUCCESS ? 0.0 : (double)status};
+            transfer_marks.put(out);
             transfer_detail::snapshot(out,view,shells);
             // Exercise both connected-wire traversal and global ownership
             // filtering on the actual post-transfer topology.
             for (SmShell* shell : shells) {
                 SmTArray<SmEdge*> after;
+                const MarkSnap marks(shell->GetContext());
                 const auto query_status=shell->GetWireEdges(after);
                 out.push_back(query_status==SM_SUCCESS ? 0.0 : (double)query_status);
                 list(out,after,view.edges);
+                marks.put(out);
             }
+            out.push_back((double)pre_status.size());
+            out.insert(out.end(),pre_status.begin(),pre_status.end());
             return sc_copy_out(out.data(),(int64_t)out.size(),output,cap,output_len);
         });
     SC_CATCH
@@ -365,10 +427,10 @@ SC_EXPORT int32_t sc_topology_shell_ray(const char* path,const double* input,int
     const double* start,const double* direction,double tolerance,int32_t has_radius,double radius,
     double* output,int64_t cap,int64_t* output_len) {
     if (!start || !direction || !output_len || cap<0 || (cap && !output) ||
-        (has_radius!=0 && has_radius!=1) || !std::isfinite(tolerance) ||
-        (has_radius && !std::isfinite(radius))) return SC_ERR_ARG;
+        (has_radius!=0 && has_radius!=1)) return SC_ERR_ARG;
+    bool finite = std::isfinite(tolerance) && (!has_radius || std::isfinite(radius));
     for (int i=0;i<3;++i)
-        if (!std::isfinite(start[i]) || !std::isfinite(direction[i])) return SC_ERR_ARG;
+        finite = finite && std::isfinite(start[i]) && std::isfinite(direction[i]);
     SC_TRY
     return sc_topology_fixture::apply(path,input,count,[&](const sc_topology_fixture::View& view)->int32_t {
         std::vector<double> out;
@@ -376,12 +438,19 @@ SC_EXPORT int32_t sc_topology_shell_ray(const char* path,const double* input,int
         SmVector3d vector(direction[0],direction[1],direction[2]);
         for (SmShell* shell:view.shells) {
             SmTArray<SmFaceuse*> fus; shell->GetFaceuses(fus);
-            for (ULONG i=0;i<fus.GetSize();++i)
+            bool boundary=false;
+            for (ULONG i=0;i<fus.GetSize();++i) {
                 if (!fus[i]->GetFace() || !fus[i]->GetMate()) return SC_ERR_ARG;
+                if (fus[i]->GetMate()->GetShell()!=shell) boundary=true;
+            }
+            // Non-finite values only matter once boundary faces reach the solver;
+            // an empty shape never uses them beyond the status checks compared here.
+            if (boundary && !finite) return SC_ERR_ARG;
             SmRegion* region=view.regions.empty() ? nullptr : view.regions.front();
             SmPointClassification pc(SmZoneTol3d(0.125),shell->GetContext());
             pc.SetClassObject(SM_PC_POINT,nullptr);
             pc.SetGap3d(123.0); pc.SetPreSnapParam(456.0);
+            const MarkSnap marks(shell->GetContext());
             SmStatus status=shell->RayFire(point,vector,SmZoneTol3d(tolerance),region,pc,
                                            has_radius ? &radius : nullptr);
             out.push_back(status==SM_SUCCESS ? 0.0 : (double)status);
@@ -391,6 +460,7 @@ SC_EXPORT int32_t sc_topology_shell_ray(const char* path,const double* input,int
             out.push_back(pc.GetTolerance());
             out.push_back(pc.GetGap3d());
             out.push_back(pc.GetPreSnapParam());
+            marks.put(out);
         }
         return sc_copy_out(out.data(),(int64_t)out.size(),output,cap,output_len);
     });

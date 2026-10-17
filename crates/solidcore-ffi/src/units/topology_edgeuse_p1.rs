@@ -13,6 +13,7 @@
 //! | `2 surface u0 v0 u1 v1 validate_only init_gaps` | `CreateFaceFromSurface(surface, dom)`   |
 //! | `3 validate_only init_gaps`                   | the wire network of `prog_test` `my_test_topology` |
 //! | `4 n points(x y z)*n validate_only init_gaps` | actual `MakeShellVertex` calls (0..64 vertices) |
+//! | `5 has_face [surface u0 v0 u1 v1] networks validate_only init_gaps` | an optional face (as kind 2) and `networks` (0..=3) copies of the wire network in one B-rep |
 //!
 //! A surface block is `0 oob form n m p q r s cpts(x y z w) u v` (`SmBSplineSurface`) or
 //! `1 O[3] N[3]` (`SmPlane(O, N)`); a curve block `dim n p m cpts(x y z w) knots`
@@ -333,8 +334,38 @@ fn uv(rd: &mut Reader<'_>, dom: Domain) -> Result<(), FfiError> {
 }
 
 /// A B-rep block.
-fn brep_block(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
-    match rd.index(4)? {
+pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
+    brep_block_with_plane_limit(rd, path, 1e4)
+}
+
+/// The surface and parameter domain of a face block (`2`, and `5` with a face).
+fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result<(), FfiError> {
+        let dom = surface(rd)?;
+        let d = rd.finites(4)?;
+        let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
+        else {
+            return Err(bad("domain too short"));
+        };
+        if a >= c || b2 >= e {
+            return Err(bad("face domain not ordered"));
+        }
+        match dom {
+            Some([u0, v0, u1, v1]) => {
+                if a < u0 || c > u1 || b2 < v0 || e > v1 {
+                    return Err(bad("face domain outside the surface's"));
+                }
+            }
+            None => {
+                if d.iter().any(|x| x.abs() > plane_domain_limit) {
+                    return Err(bad("plane face domain too large"));
+                }
+            }
+        }
+    Ok(())
+}
+
+fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
+    match rd.index(5)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -350,28 +381,12 @@ fn brep_block(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Resul
                 return Err(bad("wire edge interval outside the curve's"));
             }
         }
-        2 => {
-            let dom = surface(rd)?;
-            let d = rd.finites(4)?;
-            let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
-            else {
-                return Err(bad("domain too short"));
-            };
-            if a >= c || b2 >= e {
-                return Err(bad("face domain not ordered"));
+        2 => face_block(rd, plane_domain_limit)?,
+        5 => {
+            if rd.flag()? {
+                face_block(rd, plane_domain_limit)?;
             }
-            match dom {
-                Some([u0, v0, u1, v1]) => {
-                    if a < u0 || c > u1 || b2 < v0 || e > v1 {
-                        return Err(bad("face domain outside the surface's"));
-                    }
-                }
-                None => {
-                    if d.iter().any(|x| x.abs() > plane_domain_limit) {
-                        return Err(bad("plane face domain too large"));
-                    }
-                }
-            }
+            rd.index(3)?;
         }
         4 => {
             let count = rd.index(MAX_LIST)?;
@@ -562,7 +577,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     // operation. Actual native shell probes cover plane domains through 1e6;
     // retain the existing 1e4 bound for the other edge-use operations.
     let plane_domain_limit = if op == Op::Export { 1e6 } else { 1e4 };
-    brep_block(&mut rd, path, plane_domain_limit)?;
+    brep_block_with_plane_limit(&mut rd, path, plane_domain_limit)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
     let export = raw(Op::Export, path, block)?;
     if op == Op::Export {

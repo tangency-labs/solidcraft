@@ -1068,6 +1068,7 @@ mod tests {
             mate: None,
             orientation: OrientType::Same,
             loopuses: vec![LoopuseId::from_index(0)],
+            sibling_links: None,
         })
         .unwrap();
         b.add_loopuse_record(Loopuse {

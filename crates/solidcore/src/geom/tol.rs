@@ -159,8 +159,10 @@ use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 // UNPORTED(topology.vertex): SmTol::GetScaledZero(const SmVertex&) (SmVertex::GetPoint).
 // UNPORTED(topology.edge): SmTol::GetScaledZero(const SmEdge&) (SmEdge::GetCurve).
 // UNPORTED(topology.face_p2): SmTol::GetScaledZero(const SmFace&) (SmFace::GetSurface).
-// UNPORTED(query.face_p1): SmTol::GetScaledZero(const SmRegion&) and (const SmShell&)
-// (CalculateBoundingBox).
+// UNPORTED(query.face_p1): SmTol::GetScaledZero(const SmRegion&) and (const SmShell&) are
+// each one call to SmRegion::CalculateBoundingBox / SmShell::CalculateBoundingBox, which
+// harness/callgraph/units.json assigns to query.face_p1 (the blocking callee is in that
+// unit, not in geom.tol).
 // SmTol::UpdateObjectTolerance(SmTopology*, double, double, SmBoolean) is
 // update_object_tolerance below (CO-PORTED in boolean.topology_intersector_p1).
 

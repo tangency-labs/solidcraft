@@ -135,7 +135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/heal.heal_data_p2/edge_cases.json#11",
-      "values_compared": 3113
+      "values_compared": 3112
     },
     {
       "deferred": {
@@ -3163,7 +3163,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=8971101146397200656",
-      "values_compared": 2825
+      "values_compared": 2823
     },
     {
       "deferred": {
@@ -4011,7 +4011,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=8971101146397200744",
-      "values_compared": 3010
+      "values_compared": 3011
     },
     {
       "deferred": {
@@ -5803,7 +5803,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=8971101146397200922",
-      "values_compared": 2821
+      "values_compared": 2820
     },
     {
       "max_rel_err": 0.0,
@@ -7267,7 +7267,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=8971101146397201068",
-      "values_compared": 2887
+      "values_compared": 2888
     },
     {
       "deferred": {

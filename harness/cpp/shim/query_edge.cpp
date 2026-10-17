@@ -534,16 +534,11 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
             v.push_back(g.find(4, t));
         put_list(o, v);
     }
-    for (SmFace* p : g.faces)
-    {
+    for (SmFace* p : g.faces) {
         put_surface(o, p->GetSurface());
-        SmExtent2d d = p->GetUVDomain();
-        o.push_back(d.GetMin().x);
-        o.push_back(d.GetMin().y);
-        o.push_back(d.GetMax().x);
-        o.push_back(d.GetMax().y);
-        o.push_back((double)p->GetTolerance());
-        o.push_back(p->GetSurface() ? (double)p->GetSurface()->GetType() : -1.0);
+        const SmExtent2d domain=p->GetUVDomain();
+        o.insert(o.end(), {domain.GetMin().x,domain.GetMin().y,domain.GetMax().x,domain.GetMax().y,
+            (double)p->GetTolerance(),p->GetSurface() ? (double)p->GetSurface()->GetType() : -1.0});
     }
     for (SmLoopuse* p : g.loopuses)
     {
@@ -614,6 +609,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     sc_topology_fixture::append_shell_state(
         {*brep,g.regions,g.shells,g.faceuses,g.faces,g.loopuses,g.loops,
          g.edgeuses,g.edges,g.vertexuses,g.vertices},o);
+    o.push_back((double)brep->GetTolerance());
     // the curve type of every edge (-1 none), after the graph
     for (SmEdge* p : g.edges)
         o.push_back(p->GetCurve() ? (double)p->GetCurve()->GetType() : -1.0);

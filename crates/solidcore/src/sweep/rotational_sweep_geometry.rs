@@ -1172,11 +1172,17 @@ mod tests {
     /// `MakeShellVertex` + `MakeWireEdgeVertex` link it.
     fn wire(a: Point3, c: Point3) -> (Brep, EdgeId) {
         let mut br = Brep::new();
-        let r = br.add_region_record(Region { in_brep: true }).unwrap();
+        let r = br
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
         let s = br
             .add_shell_record(Shell {
                 faces: Vec::new(),
                 region: Some(r),
+                ..Shell::default()
             })
             .unwrap();
         let v0 = br

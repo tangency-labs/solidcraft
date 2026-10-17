@@ -20,8 +20,10 @@
 //! return errors. Wire recursion becomes explicit continuation frames, in exactly
 //! the upstream order (no input-dependent call-stack growth). Outputs remain mutable
 //! arrays where early returns preserve optional arrays upstream. Shell ownership
-//! mutation waits for `topology.shell`; ray intersections wait for
-//! `topology.face_p4`. Existing co-ported accessors are reused.
+//! moves through `topology::shell` (`transfer_children`, `move_faceuse`: the
+//! `Remove` / `PostInsert` statuses that `FaceuseShellReplacement` ignores cannot
+//! fail on a consistent B-rep, so an inconsistent one is an error); ray
+//! intersections wait for `topology.face_p4`. Existing co-ported accessors are reused.
 
 use std::collections::BTreeMap;
 
@@ -35,7 +37,8 @@ use crate::topology::edgeuse::p1 as eu;
 use crate::topology::face::p2 as face;
 use crate::topology::topology::Topology;
 use crate::topology::{
-    vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, ShellId, VertexId, VertexuseId,
+    shell, vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, ShellId, VertexId,
+    VertexuseId,
 };
 
 const OP: &str = "topology::topology_traverser";
@@ -53,6 +56,8 @@ pub enum Entity {
     Faceuse(FaceuseId),
     /// A vertex use.
     Vertexuse(VertexuseId),
+    /// A shell (`SmShell::Mark`, as `SmShell::GetMatedShells` uses it).
+    Shell(ShellId),
 }
 
 /// Topology mark records for one B-rep; retain across calls using the same context.
@@ -313,20 +318,17 @@ pub fn closure_traversal(
     faceuse_traversal(k, b, marks, start, lock.mark_type(), faceuses)
 }
 
-/// Transfer a shell's children to its replacement.
-/// Returns `Unported(topology.shell)` until `SmShell::TransferChildrenTo` is ported.
-pub fn remove_shell(b: &mut Brep, remove: ShellId, replace: ShellId) -> Result<()> {
-    b.shell(remove)?;
-    b.shell(replace)?;
-    // UNPORTED(topology.shell): SmShell::TransferChildrenTo
-    Err(SolidError::unported(
-        "SmShell::TransferChildrenTo",
-        "topology.shell",
-    ))
+/// Transfer a shell's children to its replacement (`RemoveShell`: `SER` on
+/// `SmShell::TransferChildrenTo` with no wire-edge list).
+///
+/// # Errors
+/// Those of [`shell::transfer_children`].
+pub fn remove_shell(k: &mut Kernel, b: &mut Brep, remove: ShellId, replace: ShellId) -> Result<()> {
+    shell::transfer_children(k, b, remove, replace, None)
 }
 
-/// Traverse connected face uses, then move each to `new_shell` in visit order.
-/// Returns `Unported(topology.shell)` when moving between shells is required.
+/// Traverse connected face uses, then move each to `new_shell` in visit order
+/// (`Remove` / `PostInsert`, statuses ignored upstream; [`shell::move_faceuse`]).
 pub fn faceuse_shell_replacement(
     k: &mut Kernel,
     b: &mut Brep,
@@ -340,8 +342,7 @@ pub fn faceuse_shell_replacement(
     faceuse_traversal(k, b, marks, start, lock.mark_type(), Some(replaced))?;
     for &fu in replaced.iter() {
         if b.faceuse(fu)?.shell != Some(new_shell) {
-            // UNPORTED(topology.shell): SmShell::Remove / SmShell::PostInsert
-            return Err(SolidError::unported("SmShell::Remove", "topology.shell"));
+            shell::move_faceuse(b, fu, new_shell)?;
         }
     }
     Ok(())
