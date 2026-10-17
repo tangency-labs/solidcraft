@@ -47,9 +47,11 @@
 //!   degrees `-1`) is `None` in an `Option`; partly NULL functions cannot be
 //!   expressed. Storage that upstream allocates uninitialised (`malloc`) is
 //!   zero-filled.
-//! - The `NL_STACKS` arguments have no counterpart and allocation cannot fail, so
-//!   [`CurveFunction::compact`] has no memory error path; `N_CrvFuncSetPtrs` takes the
-//!   new arrays by value and checks that they hold the indices in use.
+//! - The `NL_STACKS` arguments have no counterpart. New storage is zero-filled via
+//!   fallible reservations; unrepresentable lengths/grid sizes and failed reservations
+//!   return `NL_MEM_ERR` without changing the slot. [`CurveFunction::compact`] has no
+//!   memory error path; `N_CrvFuncSetPtrs` takes the new arrays by value and checks
+//!   that they hold the indices in use.
 //! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The routine-name argument (`rname`) is dropped.
@@ -63,6 +65,7 @@ use crate::nurbs::knots::{KnotVector, Side};
 const OP_CRV_NEW: &str = "nurbs::funcs_basic::CurveFunction::new";
 const OP_CRV_WITH: &str = "nurbs::funcs_basic::CurveFunction::with_indices";
 const OP_CRV_SIZED: &str = "nurbs::funcs_basic::CurveFunction::is_sized";
+const OP_CRV_SIZE_ARRAYS: &str = "nurbs::funcs_basic::CurveFunction::size_arrays";
 const OP_CRV_SET_SIZE: &str = "nurbs::funcs_basic::CurveFunction::set_size_indices";
 const OP_CRV_SET_ARRAYS: &str = "nurbs::funcs_basic::CurveFunction::set_arrays";
 const OP_CRV_EVAL: &str = "nurbs::funcs_basic::CurveFunction::eval";
@@ -70,6 +73,7 @@ const OP_CRV_DERIVS: &str = "nurbs::funcs_basic::CurveFunction::derivs";
 const OP_SRF_NEW: &str = "nurbs::funcs_basic::SurfaceFunction::new";
 const OP_SRF_WITH: &str = "nurbs::funcs_basic::SurfaceFunction::with_indices";
 const OP_SRF_SIZED: &str = "nurbs::funcs_basic::SurfaceFunction::is_sized";
+const OP_SRF_SIZE_ARRAYS: &str = "nurbs::funcs_basic::SurfaceFunction::size_arrays";
 const OP_SRF_SET_SIZE: &str = "nurbs::funcs_basic::SurfaceFunction::set_size_indices";
 const OP_SRF_VALUE: &str = "nurbs::funcs_basic::SurfaceFunction::value";
 const OP_SRF_EVAL: &str = "nurbs::funcs_basic::SurfaceFunction::eval";
@@ -112,6 +116,32 @@ fn rows_hold(rows: &[Vec<f64>], n: usize, m: usize) -> bool {
         Some(rows) => rows.iter().all(|row| row.len() > m),
         None => false,
     }
+}
+
+/// Checks the byte layout before any allocation from caller-supplied dimensions.
+fn array_layout<T>(count: usize, op: &'static str) -> Result<()> {
+    std::alloc::Layout::array::<T>(count)
+        .map(|_| ())
+        .map_err(|_| nlib(op, NlibCode::Memory))
+}
+
+/// Converts a highest index to an array length without saturation or overflow.
+fn array_len<T>(last: usize, op: &'static str) -> Result<usize> {
+    let count = last
+        .checked_add(1)
+        .ok_or_else(|| nlib(op, NlibCode::Memory))?;
+    array_layout::<T>(count, op)?;
+    Ok(count)
+}
+
+/// Reserves before zero-filling so allocation failures return through the kernel API.
+fn zeros(count: usize, op: &'static str) -> Result<Vec<f64>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(count)
+        .map_err(|_| nlib(op, NlibCode::Memory))?;
+    values.resize(count, 0.0);
+    Ok(values)
 }
 
 // ---- curve functions ----------------------------------------------------------------
@@ -254,21 +284,23 @@ impl CurveFunction {
     /// storage is kept and the indices and degree are reset to the requested values.
     ///
     /// Errors with [`NlibCode::Storage`] when the existing function is too small
-    /// (the slot is left unchanged).
+    /// or [`NlibCode::Memory`] when new storage cannot be represented or reserved.
+    /// The slot is left unchanged on error.
     pub fn size_arrays(slot: &mut Option<Self>, n: usize, p: usize, m: usize) -> Result<&mut Self> {
-        match slot {
-            Some(cfn) => {
-                cfn.is_sized(n, m)?;
-                cfn.set_size_indices(n, p, m)?;
-                Ok(cfn)
-            }
-            None => Ok(slot.insert(Self {
-                fu: vec![0.0; n.saturating_add(1)],
+        if let Some(cfn) = slot {
+            cfn.is_sized(n, m)?;
+            cfn.set_size_indices(n, p, m)?;
+            Ok(cfn)
+        } else {
+            let values_len = array_len::<f64>(n, OP_CRV_SIZE_ARRAYS)?;
+            let knots_len = array_len::<f64>(m, OP_CRV_SIZE_ARRAYS)?;
+            Ok(slot.insert(Self {
+                fu: zeros(values_len, OP_CRV_SIZE_ARRAYS)?,
                 n,
                 p,
-                knots: vec![0.0; m.saturating_add(1)],
+                knots: zeros(knots_len, OP_CRV_SIZE_ARRAYS)?,
                 m,
-            })),
+            }))
         }
     }
 
@@ -548,7 +580,9 @@ impl SurfaceFunction {
     /// degrees are reset to the requested values.
     ///
     /// Errors with [`NlibCode::Storage`] when the existing function is too small
-    /// (the slot is left unchanged).
+    /// or [`NlibCode::Memory`] when new storage cannot be represented or reserved.
+    /// The complete grid size is checked before allocating any rows; the slot is
+    /// left unchanged on error.
     pub fn size_arrays(
         slot: &mut Option<Self>,
         n: usize,
@@ -558,23 +592,38 @@ impl SurfaceFunction {
         r: usize,
         s: usize,
     ) -> Result<&mut Self> {
-        match slot {
-            Some(sfn) => {
-                sfn.is_sized(n, m, r, s)?;
-                sfn.set_size_indices(n, m, p, q, r, s)?;
-                Ok(sfn)
+        if let Some(sfn) = slot {
+            sfn.is_sized(n, m, r, s)?;
+            sfn.set_size_indices(n, m, p, q, r, s)?;
+            Ok(sfn)
+        } else {
+            const OP: &str = OP_SRF_SIZE_ARRAYS;
+            let rows = array_len::<Vec<f64>>(n, OP)?;
+            let cols = array_len::<f64>(m, OP)?;
+            let u_len = array_len::<f64>(r, OP)?;
+            let v_len = array_len::<f64>(s, OP)?;
+            let cells = rows
+                .checked_mul(cols)
+                .ok_or_else(|| nlib(OP, NlibCode::Memory))?;
+            array_layout::<f64>(cells, OP)?;
+
+            let mut fuv = Vec::new();
+            fuv.try_reserve_exact(rows)
+                .map_err(|_| nlib(OP, NlibCode::Memory))?;
+            for _ in 0..rows {
+                fuv.push(zeros(cols, OP)?);
             }
-            None => Ok(slot.insert(Self {
-                fuv: vec![vec![0.0; m.saturating_add(1)]; n.saturating_add(1)],
+            Ok(slot.insert(Self {
+                fuv,
                 n,
                 m,
                 p,
                 q,
-                u: vec![0.0; r.saturating_add(1)],
+                u: zeros(u_len, OP)?,
                 r,
-                v: vec![0.0; s.saturating_add(1)],
+                v: zeros(v_len, OP)?,
                 s,
-            })),
+            }))
         }
     }
 
@@ -753,5 +802,87 @@ mod tests {
         assert!(s.is_sized(1, 1, 3, 4).is_err());
         assert!(s.set_size_indices(3, 1, 1, 1, 3, 3).is_err());
         assert!(SurfaceFunction::new(vec![vec![1.0], vec![]], 0, 0, vec![0.0], vec![0.0]).is_err());
+    }
+
+    #[test]
+    fn curve_sizing_rejects_unrepresentable_allocations_without_changing_slot() {
+        for last in [usize::MAX, isize::MAX as usize / size_of::<f64>()] {
+            for (n, m) in [(last, 0), (0, last)] {
+                let mut slot = None;
+                assert!(matches!(
+                    CurveFunction::size_arrays(&mut slot, n, 1, m),
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Memory,
+                        ..
+                    })
+                ));
+                assert!(slot.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn surface_sizing_rejects_unrepresentable_allocations_without_changing_slot() {
+        for last in [usize::MAX, isize::MAX as usize / size_of::<f64>()] {
+            for (n, m, r, s) in [
+                (last, 0, 0, 0),
+                (0, last, 0, 0),
+                (0, 0, last, 0),
+                (0, 0, 0, last),
+            ] {
+                let mut slot = None;
+                assert!(matches!(
+                    SurfaceFunction::size_arrays(&mut slot, n, m, 1, 1, r, s),
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Memory,
+                        ..
+                    })
+                ));
+                assert!(slot.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn surface_sizing_checks_the_whole_grid_before_allocating_rows() {
+        // Each row and the row table fit separately, but the complete grid does not.
+        let side = 1_usize << (usize::BITS / 2);
+        for (n, m) in [(1, isize::MAX as usize / 16), (side - 1, side - 1)] {
+            let mut slot = None;
+            assert!(matches!(
+                SurfaceFunction::size_arrays(&mut slot, n, m, 1, 1, 0, 0),
+                Err(SolidError::Nlib {
+                    operation: OP_SRF_SIZE_ARRAYS,
+                    code: NlibCode::Memory,
+                })
+            ));
+            assert!(slot.is_none());
+        }
+    }
+
+    #[test]
+    fn oversized_requests_preserve_existing_functions_and_storage_errors() {
+        let mut curve = Some(quad());
+        let original_curve = curve.clone();
+        assert!(matches!(
+            CurveFunction::size_arrays(&mut curve, usize::MAX, 0, 0),
+            Err(SolidError::Nlib {
+                code: NlibCode::Storage,
+                ..
+            })
+        ));
+        assert_eq!(curve, original_curve);
+
+        let mut surface = None;
+        SurfaceFunction::size_arrays(&mut surface, 1, 1, 1, 1, 3, 3).unwrap();
+        let original_surface = surface.clone();
+        assert!(matches!(
+            SurfaceFunction::size_arrays(&mut surface, 0, 0, 0, 0, usize::MAX, 0),
+            Err(SolidError::Nlib {
+                code: NlibCode::Storage,
+                ..
+            })
+        ));
+        assert_eq!(surface, original_surface);
     }
 }
