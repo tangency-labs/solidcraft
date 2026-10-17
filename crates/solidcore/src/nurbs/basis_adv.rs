@@ -36,6 +36,9 @@
 //!   one step past the last row it scales) Rust returns [`SolidError::InvalidInput`].
 //! - The multiplicity increment `t` of `N_BasisIncreaseKnotMult` is a `usize` (a
 //!   negative `t` inserts nothing upstream).
+//! - Degrees whose initial `p + 1` index cannot fit an `i64` return
+//!   [`SolidError::InvalidInput`]. Multiplicity sums are checked before comparison;
+//!   a sum that overflows is above `p` and returns [`NlibCode::Knot`].
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::basis_basic::{reparam, PTOL};
@@ -148,8 +151,8 @@ pub fn compatible_knot_array_mult(
     let ps = sgn(p, OP)?;
     let er = mr - ps;
     let es = ms - ps;
-    let mut i = ps + 1;
-    let mut j = ps + 1;
+    let mut i = ps.checked_add(1).ok_or_else(|| out_of_range(OP))?;
+    let mut j = i;
     let mut xr = Vec::new();
     let mut xs = Vec::new();
     let (r, s) = (&*r, &*s);
@@ -290,7 +293,7 @@ pub fn increase_knot_mult(u: &[f64], p: usize, t: usize) -> Result<Vec<f64>> {
     let eu = mu - ps;
 
     let mut x = Vec::new();
-    let mut i = ps + 1;
+    let mut i = ps.checked_add(1).ok_or_else(|| out_of_range(OP))?;
 
     // Find knots to be inserted.
     while i < eu {
@@ -298,7 +301,12 @@ pub fn increase_knot_mult(u: &[f64], p: usize, t: usize) -> Result<Vec<f64>> {
         while i < eu && rdi(u, i, OP)? == rdi(u, i + 1, OP)? {
             i += 1;
         }
-        if i - k + ts + 1 > ps {
+        // All terms are nonnegative: an overflowing sum necessarily exceeds p.
+        if (i - k)
+            .checked_add(ts)
+            .and_then(|mult| mult.checked_add(1))
+            .is_none_or(|mult| mult > ps)
+        {
             return Err(nlib(OP, NlibCode::Knot));
         }
         let v = rdi(u, i, OP)?;
@@ -587,6 +595,51 @@ mod tests {
             increase_knot_mult(&[0., 0., 1., 1.], 1, 5).unwrap(),
             Vec::<f64>::new()
         );
+    }
+
+    #[test]
+    fn compatible_mult_rejects_degree_that_overflows_signed_index() {
+        let Ok(p) = usize::try_from(i64::MAX) else {
+            return;
+        };
+        let mut r = [0.0, 0.0, 1.0, 1.0];
+        let mut s = r;
+        assert!(matches!(
+            compatible_knot_array_mult(&mut r, &mut s, p),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn increase_mult_rejects_degree_that_overflows_signed_index() {
+        let Ok(p) = usize::try_from(i64::MAX) else {
+            return;
+        };
+        assert!(matches!(
+            increase_knot_mult(&[0.0, 0.0, 1.0, 1.0], p, 1),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn increase_mult_rejects_increment_that_overflows_signed_sum() {
+        let Ok(t) = usize::try_from(i64::MAX) else {
+            return;
+        };
+        for (u, p) in [
+            (&[0.0, 0.0, 0.5, 1.0, 1.0][..], 1),
+            (&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0][..], 2),
+        ] {
+            // A single inner knot overflows the final +1; a repeated knot
+            // overflows the preceding addition of t as well.
+            assert!(matches!(
+                increase_knot_mult(u, p, t),
+                Err(SolidError::Nlib {
+                    code: NlibCode::Knot,
+                    ..
+                })
+            ));
+        }
     }
 
     #[test]
