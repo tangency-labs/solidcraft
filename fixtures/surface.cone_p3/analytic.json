@@ -5919,6 +5919,230 @@
         "tolerance": 9876543.21,
         "same": false
       }
+    },
+    {
+      "name": "fuzz_reversed_angle_range",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:3385-3390 (raw dStartAng/dEndAng; fuzz00891, start 0 / end -1)",
+      "inputs": {
+        "cone": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          736219.3792901868,
+          736219.3792901868,
+          3387338.933267883,
+          0.0,
+          -1.0,
+          0,
+          1,
+          0
+        ],
+        "domains": [
+          0.125,
+          0,
+          0.875,
+          1,
+          0,
+          0.125,
+          1,
+          0.875
+        ],
+        "op": 1,
+        "other": [
+          736219.3792901868,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          -4000000,
+          -4000000,
+          4000000,
+          4000000
+        ],
+        "same": false,
+        "tolerance": 0.1
+      }
+    },
+    {
+      "name": "fuzz_axis_overflow_zero_y",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967 (ConvertUVFromSTEPToNURBS status ignored; Y axis unitizes to zero, fuzz01093)",
+      "inputs": {
+        "cone": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1.0,
+          1.0,
+          4.0,
+          0,
+          360,
+          0,
+          0,
+          0
+        ],
+        "domains": [
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1
+        ],
+        "op": 0,
+        "other": [
+          0,
+          1.6,
+          1.6,
+          1,
+          0,
+          0,
+          0,
+          -1e+300,
+          1,
+          1.0,
+          1.0,
+          4.0,
+          0,
+          360,
+          0,
+          0,
+          0
+        ],
+        "same": false,
+        "tolerance": 0.1
+      }
+    },
+    {
+      "name": "fuzz_axis_overflow_zero_y_trimmed",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2972 (the converter-written U of the zero-Y cone is tested against its trimmed domain; one line kept)",
+      "inputs": {
+        "cone": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1.0,
+          1.0,
+          4.0,
+          0,
+          360,
+          0,
+          0,
+          0
+        ],
+        "domains": [
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0.85,
+          1
+        ],
+        "op": 0,
+        "other": [
+          0,
+          1.6,
+          1.6,
+          1,
+          0,
+          0,
+          0,
+          -1e+300,
+          1,
+          1.0,
+          1.0,
+          4.0,
+          0,
+          360,
+          0,
+          0,
+          0
+        ],
+        "same": false,
+        "tolerance": 0.1
+      }
+    },
+    {
+      "name": "fuzz_axis_overflow_zero_y_swapped",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:1808,1833-1838 (the failed conversion returns before the swap_uv exchange)",
+      "inputs": {
+        "cone": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1.0,
+          1.0,
+          4.0,
+          0,
+          360,
+          0,
+          0,
+          0
+        ],
+        "domains": [
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1
+        ],
+        "op": 0,
+        "other": [
+          0,
+          1.6,
+          1.6,
+          1,
+          0,
+          0,
+          0,
+          -1e+300,
+          1,
+          1.0,
+          1.0,
+          4.0,
+          0,
+          360,
+          1,
+          1,
+          0
+        ],
+        "same": false,
+        "tolerance": 0.1
+      }
     }
   ]
 }

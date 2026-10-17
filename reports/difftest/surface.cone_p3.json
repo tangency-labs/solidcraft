@@ -891,6 +891,38 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_reversed_angle_range",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/analytic.json#108 (upstream source/SMLib/src/SmCone.cpp:3385-3390 (raw dStartAng/dEndAng; fuzz00891, start 0 / end -1))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_axis_overflow_zero_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/analytic.json#109 (upstream source/SMLib/src/SmCone.cpp:2966-2967 (ConvertUVFromSTEPToNURBS status ignored; Y axis unitizes to zero, fuzz01093))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_axis_overflow_zero_y_trimmed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/analytic.json#110 (upstream source/SMLib/src/SmCone.cpp:2966-2972 (the converter-written U of the zero-Y cone is tested against its trimmed domain; one line kept))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_axis_overflow_zero_y_swapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/analytic.json#111 (upstream source/SMLib/src/SmCone.cpp:1808,1833-1838 (the failed conversion returns before the swap_uv exchange))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -10953,8 +10985,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 121,
   "cases_failed": 0,
-  "cases_passed": 1187,
-  "cases_total": 1308,
+  "cases_passed": 1191,
+  "cases_total": 1312,
   "deferred_by_unit": {
     "surface.cone_p2": 91,
     "surface.surface_p2": 30

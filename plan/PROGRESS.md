@@ -14,7 +14,7 @@ _None right now; see the next section._
 
 Anything `todo` can be claimed. These need stubs for, or co-porting of, the listed dependencies (AGENTS.md section 4).
 
-- [ ] `blend.fillet_solver_p5` (848 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `surface.offset_surface`
+- [ ] `primitive.primitive_creation_p1` (2322 lines) — missing: `topology.brep_p1`, `topology.brep_p5`, `topology.brep_p8`
 - [ ] `blend.fillet_solver_p4` (1404 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_intersector`, `blend.fillet_solver_p1`, `surface.offset_surface`
 - [ ] `sweep.topology_sweep` (2456 lines) — missing: `heal.stitch_p1`, `topology.brep_p1`, `topology.brep_p3`, `topology.brep_p5` +2 more
 - [ ] `boolean.topology_intersector_p3` (1849 lines) — missing: `boolean.topology_intersector_p2`
@@ -69,8 +69,8 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_solver_p1` (1861 lines) — in progress: #192 @froglemonade2 (ready for review)
 - [ ] 🔨 `blend.hcr` (1875 lines) — in progress: #191 @froglemonade2 (ready for review)
 - [ ] 🔨 `heal.stitch_p1` (2037 lines) — in progress: #196 @bluecmd (draft)
-- [ ] 🔨 `primitive.primitive_creation_p1` (2322 lines) — in progress: #199 @oursland (draft)
 - [ ] 🔨 `blend.fillet_intersector` (1708 lines) — in progress: #179 @bherbruck (ready for review)
+- [ ] 🔨 `blend.fillet_solver_p5` (848 lines) — in progress: #208 @damgru (draft)
 - [ ] 🔨 `blend.fillet_standard_solver_p1` (2336 lines) — in progress: #168 @bherbruck (ready for review)
 - [ ] 🔨 `heal.stitch_p2` (1906 lines) — in progress: #205 @bluecmd (draft)
 - [ ] 🔨 `boolean.topology_intersector_p2` (2195 lines) — in progress: #203 @bluecmd (draft)
@@ -300,7 +300,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ### primitive (1/5)
 
 - [x] ✅ `primitive.api_curves` (649 lines) — green, 1629 cases
-- [ ] 🔨 `primitive.primitive_creation_p1` (2322 lines) — in progress: #199 @oursland (draft)
+- [ ] ⏳ `primitive.primitive_creation_p1` (2322 lines) — waiting
 - [ ] ⏳ `primitive.primitive_creation_p3` (1842 lines) — waiting
 - [ ] ⏳ `primitive.primitive_creation_p2` (2258 lines) — waiting
 - [ ] 🔨 `primitive.api_primitives` (885 lines) — in progress: #160 @bherbruck (ready for review)
@@ -365,7 +365,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_solver_p1` (1861 lines) — in progress: #192 @froglemonade2 (ready for review)
 - [ ] 🔨 `blend.hcr` (1875 lines) — in progress: #191 @froglemonade2 (ready for review)
 - [ ] 🔨 `blend.fillet_intersector` (1708 lines) — in progress: #179 @bherbruck (ready for review)
-- [ ] ⏳ `blend.fillet_solver_p5` (848 lines) — waiting
+- [ ] 🔨 `blend.fillet_solver_p5` (848 lines) — in progress: #208 @damgru (draft)
 - [ ] 🔨 `blend.fillet_standard_solver_p1` (2336 lines) — in progress: #168 @bherbruck (ready for review)
 - [ ] ⏳ `blend.fillet_solver_p4` (1404 lines) — waiting
 - [ ] ⏳ `blend.fillet_executive_p3` (1608 lines) — waiting
