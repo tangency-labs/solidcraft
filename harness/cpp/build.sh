@@ -47,17 +47,23 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+if ! command -v cmake >/dev/null 2>&1; then
+  echo "cmake is required (version 3.20 or newer); install it before building the C++ reference." >&2
+  exit 1
+fi
+
 [ "$CLEAN" = 1 ] && rm -rf "$BUILD"
 mkdir -p "$BUILD" "$OUT/lib"
 
-GEN=()
-if command -v ninja >/dev/null 2>&1; then GEN=(-G Ninja); fi
+# Bash 3.2 treats an empty array as unset under set -u, so keep required args here.
+CMAKE_ARGS=(-S "$HERE" -B "$BUILD")
+if command -v ninja >/dev/null 2>&1; then CMAKE_ARGS+=(-G Ninja); fi
 
 # g++ (GNU) is the reference compiler; override with CXX=... if needed.
 export CXX="${CXX:-g++}"
 
 start=$(date +%s)
-nice -n 10 cmake -S "$HERE" -B "$BUILD" "${GEN[@]}" \
+nice -n 10 cmake "${CMAKE_ARGS[@]}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$OUT" \
   -DSMLIB_UPSTREAM="$ROOT/upstream" \

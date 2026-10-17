@@ -1,0 +1,19 @@
+name: build-script
+
+on:
+  pull_request:
+    paths: ['harness/cpp/build.sh', 'harness/cpp/test_build.py']
+  push:
+    branches: [main]
+    paths: ['harness/cpp/build.sh', 'harness/cpp/test_build.py']
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # /bin/bash exercises stock Bash 3.2 on macOS; no C++ checkout/build needed.
+      - run: python3 harness/cpp/test_build.py

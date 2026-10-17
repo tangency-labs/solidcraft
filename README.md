@@ -77,6 +77,12 @@ rustflags = ["-C", "link-arg=-zstack-size=8388608"]   # 8 MiB, as a native main 
 
 ## Difftest (Rust vs C++)
 
+The C++ reference build requires Bash, CMake 3.20 or newer, and a C++17 toolchain.
+Ninja is optional: when absent, CMake uses its default generator (typically Unix
+Makefiles, which requires `make`). Linux with GNU C++ is the parity reference used
+in CI; shell compatibility on macOS does not establish Apple-Clang difftest parity.
+Rust-only builds do not need these C++ build tools.
+
 ```sh
 git clone https://github.com/NVIDIA-Omniverse/usd-brep upstream
 git -C upstream checkout c9c5979
