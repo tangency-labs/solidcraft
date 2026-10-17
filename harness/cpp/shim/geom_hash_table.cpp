@@ -32,7 +32,8 @@
 //  * Add on a sized model with zero voxels (indexes m_sBuckets[SM_UNDEF_ULONG]);
 //  * Add that grows a model whose hash table still has items: SmObjsInVoxels::IncMaxItemCount
 //    re-points the bucket items at the old point-item array and then frees it;
-//  * FindCoincidentPairs with an empty bucket list (GetAt(0)) or a bucket index out of range;
+//  * FindCoincidentPairs with an empty bucket list (GetAt(0)) or a bucket index out of range,
+//    including a tracked bucket (mode 1) recorded before a SetSize that shrank the model;
 //  * MapVoxelIndexToIndices with x*y == 0 (division by zero).
 #include "sc_shim.h"
 
@@ -238,6 +239,9 @@ int32_t run(const double* p, int64_t n, std::vector<int64_t>& oi, std::vector<do
             {
                 if (upd.GetSize() == 0)
                     return SC_ERR_ARG;
+                for (ULONG k = 0; k < upd.GetSize(); k++)
+                    if (upd[k] >= v.hash().GetBucketCount())
+                        return SC_ERR_ARG;
                 pl = &upd;
             }
             else if (mode == 2)

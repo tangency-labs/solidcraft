@@ -439,10 +439,10 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 
 #### UB-35. `MapPointToVoxel` converts negative doubles to `ULONG`
 - **Location:** `SmHashTable.h:1957`-`1959`, `SmObjsInVoxels<TYPE>::MapPointToVoxel`.
-- **What happens:** `(ULONG)((x - min) / len)` is UB for negative values. On x86-64 g++ it wraps, so a point below the box lands in the top voxel after the clamp (the comment says the low end). NaN maps high; `+inf` maps to 0.
-- **Trigger:** Add a point with `x < box.min.x`.
-- **How found:** read during porting; generated difftest cases.
-- **Confirmed:** yes. The port emulates the x86-64 conversion and matches.
+- **What happens:** `(ULONG)((x - min) / len)` is UB for negative values. On x86-64 g++ it wraps, so a point below the box lands in the top voxel after the clamp (the comment says the low end). NaN maps high; `+inf` maps to 0. aarch64 g++ saturates instead (negative and NaN map to 0, `+inf` to the top voxel), so the voxel depends on the platform. A box with a zero-length axis gives NaN or `+-inf` for every point, so `SmHealData::Cache_CoinVertices` on a flat or linear vertex set puts the vertices into different voxels on the two platforms.
+- **Trigger:** Add a point with `x < box.min.x`, or any point to a box with a zero-length axis.
+- **How found:** read during porting; generated difftest cases; on aarch64, difftest failures of `geom.hash_table` and `heal.heal_data_p2` on macOS arm64.
+- **Confirmed:** yes. The port emulates the x86-64 conversion and matches. The aarch64 result was confirmed on macOS arm64 with GCC 13.4 (2026-10-17).
 - **Severity:** crash/UB (wrong voxel in practice).
 - **Rust port:** Emulates the x86-64 result (`ulong_from_f64`).
 
@@ -1483,6 +1483,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **How found:** crash in the C++ reference run during the maintainer's step-33 sequence fuzzing ([PR #164, round 2](https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459)); source inspection confirmed the mismatched list sizes and resize boundary.
 - **Confirmed:** yes by that reference run: 31 crashing scripts (7 coincidence-cache, 21 harness reads of NULL props, 3 degeneracy-cache). Requires inconsistent caller-controlled healer state; ordinary end-to-end healing was not the trigger.
 - **Severity:** crash/UB.
+
+#### UB-164. `SM_HISTOGRAM_EDGELEN_INDEX` converts negative doubles to `ULONG`
+- **Location:** `source/SMLib/inc/SmTArray.h:2395`-`2397` (macro); used by `SmHealData::Cache_EdgeProps` (`source/SMLib/src/SmHealData.cpp:2523`).
+- **What happens:** For an edge length `a` from 1e-5 up to 1, `floor(log10(a))` is -5 to -1, and `(ULONG)` of a negative double is UB. x86-64 g++ wraps, and the `+ 6` wraps back to the intended bucket 1 to 5. aarch64 g++ saturates to 0, so all these edges land in bucket 6 (lengths 1 to 10).
+- **Trigger:** `Cache_EdgeProps` on any B-rep with an edge shorter than 1 and at least 1e-5 long.
+- **How found:** generated difftest cases of `heal.heal_data_p1`, `heal.heal_data_p2` and `heal.heal_data_p3` that fail on macOS arm64 only.
+- **Confirmed:** yes. The C++ reference on macOS arm64 with GCC 13.4 puts these edges in bucket 6 (2026-10-17); the x86-64 build gives buckets 1 to 5.
+- **Severity:** crash/UB (wrong histogram bucket in practice).
+- **Rust port:** Emulates the x86-64 result (`edge_len_histogram_index`).
 
 ## Hang
 

@@ -26,6 +26,23 @@ are also logged, one entry each, in `plan/upstream-issues.md` for the upstream m
 - **difftest report `seeds` field.** It records the `--seeds` CLI value, not the number of
   generated cases a runner actually produced. `nlib.knots` overrides `cases()` to always
   generate at least 1200.
+- **The C++ reference is an x86-64 oracle where upstream casts out-of-range doubles to
+  integers.** C++ leaves `(ULONG)d` and `(long)d` undefined when the truncated value does
+  not fit (negative for unsigned, NaN, infinite, too large). x86-64 g++ emits `cvttsd2si`:
+  negative values wrap, NaN and out-of-range values give `0x8000000000000000`. aarch64
+  g++ (Apple Silicon, ARM Linux) emits `fcvtzu` / `fcvtzs`, which saturate: negative
+  values and NaN give 0, `+inf` gives the maximum. The port reproduces x86-64, the CI
+  reference, in three places: `geom::hash_table::ulong_from_f64` (`MapPointToVoxel`,
+  UB-35), `heal::heal_data::p2::edge_len_histogram_index` (`SM_HISTOGRAM_EDGELEN_INDEX`,
+  UB-164) and `surface::twist_volume::trunc_long` (no current case reaches the last one:
+  `surface.twist_volume` passes on aarch64). On an aarch64 host the native
+  reference therefore disagrees by design: `geom.hash_table` fails 435 of 619 cases,
+  `heal.heal_data_p1` 2, `heal.heal_data_p2` 41 and `heal.heal_data_p3` 2. With the
+  first two emulations switched to aarch64 semantics (`v as u64`), all four units agree
+  bit for bit (619 of 619; 265, 347 and 267 passed, none failed). Checked on 2026-10-17
+  on macOS 27, arm64, GCC 13.4.
+  Judge these units on x86-64 only. Keep the Rust emulation as it is: the library must
+  return the same result on every target, wasm included.
 
 ## nlib.knots (green; no disagreements)
 
@@ -578,6 +595,18 @@ and the old vertex count as limit) on `Points.pts`, `FitCrvPoints.pts` and
   (one vertex can own up to 7 point items). An empty `pOptBucketIndices` reads `GetAt(0)` of
   an empty array (UB; Rust checks no bucket, the shim refuses it).
 - No `UNPORTED(geom.hash_table)` stubs existed to wire.
+- **The shim refuses tracked buckets past the table (2026-10-17).** The tracked-bucket
+  list survives `SetSize`. After the model shrinks, op 4 mode 1 can therefore pass
+  `FindCoincidentPairs` an index at or past `GetBucketCount()`, and upstream reads
+  `m_sBuckets` past its end. The generator drops such programs only through its own
+  Rust model. On x86-64 that model matches the C++, so the shim never saw one. On
+  aarch64 the C++ voxel indices differ (see General), and `gen0270` reaches the read: an
+  add on a box with zero height lands in bucket 42 there (bucket 12 in the port), then
+  `SetSize` shrinks the model to 16 buckets. The full run then segfaulted in
+  `FindCoincidentPairs` or returned garbage, depending on heap contents; single cases
+  passed. The shim now returns `SC_ERR_ARG` for such a list, as the port returns
+  `InvalidInput`. On aarch64 the unit now fails the same way in every run (184 passed,
+  435 failed) instead of crashing, so `difftest --green` no longer aborts there.
 
 ## geom.object (partial; no disagreements)
 
@@ -5925,6 +5954,20 @@ mutated scales and accepted/reduced step counts are compared.
 - **Test-only merge.** The branch carries PR #122's (`heal.face_props`) head 845627d3,
   whose three unit-test fixes are needed for `cargo test -p solidcore`. Merge #122 first
   (or with this PR) so the CO-PORTED types are not duplicated.
+- **aarch64 hosts: 41 expected failures (2026-10-17).** Both causes are the integer casts
+  described under General:
+  - 26 cases (`rev_wire_len_1e-5_*`, `rev_wire_len_wrap_*` and 22 generated) have edges
+    of length 1e-5 to 1. aarch64 saturates `(ULONG)floor(log10(a))` to 0, so these edges
+    land in histogram bucket 6 instead of 1 to 5 (UB-164).
+  - 15 cases (`wire_edge_degenerate`, `rev_wire_tiny*`, `rev_wire_subtol_*`,
+    `rev_tiny_*`, `gen0069`, `gen0403`, `gen0502`) have a vertex box with a zero-length
+    axis. On aarch64, `MapPointToVoxel` then maps `0/0` to the first voxel instead of the
+    last one (UB-35), the neighbour-voxel entries change, and the coincident-vertex
+    results differ (the port's `values.out` is 15 to 60 values longer).
+
+  Not `qsort`, `rand()` or libm: `SmHealData.cpp`, `SmEdgeProps.cpp`, `SmVertexProps.cpp`
+  and `SmHealProbArray.h` call neither `qsort` nor `rand`, and with aarch64 casts in the
+  port every case matches bit for bit.
 
 ## heal.heal_data_p1 (`SmHealData` entry points and stage 2/3, sheet, trim curve, infinite region steps; `SmApiHealBrep`; PR #109, 2026-10-16; partial, no disagreements)
 
@@ -5957,6 +6000,9 @@ mutated scales and accepted/reduced step counts are compared.
 - **Last-step-only steps.** `ReSet`, `Fix_InfiniteRegion` and `HealBrep` on a B-rep
   free or rebuild the props the shim's registry tracks by address, so the FFI accepts
   them only as the last step (as `FreeTargets`).
+- **aarch64 hosts: 2 expected failures (2026-10-17).** `gen0086` and `gen0248` differ in
+  the edge-length histogram, as 26 `heal.heal_data_p2` cases do (UB-164, see General).
+  Both pass with aarch64 casts in the port.
 
 ## topology.proto_topology_p2 (`SmProtoTopology.cpp` part 2, PR #114, 2026-10-15; partial, no disagreements)
 
@@ -7364,6 +7410,9 @@ independent p6 integration.
   fixture is constructed with `SmBrepConstructor`, including swapped UV, from
   `my_test_heal_single_vertex_sphere`; API box and closed-sphere fixtures follow
   the upstream healer regressions. `heal.heal_data_p1` now calls the real sequence.
+- **aarch64 hosts: 2 expected failures (2026-10-17).** `gen0061` and `gen0211` differ in
+  the edge-length histogram, as 26 `heal.heal_data_p2` cases do (UB-164, see General).
+  Both pass with aarch64 casts in the port.
 
 ## boolean.merge_p5
 
