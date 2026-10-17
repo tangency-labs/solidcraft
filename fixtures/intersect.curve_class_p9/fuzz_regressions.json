@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "name": "fuzz_modified_cache_loopless_face",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15824 (IntersectTSBound, modified trim cache on a face without loops); found by difftest --fuzz 300 (fuzz00054)",
+      "inputs": {
+        "big": true,
+        "check3d": true,
+        "cross": false,
+        "defaults": false,
+        "dim3": false,
+        "kind": 0,
+        "op": 1,
+        "scale": 1.0,
+        "state": 2,
+        "vertices": [],
+        "zone": 1e-7
+      }
+    }
+  ]
+}

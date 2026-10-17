@@ -2,6 +2,14 @@
   "abs_floors": [],
   "cases": [
     {
+      "max_rel_err": 0.0,
+      "name": "fuzz_modified_cache_loopless_face",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#0 (upstream source/SMLib/src/SmCurveClass.cpp:15824 (IntersectTSBound, modified trim cache on a face without loops); found by difftest --fuzz 300 (fuzz00054))",
+      "values_compared": 54
+    },
+    {
       "deferred": {
         "symbol": "SmCurveClassification::InsertAt",
         "unit": "intersect.curve_class_p2"
@@ -4198,9 +4206,9 @@
   "cases_both_errored": 0,
   "cases_deferred": 197,
   "cases_failed": 0,
-  "cases_passed": 225,
+  "cases_passed": 226,
   "cases_rejected": 2,
-  "cases_total": 424,
+  "cases_total": 425,
   "deferred_by_unit": {
     "curve.crv_on_surf": 24,
     "intersect.curve_class_p2": 163,

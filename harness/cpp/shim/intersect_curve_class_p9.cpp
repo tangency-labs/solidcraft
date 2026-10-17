@@ -215,6 +215,13 @@ SC_EXPORT int32_t sc_intersect_curve_class_p9_run(const double* in,int64_t n,dou
         cache->recipe(*s,loops,state,kind==2,vl,el);
         SmCacheMgr::DeleteObjectsCache(s); s->SetCacheObj(cache.release());
     }
+    // State 2 is a cache flagged "face was modified" (m_bFaceWasModified), which is only
+    // meaningful while the Brep is in edit mode. SmBrep starts with editing disabled, and
+    // then SmCacheMgrTSrf::CacheMakeOrValidate (SmCacheMgrTSrf.cpp:97-107) deletes such a
+    // cache and rebuilds it with BuildTree before the unit reads it; that rebuild belongs
+    // to the cache units and fails on a face without loops. Enable editing so the cache is
+    // used as given, which is what the Rust side models.
+    if(op && state==2) brep->m_bEditingEnabled=TRUE;
     struct CacheGuard {
         SmSurface* surface;
         ~CacheGuard() { if(surface) SmCacheMgr::DeleteObjectsCache(surface); }
