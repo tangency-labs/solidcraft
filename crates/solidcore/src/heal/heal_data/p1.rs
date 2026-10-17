@@ -48,13 +48,11 @@
 //!   order is one stub of `topology.brep_p1`.
 //! - **Unported callees** (`UNPORTED` stubs): `SmBrep::GetVertices`, `GetEdges`,
 //!   `GetFaces`, `GetInfiniteRegion` and `SmBrep::HealBrep` (`topology.brep_p1`),
-//!   `SmBrep::TestClosureSplitRegion`
-//!   (`topology.brep_p6`), `SmBrep::FindAndSetInfiniteRegion` (`topology.brep_p5`),
-//!   `SmRegion::IsVoid` / `SetIsVoid` (`topology.shell`) and
-//!   `SmFace::CreateUVTrimCurves` (`topology.face_p3`). Default target gathering in `HealBrep`,
-//!   `SmApiHealBrep` on a B-rep and `Fix_InfiniteRegion` stop at a stub, as do
-//!   `Make_UVTrimCurves` when asked to make curves and `Fix_BadSheets` when it finds
-//!   a sheet face between two closed shells.
+//!   `SmBrep::FindAndSetInfiniteRegion` (`topology.brep_p5`),
+//!   `SmFace::CreateUVTrimCurves` (`topology.face_p3`). Default target gathering in
+//!   `HealBrep`, `SmApiHealBrep` on a B-rep and `Fix_InfiniteRegion` stop at a stub,
+//!   as does `Make_UVTrimCurves` when asked to make curves. `Fix_BadSheets` now calls
+//!   `brep_p6` when it finds a sheet face between two closed shells.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -67,7 +65,7 @@ use crate::math::BIG_DOUBLE;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::topology_traverser::{closure_traversal, Entity, Marks};
-use crate::topology::{Brep, EdgeId, FaceId, FaceuseId, RegionId, ShellId, VertexId};
+use crate::topology::{Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 
 use super::p2::{FacePropsId, HealData, PropsStore, EDGELEN_BUCKET_CNT, GAPSIZE_BUCKET_CNT};
 
@@ -133,20 +131,6 @@ fn region_is_void(b: &Brep, r: RegionId) -> Result<bool> {
 fn set_region_is_void(b: &mut Brep, r: RegionId, is_void: bool) -> Result<()> {
     b.region_mut(r)?.set_is_void(i32::from(is_void));
     Ok(())
-}
-
-/// `pBrep->TestClosureSplitRegion(bDoInfiniteRegionTesting, pFaceuse, rpNewShell,
-/// rpNewRegion)`: the new shell and region when the face use splits its region.
-fn brep_test_closure_split_region(
-    _b: &mut Brep,
-    _do_infinite_region_testing: bool,
-    _faceuse: FaceuseId,
-) -> Result<(Option<ShellId>, Option<RegionId>)> {
-    // UNPORTED(topology.brep_p6): SmBrep::TestClosureSplitRegion
-    Err(SolidError::unported(
-        "SmBrep::TestClosureSplitRegion",
-        "topology.brep_p6",
-    ))
 }
 
 /// `pFace->CreateUVTrimCurves(TRUE, NULL, NULL, ..)`: makes the face's UV trim curves
@@ -445,8 +429,8 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// [`SolidError::InvalidInput`] where upstream dereferences null (a listed props
     /// without a face, a face without face uses); those of the closure traversals and
-    /// the mark lock; [`SolidError::Unported`] for `SmBrep::TestClosureSplitRegion`
-    /// (`topology.brep_p6`).
+    /// the mark lock; [`SolidError::Unported`] from the region-splitting dependencies
+    /// (`topology.brep_p2`).
     pub fn fix_bad_sheets(
         &mut self,
         k: &mut Kernel,
@@ -507,7 +491,9 @@ impl<O: LoopObject> HealData<O> {
                 continue;
             }
 
-            // check up and down faceuse shell closures
+            // ClosureTraversal has no native error return on a consistent
+            // graph. Its Rust link/lock refusals must still propagate.
+            // Check up and down faceuse shell closures.
             let up_closed =
                 closure_traversal(k, b, marks, up_faceuse, mark_lock, Some(&mut up_faceuses))?;
             let down_closed = closure_traversal(
@@ -536,7 +522,13 @@ impl<O: LoopObject> HealData<O> {
             if up_closed && down_closed && !has_common_elements && up_shell == down_shell {
                 // fix - Split the Region on either side of the BadSheet into two
                 // different regions - increments mark again
-                let (new_shell, new_region) = brep_test_closure_split_region(b, true, up_faceuse)?;
+                let split = crate::topology::brep::p6::test_closure_split_region_attempt(
+                    k, b, marks, true, up_faceuse,
+                )?;
+                // Bare call in SmHealData.cpp:4832: ignore the native SmStatus
+                // and retain its partial outputs. The outer Result still
+                // propagates Unported and Rust topology/resolver refusals.
+                let (new_shell, new_region) = (split.shell, split.region);
 
                 // count the TestClosureSplitRegion runs
                 self.ran_region_test_closure_cnt += 1;
