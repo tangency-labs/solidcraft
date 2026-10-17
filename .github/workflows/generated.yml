@@ -19,7 +19,7 @@ concurrency:
 jobs:
   regenerate:
     name: Regenerate and commit
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     steps:
       # Always main itself, never pull request code, since this job can push.

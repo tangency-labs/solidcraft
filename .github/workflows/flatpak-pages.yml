@@ -21,7 +21,7 @@ concurrency:
 jobs:
   publish:
     name: Request the combined docs, web, and Flatpak deployment
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
