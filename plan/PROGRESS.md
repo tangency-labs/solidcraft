@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**201 / 261 units ported** (111 green, 90 partial), **278,255 / 387,903 upstream lines (71.7%)**. 39 claimed, 0 blocked, 21 todo.
+**202 / 261 units ported** (112 green, 90 partial), **281,116 / 387,903 upstream lines (72.5%)**. 38 claimed, 0 blocked, 21 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -39,7 +39,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ## In progress
 
 - [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
-- [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p2` (1928 lines) — in progress: #85 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.surface_drop_lib_p3` (2062 lines) — in progress: #136 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p4` (2022 lines) — in progress: #137 @froglemonade2 (ready for review)
@@ -56,9 +55,9 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `topology.brep_p1` (2454 lines) — in progress: #145 @bluecmd (ready for review)
 - [ ] 🔨 `topology.brep_p6` (1479 lines) — in progress: #169 @damgru (ready for review)
 - [ ] 🔨 `topology.brep_p4` (2113 lines) — in progress: #173 @froglemonade2 (draft)
-- [ ] 🔨 `topology.brep_p9` (2443 lines) — in progress: #183 @Karl-VonRichter (ready for review)
+- [ ] 🔨 `topology.brep_p9` (2443 lines) — in progress: #183 @Karl-VonRichter (draft)
 - [ ] 🔨 `topology.brep_p2` (2443 lines) — in progress: #149 @bluecmd (draft)
-- [ ] 🔨 `topology.brep_p5` (2193 lines) — in progress: #194 @Karl-VonRichter (ready for review)
+- [ ] 🔨 `topology.brep_p5` (2193 lines) — in progress: #194 @Karl-VonRichter (draft)
 - [ ] 🔨 `blend.fillet_geom_p1` (2113 lines) — in progress: #147 @bluecmd (draft)
 - [ ] 🔨 `query.brep` (517 lines) — in progress: #101 @0xlillith (draft)
 - [ ] 🔨 `topology.brep_p3` (2503 lines) — in progress: #204 @bluecmd (draft)
@@ -191,7 +190,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [x] ✅ `curve.curve_p9` (1783 lines) — green, 3093 cases
 
-### surface (38/40)
+### surface (39/40)
 
 - [x] ✅ `surface.volume_p1` (2014 lines) — green, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
@@ -218,7 +217,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_p7` (2406 lines) — partial, 3660 cases
 - [ ] 🟡 `surface.plane_p2` (1627 lines) — partial, 2218 cases
 - [x] ✅ `surface.surface_p4` (2270 lines) — green, 3000 cases
-- [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
+- [x] ✅ `surface.sphere` (2861 lines) — green
 - [ ] 🟡 `surface.surf_of_extrusion_p2` (1420 lines) — partial, 14 cases
 - [x] ✅ `surface.surface_p5` (2321 lines) — green, 3046 cases
 - [ ] 🟡 `surface.cone_p3` (1939 lines) — partial
@@ -261,9 +260,9 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `topology.brep_p6` (1479 lines) — in progress: #169 @damgru (ready for review)
 - [ ] 🟡 `topology.brep_cache` (389 lines) — partial
 - [ ] 🔨 `topology.brep_p4` (2113 lines) — in progress: #173 @froglemonade2 (draft)
-- [ ] 🔨 `topology.brep_p9` (2443 lines) — in progress: #183 @Karl-VonRichter (ready for review)
+- [ ] 🔨 `topology.brep_p9` (2443 lines) — in progress: #183 @Karl-VonRichter (draft)
 - [ ] 🔨 `topology.brep_p2` (2443 lines) — in progress: #149 @bluecmd (draft)
-- [ ] 🔨 `topology.brep_p5` (2193 lines) — in progress: #194 @Karl-VonRichter (ready for review)
+- [ ] 🔨 `topology.brep_p5` (2193 lines) — in progress: #194 @Karl-VonRichter (draft)
 - [ ] 🔨 `topology.brep_p3` (2503 lines) — in progress: #204 @bluecmd (draft)
 - [ ] 🟡 `topology.proto_topology_p2` (2091 lines) — partial, 1533 cases
 - [ ] 🟡 `topology.proto_topology_p3` (1577 lines) — partial, 3013 cases

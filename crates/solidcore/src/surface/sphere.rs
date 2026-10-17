@@ -868,7 +868,8 @@ impl Sphere {
             SurfaceKind::BSpline(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
-            | SurfaceKind::SrfInVolume(_) => {}
+            | SurfaceKind::SrfInVolume(_)
+            | SurfaceKind::OffsetSurface(_) => {}
         }
 
         // arrive here with bNeedNurbIntersection == TRUE, then analytic intersections

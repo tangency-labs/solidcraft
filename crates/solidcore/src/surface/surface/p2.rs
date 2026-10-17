@@ -4756,9 +4756,12 @@ mod tests {
     #[test]
     fn read_from_db_unported_types() {
         let mut db = DatabaseReader::default();
-        let e =
-            Surface::read_from_db(&Kernel::default(), OFFSET_SURFACE_TYPE, &mut db, 1).unwrap_err();
-        assert!(e.is_unported());
+        // the offset surface and the sphere are both read now (#62, #100): an empty
+        // stream fails in their readers, not with Unported
+        for ty in [OFFSET_SURFACE_TYPE, SPHERE_TYPE] {
+            let e = Surface::read_from_db(&Kernel::default(), ty, &mut db, 1).unwrap_err();
+            assert!(!e.is_unported());
+        }
         // a plane is read (an empty stream fails without Unported)
         let e = Surface::read_from_db(&Kernel::default(), PLANE_TYPE, &mut db, 1).unwrap_err();
         assert!(!e.is_unported());
