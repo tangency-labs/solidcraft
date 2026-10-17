@@ -93,7 +93,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -106,6 +106,7 @@ use crate::math::{
     EFF_ZERO_SQRT, PI,
 };
 use crate::surface::volume::Volume;
+use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
 // UNPORTED(topology.brep_p1): SmTol::GetModelSizeEstimate(const SmBrep&),
 // SmTol::SetModelSizeEstimate(SmBrep&, double), SmTol::GetZoneTol3d(const SmBrep*),
@@ -160,9 +161,8 @@ use crate::surface::volume::Volume;
 // UNPORTED(topology.face_p2): SmTol::GetScaledZero(const SmFace&) (SmFace::GetSurface).
 // UNPORTED(topology.shell): SmTol::GetScaledZero(const SmRegion&) and (const SmShell&)
 // (CalculateBoundingBox).
-// UNPORTED(topology.vertex), UNPORTED(topology.edge), UNPORTED(topology.face_p2):
-// SmTol::UpdateObjectTolerance(SmTopology*, double, double, SmBoolean) needs
-// SmVertex/SmEdge/SmFace::SetTolerance, GetMaxGap3d (heal.gap) and SmFace::GetEdges.
+// SmTol::UpdateObjectTolerance(SmTopology*, double, double, SmBoolean) is
+// update_object_tolerance below (CO-PORTED in boolean.topology_intersector_p1).
 
 /// `SM_USE_DEFAULT`: sentinel meaning "use the current system value".
 pub const USE_DEFAULT: f64 = 9876543.21;
@@ -1144,4 +1144,217 @@ mod tests {
             Some(3)
         );
     }
+}
+
+// ---- object tolerance updates ------------------------------------------------------------------
+
+const OP_UPDATE: &str = "geom::tol::update_object_tolerance";
+
+/// A status upstream ignores, except the errors that cannot be ignored here: unported
+/// callees and undefined behaviour upstream.
+fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// `SmFace::SetTolerance(tol)`.
+fn face_set_tolerance(
+    _b: &mut Brep,
+    _f: FaceId,
+    _tol: f64,
+    _update_only_if_larger: bool,
+    _cascade_to_boundaries: bool,
+) -> Result<()> {
+    // UNPORTED(topology.face_p3): SmFace::SetTolerance
+    Err(SolidError::unported(
+        "SmFace::SetTolerance",
+        "topology.face_p3",
+    ))
+}
+
+/// `SmFace::GetEdges(rEdges)`.
+fn face_edges(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeId>> {
+    // UNPORTED(topology.face_p4): SmFace::GetEdges
+    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+}
+
+/// The topology object `SmTol::UpdateObjectTolerance` is given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopologyToUpdate {
+    /// An `SmVertex`.
+    Vertex(VertexId),
+    /// An `SmEdge`.
+    Edge(EdgeId),
+    /// An `SmFace`.
+    Face(FaceId),
+}
+
+/// `SmTol::UpdateObjectTolerance(pTopo, dThisGap, dThisTol, bCheckGaps)` (CO-PORTED
+/// in unit `boolean.topology_intersector_p1`): raises the object's tolerance to the
+/// larger of `1.001 * this_gap` and `this_tol` (`SetTolerance` with
+/// `bUpdateOnlyIfLarger`; a face only when larger). An edge updates its two vertices
+/// the same way, a face its edges. With `check_gaps`, a vertex's (edge's) cached gaps
+/// to its edges and faces (faces) raise those objects' tolerances to `2.001` times the
+/// gap (`SmBrep::UpdateAndValidateTolerances` checks against half the tolerance): an
+/// edge with `bUpdateOnlyIfLarger`, a face only when its tolerance is below the gap
+/// (less `SM_EFF_ZERO`). `None` (a null object) does nothing.
+///
+/// # Errors
+///
+/// `SM_ERR_INVALID_INPUT` (as [`SolidError::Upstream`]) when the tolerance to use is
+/// below `SM_EFF_ZERO`; [`SolidError::Unported`] for `SmFace::SetTolerance`
+/// (`topology.face_p3`) and `SmFace::GetEdges` (`topology.face_p4`); those of the
+/// setters and gap queries.
+pub fn update_object_tolerance(
+    k: &Kernel,
+    b: &mut Brep,
+    topo: Option<TopologyToUpdate>,
+    this_gap: f64,
+    this_tol: f64,
+    check_gaps: bool,
+) -> Result<()> {
+    // SM_ASSERT_TOL(dThisTol) only reports
+
+    // no work - no target object
+    let Some(topo) = topo else {
+        return Ok(());
+    };
+
+    let tol_to_use = max2(1.001 * this_gap, this_tol); // cbiTolProj: some places do 2*.
+
+    // If both input gap and tol are zero, there's nothing to do.
+    if tol_to_use < EFF_ZERO {
+        return Err(SolidError::Upstream {
+            operation: OP_UPDATE,
+            code: SM_ERR_INVALID_INPUT,
+            entity: None,
+        });
+    }
+
+    match topo {
+        TopologyToUpdate::Vertex(v) => {
+            // (SmZoneTol3d(dTolToUse): SM_USE_DEFAULT becomes the system tolerance)
+            crate::topology::vertex::set_tolerance(b, v, zone_tol3d(k, tol_to_use), true, true)?; // TRUE: update only if larger.
+                                                                                                  // when asked - update tolerance from current gap sizes
+            if check_gaps {
+                // Get gaps to connected edges and faces
+                let mut gaps = Vec::new();
+                // MaxGap3d = Max( Vertex/Edge Vertex/Face Gap ); the status is ignored
+                ignore_soft(crate::topology::vertex::max_gap_3d(
+                    k,
+                    b,
+                    v,
+                    Some(&mut gaps),
+                    None,
+                ))?;
+
+                // for every vertex/ConnectedNeighbor gap
+                for held in gaps {
+                    let gap: crate::heal::gap::Gap = match held.gap {
+                        crate::topology::vertex::VertexGap::Edge(g) => g.into(),
+                        crate::topology::vertex::VertexGap::Face(g) => g.into(),
+                    };
+                    let gap_length = gap.length();
+
+                    // Note, SmBrep::UpdateAndValidateTolerances() checks against tol/2,
+                    // so have to double the gap (plus a little).
+                    let new_tol = 2.001 * gap_length;
+                    if let Some(e) = gap.edge(b, 0)? {
+                        crate::topology::edge::set_tolerance(
+                            b,
+                            e,
+                            zone_tol3d(k, new_tol),
+                            true,
+                            true,
+                        )?;
+                        // TRUE: update only if larger.
+                    }
+
+                    if let Some(f) = gap.face(b)? {
+                        if crate::topology::face::p2::tolerance(b, f)? < gap_length - EFF_ZERO {
+                            face_set_tolerance(b, f, zone_tol3d(k, new_tol), true, true)?;
+                        }
+                    }
+                } // end iter every gap
+            }
+        }
+
+        TopologyToUpdate::Edge(e) => {
+            crate::topology::edge::set_tolerance(b, e, zone_tol3d(k, tol_to_use), true, true)?; // TRUE: update only if larger.
+
+            // We have to update lower-dimensional topology.  [cbiTolProj]
+            // (the nested statuses are ignored upstream)
+            let vtx = crate::topology::edge::start_vertex(b, e)?;
+            ignore_soft(update_object_tolerance(
+                k,
+                b,
+                vtx.map(TopologyToUpdate::Vertex),
+                this_gap,
+                this_tol,
+                false,
+            ))?;
+            let vtx = crate::topology::edge::other_vertex(b, e, vtx)?;
+            ignore_soft(update_object_tolerance(
+                k,
+                b,
+                vtx.map(TopologyToUpdate::Vertex),
+                this_gap,
+                this_tol,
+                false,
+            ))?;
+
+            if check_gaps {
+                // (the status is ignored: no gaps on failure)
+                let gaps = ignore_soft(crate::topology::edge::max_gap_3d(k, b, e, true, None))?
+                    .and_then(|g| g.gaps)
+                    .unwrap_or_default();
+                for edge_gap in gaps {
+                    let gap: crate::heal::gap::Gap = match edge_gap {
+                        crate::topology::edge::EdgeGap::EdgeFace(g) => g.into(),
+                        crate::topology::edge::EdgeGap::VertexEdge(g) => g.into(),
+                    };
+                    let gap_length = gap.length();
+
+                    if let Some(f) = gap.face(b)? {
+                        if crate::topology::face::p2::tolerance(b, f)? < gap_length - EFF_ZERO {
+                            face_set_tolerance(
+                                b,
+                                f,
+                                zone_tol3d(k, 2.001 * gap_length),
+                                true,
+                                true,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        TopologyToUpdate::Face(f) => {
+            let face_tol = crate::topology::face::p2::tolerance(b, f)?;
+            if tol_to_use > face_tol {
+                face_set_tolerance(b, f, zone_tol3d(k, tol_to_use), true, true)?;
+            }
+
+            // We have to update lower-dimensional topology.  [cbiTolProj]
+            // Edges are sufficient, as they will take care of their vertices (just above).
+            let edges = face_edges(b, f)?;
+            for e in edges {
+                // (the status is ignored upstream)
+                ignore_soft(update_object_tolerance(
+                    k,
+                    b,
+                    Some(TopologyToUpdate::Edge(e)),
+                    this_gap,
+                    this_tol,
+                    false,
+                ))?;
+            }
+        }
+    } // end switch
+
+    Ok(())
 }

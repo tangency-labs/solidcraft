@@ -17,8 +17,9 @@
 //! absent. The deletion retry loop is iterative; wire collection uses the bounded
 //! explicit stack of `topology_traverser`. No input-dependent recursion is added.
 //! Relations are shared mutably with `merge_p1`; notifications use its caller-owned
-//! records and attribute store. Newly created vertex relationships still wait on
-//! the full intersector `Relate` implementation.
+//! records and attribute store. Newly created vertex relationships go through
+//! `Relate` ([`Relations::relate_vertices`]), which may raise the other operand's
+//! vertex tolerance, so `other` is mutable.
 //! Missing/dangling mates are rejected only when added to the keep list:
 //! typed ids cannot represent the null pointer upstream can append there.
 
@@ -132,11 +133,13 @@ fn keep_other(operation: BooleanOperation, is_void: bool) -> bool {
 /// `keep_as_wires` is cleared even when the first subsequent operation fails.
 /// Missing callees return [`SolidError::Unported`] at the first call reached;
 /// malformed topology or missing mates return an error instead of dereferencing
-/// a null pointer. The mate maps must refer to the supplied operands.
+/// a null pointer. The mate maps must refer to the supplied operands. `other` is
+/// mutable because relating a kept vertex (`SmTopologyIntersector::Relate`) raises the
+/// smaller of the two vertex tolerances, in whichever operand holds it.
 pub fn process_wires_and_shell_vertices(
     k: &Kernel,
     brep: &mut Brep,
-    other: &Brep,
+    other: &mut Brep,
     brep_marks: &mut Marks,
     other_marks: &mut Marks,
     relations: &mut Relations,
@@ -382,7 +385,7 @@ mod tests {
         let result = process_wires_and_shell_vertices(
             &k,
             &mut a,
-            &b,
+            &mut b,
             &mut am,
             &mut bm,
             &mut relations,
@@ -436,7 +439,7 @@ mod tests {
                 assert!(process_wires_and_shell_vertices(
                     &k,
                     &mut a,
-                    &b,
+                    &mut b,
                     &mut am,
                     &mut bm,
                     &mut relations,
@@ -463,7 +466,7 @@ mod tests {
                 process_wires_and_shell_vertices(
                     &k,
                     &mut a,
-                    &b,
+                    &mut b,
                     &mut am,
                     &mut bm,
                     &mut relations,

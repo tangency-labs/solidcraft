@@ -19,8 +19,10 @@
 //! and vertex/face gaps. Opaque handles still defer. The SSS refinement block
 //! (upstream lines 14826–15095) needs mutable curve/topology ownership and defers
 //! before editing geometry; this block and the edge branch of `insert_solutions`
-//! remain unported. The SSS block's missing callees are the boolean mate lookups;
-//! its preceding mutations are not implemented. Ordinary vertex projections are
+//! remain unported. That block of `IntersectVertices` (SmCurveClass.cpp
+//! 14826-15095) is this unit's own unported code (`UNPORTED(intersect.curve_class_p5)`);
+//! the mate lookups it ends with are ported in `boolean.topology_intersector_p1`.
+//! Ordinary vertex projections are
 //! compared; large-gap projections remain uncertified because the oracle vertices
 //! have no vertexuse and its Rust adapter supplies no vertex/face gap.
 //! Part 2 remains an explicit dependency; parts 6/7 are wired from main. The fixup
@@ -504,16 +506,18 @@ impl<O: ClassObject> CurveClassification<O> {
                             s.start.solution_value > 1e-7 && s.start.solution_value < tolerance
                         })))
             {
-                // UNPORTED(boolean.topology_intersector_p1): SmTopologyIntersector::GetOtherMate / GetBrepMate
-                // The entire SSS block (14826–15095) remains unported, including
-                // knot snapping, surface solves, through-point edits and clearing
-                // edgeuse UV trims. Those prerequisites have ported callees but
-                // need mutable curve/topology ownership here. Defer before any
-                // mutation; the actual unported callees are the later mate lookups.
-                // This block does not call sm_RefineCCIToSurfaces.
+                // UNPORTED(intersect.curve_class_p5): SmCurveClassification::IntersectVertices
+                // This unit's own unported GWC:CHANGED_SSS block of IntersectVertices
+                // (SmCurveClass.cpp:14826-15095): knot snapping (SnapToKnots), local and
+                // global point solves, sm_SetXSectCurveThroughPoint, SmVertex::GetEdges /
+                // SmEdge::GetEdgeuses walks, SetUVTrimCurve, then the mate lookups
+                // (SmTopologyIntersector::GetOtherMate / GetBrepMate, ported in
+                // boolean.topology_intersector_p1). Porting it needs mutable curve and B-rep
+                // access here plus a mate-lookup closure. Deferred before any mutation. This
+                // block does not call sm_RefineCCIToSurfaces.
                 return Err(SolidError::unported(
-                    "SmTopologyIntersector::GetOtherMate / GetBrepMate (unported p5 SSS block)",
-                    "boolean.topology_intersector_p1",
+                    "SmCurveClassification::IntersectVertices (SSS block, SmCurveClass.cpp:14826-15095)",
+                    "intersect.curve_class_p5",
                 ));
             }
             for solution in solutions.as_slice() {

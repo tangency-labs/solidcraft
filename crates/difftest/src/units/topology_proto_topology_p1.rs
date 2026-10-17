@@ -3699,7 +3699,8 @@ fn run_proto(
                         }
                     }
                     if !skip {
-                        match st3(r.mgr.glue_coincident_brep_vertices(k, &r.pool))? {
+                        // (the shim's intersector relates nothing: GetOtherMate is always null)
+                        match st3(r.mgr.glue_coincident_brep_vertices(k, &r.pool, &|_| None))? {
                             Ok(deleted) => {
                                 let ids = r.kill_curves(deleted);
                                 out.push(ids.len() as f64);

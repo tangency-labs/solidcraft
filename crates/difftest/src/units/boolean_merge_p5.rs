@@ -384,7 +384,7 @@ impl UnitDiff for Runner {
             match process_wires_and_shell_vertices(
                 &k,
                 &mut a,
-                &b,
+                &mut b,
                 &mut am,
                 &mut bm,
                 &mut relations,
