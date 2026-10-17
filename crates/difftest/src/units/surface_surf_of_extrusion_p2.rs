@@ -15,11 +15,12 @@
 //! and `out` (the rest). Statuses are `0` (`SM_SUCCESS`) or the `SmStatus`; `-1` on the
 //! Rust side for an error upstream cannot produce.
 //!
-//! Deferred cases: `IntersectWithPlane` of a linear or coplanar generator
-//! (`SmPlane::IntersectWithPlane`, `surface.plane_p2`);
-//! parallel extrusions / cylinder axes (`SmCurve::GlobalCurveSolve`, `curve.curve_p9`);
+//! Deferred cases: `IntersectWithPlane` of a linear or coplanar generator whose
+//! plane/plane intersection gives a line (`SmSurface::CurveOnClassify`,
+//! `intersect.curve_class_p2`; a bounded plane the swept plane misses compares);
 //! `GlobalSurfaceIntersect` needing the general intersector
-//! (`intersect.adv_surface_intersector`).
+//! (`intersect.adv_surface_intersector`, on a surface of extrusion that is not a
+//! `Surface` yet).
 
 use std::path::Path;
 

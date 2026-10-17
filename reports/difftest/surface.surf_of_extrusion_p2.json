@@ -395,8 +395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "line_plane_crossing",
@@ -415,8 +415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "coplanar_plane_crossing",
@@ -796,6 +796,134 @@
       "pass": true,
       "source": "fixture:fixtures/surface.surf_of_extrusion_p2/cases.json#95 (upstream TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests))",
       "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_far",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#0 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_near_miss",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#1 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_touch_edge",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#2 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#3 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_far_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#4 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_huge_far",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#5 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_tiny_far",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#6 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_far_swap",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#7 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_far_tol",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#8 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_far_tol0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#9 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "wire_line_normal_crossing_tilted",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#10 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_line_bounded_subdomain_miss",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#11 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_global_line_bounded_far",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#12 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "wire_global_line_bounded_far_as_surface",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p2/plane_wiring.json#13 (upstream edge case (plane/plane wiring of IntersectWithPlane))",
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -1303,8 +1431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0000",
@@ -1363,8 +1491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0007",
@@ -1383,8 +1511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0009",
@@ -1479,8 +1607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0020",
@@ -1571,8 +1699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0031",
@@ -1619,8 +1747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0036",
@@ -1631,8 +1759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0037",
@@ -1642,16 +1770,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036222607",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -1687,8 +1811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -1883,8 +2007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0067",
@@ -1911,8 +2035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0070",
@@ -1983,8 +2107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0078",
@@ -2335,8 +2459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0120",
@@ -2347,8 +2471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0121",
@@ -2359,8 +2483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0122",
@@ -2427,8 +2551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0130",
@@ -2571,8 +2695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -2627,8 +2751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0153",
@@ -2691,8 +2815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0160",
@@ -2963,8 +3087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -2983,8 +3107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0193",
@@ -3003,8 +3127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0195",
@@ -3059,8 +3183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0201",
@@ -3143,8 +3267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0211",
@@ -3307,8 +3431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0231",
@@ -3403,8 +3527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0242",
@@ -3583,8 +3707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0263",
@@ -3799,8 +3923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0289",
@@ -3871,8 +3995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0297",
@@ -3883,8 +4007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0298",
@@ -4043,8 +4167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0317",
@@ -4063,8 +4187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0319",
@@ -4179,8 +4303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0333",
@@ -4267,8 +4391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0343",
@@ -4495,8 +4619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0370",
@@ -4535,8 +4659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0374",
@@ -4571,8 +4695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0378",
@@ -4838,16 +4962,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0408",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036222977",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -4875,8 +4995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0412",
@@ -4979,8 +5099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0424",
@@ -5007,8 +5127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0427",
@@ -5075,8 +5195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0435",
@@ -5179,8 +5299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0447",
@@ -5211,8 +5331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0450",
@@ -5279,8 +5399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0458",
@@ -5307,8 +5427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0461",
@@ -5383,8 +5503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0469",
@@ -5419,8 +5539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0473",
@@ -5431,8 +5551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0474",
@@ -5575,8 +5695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0491",
@@ -5634,21 +5754,17 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0498",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223067",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0499",
@@ -5703,8 +5819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0505",
@@ -5935,8 +6051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0533",
@@ -6279,8 +6395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0574",
@@ -6435,8 +6551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0592",
@@ -6479,8 +6595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0597",
@@ -6607,8 +6723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0612",
@@ -6699,8 +6815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0623",
@@ -6739,8 +6855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0627",
@@ -6843,8 +6959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0639",
@@ -6863,8 +6979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0641",
@@ -6903,8 +7019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0645",
@@ -6923,8 +7039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0647",
@@ -6959,8 +7075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0651",
@@ -7003,8 +7119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0655",
@@ -7347,8 +7463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0697",
@@ -7391,8 +7507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0702",
@@ -7566,16 +7682,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0723",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223292",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7667,8 +7779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0734",
@@ -7855,8 +7967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0756",
@@ -7883,8 +7995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0759",
@@ -7923,8 +8035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0763",
@@ -7983,8 +8095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0770",
@@ -8035,8 +8147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0776",
@@ -8087,8 +8199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0782",
@@ -8127,8 +8239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0786",
@@ -8195,8 +8307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0794",
@@ -8395,8 +8507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0818",
@@ -8407,8 +8519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0819",
@@ -8463,8 +8575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0825",
@@ -8587,8 +8699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0840",
@@ -8671,8 +8783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0850",
@@ -8723,8 +8835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0856",
@@ -8751,8 +8863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0859",
@@ -8786,21 +8898,17 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0863",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223432",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0864",
@@ -8827,8 +8935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0867",
@@ -8927,8 +9035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0878",
@@ -8947,8 +9055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0880",
@@ -9055,8 +9163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0892",
@@ -9139,8 +9247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0902",
@@ -9159,8 +9267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0904",
@@ -9179,8 +9287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0906",
@@ -9479,8 +9587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0941",
@@ -9507,8 +9615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0944",
@@ -9535,8 +9643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0947",
@@ -9547,8 +9655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0948",
@@ -9646,16 +9754,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0960",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223529",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9770,16 +9874,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0974",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223543",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9843,8 +9943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0982",
@@ -9882,16 +9982,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0986",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223555",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -10079,8 +10175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1009",
@@ -10111,8 +10207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1012",
@@ -10367,8 +10463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1042",
@@ -10455,8 +10551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1052",
@@ -10467,8 +10563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1053",
@@ -10547,8 +10643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1062",
@@ -10559,8 +10655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1063",
@@ -10659,8 +10755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1075",
@@ -10691,8 +10787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1078",
@@ -10747,8 +10843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1084",
@@ -10855,8 +10951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1097",
@@ -10875,8 +10971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1099",
@@ -10887,8 +10983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1100",
@@ -11071,8 +11167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1121",
@@ -11083,8 +11179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1122",
@@ -11103,8 +11199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1124",
@@ -11131,8 +11227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1127",
@@ -11142,16 +11238,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1128",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=488064524036223697",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11207,8 +11299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1135",
@@ -11219,8 +11311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1136",
@@ -11231,8 +11323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1137",
@@ -11319,8 +11411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1147",
@@ -11343,8 +11435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1149",
@@ -11395,8 +11487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1155",
@@ -11511,8 +11603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1168",
@@ -11547,8 +11639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1172",
@@ -11599,8 +11691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1178",
@@ -11619,8 +11711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1180",
@@ -11659,8 +11751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IntersectWithPlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1184",
@@ -11795,13 +11887,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 230,
+  "cases_deferred": 225,
   "cases_failed": 0,
-  "cases_passed": 1129,
-  "cases_total": 1359,
+  "cases_passed": 1148,
+  "cases_total": 1373,
   "deferred_by_unit": {
     "intersect.adv_surface_intersector": 97,
-    "surface.plane_p2": 133
+    "intersect.curve_class_p2": 128
   },
   "max_rel_err": 0.0,
   "pass": true,

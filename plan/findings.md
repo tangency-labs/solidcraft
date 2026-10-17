@@ -3815,6 +3815,24 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   cases stay deferred). Its real owner is whoever threads a `Kernel` through the
   `Surface` dispatchers; raised in `plan/STATUS.md` Open issues for the coordinator.
 
+- **Re-wiring (PR #177, 2026-10-16).** `SmPlane::IntersectWithPlane` is wired into
+  `IntersectWithPlane` (linear/coplanar generator): its status is ignored as upstream; every
+  failure of the plane/plane intersection comes before its first output (which it resets
+  with the needs-more flag), so a failure is read as no curves and no needs-more. The
+  extrusion passes the converted `SmApproxTol3d` (not the `min(.., SM_EFF_ZERO_SQRT)` it
+  uses itself). A line result then needs `SmSurface::CurveOnClassify`, whose
+  `SmCurveClassification::ReSet` / `IntersectNaturalBounds` are `intersect.curve_class_p2`
+  / `intersect.curve_class_p8` (todo); the stub is `UNPORTED(intersect.curve_class_p2)`.
+  Even once those land, the classification takes a `Surface`, which a surface of
+  extrusion is not yet (the `SurfaceKind` gap above), as does the
+  `SmAdvSurfaceIntersector` fall-back of `GlobalSurfaceIntersect`, whose stub therefore
+  stays tagged `intersect.adv_surface_intersector` although that unit is `partial`.
+  The `sm_IntersectGenerators` status TODO above is done: `IntersectWithCylinder` and
+  `IntersectWithSurfOfExtrusion` keep the partial curves/types and a `false` needs-more
+  flag on failure (upstream clears it before the first failure); `Unported` and
+  `InvalidInput` (guards for inputs upstream would not survive) still propagate. No
+  fixture reaches such a failure today.
+
 ## surface.surf_of_revolution_p3 merge with surface.torus, surface.cone_p1, surface.surface_p1 (2026-10-14)
 
 - **Back-edges wired.** `SmTorus::Transform` / `SmCone::Transform` finish in

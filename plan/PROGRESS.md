@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**199 / 261 units ported** (108 green, 91 partial), **273,977 / 387,903 upstream lines (70.6%)**. 33 claimed, 0 blocked, 29 todo.
+**199 / 261 units ported** (108 green, 91 partial), **273,977 / 387,903 upstream lines (70.6%)**. 34 claimed, 0 blocked, 28 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -15,7 +15,6 @@ _None right now; see the next section._
 Anything `todo` can be claimed. These need stubs for, or co-porting of, the listed dependencies (AGENTS.md section 4).
 
 - [ ] `topology.brep_p3` (2503 lines) — missing: `topology.brep_p1`, `topology.brep_p2`, `topology.brep_p4`, `topology.brep_p9` +1 more
-- [ ] `primitive.primitive_creation_p1` (2322 lines) — missing: `topology.brep_p1`, `topology.brep_p5`, `topology.brep_p8`
 - [ ] `blend.fillet_solver_p5` (848 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `surface.offset_surface`
 - [ ] `heal.stitch_p2` (1906 lines) — missing: `heal.stitch_p1`, `topology.brep_p1`, `topology.face_p3`
 - [ ] `blend.fillet_solver_p4` (1404 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_intersector`, `blend.fillet_solver_p1`, `surface.offset_surface`
@@ -73,6 +72,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_solver_p1` (1861 lines) — in progress: #192 @froglemonade2 (ready for review)
 - [ ] 🔨 `blend.hcr` (1875 lines) — in progress: #191 @froglemonade2 (ready for review)
 - [ ] 🔨 `heal.stitch_p1` (2037 lines) — in progress: #196 @bluecmd (draft)
+- [ ] 🔨 `primitive.primitive_creation_p1` (2322 lines) — in progress: #199 @oursland (draft)
 - [ ] 🔨 `blend.fillet_intersector` (1708 lines) — in progress: #179 @bherbruck (ready for review)
 - [ ] 🔨 `blend.fillet_standard_solver_p1` (2336 lines) — in progress: #168 @bherbruck (ready for review)
 - [ ] 🔨 `boolean.topology_intersector_p1` (2491 lines) — in progress: #146 @bluecmd (ready for review)
@@ -301,7 +301,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ### primitive (1/5)
 
 - [x] ✅ `primitive.api_curves` (649 lines) — green, 1629 cases
-- [ ] ⏳ `primitive.primitive_creation_p1` (2322 lines) — waiting
+- [ ] 🔨 `primitive.primitive_creation_p1` (2322 lines) — in progress: #199 @oursland (draft)
 - [ ] ⏳ `primitive.primitive_creation_p3` (1842 lines) — waiting
 - [ ] ⏳ `primitive.primitive_creation_p2` (2258 lines) — waiting
 - [ ] 🔨 `primitive.api_primitives` (885 lines) — in progress: #160 @bherbruck (ready for review)

@@ -61,11 +61,19 @@
 //!   `TrimWithDomain`'s edit notifications are not modelled either.
 //! - **Unported callees.** `IntersectWithPlane` of a linear or coplanar generator
 //!   intersects the generator's plane with the plane (`SmPlane::IntersectWithPlane`,
-//!   unit `surface.plane_p2`) and classifies the line on this surface
-//!   (`SmCurveClassification`, unit `intersect.curve_class_p1`). The general intersection
-//!   `GlobalSurfaceIntersect` falls back to needs `SmAdvSurfaceIntersector`
-//!   (`intersect.adv_surface_intersector`). Those return [`SolidError::Unported`]; the code below the first two is ported
-//!   with the callees.
+//!   both planes taken as without owner, as [`Plane::intersect_with_plane`]) and, when
+//!   that gives a line, classifies it on this surface (`SmSurface::CurveOnClassify`,
+//!   whose `SmCurveClassification::ReSet` is unit `intersect.curve_class_p2`): that
+//!   returns [`SolidError::Unported`], and the trimming below it is ported with the
+//!   classification. The general intersection `GlobalSurfaceIntersect` falls back to
+//!   needs `SmAdvSurfaceIntersector` on this surface, which is not a [`Surface`] (see
+//!   **Not a `SurfaceKind`** above), so it stays [`SolidError::Unported`] under
+//!   `intersect.adv_surface_intersector`.
+//! - **`sm_IntersectGenerators` status.** `IntersectWithCylinder` and
+//!   `IntersectWithSurfOfExtrusion` ignore it as upstream: a failure keeps the curves
+//!   and types already added, with no more intersections needed (upstream clears the
+//!   flag before its first failure). [`SolidError::Unported`] and
+//!   [`SolidError::InvalidInput`] (an input upstream would not survive) propagate.
 //! - **Debug code.** The `SM_DEBUG_CODE` drawing and dumps are omitted.
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
@@ -87,7 +95,7 @@ use crate::nurbs::b_spline_surface::{
 use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
-use crate::surface::surface::p2::{TsectCurveType, CONE_TYPE};
+use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType, CONE_TYPE};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
@@ -306,8 +314,10 @@ impl SurfOfExtrusion {
     ///
     /// `SM_ERR_NULL_POINTER` without generator; those of the generator's plane
     /// intersection, evaluations, closed and degenerate tests;
-    /// [`SolidError::Unported`]: the first case (`SmPlane::IntersectWithPlane`, unit
-    /// `surface.plane_p2`).
+    /// [`SolidError::Unported`]: the first case when the planes meet in a line
+    /// (`SmSurface::CurveOnClassify`, unit `intersect.curve_class_p2`); the status of
+    /// the plane/plane intersection is ignored as upstream (a failure gives no
+    /// curves).
     #[allow(clippy::too_many_lines)] // one upstream function
     pub fn intersect_with_plane(
         &self,
@@ -356,15 +366,42 @@ impl SurfOfExtrusion {
         {
             // build a plane bigger than the Surface
             let this_plane = Plane::from_normal(self.curve_point, swept_normal);
-            let _ = (this_plane.step_uv_domain(), other_uv_domain);
 
-            // get the Plane/Plane intersection line trimmed to input Plane, then
-            // classify it against the natural boundaries of this surface
-            // (SmCurveClassification) and add the intervals inside it
-            // UNPORTED(surface.plane_p2): SmPlane::IntersectWithPlane
+            // get the Plane/Plane intersection line trimmed to input Plane
+            //  builds an SmLine or an SmBSplineCurve made by CreateDegenerateCurve().
+            //  (status ignored upstream: every failure of SmPlane::IntersectWithPlane
+            //  comes before its first output, which it resets with the needs-more
+            //  flag, so a failure is "no curves, no more intersections")
+            let plane_tol = approx_tol_3d.map(|t| approx_tol3d(k, t));
+            let (needs_more, plane_x) = match plane.intersect_with_plane(
+                other_uv_domain,
+                &this_plane,
+                &this_plane.step_uv_domain(),
+                plane_tol,
+            ) {
+                Ok(r) => r,
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => (false, SurfaceIntersection::default()),
+            };
+            out.needs_more_intersections = needs_more;
+
+            // no work - no solutions
+            if plane_x.curves_3d.is_empty() {
+                return Ok(out);
+            }
+
+            // arrive here when two planes intersect in one line: classify the
+            // 3dCurves against the natural boundaries of this surface (for trimming)
+            // with an SmCurveClassification over the line's natural interval at
+            // dTol, then add the intervals inside it (the whole line, or a trimmed
+            // copy), crossing
+            // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
+            // (SmSurface::CurveOnClassify, then IntersectNaturalBounds
+            // (intersect.curve_class_p8); a surface of extrusion is not a Surface
+            // the classification can take yet, see the module docs)
             return Err(SolidError::unported(
-                "SmPlane::IntersectWithPlane",
-                "surface.plane_p2",
+                "SmCurveClassification::ReSet",
+                "intersect.curve_class_p2",
             ));
         }
         // When GenCurve is planar with an independent sweep direction
@@ -645,8 +682,9 @@ impl SurfOfExtrusion {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` when the iso circle could not be made for a parallel
-    /// axis (upstream dereferences `NULL`); those of [`intersect_generators`]
-    /// (`SmCurve::GlobalCurveSolve` for parallel vectors).
+    /// axis (upstream dereferences `NULL`), and when this surface has none;
+    /// [`SolidError::Unported`] and [`SolidError::InvalidInput`] of
+    /// [`intersect_generators`] (its other failures are ignored as upstream).
     pub fn intersect_with_cylinder(
         &self,
         k: &Kernel,
@@ -710,8 +748,9 @@ impl SurfOfExtrusion {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for parallel extrusions when `other` has no generator
-    /// (upstream dereferences `NULL`); those of [`intersect_generators`]
-    /// (`SmCurve::GlobalCurveSolve` for parallel vectors).
+    /// (upstream dereferences `NULL`), and when this surface has none;
+    /// [`SolidError::Unported`] and [`SolidError::InvalidInput`] of
+    /// [`intersect_generators`] (its other failures are ignored as upstream).
     pub fn intersect_with_surf_of_extrusion(
         &self,
         k: &Kernel,
@@ -757,6 +796,9 @@ impl SurfOfExtrusion {
         out: &mut ExtrusionIntersection,
         op: &'static str,
     ) -> Result<bool> {
+        // (sm_IntersectGenerators reads this surface's generator before anything
+        // else: upstream dereferences NULL)
+        self.gen_or_null(op)?;
         let Some(other_gen) = other_gen else {
             // (sm_IntersectGenerators returns at its parallel test before touching
             // the other generator)
@@ -765,7 +807,11 @@ impl SurfOfExtrusion {
             }
             return Err(SolidError::null_pointer(op));
         };
-        let r = intersect_generators(
+        // (status ignored upstream: every failure comes after sm_IntersectGenerators
+        // cleared the needs-more flag, and keeps the curves and types it already
+        // added; an Unported callee, or an input upstream would not survive, still
+        // propagates)
+        match intersect_generators(
             k,
             self,
             tol,
@@ -774,8 +820,11 @@ impl SurfOfExtrusion {
             other_ivl,
             Some(&mut out.curves_3d),
             Some(&mut out.curve_types),
-        )?;
-        Ok(r.needs_more_intersections)
+        ) {
+            Ok(r) => Ok(r.needs_more_intersections),
+            Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => Err(e),
+            Err(_) => Ok(false),
+        }
     }
 
     // ---- IsNurbSurfaceSurfOfExtrusion -------------------------------------------------
@@ -1228,6 +1277,57 @@ mod tests {
             )
             .unwrap();
         assert!(r.needs_more_intersections);
+    }
+
+    /// A line along X extruded along Z: its swept plane is `y = 0`.
+    fn line_extrusion(k: &Kernel) -> SurfOfExtrusion {
+        let mut line = Line::from_points(Point3::ZERO, Point3::new(1.0, 0.0, 0.0), 3);
+        line.make_nurb().unwrap();
+        SurfOfExtrusion::create_canonical(k, Curve::from(line), Vec3::new(0.0, 0.0, 1.0)).unwrap()
+    }
+
+    #[test]
+    fn linear_generator_and_missed_bounded_plane_give_nothing() {
+        let k = k();
+        let s = line_extrusion(&k);
+        // a bounded plane x = 0 over y in [49, 51]: the swept plane misses it
+        let dom = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let mut plane = Plane::new(
+            Point3::new(0.0, 50.0, 0.0),
+            Vec3::Y,
+            Vec3::Z,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        plane.make_nurb().unwrap();
+        let r = s
+            .intersect_with_plane(
+                &k,
+                &s.base().natural_uv_domain(),
+                &plane,
+                &plane.step_uv_domain(),
+                None,
+            )
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        assert!(r.curves_3d.is_empty());
+    }
+
+    #[test]
+    fn linear_generator_line_waits_on_the_classification() {
+        let k = k();
+        let s = line_extrusion(&k);
+        let plane = Plane::from_normal(Point3::new(0.5, 0.0, 0.0), Vec3::X);
+        let e = s
+            .intersect_with_plane(
+                &k,
+                &s.base().natural_uv_domain(),
+                &plane,
+                &plane.step_uv_domain(),
+                None,
+            )
+            .unwrap_err();
+        assert!(e.is_unported());
     }
 
     #[test]
