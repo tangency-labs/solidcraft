@@ -29,6 +29,7 @@ using sc::null_crv;
 
 namespace
 {
+
 struct Reader
 {
     const double* in;

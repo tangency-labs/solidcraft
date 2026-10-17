@@ -1049,6 +1049,7 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
   SmBezierSpan * pBezSpan   = (SmBezierSpan*)pCurveNode->m_pData; NER(pBezSpan);
   SmExtent3d   & rBBox      = pCurveNode->m_sBBox;
 
+
   // return false when target m_cpOptVectors[0] point is further from branch bounding box than current m_dBestAnswerSoFarSq
   if (m_eCurveProperty == SM_CP_PROJECTED_POINT_MINIMIZE)
     {
@@ -1235,6 +1236,7 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
       return TRUE;
     } // end if (m_eCurveProperty == SM_CP_PLANE_INTERSECTION)
 
+
   // Make sure that the nodes have data in them
   if (   pCurveNode->m_eAuxDataType != SM_AD_BEZIER_CURVE
       && pCurveNode->m_eAuxDataType != SM_AD_CURVE_DATA)
@@ -1278,6 +1280,7 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
           return FALSE;
         }
     }
+
 
 //    double dT;
 //    double dAngDegFromPerp =

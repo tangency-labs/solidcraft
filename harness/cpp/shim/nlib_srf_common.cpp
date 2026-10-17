@@ -29,6 +29,7 @@ using sc::read_crv;
 
 namespace
 {
+
 NL_POINT pt(const double* d)
 {
     NL_POINT p;

@@ -34,6 +34,7 @@ NL_FLAG ST_surxsdr(NL_SURFACE* surP, NL_REAL dist, NL_FLAG dflg, NL_FLAG end, NL
 
 namespace
 {
+
 void push_pt(std::vector<double>& o, const NL_POINT& p)
 {
     o.push_back(p.x);

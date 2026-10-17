@@ -220,6 +220,7 @@ static SmStatus sm_FindAdditionalCpGuess
     sLineVec.Unitize();
     SmPoint3d sLinePoint = sPV[0] ;
 
+
     ULONG lNumTsect;
     double adTsectLineParam[2];
     SER(smgu_LineCoPlanarCircleIntersect(sLinePoint, sLineVec,
@@ -283,6 +284,7 @@ public:
        SmMatrix               * pOptJacobian,    // out: Partial derivatives of the functions.
        SmBoolean              & rbFoundAnswer) ; // out: Just set to FALSE = Not Used
 } ; // end class SmCCTangentIntENFO
+
 
 /*******************************************************************//**
 PURPOSE: NewtonRaphson Iteration Evaluate function Constructor
@@ -354,6 +356,7 @@ SmStatus SmCCTangentIntENFO::StaticEvaluate
       SM_ASSERT(pOptJacobian->GetNumRows()    == 2);
       SM_ASSERT(pOptJacobian->GetNumColumns() == 2);
     }
+
 
   // init output
   rbFoundAnswer = FALSE;
@@ -432,6 +435,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 
   // all done
   return SM_SUCCESS;
+
 
   // Second algorithm: can give false convergence.
 //
@@ -512,6 +516,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 //      (*pOptJacobian)[1][1] = - sPVV2[1].Dot( sCtUnit - sDsUnit )
 //                              - sDiff00.Dot( sDsUnit_s );
 //    }
+
 
   // Third algorithm: Also lost quadratic convergence.
 // The idea here is this: just zero the gap, but since we need two functions,
@@ -772,6 +777,7 @@ SmBoolean bDebugMe1 = FALSE;
                                          crX, rF, pOptJacobian, rbFoundAnswer) ;
     }
   else // not near a tangency - use standard evaluation functions
+
 
 // NEW SECTION NOT YET IMPLEMENTED: near-tangent case.
 //    {

@@ -33,6 +33,7 @@ using sc::read_srf;
 
 namespace
 {
+
 } // namespace
 
 // op 0 insert knot: surface, t mt dir inplace -> status, surface.

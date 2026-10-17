@@ -31,6 +31,7 @@ using sc::read_crv;
 
 namespace
 {
+
 // n p m, used control points, used knots.
 void dump_crv(std::vector<double>& o, const NL_CURVE* cur)
 {

@@ -33,6 +33,7 @@ using sc::read_srf;
 
 namespace
 {
+
 NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
 {
     const double* d = in + *at;

@@ -22,6 +22,7 @@ using sc::nl_status;
 
 namespace
 {
+
 struct Reader
 {
     const double* in;

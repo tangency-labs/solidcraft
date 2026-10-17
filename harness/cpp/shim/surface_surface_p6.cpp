@@ -624,6 +624,7 @@ SmSolutionPairType SmSSGlobalSolver::IdenticalSolutions // rtn: oneof SM_SP_IDEN
           SmBoolean bSurf2Singular = (   m_pSurf2->IsSingularity( sUV2A, eSingDir )
                                       && m_pSurf2->IsSingularity( sUV2B, eSingDir )) ;
 
+
           // when neither Surf1 nor Surf2 solutions are on a singularity
           if(   !bSurf1Singular
              && !bSurf2Singular)

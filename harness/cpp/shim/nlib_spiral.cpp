@@ -24,6 +24,7 @@ using sc::nl_status;
 
 namespace
 {
+
 // l m n p q r ku kv kw, knots (U V W), control points (x y z w, w index fastest).
 void dump_vol(std::vector<double>& o, const gw_VOLUME* v)
 {

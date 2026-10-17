@@ -33,6 +33,7 @@ using sc::read_crv;
 
 namespace
 {
+
 // Output curve: the input itself (in place) or a new NULL curve.
 NL_CURVE* out_crv(NL_CURVE* cur, double inplace, NL_STACKS* S)
 {

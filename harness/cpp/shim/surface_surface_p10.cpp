@@ -409,6 +409,7 @@ SmBoolean bDebugMe = FALSE ;
 
   double d3DTol = dCurveTol + dSurfaceTol;
 
+
   // when both curve and surface shapes are lines
   if(bCurveLine && bSurfaceLine)
     {
@@ -800,6 +801,7 @@ SmBoolean bDebugMe = FALSE ;
   return SM_SUCCESS;  // Found a guess - loaded it now we are done
 
 } // end sm_ClassifyCurveSurfaceXSectPoint
+
 
 // ---- verbatim: SmSurface.cpp lines 15517-16945: sm_GlobalCurveIntersectCombineSolutions
 /*******************************************************************//**
@@ -1248,6 +1250,7 @@ SmBoolean bDebugMe = FALSE ;
             } // end if range solution branch
         } // end test for merging solutions section
 
+
         // continue here after deciding whether to combine current and last solutions
 CombineDecided:
 
@@ -1386,6 +1389,7 @@ CombineDecided:
   // tangent intersecting curves often will be found to lie
   // within a coincident segment.  The design choice is to
   // keep the intersection point and discard the coincident segment
+
 
   // Mark every interval solution next-to or containing a point solution for removal
   SmTArray<SmBoolean> bCullSolution(rSolutions.GetSize(), NULL, rSolutions.GetSize()) ;
@@ -1531,6 +1535,7 @@ CombineDecided:
               }
           } // end else: range is long enough
 
+
 #ifdef SM_DEBUG_CODE
           if ( bCullSolution[ii] || bCullSolution[jj] ) {
               if(bDebugMe)
@@ -1560,6 +1565,7 @@ CombineDecided:
 
           if ( bCullSolution[ii] )
             { break; }
+
 
           // quit searching when point solutions get past interval solutions
           if(   rPtStart[0] > sInvSpan1.GetMax()

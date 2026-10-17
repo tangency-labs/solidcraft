@@ -38,6 +38,7 @@ using sc::read_srf;
 
 namespace
 {
+
 void push_pt(std::vector<double>& o, const NL_POINT& p)
 {
     o.push_back(p.x);

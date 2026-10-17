@@ -459,6 +459,7 @@ SmStatus SmSSSIntersectENFO::Evaluate
 
     return SM_SUCCESS;
 
+
 } // end SmSSSIntersectENFO::Evaluate
 
 // clang-format on

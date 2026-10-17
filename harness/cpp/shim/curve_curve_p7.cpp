@@ -147,6 +147,7 @@ static SmStatus sm_FindAdditionalCcTangentGuess
         SER(sCircle1Normal.Unitize());
     }
 
+
     if (bLineCircleIntersection) {
         ULONG lNumTsect;
         double adTsectLineParam[2];
@@ -447,6 +448,7 @@ static SmStatus sm_FilterSolution
       //     rbKeepSolution = FALSE;
       //     return SM_SUCCESS;
       //   }
+
 
 //      SmBoolean bKeep = TRUE ;
       // get unit tangents pointing into next segment
@@ -1251,6 +1253,7 @@ SmBoolean bDebugMe = FALSE ;
                                             &sPseudoBox1, &sPseudoBox2,
                                             bAdditionalWorkNeeded, sSolutions,
                                             bSnapToEnds));
+
 
       ULONG       lNumFound  = sSolutions.GetSize();
       SmSolution *aSolutions = sSolutions.GetDataArray();

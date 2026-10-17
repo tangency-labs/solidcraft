@@ -356,6 +356,7 @@ SmBSplineSurface* read_bspline_surface(Rd& rd, const SmContext& ctx)
     return new (ctx) SmBSplineSurface(sur, FALSE, NULL);
 }
 
+
 void gssi(Rd& rd, const SmContext& ctx, SmSurfOfRevolution* s, std::vector<double>& o)
 {
     int64_t kind = rd.idx();

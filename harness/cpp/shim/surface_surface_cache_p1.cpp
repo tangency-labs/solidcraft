@@ -109,6 +109,7 @@ static SmStatus sm_CheckBoundingPlaneSeparatingHalfspace
     rbIsSeparatingHalfspace = TRUE;
     return SM_SUCCESS;
 
+
 } // end sm_CheckBoundingPlaneSeparatingHalfspace
 
 // ---- verbatim: SmSurfaceCache.cpp lines 260-323: sm_ComputePlaneFrom3Points

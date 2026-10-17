@@ -25,6 +25,7 @@ using sc::nl_status;
 
 namespace
 {
+
 // p n b0 b1, (n+1) control points x y z w, n+p+2 knots -> curve on S.
 bool read_crv(const double* in, NL_CURVE* cur, double* b, NL_STACKS* S)
 {

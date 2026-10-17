@@ -116,6 +116,7 @@ SmBoolean bDebugMe = FALSE ;
   // arrive here when we have an inexact answer
   // inexact solutions are only found at interval discontinuities
 
+
   // get solution SurfacePoint: sUV, sSurfacePoint, sDU, sDV, and sNorm
   SmPoint2d sUV(crSolution.m_vStart[1],crSolution.m_vStart[2]);
   SmVector3d sDU, sDV;
@@ -223,6 +224,7 @@ SmBoolean bDebugMe = FALSE ;
           //       its curvature value at the solution point.  Use this projected curvature
           //       value to decide if the gap function at the solution is getting bigger or smaller
           //       for small deviations from the solution point.
+
 
           // Compute the curvature value for the curve after it's been projected
           // to the surfaceSectionPlane.  This will be a signed curvature value,
@@ -365,6 +367,9 @@ SmBoolean bDebugMe = FALSE ;
 
 } // end sm_FilterSolution
 
+
+
+
 // ---- the solver classes (data members of SmSurface.cpp; constructors and LocalSolve adapted)
 class SmSPGlobalSolver : public SmGlobalSolver
 {
@@ -421,6 +426,7 @@ public:
   virtual SmSolutionPairType IdenticalSolutions(const SmSolution & crSol1, const SmSolution & crSol2,
                                                 const SmSolution *&pPreferredSol) const;
 };
+
 
 // ---- verbatim: SmSurface.cpp lines 19879-19962: SmSPGlobalSolver::IdenticalSolutions
 SmSolutionPairType SmSPGlobalSolver::IdenticalSolutions  // rtn: oneof SM_SP_IDENTICAL
@@ -900,6 +906,7 @@ std::vector<SmVector3d> read_vecs(Rd& rd)
         v.push_back(rd.vec());
     return v;
 }
+
 
 // ---- ops (keep in sync with crates/solidcore-ffi/src/units/surface_surface_p5.rs) ----------
 enum : int32_t

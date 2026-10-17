@@ -312,6 +312,7 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
   SmBezierSpan * pBezSpan   = (SmBezierSpan*)pCurveNode->m_pData; NER(pBezSpan);
   SmExtent3d   & rBBox      = pCurveNode->m_sBBox;
 
+
   // return false when target m_cpOptVectors[0] point is further from branch bounding box than current m_dBestAnswerSoFarSq
   if (m_eCurveProperty == SM_CP_PROJECTED_POINT_MINIMIZE)
     {
@@ -498,6 +499,7 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
       return TRUE;
     } // end if (m_eCurveProperty == SM_CP_PLANE_INTERSECTION)
 
+
   // Make sure that the nodes have data in them
   if (   pCurveNode->m_eAuxDataType != SM_AD_BEZIER_CURVE
       && pCurveNode->m_eAuxDataType != SM_AD_CURVE_DATA)
@@ -541,6 +543,7 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
           return FALSE;
         }
     }
+
 
 //    double dT;
 //    double dAngDegFromPerp =
@@ -603,6 +606,7 @@ static SmStatus sm_FindAdditionalCpGuess
     if (sLineVec.LengthSquared() < SM_EFF_ZERO_SQ) { return SM_SUCCESS; }
     sLineVec.Unitize();
     SmPoint3d sLinePoint = sPV[0] ;
+
 
     ULONG lNumTsect;
     double adTsectLineParam[2];
@@ -877,6 +881,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
   //    sIvl.SetMinMax( sIvl.GetMin(), dNewTop );
   //  }
 
+
   if (   m_eCurveProperty == SM_CP_MINIMIZE_ANGLE_TO_PLANE
      ||  m_eCurveProperty == SM_CP_MINIMIZE_DIRECTED_ANGLE
      ||  m_eCurveProperty == SM_CP_MINIMIZE_CCW_ANGLE
@@ -1071,6 +1076,7 @@ public:
        SmBoolean              & rbFoundAnswer) ; // out: Just set to FALSE = Not Used
 } ; // end class SmCCTangentIntENFO
 
+
 /*******************************************************************//**
 PURPOSE: NewtonRaphson Iteration Evaluate function Constructor
             for tangent Curve/Curve Intersections
@@ -1141,6 +1147,7 @@ SmStatus SmCCTangentIntENFO::StaticEvaluate
       SM_ASSERT(pOptJacobian->GetNumRows()    == 2);
       SM_ASSERT(pOptJacobian->GetNumColumns() == 2);
     }
+
 
   // init output
   rbFoundAnswer = FALSE;
@@ -1219,6 +1226,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 
   // all done
   return SM_SUCCESS;
+
 
   // Second algorithm: can give false convergence.
 //
@@ -1299,6 +1307,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 //      (*pOptJacobian)[1][1] = - sPVV2[1].Dot( sCtUnit - sDsUnit )
 //                              - sDiff00.Dot( sDsUnit_s );
 //    }
+
 
   // Third algorithm: Also lost quadratic convergence.
 // The idea here is this: just zero the gap, but since we need two functions,
@@ -1580,6 +1589,7 @@ SmBoolean  bDebugMe = FALSE;
 
   rdFPrimeOfT = dTanDotTan + dVDot2nd ;
 
+
   // Set sign of 1st Derive for maximize
   //cbi: check this.
   if ( m_eSolverOperation == SM_SO_MAXIMIZE )
@@ -1787,6 +1797,7 @@ SmBoolean bDebugMe1 = FALSE;
                                          crX, rF, pOptJacobian, rbFoundAnswer) ;
     }
   else // not near a tangency - use standard evaluation functions
+
 
 // NEW SECTION NOT YET IMPLEMENTED: near-tangent case.
 //    {

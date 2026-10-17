@@ -34,6 +34,7 @@ using sc::read_crv;
 
 namespace
 {
+
 void push_cpt(std::vector<double>& o, const NL_CPOINT& c)
 {
     o.push_back(c.x);

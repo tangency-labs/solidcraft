@@ -31,6 +31,7 @@ using sc::read_srf;
 
 namespace
 {
+
 } // namespace
 
 // op 0 remove all knots: surface, tol dir inplace -> status, surface.

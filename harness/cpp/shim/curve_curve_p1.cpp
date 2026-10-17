@@ -106,6 +106,7 @@ static SmStatus sm_RefineCCSolutions( SmSolutionArray &rSolutions )
       sSolIvl2.AddValue( rSol.m_vEnd  .m_adParameters[1] );
       bReverse2 = ( rSol.m_vStart.m_adParameters[1] > rSol.m_vEnd.m_adParameters[1] );
 
+
       // The start:
       if ( rSol.m_vStart.m_dSolutionValue > 0.000001 )
       {
@@ -237,6 +238,7 @@ static SmStatus sm_TestSpanAccuracy
       // plus evaluating Hermite's is fast: they store their cubic
       // power-series expansion.
       SER( crCurve.EvaluatePoint( dCrvParam, sCrvPnt ));
+
 
       // when matching parameterization
       if ( bMatchParameterization )

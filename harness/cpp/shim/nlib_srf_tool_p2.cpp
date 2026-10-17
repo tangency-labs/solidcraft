@@ -32,6 +32,7 @@ using sc::read_srf;
 
 namespace
 {
+
 } // namespace
 
 // op 0 conditional removal: surface, t nt tol dir inplace -> status, rt, surface.

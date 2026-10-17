@@ -26,6 +26,7 @@ using sc::nl_status;
 
 namespace
 {
+
 NL_POINT pt(const double* d)
 {
     NL_POINT p;

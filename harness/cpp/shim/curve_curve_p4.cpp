@@ -214,6 +214,7 @@ static SmStatus sm_FilterSolution
       //     return SM_SUCCESS;
       //   }
 
+
 //      SmBoolean bKeep = TRUE ;
       // get unit tangents pointing into next segment
       SmVector3d sT1, sT2;
@@ -570,6 +571,7 @@ SmStatus SmCurvePropertyEFO::Evaluate
         }
         break;
 
+
     case SM_CP_PERPENDICULAR_TO_VECTOR:
         {
             // See where first derivative doted with the first vector is zero.
@@ -661,6 +663,7 @@ SmStatus SmCurvePropertyEFO::Evaluate
             SmVector3d APrime  = sC[1] * sC[3];   // + sC[2]*sC[2]  <- v*v == 0.
             double dDenomPrime = ( A.Dot( APrime ) ) / dDenom;
             rdFPrimeOfT = ( dNumerPrime - ( dK + rdFOfT ) * dDenomPrime ) / dDenom;
+
 
             if ( smos_Fabs( rdFOfT*rdFOfT ) < m_dSquaredTolerance )
               {
@@ -974,6 +977,7 @@ SmStatus SmCurvePropertyEFO::Evaluate
             // and similarly,  b' = ( C'.C'' ) / b
             //
             // So:  F' = ( 3*b*b*b' - F*m' ) / m
+
 
             SER( m_crCurve.Evaluate( dT, 3, bLeftRightFlag, sC, FALSE ));  // exact tangent lengths
 
@@ -1468,6 +1472,7 @@ public:
        SmBoolean              & rbFoundAnswer) ; // out: Just set to FALSE = Not Used
 } ; // end class SmCCTangentIntENFO
 
+
 /*******************************************************************//**
 PURPOSE: NewtonRaphson Iteration Evaluate function Constructor
             for tangent Curve/Curve Intersections
@@ -1538,6 +1543,7 @@ SmStatus SmCCTangentIntENFO::StaticEvaluate
       SM_ASSERT(pOptJacobian->GetNumRows()    == 2);
       SM_ASSERT(pOptJacobian->GetNumColumns() == 2);
     }
+
 
   // init output
   rbFoundAnswer = FALSE;
@@ -1616,6 +1622,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 
   // all done
   return SM_SUCCESS;
+
 
   // Second algorithm: can give false convergence.
 //
@@ -1696,6 +1703,7 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 //      (*pOptJacobian)[1][1] = - sPVV2[1].Dot( sCtUnit - sDsUnit )
 //                              - sDiff00.Dot( sDsUnit_s );
 //    }
+
 
   // Third algorithm: Also lost quadratic convergence.
 // The idea here is this: just zero the gap, but since we need two functions,

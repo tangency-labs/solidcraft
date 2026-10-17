@@ -29,6 +29,7 @@ using sc::read_crv;
 
 namespace
 {
+
 // true when the sampling count of N_CrvOffsetPtSampling is safe (or never computed).
 bool samples_ok(NL_CURVE* curP, NL_VECTOR B, NL_REAL d, NL_DEGREE deg, NL_REAL tol, double max_samples)
 {

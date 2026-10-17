@@ -31,6 +31,7 @@ using sc::read_srf;
 
 namespace
 {
+
 } // namespace
 
 // op 0 remove knots with constraints: surface, cu, cu u knots, cv, cv v knots,

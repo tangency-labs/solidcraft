@@ -300,6 +300,7 @@ void put_solutions(std::vector<double>& o, SmSolutionArray& sols, const SmSurfac
     }
 }
 
+
 void put_state(std::vector<double>& o, SmSurfPtSolveStepper& s)
 {
     put_uv(o, s.UV());

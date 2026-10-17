@@ -414,6 +414,7 @@ SmBoolean bDebugMe = FALSE ;
 
   double d3DTol = dCurveTol + dSurfaceTol;
 
+
   // when both curve and surface shapes are lines
   if(bCurveLine && bSurfaceLine)
     {
@@ -1295,6 +1296,7 @@ SmBoolean bDebugMe = FALSE ;
       SmVector3d sSv_Unit_u = sSv.UnitizedDerivative( sSuv );  // Note: not the same as sSu_Unit_v.
       SmVector3d sSv_Unit_v = sSv.UnitizedDerivative( sSvv );
 
+
       if (pOptJacobian)
         {
           (*pOptJacobian)[0][0] =  sCt_Unit_t.Dot( sSMinusC ) - sCt_Unit.Dot( sCt );
@@ -1820,6 +1822,7 @@ SmBoolean bDebugMe = FALSE;
       SER( ComputeJacobian( sTmpX, rF, *pOptJacobian, &sDomains ));
     }
 
+
 #ifdef SM_DEBUG_CODE
   if (bDebugMe)
     {
@@ -2134,6 +2137,7 @@ SmBoolean bDebugMe2 = FALSE;
 #endif
 
   return SM_SUCCESS;
+
 
 } // end SmSSNormalizeENFO::Evaluate
 

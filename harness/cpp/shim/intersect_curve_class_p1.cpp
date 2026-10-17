@@ -1251,6 +1251,7 @@ static SmStatus sm_MakeConsistentClassifications(SmCurveClassification & rCurveC
               SmVertex *pEdgeVertex1 = pClassifyEdge->GetVertex();
               SmVertex *pEdgeVertex2 = pClassifyEdge->GetOtherVertex(pEdgeVertex1);
 
+
               // check that classified vertex is one of the Edge's vertices
               if (   pClassifyVertex != pEdgeVertex1
                   && pClassifyVertex != pEdgeVertex2)
@@ -1395,6 +1396,7 @@ static double sm_GetCurveCurveAngle
 #else
     SM_REF1(dDeviation);
 #endif // SM_DEBUG_CODE
+
 
   // get the angle between the tangents
   double dAngleRadians = 0.0 ;

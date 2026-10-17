@@ -30,6 +30,7 @@ using sc::read_crv;
 
 namespace
 {
+
 // Reads one curve function at in[*at], allocating it on S; advances *at.
 NL_CFUN* read_fun(const double* in, int64_t* at, NL_STACKS* S)
 {

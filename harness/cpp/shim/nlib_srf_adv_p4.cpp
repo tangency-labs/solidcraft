@@ -40,6 +40,7 @@ NL_FLAG ST_GetRotationRateOfChange(NL_CURVE* traj, NL_PARAMETER u, NL_CURVE* cur
 
 namespace
 {
+
 NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
 {
     const double* d = in + *at;

@@ -28,6 +28,7 @@ using sc::read_crv;
 
 namespace
 {
+
 NL_SFUN* null_sfn(NL_STACKS* S)
 {
     NL_SFUN* sfn = N_AllocSrfFuncData(S);

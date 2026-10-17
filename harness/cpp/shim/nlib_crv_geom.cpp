@@ -27,6 +27,7 @@ using sc::read_crv;
 
 namespace
 {
+
 void push_pt(std::vector<double>& o, NL_POINT P)
 {
     o.push_back(P.x);

@@ -28,6 +28,7 @@ using sc::read_srf;
 
 namespace
 {
+
 // True when N_SrfOffset would read an unset generator tangent.
 bool unset_tangent(NL_SURFACE* sur, NL_REAL eps)
 {
