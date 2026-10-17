@@ -100,16 +100,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816354785678691015",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -136,16 +132,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "gen0003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816354785678691018",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -212,16 +204,12 @@
       "values_compared": 142
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816354785678691025",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -232,16 +220,12 @@
       "values_compared": 142
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "gen0012",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816354785678691027",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -264,16 +248,12 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "gen0015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816354785678691030",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -6177,8 +6157,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c000",
@@ -6189,8 +6169,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c111",
@@ -6201,8 +6181,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c222",
@@ -6213,8 +6193,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c333",
@@ -6225,8 +6205,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c434",
@@ -6237,8 +6217,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c555",
@@ -6249,8 +6229,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c666",
@@ -6260,88 +6240,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -6465,8 +6417,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c000",
@@ -6477,8 +6429,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c111",
@@ -6489,8 +6441,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c222",
@@ -6501,8 +6453,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c333",
@@ -6513,8 +6465,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c434",
@@ -6525,8 +6477,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c555",
@@ -6537,8 +6489,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c666",
@@ -6548,88 +6500,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -6781,8 +6705,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c000",
@@ -6793,8 +6717,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c111",
@@ -6805,8 +6729,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c222",
@@ -6817,8 +6741,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c333",
@@ -6829,8 +6753,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c434",
@@ -6841,8 +6765,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c555",
@@ -6853,8 +6777,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c666",
@@ -6864,88 +6788,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -7073,8 +6969,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c000",
@@ -7085,8 +6981,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c111",
@@ -7097,8 +6993,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c222",
@@ -7109,8 +7005,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c333",
@@ -7121,8 +7017,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c434",
@@ -7133,8 +7029,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c555",
@@ -7145,8 +7041,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c666",
@@ -7156,88 +7052,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -7625,8 +7493,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::ConnectIntervals",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k0_o0_0",
@@ -7637,8 +7505,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k0_o1_0",
@@ -7648,16 +7516,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k0_o2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -7669,8 +7533,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k0_o1_1",
@@ -7680,33 +7544,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k0_o2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k0_o0_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 204
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k0_o1_2",
@@ -7716,16 +7572,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k0_o2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -13629,8 +13481,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c000",
@@ -13641,8 +13493,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c111",
@@ -13653,8 +13505,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c222",
@@ -13665,8 +13517,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c333",
@@ -13677,8 +13529,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c434",
@@ -13689,8 +13541,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c555",
@@ -13701,8 +13553,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c666",
@@ -13712,88 +13564,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -13917,8 +13741,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c000",
@@ -13929,8 +13753,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c111",
@@ -13941,8 +13765,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c222",
@@ -13953,8 +13777,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c333",
@@ -13965,8 +13789,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c434",
@@ -13977,8 +13801,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c555",
@@ -13989,8 +13813,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c666",
@@ -14000,88 +13824,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -14233,8 +14029,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c000",
@@ -14245,8 +14041,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c111",
@@ -14257,8 +14053,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c222",
@@ -14269,8 +14065,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c333",
@@ -14281,8 +14077,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c434",
@@ -14293,8 +14089,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c555",
@@ -14305,8 +14101,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c666",
@@ -14316,88 +14112,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -14525,8 +14293,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c000",
@@ -14537,8 +14305,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c111",
@@ -14549,8 +14317,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c222",
@@ -14561,8 +14329,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c333",
@@ -14573,8 +14341,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c434",
@@ -14585,8 +14353,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c555",
@@ -14597,8 +14365,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c666",
@@ -14608,88 +14376,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -15077,8 +14817,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::ConnectIntervals",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k1_o0_0",
@@ -15089,8 +14829,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k1_o1_0",
@@ -15100,16 +14840,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k1_o2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -15121,8 +14857,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k1_o1_1",
@@ -15132,21 +14868,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k1_o2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::ConnectIntervals",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k1_o0_2",
@@ -15157,8 +14889,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k1_o1_2",
@@ -15168,16 +14900,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k1_o2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -21081,8 +20809,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c000",
@@ -21093,8 +20821,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c111",
@@ -21105,8 +20833,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c222",
@@ -21117,8 +20845,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c333",
@@ -21129,8 +20857,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c434",
@@ -21141,8 +20869,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c555",
@@ -21153,8 +20881,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c666",
@@ -21164,88 +20892,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -21369,8 +21069,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c000",
@@ -21381,8 +21081,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c111",
@@ -21393,8 +21093,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c222",
@@ -21405,8 +21105,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c333",
@@ -21417,8 +21117,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c434",
@@ -21429,8 +21129,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c555",
@@ -21441,8 +21141,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c666",
@@ -21452,88 +21152,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -21685,8 +21357,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c000",
@@ -21697,8 +21369,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c111",
@@ -21709,8 +21381,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c222",
@@ -21721,8 +21393,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c333",
@@ -21733,8 +21405,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c434",
@@ -21745,8 +21417,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c555",
@@ -21757,8 +21429,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c666",
@@ -21768,88 +21440,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -21977,8 +21621,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c000",
@@ -21989,8 +21633,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c111",
@@ -22001,8 +21645,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c222",
@@ -22013,8 +21657,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c333",
@@ -22025,8 +21669,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c434",
@@ -22037,8 +21681,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c555",
@@ -22049,8 +21693,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c666",
@@ -22060,88 +21704,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -22529,8 +22145,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::ConnectIntervals",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k2_o0_0",
@@ -22541,8 +22157,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k2_o1_0",
@@ -22552,16 +22168,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k2_o2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -22573,8 +22185,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k2_o1_1",
@@ -22584,21 +22196,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k2_o2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::ConnectIntervals",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k2_o0_2",
@@ -22609,8 +22217,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k2_o1_2",
@@ -22620,16 +22228,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k2_o2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -28533,8 +28137,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c000",
@@ -28545,8 +28149,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c111",
@@ -28557,8 +28161,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c222",
@@ -28569,8 +28173,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c333",
@@ -28581,8 +28185,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c434",
@@ -28593,8 +28197,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c555",
@@ -28605,8 +28209,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c666",
@@ -28616,88 +28220,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -28821,8 +28397,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c000",
@@ -28833,8 +28409,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c111",
@@ -28845,8 +28421,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c222",
@@ -28857,8 +28433,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c333",
@@ -28869,8 +28445,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c434",
@@ -28881,8 +28457,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c555",
@@ -28893,8 +28469,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c666",
@@ -28904,88 +28480,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -29137,8 +28685,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c000",
@@ -29149,8 +28697,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c111",
@@ -29161,8 +28709,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c222",
@@ -29173,8 +28721,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c333",
@@ -29185,8 +28733,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c434",
@@ -29197,8 +28745,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c555",
@@ -29209,8 +28757,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c666",
@@ -29220,88 +28768,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -29429,8 +28949,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c000",
@@ -29441,8 +28961,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c111",
@@ -29453,8 +28973,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c222",
@@ -29465,8 +28985,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c333",
@@ -29477,8 +28997,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c434",
@@ -29489,8 +29009,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c555",
@@ -29501,8 +29021,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c666",
@@ -29512,88 +29032,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -29981,8 +29473,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::ConnectIntervals",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k3_o0_0",
@@ -29993,8 +29485,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k3_o1_0",
@@ -30004,16 +29496,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k3_o2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -30025,8 +29513,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k3_o1_1",
@@ -30036,33 +29524,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k3_o2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k3_o0_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 204
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k3_o1_2",
@@ -30072,16 +29552,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k3_o2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -35985,8 +35461,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c000",
@@ -35997,8 +35473,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c111",
@@ -36009,8 +35485,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c222",
@@ -36021,8 +35497,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c333",
@@ -36033,8 +35509,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c434",
@@ -36045,8 +35521,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c555",
@@ -36057,8 +35533,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c666",
@@ -36068,88 +35544,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -36273,8 +35721,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c000",
@@ -36285,8 +35733,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c111",
@@ -36297,8 +35745,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c222",
@@ -36309,8 +35757,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c333",
@@ -36321,8 +35769,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c434",
@@ -36333,8 +35781,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c555",
@@ -36345,8 +35793,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c666",
@@ -36356,88 +35804,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -36589,8 +36009,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c000",
@@ -36601,8 +36021,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c111",
@@ -36613,8 +36033,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c222",
@@ -36625,8 +36045,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c333",
@@ -36637,8 +36057,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c434",
@@ -36649,8 +36069,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c555",
@@ -36661,8 +36081,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c666",
@@ -36672,88 +36092,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -36881,8 +36273,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c000",
@@ -36893,8 +36285,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c111",
@@ -36905,8 +36297,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c222",
@@ -36917,8 +36309,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c333",
@@ -36929,8 +36321,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c434",
@@ -36941,8 +36333,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c555",
@@ -36953,8 +36345,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c666",
@@ -36964,88 +36356,60 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o2_c666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "deferred": {
@@ -37420,21 +36784,17 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k4_o0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 204
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k4_o1_0",
@@ -37444,16 +36804,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k4_o2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -37465,8 +36821,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k4_o1_1",
@@ -37476,33 +36832,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k4_o2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::AreCoincidentMaybe",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k4_o0_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 204
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
+        "symbol": "SmCurveClassification::GetClassifyCrvLoc",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "partition_k4_o1_2",
@@ -37512,16 +36860,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::GetPointClassByIndex",
-        "unit": "intersect.curve_class_p7"
-      },
       "max_rel_err": 0.0,
       "name": "partition_k4_o2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -37533,13 +36877,13 @@
     }
   ],
   "cases_both_errored": 6,
-  "cases_deferred": 505,
+  "cases_deferred": 341,
   "cases_failed": 0,
-  "cases_passed": 3933,
+  "cases_passed": 4097,
   "cases_total": 4438,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 110,
-    "intersect.curve_class_p7": 335,
+    "intersect.curve_class_p2": 271,
+    "intersect.curve_class_p7": 10,
     "topology.edge": 40,
     "topology.face_p2": 20
   },
