@@ -562,6 +562,8 @@ fn op_of(c: i64) -> HealerOpType {
 
 #[allow(clippy::too_many_lines)]
 fn rust_prob(kind: u8, n: u64, ops: &[[i64; 4]]) -> Result<Output, HarnessError> {
+    // Run only on scripts the C++ guard accepts: `n` sizes the object list below.
+    ffi::check_prob(&prob_input(kind, n, ops)).map_err(|e| harness(format!("prob script: {e}")))?;
     let mut arena: PropsArena<FacePropsId, FacePropsEntry<H>> = PropsArena::default();
     let ids: Vec<FacePropsId> = (0..n).map(|_| arena.alloc(FacePropsEntry::new())).collect();
     let id = |a: i64| -> Result<FacePropsId, HarnessError> {
@@ -1165,6 +1167,9 @@ fn rust_heal(
         // the B-rep could not be built: the shim reports the same `-1 status`
         return Ok(Output::new().values("out", ex));
     };
+    // Run only on scripts the C++ guard accepts: the voxel counts size the voxel model.
+    ffi::check_heal(&args_of(targets, voxels, steps, n))
+        .map_err(|e| harness(format!("heal script: {e}")))?;
     let c = counts(&ex).ok_or_else(|| harness("export counts"))?;
     let (mut b, exact) = import(&ex)?;
     if exact.iter().any(|x| !x) {
@@ -1910,5 +1915,41 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         run_rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Object counts the C++ guard refuses are a harness error on the Rust side too,
+    /// not a capacity-overflow panic or a 32 GiB object list (issue #181).
+    #[test]
+    fn prob_refuses_unguarded_object_counts() {
+        for n in [
+            0,
+            ffi::MAX_OBJECTS as u64 + 1,
+            1 << 31,
+            1 << 32,
+            i64::MAX as u64,
+            u64::MAX,
+        ] {
+            let i = Inputs::Prob {
+                kind: 1,
+                n,
+                ops: Vec::new(),
+            };
+            assert!(run_rust(&i).is_err(), "n = {n}");
+        }
+    }
+
+    /// Generated problem array scripts pass the guard and still run.
+    #[test]
+    fn prob_runs_generated_scripts() {
+        let mut rng = Rng::new(7);
+        for _ in 0..200 {
+            let i = gen_prob(&mut rng);
+            assert!(run_rust(&i).is_ok(), "{i:?}");
+        }
     }
 }
