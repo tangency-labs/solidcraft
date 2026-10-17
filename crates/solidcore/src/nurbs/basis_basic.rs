@@ -38,6 +38,8 @@
 //!   product overflows (signed overflow is undefined upstream) Rust returns
 //!   [`SolidError::InvalidInput`].
 
+use std::collections::TryReserveError;
+
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::geom::Interval;
 use crate::nurbs::knots::{KnotVector, Side};
@@ -67,6 +69,35 @@ fn endless(operation: &'static str) -> SolidError {
 
 fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
     SolidError::Nlib { operation, code }
+}
+
+/// A zero `rows x w` array (upstream `N_AllocReal2dArray(rows - 1, w - 1)`).
+///
+/// Upstream allocates the row pointers and the values as two blocks and fails softly
+/// with `NL_MEM_ERR` when either does not fit. Here the row list and every row are
+/// reserved fallibly and filled within that capacity, so any failed allocation
+/// returns that error instead of aborting.
+fn zeros2(rows: usize, w: usize, op: &'static str) -> Result<Vec<Vec<f64>>> {
+    zeros2_with(rows, w, op, Vec::try_reserve_exact)
+}
+
+/// [`zeros2`] with the row reservation passed in, so a test can make it fail midway.
+fn zeros2_with(
+    rows: usize,
+    w: usize,
+    op: &'static str,
+    mut reserve: impl FnMut(&mut Vec<f64>, usize) -> std::result::Result<(), TryReserveError>,
+) -> Result<Vec<Vec<f64>>> {
+    let mem = |_| nlib(op, NlibCode::Memory);
+    let mut a: Vec<Vec<f64>> = Vec::new();
+    a.try_reserve_exact(rows).map_err(mem)?;
+    for _ in 0..rows {
+        let mut r = Vec::new();
+        reserve(&mut r, w).map_err(mem)?;
+        r.resize(w, 0.0);
+        a.push(r);
+    }
+    Ok(a)
 }
 
 /// `a[i]`, or `InvalidInput` when out of range.
@@ -576,8 +607,10 @@ pub struct BasisDerivs {
 /// # Errors
 ///
 /// [`NlibCode::Numerical`] when a knot difference is below `1e-24` (more than
-/// `p + 1` equal knots); errors of [`KnotVector::find_span`]; `InvalidInput` where
-/// upstream would index out of bounds or overflow its `int` derivative factor.
+/// `p + 1` equal knots); [`NlibCode::Memory`] when the `(der + 1) x (p + 1)` or
+/// `(p + 1) x (p + 1)` arrays cannot be allocated; errors of
+/// [`KnotVector::find_span`]; `InvalidInput` where upstream would index out of bounds
+/// or overflow its `int` derivative factor.
 #[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
 pub fn basis_derivs(
     knt: &KnotVector<'_>,
@@ -601,11 +634,11 @@ pub fn basis_derivs(
     let mder = sgn(p.min(der), OP)?;
     let rows = der.checked_add(1).ok_or_else(|| out_of_range(OP))?;
     let w = p.checked_add(1).ok_or_else(|| out_of_range(OP))?;
-    let mut nd = vec![vec![0.0; w]; rows];
+    let mut nd = zeros2(rows, w, OP)?;
 
     let mut left = vec![0.0; w];
     let mut right = vec![0.0; w];
-    let mut ndu = vec![vec![0.0; w]; w];
+    let mut ndu = zeros2(w, w, OP)?;
     let mut a = vec![vec![0.0; w]; 2];
 
     // Compute the basis functions.
@@ -839,6 +872,55 @@ mod tests {
         // ... including the unused final product (13!/2! at k = 10).
         assert!(basis_derivs(&kv(&long), 13, 0.5, Side::Left, 10).is_err());
         assert!(basis_derivs(&kv(&long), 13, 0.5, Side::Left, 9).is_ok());
+    }
+
+    /// A derivative order too large to allocate is `NL_MEM_ERR`, as upstream's
+    /// `N_AllocReal2dArray`, not a capacity-overflow panic or an abort (issue #206).
+    #[test]
+    fn derivs_huge_order_is_memory_error() {
+        let k = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        for der in [1 << 56, 1 << 60, i64::MAX as usize, usize::MAX / 2] {
+            assert!(
+                matches!(
+                    basis_derivs(&kv(&k), 3, 0.5, Side::Left, der),
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Memory,
+                        ..
+                    })
+                ),
+                "der = {der}"
+            );
+        }
+    }
+
+    /// A row allocation that fails after earlier ones succeeded is `NL_MEM_ERR` too, not
+    /// an abort (review of PR #214).
+    #[test]
+    fn zeros2_row_failure_midway_is_memory_error() {
+        for fail_at in 1..=4 {
+            let mut calls = 0;
+            let got = zeros2_with(4, 4, "test", |r, n| {
+                calls += 1;
+                if calls == fail_at {
+                    // A real reservation error, without allocating.
+                    Vec::<f64>::new().try_reserve(usize::MAX)
+                } else {
+                    r.try_reserve_exact(n)
+                }
+            });
+            assert!(
+                matches!(
+                    got,
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Memory,
+                        ..
+                    })
+                ),
+                "fail_at = {fail_at}"
+            );
+            assert_eq!(calls, fail_at);
+        }
+        assert_eq!(zeros2(4, 3, "test").unwrap(), vec![vec![0.0; 3]; 4]);
     }
 
     #[test]

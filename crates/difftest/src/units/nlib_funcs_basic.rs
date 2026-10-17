@@ -445,6 +445,10 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     let mut o = Vec::new();
     match i {
         Inputs::CrvEval { crv, der, params } => {
+            // Run only on orders the C++ guard accepts: `der` sizes every output row.
+            if *der > ffi::MAX_DER {
+                return Err(harness(format!("der {der} > {}", ffi::MAX_DER)));
+            }
             let c = build_crv(crv)?;
             for pt in params {
                 let f = c.eval(pt.u, pt.flag.side());
