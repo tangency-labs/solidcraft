@@ -134,16 +134,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0012",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9751865495562476135",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "deferred": {
@@ -194,28 +190,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#17 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#18 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -326,16 +314,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#29 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -442,28 +426,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#39 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#40 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -578,16 +554,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#51 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -698,16 +670,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#62 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -814,28 +782,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#72 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#73 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -942,28 +902,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#83 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#84 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -1074,16 +1026,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#95 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -1190,28 +1138,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#105 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#106 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -1318,28 +1258,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#116 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#117 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -1450,16 +1382,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#128 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -1562,28 +1490,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#138 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#139 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -3158,28 +3078,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#281 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#282 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -3290,16 +3202,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#293 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -3406,16 +3314,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#303 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -3530,28 +3434,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#314 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#315 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -3774,28 +3670,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#336 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#337 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -3902,28 +3790,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#347 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#348 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -4034,16 +3914,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#359 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -4150,16 +4026,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#369 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -4274,28 +4146,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#380 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#381 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -4514,28 +4378,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#402 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#403 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -4642,28 +4498,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#413 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#414 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -4766,28 +4614,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#424 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#425 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -4894,28 +4734,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#435 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#436 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5022,28 +4854,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#446 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#447 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5146,28 +4970,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#457 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#458 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5274,28 +5090,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#468 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#469 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5402,28 +5210,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#479 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#480 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5526,28 +5326,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#490 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#491 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5654,28 +5446,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#501 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#502 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5782,28 +5566,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#512 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#513 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5906,28 +5682,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#523 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#524 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6030,28 +5798,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#534 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#535 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6158,28 +5918,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#545 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#546 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6282,28 +6034,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#556 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#557 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6410,28 +6154,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#567 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#568 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6538,28 +6274,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#578 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#579 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6662,28 +6390,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#589 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#590 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6790,28 +6510,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#600 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#601 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -6918,28 +6630,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#611 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#612 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7042,28 +6746,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#622 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#623 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7170,28 +6866,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#633 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#634 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7298,28 +6986,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#644 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#645 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7422,28 +7102,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#655 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#656 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7546,28 +7218,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#666 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#667 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7674,16 +7338,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#677 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -7794,16 +7454,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#688 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -7918,16 +7574,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#699 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -8042,16 +7694,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#710 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -8162,16 +7810,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#721 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -8286,16 +7930,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#732 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -8410,16 +8050,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#743 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -8530,16 +8166,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#754 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -8654,16 +8286,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#765 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -8778,16 +8406,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#776 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -8898,16 +8522,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#787 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -9018,16 +8638,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#798 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -9142,16 +8758,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#809 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9262,16 +8874,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#820 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9386,16 +8994,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#831 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9510,16 +9114,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#842 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9630,16 +9230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#853 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9754,16 +9350,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#864 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9878,16 +9470,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#875 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -9998,16 +9586,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#886 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -10122,16 +9706,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#897 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -10246,16 +9826,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#908 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -10366,16 +9942,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#919 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -10486,16 +10058,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#930 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -10610,28 +10178,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#941 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#942 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -10734,28 +10294,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#952 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#953 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -10862,28 +10414,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#963 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#964 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -10990,28 +10534,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#974 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#975 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11114,28 +10650,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#985 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#986 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11242,28 +10770,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#996 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#997 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11370,28 +10890,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1007 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1008 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11494,28 +11006,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1018 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1019 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11622,28 +11126,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1029 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1030 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11750,28 +11246,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1040 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1041 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11874,28 +11362,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1051 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1052 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -11998,28 +11478,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1062 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1063 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -12126,16 +11598,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1073 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -12246,16 +11714,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1084 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -12370,16 +11834,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1095 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -12494,16 +11954,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1106 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -12614,16 +12070,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1117 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -12738,16 +12190,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1128 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -12862,16 +12310,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1139 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -12982,16 +12426,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1150 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -13106,16 +12546,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1161 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -13230,16 +12666,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1172 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -13350,16 +12782,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1183 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -13470,16 +12898,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1194 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -13594,28 +13018,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1205 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1206 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -13718,28 +13134,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1216 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1217 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -13846,28 +13254,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1227 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1228 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -13974,28 +13374,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1238 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1239 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14098,28 +13490,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1249 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1250 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14226,28 +13610,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1260 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1261 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14354,28 +13730,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1271 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1272 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14478,28 +13846,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1282 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1283 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14606,28 +13966,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1293 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1294 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14734,28 +14086,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1304 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1305 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14858,28 +14202,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1315 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1316 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -14982,28 +14318,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1326 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1327 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15110,28 +14438,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1337 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1338 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15234,28 +14554,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1348 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1349 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15362,28 +14674,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1359 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1360 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15490,28 +14794,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1370 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1371 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15614,28 +14910,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1381 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1382 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15742,28 +15030,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1392 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1393 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15870,28 +15150,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1403 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1404 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -15994,28 +15266,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1414 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1415 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16122,28 +15386,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1425 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1426 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16250,28 +15506,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1436 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1437 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16374,28 +15622,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1447 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1448 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16498,28 +15738,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1458 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1459 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16626,28 +15858,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1469 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1470 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16750,28 +15974,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1480 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1481 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16878,28 +16094,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1491 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1492 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17006,28 +16214,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1502 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1503 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17130,28 +16330,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1513 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1514 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17258,28 +16450,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1524 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1525 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17386,28 +16570,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1535 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1536 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17510,28 +16686,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1546 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1547 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17638,28 +16806,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1557 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1558 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17766,28 +16926,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1568 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1569 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -17890,28 +17042,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1579 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1580 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18014,28 +17158,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1590 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1591 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18142,28 +17278,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1601 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1602 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18266,28 +17394,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1612 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1613 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18394,28 +17514,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1623 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1624 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18522,28 +17634,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1634 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1635 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18646,28 +17750,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1645 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1646 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18774,28 +17870,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1656 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1657 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -18902,28 +17990,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1667 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1668 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19026,28 +18106,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1678 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1679 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19154,28 +18226,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1689 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1690 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19282,28 +18346,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1700 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1701 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19406,28 +18462,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1711 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1712 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19530,28 +18578,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1722 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1723 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19658,28 +18698,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1733 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1734 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19782,28 +18814,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1744 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1745 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -19910,28 +18934,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1755 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1756 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20038,28 +19054,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1766 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1767 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20162,28 +19170,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1777 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1778 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20290,28 +19290,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1788 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1789 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20418,28 +19410,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1799 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1800 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20542,28 +19526,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1810 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1811 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20670,28 +19646,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1821 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1822 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20798,28 +19766,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1832 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1833 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -20922,28 +19882,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1843 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1844 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21046,28 +19998,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1854 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1855 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21174,28 +20118,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1865 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1866 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21298,28 +20234,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1876 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1877 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21426,28 +20354,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1887 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1888 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21554,28 +20474,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1898 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1899 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21678,28 +20590,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1909 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1910 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21806,28 +20710,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1920 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1921 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -21934,28 +20830,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f0_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1931 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f0_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1932 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -22058,28 +20946,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f1_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1942 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f1_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1943 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -22186,28 +21066,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f2_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1953 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f2_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1954 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -22314,28 +21186,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f3_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1964 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f3_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1965 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -22438,28 +21302,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f4_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1975 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f4_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1976 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -22562,28 +21418,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f5_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1986 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_1_f5_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1987 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -25671,13 +24519,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 1793,
+  "cases_deferred": 1505,
   "cases_failed": 0,
-  "cases_passed": 519,
+  "cases_passed": 807,
   "cases_total": 2312,
   "deferred_by_unit": {
     "cpp-crash-guard:UB-137": 98,
-    "topology.edgeuse_p3": 288,
     "topology.face_p3": 1100,
     "topology.face_p4": 307
   },

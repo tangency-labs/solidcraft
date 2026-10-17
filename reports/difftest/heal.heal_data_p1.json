@@ -3571,8 +3571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmHealData::HealTgts",
-        "unit": "heal.heal_data_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0183",
@@ -3882,6 +3882,10 @@
       "values_compared": 4245
     },
     {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
       "max_rel_err": 0.0,
       "name": "gen0217",
       "outcome": "deferred",
@@ -4852,10 +4856,9 @@
   "cases_passed": 267,
   "cases_total": 493,
   "deferred_by_unit": {
-    "heal.heal_data_p3": 2,
     "query.face_p4": 64,
     "topology.brep_p1": 12,
-    "topology.face_p2": 81,
+    "topology.face_p2": 83,
     "topology.face_p3": 18,
     "topology.face_p4": 49
   },

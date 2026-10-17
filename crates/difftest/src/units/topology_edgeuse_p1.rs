@@ -282,7 +282,7 @@ pub(crate) fn brep_block_of(
             v.extend(dom);
         }
         BrepIn::CrvOnSurfFace { surface, dom } => {
-            v.push(4.0);
+            v.push(6.0);
             push_surface(&mut v, surface)?;
             v.extend(dom);
         }

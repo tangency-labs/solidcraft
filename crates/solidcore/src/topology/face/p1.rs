@@ -91,9 +91,9 @@
 //! - **Unported callees** return [`SolidError::Unported`]: `SmFace::Notify` and
 //!   `CreateUVTrimCurves` (`topology.face_p3`); `SmFace::GetUpwardLoopuses`,
 //!   `GetUpwardVertexuses`, `GetEdges`, `GetBrep` and `HasSeamProblem`
-//!   (`topology.face_p4`); `SmEdgeuse::NormalizedEvaluate` and
-//!   `GetOrCreateUVTrimCurve` (`topology.edgeuse_p3`); `SmBrep::ReplaceSurface`
-//!   (`topology.brep_p2`).
+//!   (`topology.face_p4`); `SmBrep::ReplaceSurface` (`topology.brep_p2`).
+//!   `SmEdgeuse::NormalizedEvaluate` and `GetOrCreateUVTrimCurve` call
+//!   [`crate::topology::edgeuse::p3`] (wired in PR #117).
 //! - **Bounds.** `SplitAtSeam` recurses into the faces its U merge made, once per face
 //!   (upstream asserts the recursion only fixes V seams); the port carries a depth and
 //!   returns [`SolidError::InvalidInput`] past [`MAX_SPLIT_AT_SEAM_DEPTH`]. Every other
@@ -130,6 +130,7 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::face::p2 as fp2;
 use crate::topology::loopuse as lu1;
 use crate::topology::trimming_tools as tt;
@@ -241,23 +242,32 @@ fn has_seam_problem<O: LoopObject>(
     ))
 }
 
-/// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation).
-fn normalized_evaluate_uv(_b: &Brep, _eu: EdgeuseId, _t: f64) -> Result<Point3> {
-    // UNPORTED(topology.edgeuse_p3): SmEdgeuse::NormalizedEvaluate
-    Err(SolidError::unported(
-        "SmEdgeuse::NormalizedEvaluate",
-        "topology.edgeuse_p3",
-    ))
+/// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation; default arguments: no
+/// first derivative, `bOKToMakeUVTrimCurve = TRUE`).
+fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Result<Point3> {
+    Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)`: the edge use's UV trim curve (made when
-/// missing).
-fn get_or_create_uv_trim_curve(_b: &mut Brep, _eu: EdgeuseId) -> Result<Curve> {
-    // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
-    Err(SolidError::unported(
-        "SmEdgeuse::GetOrCreateUVTrimCurve",
-        "topology.edgeuse_p3",
-    ))
+/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (default arguments: no distance or
+/// deviation, `bOKToMakeUVTrimCurve = TRUE`): the returned status, and the edge use's
+/// (or its mate's) UV trim curve afterwards, which a failing status can still leave
+/// attached.
+fn fetch_uv_trim_curve(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+) -> Result<(std::result::Result<(), SolidError>, Option<Curve>)> {
+    let fetch = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    let curve = eu1::uv_trim_curve(b, eu)?.0.cloned();
+    Ok((fetch.status, curve))
+}
+
+/// `SER(pEU->GetOrCreateUVTrimCurve(rpUVCurve))`: the UV trim curve; a failing status
+/// returns, and a missing curve is the null dereference that follows upstream.
+fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
+    let (status, curve) = fetch_uv_trim_curve(k, b, eu)?;
+    status?;
+    curve.ok_or_else(|| SolidError::null_pointer(OP))
 }
 
 /// `rCrvClass.IsCrossedByEdge()`: upstream returns a plain boolean, so a failure other
@@ -545,8 +555,8 @@ pub struct OrientedTrimBoundary {
 /// `SM_ERR_INVALID_INPUT` for a loop of another face; `SM_ERR_NULL_POINTER` for a 3D
 /// edge curve that is not a B-spline kind; [`SolidError::InvalidInput`] where upstream
 /// dereferences null; those of the copies, conversions, reversals and evaluations;
-/// [`SolidError::Unported`] (`CreateUVTrimCurves`, `NormalizedEvaluate`,
-/// `GetOrCreateUVTrimCurve`).
+/// [`SolidError::Unported`] (`CreateUVTrimCurves`, and the deferred callees of
+/// `NormalizedEvaluate` / `GetOrCreateUVTrimCurve`).
 #[allow(clippy::too_many_lines)] // one upstream routine
 pub fn create_oriented_trim_boundary(
     k: &Kernel,
@@ -601,7 +611,7 @@ pub fn create_oriented_trim_boundary(
 
         // the last edge's end-point (status ignored)
         let mut last_pnt = Vec3::UNDEF;
-        if let Some(p) = ignored(normalized_evaluate_uv(b, last_eu, 1.0))? {
+        if let Some(p) = ignored(normalized_evaluate_uv(k, b, last_eu, 1.0))? {
             last_pnt = p;
         }
 
@@ -610,7 +620,7 @@ pub fn create_oriented_trim_boundary(
         // for every edgeuse in this loop
         for &eu in &edgeuses {
             if eu1::orientation(b, eu)? == OrientType::Same {
-                let uv_curve = get_or_create_uv_trim_curve(b, eu)?;
+                let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
                 let ivl = uv_curve.natural_interval();
 
                 // get trim curve's start UV point
@@ -630,7 +640,8 @@ pub fn create_oriented_trim_boundary(
                 edges_in_loop += 1;
                 if parameter_space {
                     // (status ignored upstream; only NER(pOrig))
-                    let orig = ignored(get_or_create_uv_trim_curve(b, eu))?
+                    let orig = fetch_uv_trim_curve(k, b, eu)?
+                        .1
                         .ok_or_else(|| SolidError::null_pointer(OP))?;
                     let mut bsc = orig.copy(k)?;
                     bsc.convert_to_2d(k)?;
@@ -642,7 +653,7 @@ pub fn create_oriented_trim_boundary(
                 }
             } else {
                 let mut bsc = if parameter_space {
-                    let orig = get_or_create_uv_trim_curve(b, eu)?;
+                    let orig = get_or_create_uv_trim_curve(k, b, eu)?;
                     let mut bsc = orig.copy(k)?;
                     bsc.convert_to_2d(k)?;
                     let _ = bsc.set_owner(orig.owner(), None);

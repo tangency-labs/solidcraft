@@ -93,8 +93,8 @@
 //!   `SmCurveInterval::GetIvlBound_EdgeuseObj` (`intersect.curve_class_p4`),
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` (`topology.face_p1`),
 //!   `SmSurface::IsSingularity` of a non-plane
-//!   (`surface.surface_p5`) and `SmOffsetSurface` (`surface.offset_surface`) return
-//!   [`SolidError::Unported`].
+//!   (`surface.surface_p5`) return [`SolidError::Unported`]. A thick face's temporary
+//!   `SmOffsetSurface` is built over a copy of the face surface (upstream shares it).
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;

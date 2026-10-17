@@ -1143,8 +1143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_0_0",
@@ -1155,8 +1155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_0_1",
@@ -1167,8 +1167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_0_2",
@@ -1179,8 +1179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_0.001_0",
@@ -1191,8 +1191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_0.001_1",
@@ -1203,8 +1203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_0.001_2",
@@ -1215,8 +1215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_1000000.0_0",
@@ -1227,8 +1227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_1000000.0_1",
@@ -1239,8 +1239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_8_1000000.0_2",
@@ -1251,8 +1251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_0_0",
@@ -1263,8 +1263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_0_1",
@@ -1275,8 +1275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_0_2",
@@ -1287,8 +1287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_0.001_0",
@@ -1299,8 +1299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_0.001_1",
@@ -1311,8 +1311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_0.001_2",
@@ -1323,8 +1323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_1000000.0_0",
@@ -1335,8 +1335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_1000000.0_1",
@@ -1347,8 +1347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cross_radial_9_1000000.0_2",
@@ -1382,28 +1382,20 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
-      },
       "max_rel_err": 0.0,
       "name": "mated_face_region_sphere.smb",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/review.json#37 (upstream source/SMLib/src/SmMerge.cpp)",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
-        "unit": "topology.edgeuse_p2"
-      },
       "max_rel_err": 0.0,
       "name": "mated_face_region_box_with_large_fillet.smb",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/review.json#38 (upstream source/SMLib/src/SmMerge.cpp)",
-      "values_compared": 0
+      "values_compared": 241
     },
     {
       "deferred": {
@@ -2279,15 +2271,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 73,
+  "cases_deferred": 71,
   "cases_failed": 0,
-  "cases_passed": 175,
+  "cases_passed": 177,
   "cases_total": 248,
   "deferred_by_unit": {
+    "intersect.surface_drop_lib_p3": 18,
     "query.brep": 14,
     "topology.brep_p1": 33,
     "topology.brep_p9": 3,
-    "topology.edgeuse_p2": 20,
     "topology.face_p2": 3
   },
   "max_rel_err": 0.0,

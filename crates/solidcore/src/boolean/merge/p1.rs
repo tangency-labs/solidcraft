@@ -191,8 +191,8 @@ fn merge_coincident_surfaces(
 /// unmated edges at 0.456789 of their interval and classify each point.
 pub fn find_brep_region_of_other_face(
     k: &Kernel,
-    brep: &Brep,
-    other: &Brep,
+    brep: &mut Brep,
+    other: &mut Brep,
     other_faceuse: FaceuseId,
     brep_mates: &BTreeMap<EdgeId, EdgeId>,
 ) -> Result<Option<RegionId>> {
@@ -209,7 +209,7 @@ pub fn find_brep_region_of_other_face(
             k,
             brep,
             mate,
-            other,
+            Some(&mut *other),
             other_eu,
             None,
             OrientType::Same,
@@ -629,8 +629,8 @@ mod tests {
         assert_eq!(
             find_brep_region_of_other_face(
                 &Kernel::default(),
-                &b,
-                &Brep::new(),
+                &mut b,
+                &mut Brep::new(),
                 FaceuseId::from_index(u32::MAX),
                 &BTreeMap::new()
             )

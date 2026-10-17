@@ -442,7 +442,10 @@ impl<O: ClassObject> CurveClassification<O> {
             if !cached {
                 return SolidError::null_pointer(OP);
             }
-            // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
+            // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve (justified: findings.md topology.edgeuse_p3)
+            // the boundary views are read-only `ClassGeometry` handles built from a
+            // borrowed `&Brep` (`query::face::p2::curve_on_classify`), so a trim curve
+            // created here could be neither stored nor resolved
             SolidError::unported("SmEdgeuse::GetOrCreateUVTrimCurve", "topology.edgeuse_p3")
         })?;
         let trim = curve(geometry, trim_handle)?;

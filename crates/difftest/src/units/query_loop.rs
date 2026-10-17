@@ -394,10 +394,15 @@ fn rust_brep(
     let n = u32::try_from(i.edgeuses.len()).map_err(|_| harness("edge uses"))?;
     let uv_domain = surface.natural_uv_domain();
     let mut b = Brep::new();
-    b.add_region_record(Region { in_brep: true }).map_err(err)?;
+    b.add_region_record(Region {
+        in_brep: true,
+        ..Region::default()
+    })
+    .map_err(err)?;
     b.add_shell_record(Shell {
         faces: vec![FaceId::from_index(0)],
         region: Some(RegionId::from_index(0)),
+        ..Shell::default()
     })
     .map_err(err)?;
     b.add_face_record(Face {
@@ -421,6 +426,7 @@ fn rust_brep(
         mate: None,
         orientation: OrientType::Same,
         loopuses: vec![lu],
+        ..Faceuse::default()
     })
     .map_err(err)?;
     b.add_loopuse_record(Loopuse {

@@ -23417,18 +23417,17 @@
     }
   ],
   "cases_both_errored": 494,
-  "cases_deferred": 458,
+  "cases_deferred": 346,
   "cases_failed": 0,
-  "cases_passed": 2234,
+  "cases_passed": 2346,
   "cases_total": 2692,
   "deferred_by_unit": {
     "curve.crv_on_surf": 74,
     "intersect.curve_class_p4": 30,
     "intersect.surface_drop_lib_p3": 39,
     "query.face_p3": 47,
-    "surface.offset_surface": 112,
-    "topology.face_p1": 63,
-    "topology.face_p2": 93
+    "topology.face_p2": 93,
+    "topology.face_p3": 63
   },
   "max_rel_err": 0.0,
   "pass": true,

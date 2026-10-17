@@ -658,15 +658,15 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
         SmEdge* pEdge = nullptr;
         status = brep->CreateWireEdgeFromCurve(c, SmExtent1d(t0, t1), pEdge);
     }
-    else if (kind == 2 || kind == 4)
+    else if (kind == 2 || kind == 6)
     {
         SmSurface* s = read_surface(rd, ctx);
         SmPoint2d a = rd.uv(), b = rd.uv();
         SmFace* pFace = nullptr;
         status = brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
-        if (kind == 4 && status == SM_SUCCESS && pFace != nullptr && pFace->GetSurface() != nullptr)
+        if (kind == 6 && status == SM_SUCCESS && pFace != nullptr && pFace->GetSurface() != nullptr)
         {
-            // Kind 4: every edge's curve becomes an SmCrvOnSurf of the face's surface over a
+            // Kind 6: every edge's curve becomes an SmCrvOnSurf of the face's surface over a
             // copy of its primary edge use's UV trim curve (the UV trim curves stay,
             // `bCallNotify` FALSE), the CrvOnSurf path of `CreateUVTrimCurve`.
             // (CreateFaceFromSurface attaches no UV trim curves: make them first)

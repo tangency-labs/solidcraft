@@ -542,20 +542,26 @@ pub fn radial_sector_classify(
         edge,
         normalized_param,
         sector_eu,
-        brep,
+        None,
         classify_eu,
     )
 }
 
-/// `RadialSectorClassify` with the classified edge use in a second B-rep.
-/// Equal arena ids in different operands do not identify the same curve.
+/// `RadialSectorClassify` with the classified edge use in a second B-rep
+/// (`other_brep`; `None` is `brep` itself, as [`radial_sector_classify`]).
+/// Equal arena ids in different operands do not identify the same curve. Both
+/// B-reps are mutable because the step-offs may create UV trim curves.
+///
+/// # Errors
+///
+/// As [`radial_sector_classify`].
 pub fn radial_sector_classify_between(
     k: &Kernel,
-    brep: &Brep,
+    brep: &mut Brep,
     edge: EdgeId,
     normalized_param: f64,
     sector_eu: EdgeuseId,
-    other_brep: &Brep,
+    mut other_brep: Option<&mut Brep>,
     classify_eu: EdgeuseId,
 ) -> Result<RadialSectorClass> {
     // locals
@@ -569,11 +575,13 @@ pub fn radial_sector_classify_between(
     let start_point = curve_of(brep, edge, OP_RADIAL)?.evaluate_point(this_param)?;
 
     // classify edge locals
-    let other_edge = other_brep
+    let same_brep = other_brep.is_none();
+    let other_ref: &Brep = other_brep.as_deref().unwrap_or(&*brep);
+    let other_edge = other_ref
         .edgeuse(classify_eu)?
         .edge
         .ok_or(SolidError::null_pointer(OP_RADIAL))?;
-    let other = other_brep.edge(other_edge)?;
+    let other = other_ref.edge(other_edge)?;
     let other_curve = other
         .curve
         .as_ref()
@@ -583,7 +591,7 @@ pub fn radial_sector_classify_between(
     // get the corresponding classify edge parameter value
     // 1. when the curves are the same - reuse param value
     // 2. when curves differ - drop point to curve (over a sequence of larger seek areas)
-    let other_param = if core::ptr::eq(brep, other_brep) && other_edge == edge {
+    let other_param = if same_brep && other_edge == edge {
         this_param
     } else {
         let mut success = false;
@@ -627,7 +635,7 @@ pub fn radial_sector_classify_between(
     // detect special case: all planar surfaces
     let all_planes = on_plane(brep, sector_eu)?
         && on_plane(brep, eu_radial)?
-        && on_plane(other_brep, classify_eu)?;
+        && on_plane(other_brep.as_deref().unwrap_or(&*brep), classify_eu)?;
 
     let mut num_consecutive_coincidences: u32 = 0;
 
@@ -668,7 +676,10 @@ pub fn radial_sector_classify_between(
         // 3. get ClassifyEdge->face stepoff binormal
         if stepped_off(evaluate_binormal_step_off(
             k,
-            other_brep,
+            match other_brep.as_deref_mut() {
+                Some(o) => o,
+                None => &mut *brep,
+            },
             classify_eu,
             other_param,
             step_off_distance,
@@ -1222,13 +1233,13 @@ mod tests {
     #[test]
     fn cross_brep_classification_does_not_alias_equal_local_ids() {
         let k = Kernel::default();
-        let (b, e) = wire(Vec3::ZERO, Vec3::X, true);
-        let other = Brep::new();
+        let (mut b, e) = wire(Vec3::ZERO, Vec3::X, true);
+        let mut other = Brep::new();
         let eu = EdgeuseId::from_index(0);
         // The primary has eu 0; the other operand does not. Reading the primary
         // for both operands would reach the plane check instead of rejecting it.
         assert!(matches!(
-            radial_sector_classify_between(&k, &b, e, 0.5, eu, &other, eu),
+            radial_sector_classify_between(&k, &mut b, e, 0.5, eu, Some(&mut other), eu),
             Err(SolidError::NotFound { .. })
         ));
     }

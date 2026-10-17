@@ -632,7 +632,7 @@ pub fn find_radial_sector(
         k,
         b,
         e,
-        b,
+        None,
         classify_eu,
         region,
         required_orientation,
@@ -641,12 +641,17 @@ pub fn find_radial_sector(
 }
 
 /// `FindRadialSector` with a classified edge use from another B-rep.
-/// The returned ids belong to `b`; `classify_eu` belongs to `other`.
+/// The returned ids belong to `b`; `classify_eu` belongs to `other` (`None` is `b`
+/// itself, as [`find_radial_sector`]).
+///
+/// # Errors
+///
+/// As [`find_radial_sector`].
 pub fn find_radial_sector_between(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     e: EdgeId,
-    other: &Brep,
+    mut other: Option<&mut Brep>,
     classify_eu: EdgeuseId,
     region: Option<RegionId>,
     required_orientation: OrientType,
@@ -701,7 +706,7 @@ pub fn find_radial_sector_between(
                 e,
                 param,
                 eu,
-                other,
+                other.as_deref_mut(),
                 classify_eu,
             ) {
                 Ok(c) => c,
