@@ -165,9 +165,9 @@ impl ScriptOp {
         use ScriptOp::{
             BrepMate, CanImprint, CheckInterior, CheckSsi, ClearSsi, CommonEdges, CommonVertices,
             EdgeFace, FaceFace, FaceFaceCoin, FixupEnd, FixupMid, Getters, Imprint, ImprintFace,
-            IsMated, Lowest, MappedBrep, MgrNew, OtherMate, RegisterSsi, Relate, Resolve,
-            SetBreps, SetEdgeClass, SetSubset, SetTols, ShellVerts, SplitTwo, ThisMate,
-            VertexFace, WireLamina,
+            IsMated, Lowest, MappedBrep, MgrNew, OtherMate, RegisterSsi, Relate, Resolve, SetBreps,
+            SetEdgeClass, SetSubset, SetTols, ShellVerts, SplitTwo, ThisMate, VertexFace,
+            WireLamina,
         };
         const ALL: [ScriptOp; 32] = [
             Relate,
@@ -356,7 +356,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -382,7 +384,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -566,7 +571,8 @@ impl Counts {
                 }
             }
             HandleKind::Brep => {
-                if !(0..=1).contains(&i) || self.breps.get(i as usize).copied().flatten().is_none() {
+                if !(0..=1).contains(&i) || self.breps.get(i as usize).copied().flatten().is_none()
+                {
                     return Err(bad("B-rep handle out of range"));
                 }
             }
@@ -640,7 +646,15 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
     // the intersector's B-reps: both from the blocks with either constructor (1 sets
     // them with SetPrimaryBrep / SetOtherBrep), then whatever SetBreps sets
     let mut have_breps = [true, c.breps[1].is_some()];
-    let any = [Vertex, Edge, Face, HandleKind::EdgeCurve, FaceSurface, HandleKind::Curve, Brep];
+    let any = [
+        Vertex,
+        Edge,
+        Face,
+        HandleKind::EdgeCurve,
+        FaceSurface,
+        HandleKind::Curve,
+        Brep,
+    ];
     for _ in 0..n_ops {
         let code = rd.int(1, 33)?;
         let op = ScriptOp::from_code(code).ok_or_else(|| bad("bad script op"))?;
@@ -668,10 +682,7 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
         }
         if matches!(
             op,
-            ScriptOp::FaceFace
-                | ScriptOp::FaceFaceCoin
-                | ScriptOp::Resolve
-                | ScriptOp::Imprint
+            ScriptOp::FaceFace | ScriptOp::FaceFaceCoin | ScriptOp::Resolve | ScriptOp::Imprint
         ) && (!have_breps[0] || !have_breps[1])
         {
             return Err(bad("op dereferences a null intersector B-rep"));
@@ -687,7 +698,10 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
             ScriptOp::MappedBrep => {
                 rd.index(100_000)?;
             }
-            ScriptOp::CommonEdges | ScriptOp::CommonVertices | ScriptOp::Getters | ScriptOp::ClearSsi => {}
+            ScriptOp::CommonEdges
+            | ScriptOp::CommonVertices
+            | ScriptOp::Getters
+            | ScriptOp::ClearSsi => {}
             ScriptOp::SetSubset | ScriptOp::Lowest => c.list(rd, &any, true)?,
             ScriptOp::FixupEnd | ScriptOp::FixupMid => {
                 let dim = rd.index(3)?;

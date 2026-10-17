@@ -89,13 +89,14 @@
 //!   `GlueEdgesGeneral` (`topology.brep_p7`), `DeleteFace` (`topology.brep_p3`),
 //!   `SmFace::GetVertices` / `GetEdges` / `GetBrep` (`topology.face_p4`),
 //!   `SmFace::FaceIntersect` / `SetTolerance` (`topology.face_p3`),
-//!   `SmFace::CalculateUVDomainFromUVTrimCurves` (`topology.face_p1`),
 //!   `SmFace::CalculateBoundingBox` / `Point3DClassify` (`query.face_p1`),
 //!   and the `SmCurveClassification` constructor (`intersect.curve_class_p4`). The
 //!   code after a stub is ported in full. `SmSurface::GlobalCurveIntersect` /
 //!   `CoincidenceCheck` (`surface.surface_p8`), `SmCurveClassification::Homogenize`
-//!   (`intersect.curve_class_p6`) and `InsertTopologyIntersections`
-//!   (`intersect.curve_class_p5`) are the ported calls.
+//!   (`intersect.curve_class_p6`), `InsertTopologyIntersections`
+//!   (`intersect.curve_class_p5`) and `SmFace::CalculateUVDomainFromUVTrimCurves`
+//!   (`topology.face_p1`, through [`IntersectorBrep`]; its `CreateUVTrimCurves` is
+//!   still `Unported` in `topology.face_p3`) are the ported calls.
 //! - **Undefined behaviour upstream** (a null object dereferenced, a solution without
 //!   objects, the maps of an intersector made with the context-only constructor) is
 //!   [`SolidError::InvalidInput`].
@@ -303,6 +304,15 @@ pub trait IntersectorBrep<O>: ProtoBrep<O> {
     ///
     /// Those of the computation.
     fn edge_bounding_box(&self, k: &Kernel, edge: O) -> Result<Extent3d>;
+    /// `SmFace::CalculateUVDomainFromUVTrimCurves(rDomain)` with upstream's default
+    /// arguments (`bLimitDomain = TRUE`, no loop gaps;
+    /// `topology::face::p1::calculate_uv_domain_from_uv_trim_curves`): the new domain.
+    ///
+    /// # Errors
+    ///
+    /// Those of the computation (`SolidError::Unported` while `CreateUVTrimCurves`,
+    /// `topology.face_p3`, is not ported).
+    fn face_uv_domain_from_uv_trim_curves(&mut self, k: &Kernel, face: O) -> Result<Extent2d>;
     /// `SmFace::PointClassify(uv, tol, FALSE, TRUE, pc)` with upstream's other
     /// arguments at their defaults (`query::face::p2::point_classify`).
     ///
@@ -439,15 +449,6 @@ fn face_vertices<O>(_face: O) -> Result<Vec<O>> {
 fn face_edges<O>(_face: O) -> Result<Vec<O>> {
     // UNPORTED(topology.face_p4): SmFace::GetEdges
     Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
-}
-
-/// `SmFace::CalculateUVDomainFromUVTrimCurves(rDomain)`.
-fn face_uv_domain_from_uv_trim_curves<O>(_face: O) -> Result<Extent2d> {
-    // UNPORTED(topology.face_p1): SmFace::CalculateUVDomainFromUVTrimCurves
-    Err(SolidError::unported(
-        "SmFace::CalculateUVDomainFromUVTrimCurves",
-        "topology.face_p1",
-    ))
 }
 
 /// `SmFace::CalculateBoundingBox(rBox)`.
@@ -1732,8 +1733,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ///
     /// Unless `ignore_problems`, a failing vertex loop or edge split (`SER`); those of
     /// the geometry queries; [`SolidError::Unported`] for the face bounding box
-    /// (`query.face_p1`), `SmFace::CalculateUVDomainFromUVTrimCurves`,
-    /// `SmSurface::GlobalCurveIntersect` and the B-rep edits;
+    /// (`query.face_p1`), `SmFace::CalculateUVDomainFromUVTrimCurves`'s
+    /// `CreateUVTrimCurves`, `SmSurface::GlobalCurveIntersect` and the B-rep edits;
     /// [`SolidError::InvalidInput`] for null handles upstream dereferences.
     #[allow(clippy::too_many_lines)]
     pub fn edge_face_intersect(
@@ -1831,7 +1832,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 // If possible, reduce the surface domain.
                 // This can save a lot of work; e.g., two halves of a cylinder.
-                if let Some(d) = ignore_soft(face_uv_domain_from_uv_trim_curves(face))? {
+                if let Some(d) = ignore_soft(brep.face_uv_domain_from_uv_trim_curves(k, face))? {
                     face_domain = d;
                 }
 
@@ -2661,7 +2662,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ///
     /// Unless `ignore_problems`, `SM_ERR` for a face to delete without B-rep;
     /// [`SolidError::Unported`] for `SmFace::GetEdges` / `GetBrep`
-    /// (`topology.face_p4`), `SmFace::CalculateUVDomainFromUVTrimCurves` and
+    /// (`topology.face_p4`), `SmFace::CalculateUVDomainFromUVTrimCurves`'s
+    /// `CreateUVTrimCurves` and
     /// `SmBrep::DeleteFace`; [`SolidError::InvalidInput`] for null handles upstream
     /// dereferences; those of the surface evaluations.
     #[allow(clippy::too_many_lines)]
@@ -2747,10 +2749,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             .ok_or(dangling("face handle is unknown"))?;
 
                         // Note, that's not good enough, Face domains may not be at all tight, so:
-                        if let Some(d) = ignore_soft(face_uv_domain_from_uv_trim_curves(face1))? {
+                        if let Some(d) =
+                            ignore_soft(brep.face_uv_domain_from_uv_trim_curves(k, face1))?
+                        {
                             domain1 = d;
                         }
-                        if let Some(d) = ignore_soft(face_uv_domain_from_uv_trim_curves(face2))? {
+                        if let Some(d) =
+                            ignore_soft(brep.face_uv_domain_from_uv_trim_curves(k, face2))?
+                        {
                             domain2 = d;
                         }
 
