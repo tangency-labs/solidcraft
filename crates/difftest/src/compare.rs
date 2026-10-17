@@ -53,6 +53,8 @@ pub struct CaseDiff {
     pub max_rel_err: f64,
     /// Number of float pairs compared.
     pub values_compared: usize,
+    /// Number of integers, topology ids and adjacency entries compared.
+    pub exact_compared: usize,
 }
 
 impl CaseDiff {
@@ -191,6 +193,7 @@ fn compare_topology(d: &mut CaseDiff, a: &Topology, b: &Topology) {
             (Some(x), Some(y)) => {
                 if x.len() == y.len() {
                     for (i, (p, q)) in x.iter().zip(y.iter()).enumerate() {
+                        d.exact_compared += 1;
                         if p != q {
                             d.push(Mismatch {
                                 field: format!("{field}[{i}]"),
@@ -225,6 +228,7 @@ fn exact_list(d: &mut CaseDiff, field: &str, a: &[i64], b: &[i64]) {
         return;
     }
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+        d.exact_compared += 1;
         if x != y {
             d.push(Mismatch {
                 field: format!("{field}[{i}]"),
@@ -299,7 +303,10 @@ mod tests {
             .topology(Topology::new().count("faces", 5));
         let d = compare(&a, &b, &[]);
         assert_eq!(d.mismatch_count, 2);
+        let same = compare(&a, &a, &[]);
+        assert_eq!((same.values_compared, same.exact_compared), (1, 6));
         let e = compare(&Output::err("x"), &Output::new(), &[]);
+        assert_eq!((e.values_compared, e.exact_compared), (0, 0));
         assert!(!e.pass());
         assert!(compare(&Output::err("x"), &Output::err("x"), &[]).pass());
     }

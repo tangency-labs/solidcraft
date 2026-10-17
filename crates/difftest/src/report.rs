@@ -112,12 +112,15 @@ pub fn write_unit_report(dir: &Path, r: &UnitResult) -> Result<PathBuf, HarnessE
 }
 
 /// One-line summary, e.g.
-/// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16`.
-/// The status word is `PASS` (green), `PARTIAL` or `FAIL`; with deferred cases the
-/// line ends with ` blocked_by=<unit>(<cases>),...`.
+/// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16 with_values=36 no_values=4`.
+/// The status word is `PASS` (green), `PARTIAL` or `FAIL`; `with_values` / `no_values`
+/// split the passing cases into those that compared at least one value and those that
+/// compared nothing (the same error on both sides, or empty outputs); with deferred
+/// cases the line ends with ` blocked_by=<unit>(<cases>),...`.
 pub fn summary_line(r: &UnitResult) -> String {
+    let with_values = r.passed_with_values();
     let mut s = format!(
-        "{} {} cases={} passed={} failed={} deferred={} max_rel_err={:e}",
+        "{} {} cases={} passed={} failed={} deferred={} max_rel_err={:e} with_values={with_values} no_values={}",
         match r.status() {
             UnitStatus::Green => "PASS",
             UnitStatus::Partial => "PARTIAL",
@@ -128,7 +131,8 @@ pub fn summary_line(r: &UnitResult) -> String {
         r.passed(),
         r.failed(),
         r.deferred(),
-        r.max_rel_err()
+        r.max_rel_err(),
+        r.passed() - with_values
     );
     if r.rejected() > 0 {
         let _ = write!(s, " rejected={}", r.rejected());

@@ -183,7 +183,8 @@ struct Job {
     start: Instant,
 }
 
-fn exit_detail(status: std::process::ExitStatus) -> String {
+/// `killed by signal N` or `runner exit code N`.
+pub(crate) fn exit_detail(status: std::process::ExitStatus) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;

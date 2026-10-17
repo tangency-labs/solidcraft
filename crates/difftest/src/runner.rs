@@ -150,6 +150,12 @@ impl CaseResult {
     pub fn is_deferred(&self) -> bool {
         self.outcome() == CaseOutcome::Deferred
     }
+
+    /// The comparison checked at least one float, integer or topology entry (not only
+    /// an error string both sides agreed on, or empty outputs).
+    pub fn compared_values(&self) -> bool {
+        self.diff.values_compared + self.diff.exact_compared > 0
+    }
 }
 
 /// Status of a unit run (AGENTS.md section 4a).
@@ -213,6 +219,15 @@ impl UnitResult {
     /// Number of passing cases.
     pub fn passed(&self) -> usize {
         self.cases.iter().filter(|c| c.pass()).count()
+    }
+
+    /// Number of passing cases that compared at least one value
+    /// ([`CaseResult::compared_values`]); the other passing cases compared nothing.
+    pub fn passed_with_values(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|c| c.pass() && c.compared_values())
+            .count()
     }
 
     /// Number of failing cases.
@@ -478,6 +493,10 @@ mod tests {
         assert!(r.pass());
         assert_eq!((r.passed(), r.failed(), r.deferred()), (1, 0, 1));
         assert_eq!(r.deferred_by_unit().get("geom.curve"), Some(&1));
+        // Neither passing case compared a value (`CaseDiff::default()`).
+        assert_eq!(r.passed_with_values(), 0);
+        r.cases[0].diff.exact_compared = 1;
+        assert_eq!(r.passed_with_values(), 1);
         r.cases.push(case(None, false));
         assert_eq!(r.status(), UnitStatus::Fail);
         r.cases.truncate(1);
@@ -611,6 +630,7 @@ mod tests {
         assert_eq!(r.status(), UnitStatus::Partial);
         let line = crate::report::summary_line(&r);
         assert!(line.starts_with("PARTIAL fake.unit cases=4 passed=2 failed=0 deferred=2"));
+        assert!(line.contains(" with_values=2 no_values=0 "), "{line}");
         assert!(line.ends_with(" blocked_by=geom.curve(2)"), "{line}");
         let rep = crate::report::unit_report(&r);
         assert_eq!(rep["status"], "partial");

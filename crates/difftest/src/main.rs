@@ -7,23 +7,29 @@
 //! cargo run -p difftest --features cpp -- --list
 //! cargo run -p difftest --features cpp -- --status-of <id>   # prints green|partial|fail
 //! options: --seeds N (default 16)  --filter <substr>  --perturb  --report-dir <dir>  --no-report
+//! cargo run -p difftest --features cpp -- --unit <id> --fuzz N [--fuzz-out <dir>]   # FFI guard probing
 //! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
 //! ```
 //! Exit status: 0 no failures (deferred cases are not failures), 1 any failure,
 //! 2 usage / harness setup error.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Instant;
 
 use difftest::case::repo_root;
-use difftest::{plan, registry, report, run_unit, CaseContext, RunOptions, UnitStatus};
+use difftest::{fuzz, plan, registry, report, run_unit, CaseContext, RunOptions, UnitStatus};
 
 const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] \
 [--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]
+       difftest --unit <id>... --fuzz N [--fuzz-out <dir>] [--seeds N] [--filter <substr>]
        difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]";
 
 /// Default child processes of `--ssi-corpus`.
 const DEFAULT_SSI_JOBS: usize = 2;
+
+/// Failures (and `differs` notes) printed per unit by `--fuzz`; all failures are written.
+const MAX_FUZZ_LINES: usize = 10;
 
 /// Default number of generated cases per unit.
 const DEFAULT_SEEDS: usize = 16;
@@ -46,6 +52,8 @@ struct Args {
     tol: Option<String>,
     jobs: Option<usize>,
     glob: Option<String>,
+    fuzz: Option<usize>,
+    fuzz_out: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -73,6 +81,11 @@ fn parse_args() -> Result<Args, String> {
                 let v = val("--jobs")?;
                 a.jobs = Some(v.parse().map_err(|_| format!("bad --jobs `{v}`"))?);
             }
+            "--fuzz" => {
+                let v = val("--fuzz")?;
+                a.fuzz = Some(v.parse().map_err(|_| format!("bad --fuzz `{v}`"))?);
+            }
+            "--fuzz-out" => a.fuzz_out = Some(PathBuf::from(val("--fuzz-out")?)),
             "-h" | "--help" => return Err(String::new()),
             other if a.ssi_corpus && !other.starts_with('-') && a.glob.is_none() => {
                 a.glob = Some(other.to_string());
@@ -94,6 +107,10 @@ fn main() -> ExitCode {
             eprintln!("difftest: --ssi-case needs feature `cpp`");
             return ExitCode::from(2);
         }
+    }
+    // Child of `--fuzz`: one batch of fuzz cases (see `difftest::fuzz::run_child`).
+    if raw.first().map(String::as_str) == Some("--fuzz-exec") {
+        return fuzz::run_child(raw.get(1..).unwrap_or(&[]));
     }
     let args = match parse_args() {
         Ok(a) => a,
@@ -136,6 +153,10 @@ fn main() -> ExitCode {
     if args.tol.is_some() || args.jobs.is_some() {
         eprintln!("difftest: --tol and --jobs only apply to --ssi-corpus");
         return ExitCode::from(2);
+    }
+
+    if args.fuzz.is_some() || args.fuzz_out.is_some() {
+        return fuzz_main(&args, &ctx, &root);
     }
 
     let plan_units = plan::load(&root).unwrap_or_default();
@@ -290,6 +311,84 @@ fn main() -> ExitCode {
     if setup_error {
         ExitCode::from(2)
     } else if failed > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// `--fuzz N`: probes each `--unit` with N mutated cases (see `difftest::fuzz`). No report.
+fn fuzz_main(args: &Args, ctx: &CaseContext, root: &Path) -> ExitCode {
+    let n = match args.fuzz {
+        Some(n) if n > 0 => n,
+        _ => {
+            eprintln!("difftest: --fuzz needs a case count N >= 1");
+            return ExitCode::from(2);
+        }
+    };
+    if args.units.is_empty()
+        || args.green
+        || args.all
+        || args.list
+        || args.perturb
+        || args.status_of.is_some()
+    {
+        eprintln!("difftest: --fuzz takes --unit <id> (not --green, --all, --list, --perturb or --status-of)");
+        return ExitCode::from(2);
+    }
+    let opts = fuzz::FuzzOptions {
+        cases: n,
+        out_dir: args
+            .fuzz_out
+            .clone()
+            .unwrap_or_else(|| root.join("bin").join("fuzz")),
+        filter: args.filter.clone(),
+    };
+    let reg = registry();
+    let start = Instant::now();
+    let mut wanted = args.units.clone();
+    let mut seen = std::collections::BTreeSet::new();
+    wanted.retain(|w| seen.insert(w.clone()));
+    let mut failed = 0usize;
+    for id in &wanted {
+        let Some(unit) = reg.iter().find(|u| u.id() == id.as_str()) else {
+            println!("FUZZ-FAIL {id} (no difftest runner registered for this unit)");
+            failed += 1;
+            continue;
+        };
+        let res = fuzz::run_fuzz(unit.as_ref(), ctx, &opts);
+        println!("{}", fuzz::summary_line(&res));
+        for f in res.failures.iter().take(MAX_FUZZ_LINES) {
+            let file = f.file.as_deref().map_or_else(String::new, |p| {
+                format!(" -> {}", p.strip_prefix(root).unwrap_or(p).display())
+            });
+            println!("  {} {}: {}{file}", f.verdict.as_str(), f.case, f.detail);
+        }
+        if res.failures.len() > MAX_FUZZ_LINES {
+            let dir = opts.out_dir.join(id);
+            println!(
+                "  ... {} more failures in {}",
+                res.failures.len() - MAX_FUZZ_LINES,
+                dir.strip_prefix(root).unwrap_or(&dir).display()
+            );
+        }
+        for n in res.notes.iter().take(MAX_FUZZ_LINES) {
+            let file = n.file.as_deref().map_or_else(String::new, |p| {
+                format!(" -> {}", p.strip_prefix(root).unwrap_or(p).display())
+            });
+            let what = n.verdict.as_str();
+            println!("  note ({what}) {}: {}{file}", n.case, n.detail);
+        }
+        if !res.pass() {
+            failed += 1;
+        }
+    }
+    println!(
+        "difftest --fuzz: {} unit(s), {failed} failed, {:.1} s",
+        wanted.len(),
+        start.elapsed().as_secs_f64()
+    );
+    if failed > 0 {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS

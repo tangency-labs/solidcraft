@@ -11,6 +11,7 @@
 pub mod case;
 pub mod compare;
 pub mod fixtures;
+pub mod fuzz;
 pub mod json;
 pub mod output;
 pub mod plan;

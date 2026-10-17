@@ -31,16 +31,22 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--filter S` | only cases whose name contains `S` |
 | `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
+| `--fuzz N` | with `--unit`: probe the unit's FFI guard with N mutated cases, each run in a child process (below). No report written. |
+| `--fuzz-out D` | where `--fuzz` writes failing inputs (default `bin/fuzz/`; files go to `D/<unit>/`) |
 | `--ssi-corpus [--tol T] [--jobs N] [glob]` | score both engines against the SSI corpus (see [below](#--ssi-corpus-exact-ground-truth-ssi-corpus)); not a gate |
 
 Exit status: `0` no failures (deferred cases are not failures), `1` any
 failure, `2` usage or setup error. Output: one summary line per unit,
 
 ```
-PASS|PARTIAL|FAIL <unit> cases=… passed=… failed=… deferred=… max_rel_err=… [blocked_by=<unit>(<n>),…]
+PASS|PARTIAL|FAIL <unit> cases=… passed=… failed=… deferred=… max_rel_err=… with_values=… no_values=… [blocked_by=<unit>(<n>),…]
 ```
 
 then the first few failing cases and `reports/difftest/<unit>.json`.
+`with_values` / `no_values` split the passing cases into those that compared
+at least one float, integer or topology entry and those that compared nothing
+(both sides returned the same error, or empty outputs). A unit whose passes are
+mostly `no_values` proves little: make the generator reach the success path.
 
 **Perturbation** (`--perturb`): per case, in order of preference: the error
 string if the Rust side errored (gets `~perturbed` appended); else the first
@@ -49,6 +55,50 @@ first topology id (`+1`, or an empty adjacency entry gains a neighbour); else
 the first float of an all-zero / non-finite array (`0`→`1e-8`, NaN→`0`,
 ±inf→∓inf). The line reports `perturbed`, `detected`, `unperturbed` (cases
 with an empty output) and `deferred` (never perturbed).
+
+## Fuzzing the FFI guard (`--fuzz`)
+
+```sh
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit foo.bar --fuzz 1000
+```
+
+The FFI wrapper is the only thing between bad inputs and undefined behaviour in
+upstream, so `--fuzz N` throws N mutated inputs at it. Fuzz case `i` takes one
+of the unit's normal cases (fixtures and `--seeds` generated cases, `--filter`
+applies) and changes one to three leaves or arrays of its inputs: floats to
+`0`, `-0`, `±1`, `±1e-300`, `±1e300` (and `"NaN"`, `"inf"`, `"-inf"` if the
+unit's inputs already use those strings), integers to `-1`, `0`, `2^31`,
+`2^32`, `i64::MIN`, `i64::MAX` or the length of an input array; arrays are
+emptied, truncated or get an element duplicated; flags are flipped. Strings are
+left alone. The seed is `fnv1a64("fuzz:" + unit) + i`, so a run is
+reproducible and `--fuzz 300` is a prefix of `--fuzz 1000`.
+
+Cases run in batches of 100 in a child process (`difftest --fuzz-exec`, hidden)
+with a 4 GiB address-space limit, so a segfault, abort or hang ends the batch
+instead of the run; the case that died is re-run alone to confirm it. Each
+case gets one verdict:
+
+| verdict | meaning |
+|---|---|
+| `rejected` | the C++ runner returned a harness error (the guard refused the input) or its fixture constructor rejected the case; Rust is not run on it (fine) |
+| `malformed` | the mutated inputs no longer parse into the runner's input type (fine; not a guard probe) |
+| `ran` | both sides ran (fine). `differs` counts those where they disagree: a note only (not a failure), since fuzz inputs may be outside the generator's domain; each is still written as a reproduction file, like a failure |
+| `crash` | the child died from a signal or an abnormal exit (C++ crash, Rust stack overflow or failed allocation): **FAIL** |
+| `panic` | a runner panicked on either side: **FAIL** |
+| `timeout` | no result within 20 s, and again when the case runs alone: **FAIL**. A timeout that does not reproduce alone is load-dependent: the case counts with the verdict it gets alone and a `note (timeout)` line records it |
+
+```
+FUZZ-PASS|FUZZ-FAIL <unit> cases=… rejected=… malformed=… ran=… differs=… crashes=… panics=… timeouts=…
+```
+
+Each failure is printed with its detail (side, signal or panic location) and
+its inputs are written as a fixture file, `bin/fuzz/<unit>/fuzzNNNNN.json`
+(`{"cases": [...], "fuzz_failure": {...}}`; a crash that only happens after
+earlier cases of its batch keeps those cases, in order). Fix the guard (or the
+Rust port), then copy the case into `fixtures/<unit>/` as a regression case
+(fixture paths from `$upstream_file` appear expanded). Exit status `1` on any
+failure. A `differs` case is printed as a `note (differs)` line with its file and
+is written the same way (so it can be re-run), but does not fail the run.
 
 ## Deferred cases, `partial` units
 
@@ -341,7 +391,8 @@ errors (unreadable case, report not writable); verdicts never fail the run.
 ## Notes
 
 * Cases run sequentially in one process: the C++ kernel has global state. A
-  C++ crash (segfault) kills the run; use `--filter` to bisect.
+  C++ crash (segfault) kills the run; use `--filter` to bisect (`--fuzz` runs
+  its cases in child processes instead).
 * Rust panics in a runner are caught and reported as a failing case.
 * `solidcore-ffi` without feature `cpp` is an empty crate that builds for
   `wasm32-unknown-unknown`; the difftest binary refuses to run without `cpp`.
