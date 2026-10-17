@@ -1,0 +1,5655 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "operation_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#0",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "operation_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#1",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "operation_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#2",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "operation_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#3",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "operation_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#4",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_prog_offset_setters",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#5 (upstream tests/prog_test/src/smOffsetTest.cpp:58-71)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_shell_duplicates_and_replacement",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#6 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2619-2638)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "upstream_offset_settings_prefix",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#7 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2745-2755)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "duplicate_pairs_exact_one_and_many",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#8",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_arenas_and_empty_shell_replacement",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#9",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_positive_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#10",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_negative_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#11",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tiny_distance",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#12",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_huge_negative_distance",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/config.json#13",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_positive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#0",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_moderate_boundary_samples",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#1",
+      "values_compared": 470
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#2",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_negative_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#3",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#4",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#5",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_positive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#6",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_moderate_boundary_samples",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#7",
+      "values_compared": 470
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#8",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_negative_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#9",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#10",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#11",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_positive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#12",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_moderate_boundary_samples",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#13",
+      "values_compared": 470
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#14",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_negative_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#15",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#16",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#17",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_rational_quadratic_positive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#18",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_rational_quadratic_moderate_boundary_samples",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#19",
+      "values_compared": 470
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_rational_quadratic_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#20",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_rational_quadratic_negative_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#21",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_rational_quadratic_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#22",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_rational_quadratic_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#23",
+      "values_compared": 290
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_scaled_axes_subdomain",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#24",
+      "values_compared": 174
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_plane_negative_scale",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#25",
+      "values_compared": 174
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_mixed_degrees_subdomain",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#26",
+      "values_compared": 174
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_quadratic_tiny_scale",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#27",
+      "values_compared": 174
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "extend_bilinear_huge_scale",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/extension.json#28",
+      "values_compared": 174
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::ShrinkGeometry",
+        "unit": "topology.brep_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "probe_replace_empty",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#0",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_remove_no_merge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#1",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::RemoveFaces",
+        "unit": "topology.brep_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "probe_remove_empty",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#2",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_side_wall_null",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#3",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_side_wall_unmapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#4",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_fill_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#5",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_vertex_null",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#6",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmOffsetGeometryCreation::VertexOffset",
+        "unit": "offset.offset_geometry_creation"
+      },
+      "max_rel_err": 0.0,
+      "name": "probe_vertex_isolated",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#7",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_faceuse_null",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#8",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_faceuse_no_surface",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#9",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmStitch::StitchIntoSolid",
+        "unit": "heal.stitch_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "probe_piecewise_empty",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#10",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "probe_map_plane",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#11",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "probe_edgeuses_unmapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#12",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sync_empty_both",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#0",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_first_unfiltered_tiny_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#1",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_second_filtered_first_strict_10_percent",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#2",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "below_10_percent",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#3",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "above_10_percent",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#4",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ten_equal_pieces_removed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#5",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eleven_equal_pieces_removed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#6",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "nine_equal_pieces_survive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#7",
+      "values_compared": 162
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "zero_trim_first_leaves_second_unfiltered",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#8",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "zero_trim_second_filtered_to_null_padding",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#9",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "real_lines_reversed_construction_sorted_matches",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#10",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "real_bspline_trimmed_subdomains",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#11",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "mixed_analytic_and_spline_sorted_gaps",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#12",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "matched_plus_first_and_second_gaps",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#13",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "touching_boundaries_not_interior_splits",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#14",
+      "values_compared": 36
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "split_minimum_dependency",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#15",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "split_maximum_dependency",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#16",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_boundary_below_eff_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#17",
+      "values_compared": 36
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "boundary_exact_eff_zero_split",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#18",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_minima_public_order_tie",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#19",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_minima_matched_order_tie",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#20",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_real_curves",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#21",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "huge_real_curves",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#22",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null_original_real_native_status",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#23",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null_other_second_fixtures_still_measured",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#24",
+      "values_compared": 36
+    },
+    {
+      "inputs": {
+        "first": [
+          {
+            "curve": {
+              "domain": [0, 1],
+              "end": [0, 0, 0],
+              "kind": "line",
+              "start": [0, 0, 0]
+            },
+            "interval": [0, 1]
+          }
+        ],
+        "null_original": false,
+        "null_other": false,
+        "op": "synchronize",
+        "second": []
+      },
+      "max_rel_err": 0.0,
+      "name": "coincident_analytic_line_constructor_rejection",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native fixture constructor status_1007",
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#25",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_degenerate_analytic_line_positive_length_survives",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#26",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "near_degenerate_quadratic_spline_positive_length_survives",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#27",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "collapsed_quadratic_spline_length_filter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/synchronize.json#28",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_positive_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#0",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_negative_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#1",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_tiny_positive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#2",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_tiny_negative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#3",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_positive_pi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#4",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_negative_pi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#5",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_nonround_positive_order_sensitive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#6",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "config_tangency_nonround_negative_order_sensitive",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#7",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339608",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339609",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339610",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 1.6231610969065313e-16,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339611",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339612",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339613",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339614",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 1.1044851447990215e-15,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339615",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339616",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339617",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339618",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339619",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339620",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339621",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.094419169900233e-15,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339622",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339623",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339624",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339625",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339626",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339627",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 4.84563228264332e-16,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339628",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339629",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339630",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339631",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339632",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339633",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339634",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339635",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339636",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339637",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339638",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339639",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339640",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339641",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339642",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339643",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339644",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339645",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339646",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339647",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339648",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 5.678215456057589e-16,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339649",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 4.836100820372726e-16,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339650",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 8.907921913433045e-16,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339651",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339652",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339653",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339654",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339655",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.4065409907248226e-15,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339656",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339657",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.369552238966309e-15,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339658",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339659",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339660",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339661",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.798320462857195e-15,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339662",
+      "values_compared": 162
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339663",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339664",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339665",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339666",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339667",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339668",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339669",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 2.1386343431250408e-16,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339670",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339671",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 3.705384843088138e-16,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339672",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339673",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339674",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339675",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339676",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339677",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339678",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339679",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339680",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339681",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.6080825231408113e-15,
+      "name": "gen0074",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339682",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339683",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339684",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339685",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339686",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339687",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339688",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339689",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339690",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339691",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339692",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339693",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339694",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339695",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339696",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339697",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339698",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339699",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339700",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339701",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339702",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339703",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 3.4316846110317193e-16,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339704",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339705",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339706",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339707",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339708",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339709",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339710",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339711",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339712",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.2046177331636236e-16,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339713",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339714",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339715",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339716",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339717",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339718",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339719",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339720",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339721",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339722",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339723",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339724",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339725",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339726",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339727",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339728",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 9.278979618908892e-15,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339729",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339730",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339731",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339732",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339733",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339734",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339735",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339736",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 5.4625402159784255e-15,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339737",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339738",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339739",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339740",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339741",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339742",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339743",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339744",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339745",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339746",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339747",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339748",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339749",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 1.6120430322080875e-15,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339750",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 1.8927384853525304e-16,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339751",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339752",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339753",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339754",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339755",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339756",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339757",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.3409828572624755e-15,
+      "name": "gen0150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339758",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339759",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339760",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339761",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339762",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339763",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 9.333783714320088e-16,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339764",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339765",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339766",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339767",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 1.961602061973798e-16,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339768",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 3.686281018438524e-16,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339769",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339770",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339771",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339772",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339773",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339774",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339775",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339776",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339777",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339778",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339779",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339780",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339781",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339782",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339783",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339784",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 3.3857802681921913e-16,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339785",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339786",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339787",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339788",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339789",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339790",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339791",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339792",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339793",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339794",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339795",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339796",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339797",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339798",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 5.047302627606746e-16,
+      "name": "gen0191",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339799",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339800",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339801",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339802",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339803",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339804",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339805",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339806",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339807",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 6.428739232709403e-16,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339808",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339809",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339810",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339811",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339812",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339813",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339814",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339815",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339816",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339817",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339818",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339819",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339820",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339821",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339822",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339823",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.1163742477652095e-16,
+      "name": "gen0216",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339824",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339825",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339826",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339827",
+      "values_compared": 260
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339828",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 2.0806395104997784e-15,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339829",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339830",
+      "values_compared": 260
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339831",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 2.1229604768554552e-16,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339832",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339833",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.5139756042650037e-14,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339834",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339835",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339836",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339837",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339838",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339839",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 7.800306077446646e-16,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339840",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 1.1080858458982682e-15,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339841",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339842",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339843",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339844",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339845",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339846",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339847",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339848",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339849",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339850",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339851",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 2.4925455571977407e-16,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339852",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339853",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339854",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339855",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.325305995613779e-16,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339856",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339857",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339858",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339859",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 5.034403622495475e-16,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339860",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339861",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339862",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339863",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339864",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339865",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339866",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339867",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 1.1162013212143252e-15,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339868",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339869",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339870",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339871",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 8.87694260387108e-16,
+      "name": "gen0264",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339872",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 3.3514535044907636e-16,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339873",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 1.8945412912117165e-16,
+      "name": "gen0266",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339874",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 1.2749701481436382e-16,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339875",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 1.4022368021514521e-15,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339876",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 5.308840291352534e-16,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339877",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339878",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339879",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339880",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339881",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339882",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339883",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339884",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339885",
+      "values_compared": 72
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339886",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339887",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339888",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339889",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339890",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339891",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339892",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339893",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339894",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339895",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339896",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339897",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.807691388730853e-16,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339898",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339899",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339900",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339901",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339902",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339903",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339904",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339905",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339906",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339907",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339908",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339909",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339910",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339911",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339912",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339913",
+      "values_compared": 260
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339914",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339915",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339916",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339917",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 4.639353342338488e-16,
+      "name": "gen0310",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339918",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339919",
+      "values_compared": 162
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339920",
+      "values_compared": 260
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551339921",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339922",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339923",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 3.8681485249273216e-16,
+      "name": "gen0316",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339924",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339925",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339926",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339927",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 3.4145724354851105e-15,
+      "name": "gen0320",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339928",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339929",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 3.519597692004286e-16,
+      "name": "gen0322",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339930",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 8.001700142682745e-16,
+      "name": "gen0323",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339931",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339932",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339933",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339934",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.050412081015348e-16,
+      "name": "gen0327",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339935",
+      "values_compared": 198
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339936",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339937",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 3.785476970705061e-16,
+      "name": "gen0330",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339938",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339939",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339940",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339941",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339942",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 3.384638678986814e-15,
+      "name": "gen0335",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339943",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339944",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339945",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339946",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 7.713697871742541e-16,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339947",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339948",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 1.1542274438018172e-15,
+      "name": "gen0341",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339949",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339950",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339951",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339952",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339953",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339954",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339955",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339956",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 3.78547697070506e-16,
+      "name": "gen0349",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339957",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 2.854623591013544e-15,
+      "name": "gen0350",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339958",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339959",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 9.498256160423652e-16,
+      "name": "gen0352",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339960",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339961",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339962",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339963",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339964",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 2.4848528961873404e-16,
+      "name": "gen0357",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339965",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339966",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339967",
+      "values_compared": 162
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0360",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339968",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0361",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339969",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0362",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339970",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0363",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339971",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 8.931157383506392e-15,
+      "name": "gen0364",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339972",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0365",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339973",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0366",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339974",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.9727968068897096e-16,
+      "name": "gen0367",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339975",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 4.063113681965755e-16,
+      "name": "gen0368",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339976",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0369",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339977",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0370",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339978",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0371",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339979",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0372",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339980",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0373",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339981",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0374",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339982",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.9158035700250084e-14,
+      "name": "gen0375",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339983",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0376",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339984",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0377",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339985",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0378",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339986",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0379",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339987",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0380",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339988",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0381",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339989",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 1.8461698663648037e-16,
+      "name": "gen0382",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339990",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0383",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339991",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0384",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339992",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0385",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339993",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0386",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339994",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 4.7335819721336975e-16,
+      "name": "gen0387",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339995",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 3.8904011132537047e-16,
+      "name": "gen0388",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339996",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0389",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339997",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0390",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339998",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0391",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551339999",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0392",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340000",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0393",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340001",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0394",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340002",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0395",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340003",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0396",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340004",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0397",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340005",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0398",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340006",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0399",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340007",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0400",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340008",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0401",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340009",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0402",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340010",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 4.1674147323433935e-16,
+      "name": "gen0403",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340011",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0404",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340012",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0405",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340013",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0406",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340014",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0407",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340015",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0408",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340016",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0409",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340017",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0410",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340018",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 5.164073190247253e-16,
+      "name": "gen0411",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340019",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0412",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340020",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0413",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340021",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0414",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340022",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 2.0111984967039038e-16,
+      "name": "gen0415",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340023",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0416",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340024",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0417",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340025",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 3.624378941006834e-15,
+      "name": "gen0418",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340026",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0419",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340027",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0420",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340028",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0421",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340029",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0422",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340030",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0423",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340031",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0424",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340032",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0425",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340033",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 2.3100566614779328e-14,
+      "name": "gen0426",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340034",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0427",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340035",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 1.4784422841265099e-16,
+      "name": "gen0428",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340036",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0429",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340037",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0430",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340038",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0431",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340039",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0432",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340040",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 7.15669096066402e-16,
+      "name": "gen0433",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340041",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 2.0275957157721682e-15,
+      "name": "gen0434",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340042",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0435",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340043",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0436",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340044",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 2.003257007629736e-16,
+      "name": "gen0437",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340045",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0438",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340046",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.623704299312173e-16,
+      "name": "gen0439",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340047",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0440",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340048",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.1145137204145548e-16,
+      "name": "gen0441",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340049",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 9.689521859160208e-16,
+      "name": "gen0442",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340050",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 9.673940282299858e-15,
+      "name": "gen0443",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340051",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0444",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340052",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0445",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340053",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0446",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340054",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0447",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340055",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0448",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340056",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.6896044162488884e-15,
+      "name": "gen0449",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340057",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0450",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340058",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0451",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340059",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0452",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340060",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0453",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340061",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0454",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340062",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0455",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340063",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 8.554464991852835e-16,
+      "name": "gen0456",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340064",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0457",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340065",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0458",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340066",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0459",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340067",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.242951897358329e-15,
+      "name": "gen0460",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340068",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0461",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340069",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0462",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340070",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0463",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340071",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0464",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340072",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 1.8586591417918263e-16,
+      "name": "gen0465",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340073",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0466",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340074",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.8927384853525304e-16,
+      "name": "gen0467",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340075",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0468",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340076",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0469",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340077",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0470",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340078",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0471",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340079",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0472",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340080",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0473",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340081",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0474",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340082",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0475",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340083",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 2.1655782789276906e-15,
+      "name": "gen0476",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340084",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0477",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340085",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0478",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340086",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0479",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340087",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0480",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340088",
+      "values_compared": 162
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0481",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340089",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0482",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340090",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 3.47685332897294e-15,
+      "name": "gen0483",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340091",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 1.2447382795994008e-15,
+      "name": "gen0484",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340092",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0485",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340093",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0486",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340094",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0487",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340095",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0488",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340096",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0489",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340097",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0490",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340098",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0491",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340099",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0492",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340100",
+      "values_compared": 36
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0493",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551340101",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 1.3577637935041546e-15,
+      "name": "gen0494",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340102",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 1.858271345151864e-15,
+      "name": "gen0495",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340103",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0496",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340104",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0497",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340105",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0498",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340106",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0499",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340107",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0500",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340108",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 4.713644727174504e-15,
+      "name": "gen0501",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340109",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0502",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340110",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 3.44996427481403e-15,
+      "name": "gen0503",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340111",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0504",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340112",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0505",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340113",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0506",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340114",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 7.134141332592876e-16,
+      "name": "gen0507",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340115",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0508",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340116",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0509",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340117",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.8347744128916987e-15,
+      "name": "gen0510",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340118",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0511",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340119",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0512",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340120",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0513",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340121",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 1.3846679911700683e-15,
+      "name": "gen0514",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340122",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0515",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340123",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0516",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340124",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0517",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340125",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0518",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340126",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0519",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340127",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0520",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340128",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0521",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340129",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0522",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340130",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0523",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340131",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0524",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340132",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0525",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340133",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0526",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340134",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 5.36950700185529e-16,
+      "name": "gen0527",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340135",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0528",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340136",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0529",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340137",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0530",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340138",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 3.3571765673622244e-16,
+      "name": "gen0531",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340139",
+      "values_compared": 216
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0532",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340140",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0533",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340141",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0534",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340142",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0535",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340143",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0536",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340144",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0537",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340145",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0538",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340146",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0539",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340147",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0540",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340148",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0541",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340149",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0542",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340150",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0543",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340151",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0544",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340152",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 8.03617581742594e-16,
+      "name": "gen0545",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340153",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0546",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340154",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0547",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340155",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 3.839767271599482e-15,
+      "name": "gen0548",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340156",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0549",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340157",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0550",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340158",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0551",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340159",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0552",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340160",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0553",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340161",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0554",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340162",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0555",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340163",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0556",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340164",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 2.8225775226172425e-16,
+      "name": "gen0557",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340165",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0558",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340166",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 1.8927384853525302e-16,
+      "name": "gen0559",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340167",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0560",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340168",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0561",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340169",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0562",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340170",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0563",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340171",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeVertexSplitEdge",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0564",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13762035380551340172",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 2.161676969303453e-16,
+      "name": "gen0565",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340173",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0566",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340174",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0567",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340175",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0568",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340176",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 7.071857777673971e-16,
+      "name": "gen0569",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340177",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 1.7234721964822201e-15,
+      "name": "gen0570",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340178",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 2.1112663740286463e-16,
+      "name": "gen0571",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340179",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0572",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340180",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0573",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340181",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0574",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340182",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 2.213290057263088e-16,
+      "name": "gen0575",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340183",
+      "values_compared": 72
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0576",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340184",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 6.891074272578474e-16,
+      "name": "gen0577",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340185",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0578",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340186",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0579",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340187",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0580",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340188",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0581",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340189",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0582",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340190",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0583",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340191",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0584",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340192",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0585",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340193",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0586",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340194",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0587",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340195",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 3.2219240305448986e-16,
+      "name": "gen0588",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340196",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0589",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340197",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0590",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340198",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0591",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340199",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0592",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340200",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0593",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340201",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0594",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340202",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0595",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340203",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0596",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340204",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0597",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340205",
+      "values_compared": 260
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0598",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340206",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0599",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13762035380551340207",
+      "values_compared": 260
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 17,
+  "cases_failed": 0,
+  "cases_passed": 675,
+  "cases_rejected": 1,
+  "cases_total": 693,
+  "deferred_by_unit": {
+    "heal.stitch_p2": 1,
+    "offset.offset_geometry_creation": 1,
+    "topology.brep_p4": 1,
+    "topology.brep_p5": 1,
+    "topology.brep_p9": 12,
+    "topology.edgeuse_p3": 1
+  },
+  "max_rel_err": 2.9158035700250084e-14,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "offset.offset_executive_p1"
+}

@@ -6890,6 +6890,109 @@ independent p6 integration.
   take the other operand mutably; it stays unreached behind `MakeShellVertex`,
   `topology.brep_p9`.)
 
+
+## offset.offset_executive_p1 (partial, PR #175, 2026-10-17)
+
+The implementation, native adapter, FFI wrapper, fixtures and differential runner
+are included directly in the PR rather than depending on a personal WIP branch.
+Settings, correspondence, synchronization and extended-surface caching are
+implemented; higher construction paths stop at their actual unavailable callees,
+with owner-tagged `Unported` errors and documented continuations.
+
+- **Extension input contract corrected after review.** The first investigation
+  incorrectly treated signed geometry-creator distances as reachable executive
+  inputs. `OffsetBrep` (`SmOffsetExecutive.cpp:114-120`) and `ShellBrep`
+  (`:206-223`) use `fabs(dOffsetDistance)` for the creator and carry the sign
+  through `SetInset`; the local-operation caller (`SmBrep.cpp:12004-12008`)
+  uses half a bounding-sphere radius. The executive's internal extension
+  magnitude is therefore nonnegative. The FFI and native adapter reject
+  negative extension magnitudes before entering C++, with dedicated guard tests.
+  Signed zero and positive tiny/large magnitudes remain covered. Signed
+  constructor/getter probes and inset flags remain valid separate coverage;
+  negative public offset distances are not rejected. HANG-16 records the
+  underlying surface routine's direct negative-distance hazard, not a blocker
+  reachable through the real executive entry points.
+- **Equal-minimum relation order follows the established convention (ND-2).**
+  `SmRelation::GetSeconds` iterates pointer-hashed unordered membership, and
+  `sm_SortEdgeuses` swaps only for strictly greater minima. Following this
+  file's existing `geom.tol` convention, both comparison snapshots sort only
+  contiguous groups with exactly equal measured minimum parameters by traversal
+  id. The original two tie regressions remain. Distinct-minimum ordering,
+  membership, multiplicity, null padding, geometry, statuses and traversal
+  records are unchanged; no tolerance is relaxed. Regression tests verify that
+  normalization does not hide those differences. The deterministic kernel's
+  actual sorting algorithm is unchanged.
+- **Final aggregate validation after the non-blocking follow-ups.** The corrected
+  runner completes without an isolated-case selector: 693 cases (93 fixtures and
+  600 fixed-seed generated), 675 passed, 0 failed, 17 deferred and one explicit
+  analytic-line constructor rejection. Every pass compares numerical values.
+  Maximum relative error is `2.9158035700250084e-14`, within unchanged `1e-9`
+  relative tolerance with no absolute floors. Sensitivity detects all 675
+  perturbations. The standard report is
+  `reports/difftest/offset.offset_executive_p1.json`; the obsolete Markdown
+  investigation is removed. These results supersede the initial 691 / 633 / 17 /
+  41 aggregate. Rejected inputs and deferred paths are not passes. Final validation
+  uses pinned upstream `c9c5979`, GNU g++ 12.2.0 and Rust 1.98.0 on Linux ARM64
+  in local Docker, not the retired network builder.
+- **Remaining dependencies and coverage.** Twelve cases need
+  `topology.brep_p9::SmBrep::MakeVertexSplitEdge`; one each needs
+  `heal.stitch_p2::SmStitch::StitchIntoSolid`,
+  `offset.offset_geometry_creation::SmOffsetGeometryCreation::VertexOffset`,
+  `topology.brep_p4::SmBrep::ShrinkGeometry`,
+  `topology.brep_p5::SmBrep::RemoveFaces`, and
+  `topology.edgeuse_p3::SmEdgeuse::NormalizedEvaluate`. Construction continuations
+  behind these actual calls remain documented rather than reported as completed.
+  Other unavailable construction branches have owner-tagged adapters but are not
+  certified by empty/no-op cases. Review corrections also cover custom tangency
+  snapshots, orientation-sensitive endpoint notifications, cache identity, strict
+  length filtering, gap order, actual topology-solver dispatch and both retained
+  equal-minimum regressions.
+- **Earlier broader checks and limitation.** Formatting and C++-enabled workspace Clippy
+  (all targets, warnings denied) passed. All 1299 kernel tests, 20 runner tests and
+  14 FFI tests pass, including execution of the direct native negative-distance
+  guard test; the wasm check passes. A full `--green --no-report` run selected
+  198 units but hit its 1200-second limit after 107 PASS and 67 PARTIAL summaries,
+  with no reported failures. It last completed `query.edge` and did not reach
+  this unit at position 196. The standalone offset run above passed the partial
+  gate; no completed full-suite baseline pass is claimed.
+- **Non-blocking review follow-ups (2026-10-18).** `RemoveExcessFaces` now tags the
+  arena-order edge walk with `UNPORTED(topology.brep_p1): SmBrep::GetEdges` and
+  explicitly does not certify linked-list/deletion order; nonempty paths still
+  stop at `NormalizedEvaluate` before removal. UV conversion and bounding-box
+  calls preserve the ordinary statuses upstream ignores, without hiding
+  `Unported`; tests check conversion side effects and the initialized empty
+  extent on ordinary failure. The strut vertex's missing-mate lookup now yields
+  an empty relation list, preserving primary-map precedence, rather than a null
+  error. Five kernel regressions cover these changes.
+- **Rejected-fixture coverage repaired without changing measured geometry.** The
+  previous adapter used `SmBSplineCurve::CreateLineSegment` to close each measured
+  loop, but that constructor rejects coincident endpoints. Only for exactly
+  coincident support endpoints, a real nonzero closed cubic B-spline now closes
+  the loop on both engines. The measured curve/interval, actual `MakeWireEdge`
+  calls, measured traversal and normalization policy are unchanged. Both original
+  zero-trim cases and the collapsed quadratic case now perform real comparisons;
+  generated constant/zero-trim cases do too. Two positive near-degenerate cases
+  exercise the short-but-positive length branch. The coincident analytic-line
+  fixture intentionally remains a native constructor rejection (`1007`), not a
+  fabricated parity result. Rejections fall from 41 to one. Native runner
+  regressions verify all five zero/near-degenerate comparisons and the separate
+  analytic rejection.
+- **Current follow-up checks and upstream limitation.** Formatting, C++-enabled
+  workspace/all-target Clippy with warnings denied, 36 p1 kernel tests, 22 p1
+  runner tests, 14 p1 FFI tests and wasm checking pass. The newly merged sphere
+  module omitted the existing `OffsetSurface` variant from its fallback match;
+  the integration fix routes it to the same generic boundary, with a regression
+  and an unchanged 800/800 sphere differential result. The full kernel run is
+  **not green**: 1352 tests pass and the unchanged upstream
+  `surface::surface::p2::tests::read_from_db_unported_types` test fails because it
+  still expects the now-ported `OFFSET_SURFACE_TYPE` reader to return `Unported`.
+  That unrelated assertion is not changed or skipped, and no full-suite pass is
+  claimed. Local compilation now shares 10 Cargo jobserver slots, uses the
+  upstream `cc/parallel` feature, persistent compiler caching and Linux-native
+  target/cache volumes. A forced 204-shim cached rebuild measured 61.65 seconds
+  on the host bind mount versus 5.38 seconds on the Linux volumes; this is a
+  warmed FFI rebuild measurement, not an end-to-end cold-suite speedup.
+
 ## topology.face_p1 (`SmFace.cpp` part 1: `MoveSeam`, `SplitAtSeam`, `CreateOrientedTrimBoundary`, `CalculateUVDomainFromUVTrimCurves`, ...; PR #148, 2026-10-16; partial, no disagreements)
 
 - **Mostly deferred by design.** Every mutating member starts with `SmFace::Notify`

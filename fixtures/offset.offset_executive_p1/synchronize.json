@@ -1,0 +1,2563 @@
+{
+  "cases": [
+    {
+      "name": "sync_empty_both",
+      "inputs": {
+        "op": "synchronize",
+        "first": [],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "empty_first_unfiltered_tiny_second",
+      "inputs": {
+        "op": "synchronize",
+        "first": [],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                9,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "empty_second_filtered_first_strict_10_percent",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                9,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "below_10_percent",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                0.99999999,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                9,
+                0,
+                0
+              ],
+              "domain": [
+                1,
+                2
+              ]
+            },
+            "interval": [
+              1,
+              2
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "above_10_percent",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.00000001,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                9,
+                0,
+                0
+              ],
+              "domain": [
+                1,
+                2
+              ]
+            },
+            "interval": [
+              1,
+              2
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "ten_equal_pieces_removed",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                1,
+                2
+              ]
+            },
+            "interval": [
+              1,
+              2
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                3,
+                4
+              ]
+            },
+            "interval": [
+              3,
+              4
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                4,
+                5
+              ]
+            },
+            "interval": [
+              4,
+              5
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                5,
+                6
+              ]
+            },
+            "interval": [
+              5,
+              6
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                6,
+                7
+              ]
+            },
+            "interval": [
+              6,
+              7
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                7,
+                8
+              ]
+            },
+            "interval": [
+              7,
+              8
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                8,
+                9
+              ]
+            },
+            "interval": [
+              8,
+              9
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                9,
+                10
+              ]
+            },
+            "interval": [
+              9,
+              10
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "eleven_equal_pieces_removed",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                1,
+                2
+              ]
+            },
+            "interval": [
+              1,
+              2
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                3,
+                4
+              ]
+            },
+            "interval": [
+              3,
+              4
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                4,
+                5
+              ]
+            },
+            "interval": [
+              4,
+              5
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                5,
+                6
+              ]
+            },
+            "interval": [
+              5,
+              6
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                6,
+                7
+              ]
+            },
+            "interval": [
+              6,
+              7
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                7,
+                8
+              ]
+            },
+            "interval": [
+              7,
+              8
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                8,
+                9
+              ]
+            },
+            "interval": [
+              8,
+              9
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                9,
+                10
+              ]
+            },
+            "interval": [
+              9,
+              10
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                10,
+                11
+              ]
+            },
+            "interval": [
+              10,
+              11
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "nine_equal_pieces_survive",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                8,
+                9
+              ]
+            },
+            "interval": [
+              8,
+              9
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                7,
+                8
+              ]
+            },
+            "interval": [
+              7,
+              8
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                6,
+                7
+              ]
+            },
+            "interval": [
+              6,
+              7
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                5,
+                6
+              ]
+            },
+            "interval": [
+              5,
+              6
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                4,
+                5
+              ]
+            },
+            "interval": [
+              4,
+              5
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                3,
+                4
+              ]
+            },
+            "interval": [
+              3,
+              4
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                1,
+                2
+              ]
+            },
+            "interval": [
+              1,
+              2
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "zero_trim_first_leaves_second_unfiltered",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              0
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                9,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "zero_trim_second_filtered_to_null_padding",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              0
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "real_lines_reversed_construction_sorted_matches",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "real_bspline_trimmed_subdomains",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.75
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.25,
+                  0.3125,
+                  0.0,
+                  1.25
+                ]
+              ],
+              "knots": [
+                -2,
+                -2,
+                -2,
+                3,
+                3,
+                3
+              ]
+            },
+            "interval": [
+              0.5,
+              1.5
+            ]
+          },
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 3,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.3333333333333333,
+                  0.027777777777777776,
+                  0.02777777777777778,
+                  1.0
+                ],
+                [
+                  0.6666666666666666,
+                  0.1111111111111111,
+                  0.02777777777777778,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                -2,
+                -2,
+                -2,
+                -2,
+                3,
+                3,
+                3,
+                3
+              ]
+            },
+            "interval": [
+              -1,
+              0
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 1,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                -2,
+                -2,
+                3,
+                3
+              ]
+            },
+            "interval": [
+              -1,
+              0
+            ]
+          },
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 3,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.75
+                ],
+                [
+                  0.3333333333333333,
+                  0.027777777777777776,
+                  0.02777777777777778,
+                  1.0
+                ],
+                [
+                  0.8333333333333333,
+                  0.1388888888888889,
+                  0.034722222222222224,
+                  1.25
+                ],
+                [
+                  1.5,
+                  0.375,
+                  0.0,
+                  1.5
+                ]
+              ],
+              "knots": [
+                -2,
+                -2,
+                -2,
+                -2,
+                3,
+                3,
+                3,
+                3
+              ]
+            },
+            "interval": [
+              0.5,
+              1.5
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "mixed_analytic_and_spline_sorted_gaps",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                4,
+                5
+              ]
+            },
+            "interval": [
+              4,
+              5
+            ]
+          },
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                2,
+                2,
+                2,
+                3,
+                3,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "matched_plus_first_and_second_gaps",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                4,
+                5
+              ]
+            },
+            "interval": [
+              4,
+              5
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "touching_boundaries_not_interior_splits",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                1,
+                2
+              ]
+            },
+            "interval": [
+              1,
+              2
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "split_minimum_dependency",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0.25,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "split_maximum_dependency",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.75
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.25,
+                  0.3125,
+                  0.0,
+                  1.25
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              0.75
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "near_boundary_below_eff_zero",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              5e-13,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "boundary_exact_eff_zero_split",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              1e-12,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "equal_minima_public_order_tie",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                2,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "equal_minima_matched_order_tie",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.125,
+                  0.0625,
+                  1.0
+                ],
+                [
+                  2.0,
+                  0.5,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "tiny_real_curves",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1e-10,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  5e-11,
+                  6.25e-12,
+                  3.125e-12,
+                  1.0
+                ],
+                [
+                  1e-10,
+                  2.5e-11,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                2,
+                2,
+                2,
+                3,
+                3,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "huge_real_curves",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  5000000000.0,
+                  625000000.0,
+                  312500000.0,
+                  1.0
+                ],
+                [
+                  10000000000.0,
+                  2500000000.0,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          },
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                10000000000.0,
+                0,
+                0
+              ],
+              "domain": [
+                2,
+                3
+              ]
+            },
+            "interval": [
+              2,
+              3
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "null_original_real_native_status",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": true,
+        "null_other": false
+      }
+    },
+    {
+      "name": "null_other_second_fixtures_still_measured",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  0.5,
+                  0.0625,
+                  0.03125,
+                  1.0
+                ],
+                [
+                  1.0,
+                  0.25,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": true
+      }
+    },
+    {
+      "name": "coincident_analytic_line_constructor_rejection",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "near_degenerate_analytic_line_positive_length_survives",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1e-10,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "near_degenerate_quadratic_spline_positive_length_survives",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                [
+                  5e-11,
+                  2.5e-11,
+                  0,
+                  1
+                ],
+                [
+                  1e-10,
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [],
+        "null_original": false,
+        "null_other": false
+      }
+    },
+    {
+      "name": "collapsed_quadratic_spline_length_filter",
+      "inputs": {
+        "op": "synchronize",
+        "first": [
+          {
+            "curve": {
+              "kind": "bspline",
+              "degree": 2,
+              "control_points": [
+                [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "knots": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "second": [
+          {
+            "curve": {
+              "kind": "line",
+              "start": [
+                0,
+                0,
+                0
+              ],
+              "end": [
+                1.0,
+                0,
+                0
+              ],
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "interval": [
+              0,
+              1
+            ]
+          }
+        ],
+        "null_original": false,
+        "null_other": false
+      }
+    }
+  ]
+}

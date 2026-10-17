@@ -2602,6 +2602,37 @@ mod tests {
     }
 
     #[test]
+    fn offset_surface_intersection_reaches_the_generic_dispatch_boundary() {
+        let k = Kernel::default();
+        let sphere = canonical(&k, 2.0);
+        let domain = sphere.base.base.natural_uv_domain();
+        let offset = crate::surface::offset_surface::OffsetSurface::new(
+            &k,
+            0.25,
+            Surface::from(sphere.base.clone()),
+            false,
+            0,
+        )
+        .unwrap();
+        let other = Surface::from(offset);
+        assert!(matches!(
+            sphere.global_surface_intersect(
+                &k,
+                &domain,
+                &other,
+                &other.natural_uv_domain(),
+                [true, true],
+                None,
+                None,
+            ),
+            Err(SolidError::Unported {
+                upstream: "SmSurface::GlobalSurfaceIntersect",
+                unit: "surface.sphere",
+            })
+        ));
+    }
+
+    #[test]
     fn step_and_nurb_points_agree() {
         let k = Kernel::default();
         for radius in [2.0, -2.0] {
