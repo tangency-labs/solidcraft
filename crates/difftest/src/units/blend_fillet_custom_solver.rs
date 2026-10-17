@@ -21,9 +21,12 @@
 //! more ending on rail 2) along line, arc and free-form rails, with jittered fillet
 //! points, touching rails, degenerate sweeps (`beta` 0 or below `SM_EFF_ZERO_SQRT`),
 //! mismatched point counts and knot vectors, tolerances from 0 to above the rail gap
-//! and scales from `1e-6` to `1e6`. `jac` and `init` cases are deferred on the Rust
-//! side while the offset surface evaluation (`surface.offset_surface`) is unported,
-//! except `init` without `rbDoSurf2Calcs`, which is compared. Every run has at least
+//! and scales from `1e-6` to `1e6`. `jac` and `init` cases build their offset surfaces
+//! with the solver's `sing` (`lSingularities`): upstream's default `SM_SS_UNKNOWN`
+//! (fixtures, and half the generated cases) asks the base surface's `GetSingularities`
+//! and is deferred until `surface.surface_p3`; `SM_SS_NONE` cases compare the offset
+//! evaluations now. `init` cases with `rbDoSurf2Calcs` also wait on the point solves
+//! (`surface.surface_p4`, `surface.surface_p5`). Every run has at least
 //! [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
@@ -45,6 +48,7 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::surface::offset_surface::SS_UNKNOWN;
 use solidcore::surface::surface::Surface;
 use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_custom_solver::{self as ffi, Op};
@@ -95,10 +99,18 @@ struct SolverIn {
     angle: f64,
     #[serde(default = "default_ext")]
     ext: f64,
+    /// `lSingularities` of the offset surfaces (upstream's default `SM_SS_UNKNOWN`
+    /// when absent).
+    #[serde(default = "default_sing")]
+    sing: u32,
 }
 
 fn default_ext() -> f64 {
     0.5
+}
+
+fn default_sing() -> u32 {
+    SS_UNKNOWN
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -214,6 +226,7 @@ fn push_solver(o: &mut Vec<f64>, s: &SolverIn) -> Result<(), HarnessError> {
         push_srf(o, b)?;
     }
     o.extend([s.r[0], s.r[1], s.o[0], s.o[1], s.angle, s.ext]);
+    o.push(f64::from(s.sing));
     Ok(())
 }
 
@@ -486,15 +499,47 @@ fn dump_surface(o: &mut Vec<f64>, s: &BSplineSurface) {
     o.extend_from_slice(sur.v_knots());
 }
 
+/// A Rust result as the case's outcome: `Err(deferred)` for an unported callee.
+type Built<T> = Result<T, Output>;
+
+/// `r`, or the deferred output of an `Unported` error (others are harness errors:
+/// the C++ constructions cannot fail).
+fn built<T>(r: Result<T, SolidError>) -> Result<Built<T>, HarnessError> {
+    match r {
+        Ok(v) => Ok(Ok(v)),
+        Err(e) => Output::unported(&e)
+            .map(Err)
+            .ok_or_else(|| harness(format!("offset surface: {e}"))),
+    }
+}
+
+/// An offset surface of the solver's rails (`SmOffsetSurface(d, base)` with the
+/// case's `lSingularities`).
+fn offset_of(
+    k: &Kernel,
+    s: &SolverIn,
+    d: f64,
+    base: Surface,
+    id: SurfaceId,
+) -> Result<Built<OffsetSurface>, HarnessError> {
+    built(OffsetSurface::new(k, d, base, id, s.sing))
+}
+
 /// The solver's base: rail 0 offsets A (`Free(0)`), rail 1 B (`Free(1)`) or A.
-fn base_of(s: &SolverIn) -> Result<ConstantRadiusAssistedFs, HarnessError> {
+fn base_of(k: &Kernel, s: &SolverIn) -> Result<Built<ConstantRadiusAssistedFs>, HarnessError> {
     let a = surface_of(&s.a)?;
     let (b, b_id) = match &s.b {
         Some(b) => (surface_of(b)?, SurfaceId::Free(1)),
         None => (a.clone(), SurfaceId::Free(0)),
     };
-    let mut s0 = OffsetSurface::new(s.r[0] * s.o[0], a, SurfaceId::Free(0));
-    let mut s1 = OffsetSurface::new(s.r[1] * s.o[1], b, b_id);
+    let mut s0 = match offset_of(k, s, s.r[0] * s.o[0], a, SurfaceId::Free(0))? {
+        Ok(o) => o,
+        Err(out) => return Ok(Err(out)),
+    };
+    let mut s1 = match offset_of(k, s, s.r[1] * s.o[1], b, b_id)? {
+        Ok(o) => o,
+        Err(out) => return Ok(Err(out)),
+    };
     s0.set_allow_extension(true);
     s1.set_allow_extension(true);
     let mut fs = ConstantRadiusAssistedFs::from_parts(
@@ -507,7 +552,7 @@ fn base_of(s: &SolverIn) -> Result<ConstantRadiusAssistedFs, HarnessError> {
         [None, None],
     );
     fs.surface_extension_factor = s.ext;
-    Ok(fs)
+    Ok(Ok(fs))
 }
 
 /// The base identity of a selector (`None` for `NULL`).
@@ -526,25 +571,22 @@ fn selector_id(sel: usize, s: &SolverIn) -> Option<SurfaceId> {
 
 /// The offset surface of a (non-`NULL`) selector.
 fn selector_surface(
+    k: &Kernel,
     sel: usize,
     s: &SolverIn,
     fs: &ConstantRadiusAssistedFs,
-) -> Result<OffsetSurface, HarnessError> {
+) -> Result<Built<OffsetSurface>, HarnessError> {
     let rust = |e: SolidError| harness(e.to_string());
     match sel {
-        1 => fs.surface(0).cloned().map_err(rust),
-        2 => fs.surface(1).cloned().map_err(rust),
+        1 => fs.surface(0).cloned().map(Ok).map_err(rust),
+        2 => fs.surface(1).cloned().map(Ok).map_err(rust),
         3 | 4 => {
             let id = if sel == 3 {
                 SurfaceId::Free(0)
             } else {
                 SurfaceId::Free(2)
             };
-            Ok(OffsetSurface::new(
-                s.r[0] * s.o[0],
-                surface_of(&s.a)?,
-                id,
-            ))
+            offset_of(k, s, s.r[0] * s.o[0], surface_of(&s.a)?, id)
         }
         _ => Err(harness("NULL first surface")),
     }
@@ -600,7 +642,11 @@ fn rust_jac(
     f: &[f64],
     jac: Option<[usize; 2]>,
 ) -> Result<Output, HarnessError> {
-    let base = base_of(solver)?;
+    let k = Kernel::default();
+    let base = match base_of(&k, solver)? {
+        Ok(b) => b,
+        Err(out) => return Ok(out),
+    };
     let load = JacobianLoad {
         rail_index: rail,
         surface1: selector_id(sel[0].0, solver),
@@ -652,7 +698,7 @@ fn rust_jac(
 }
 
 fn offsets_of(fs: &ConstantRadiusAssistedFs) -> [f64; 2] {
-    [0, 1].map(|i| fs.surface(i).map_or(f64::NAN, |s| s.offset_distance))
+    [0, 1].map(|i| fs.surface(i).map_or(f64::NAN, OffsetSurface::offset_distance))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -668,8 +714,14 @@ fn rust_init(
     guess: &[f64],
 ) -> Result<Output, HarnessError> {
     let k = Kernel::default();
-    let base = base_of(solver)?;
-    let surface1 = selector_surface(sel1, solver, &base)?;
+    let base = match base_of(&k, solver)? {
+        Ok(b) => b,
+        Err(out) => return Ok(out),
+    };
+    let mut surface1 = match selector_surface(&k, sel1, solver, &base)? {
+        Ok(s) => s,
+        Err(out) => return Ok(out),
+    };
     let mut ivls = ExtentNd::new(intervals.len());
     for (i, [a, b]) in intervals.iter().enumerate() {
         *ivls
@@ -684,7 +736,7 @@ fn rust_init(
             None,
             do2,
             rail,
-            &surface1,
+            &mut surface1,
             s1_index,
             &mut ivls,
             &mut per,
@@ -695,7 +747,7 @@ fn rust_init(
             None,
             do2,
             rail,
-            &surface1,
+            &mut surface1,
             s1_index,
             &mut ivls,
             &mut per,
@@ -1177,6 +1229,8 @@ fn gen_solver(rng: &mut Rng) -> SolverIn {
         ],
         angle: rng.uniform(0.1, 1.4),
         ext: if rng.chance(0.8) { 0.5 } else { 1.0 },
+        // upstream's default, or none given (compared before surface.surface_p3)
+        sing: if rng.chance(0.5) { SS_UNKNOWN } else { 0 },
     }
 }
 

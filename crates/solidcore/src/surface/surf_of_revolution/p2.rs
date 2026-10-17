@@ -618,6 +618,7 @@ impl SurfOfRevolution {
             SurfaceKind::BSpline(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => {}
         }
 
@@ -683,6 +684,7 @@ impl SurfOfRevolution {
             SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => return Ok(None),
         };
         Self::is_nurb_surface_surf_of_revolution_base(k, tgt, tolerance_scale)

@@ -1886,10 +1886,10 @@ pub fn is_topological(
             * (0.5 * face2::tolerance(b, face1)?).min(0.5 * face2::tolerance(b, face2_)?);
 
         // Do this only for Analytic surfaces, because they are extendable.
-        if !(surf1.is_analytic()? || surf1.is_planar(approx_tol)?.is_planar) {
+        if !(surf1.is_analytic()? || surf1.is_planar(k, approx_tol)?.is_planar) {
             return Ok(out);
         }
-        if !(surf2.is_analytic()? || surf2.is_planar(approx_tol)?.is_planar) {
+        if !(surf2.is_analytic()? || surf2.is_planar(k, approx_tol)?.is_planar) {
             return Ok(out);
         }
 

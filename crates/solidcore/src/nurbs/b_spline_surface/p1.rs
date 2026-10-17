@@ -109,12 +109,11 @@
 //!   `SmSurface::EvaluateNormal` (`surface::surface::p7`); its zone tolerance expansion
 //!   reads `GetFace()`, and a bare B-spline has no owner (the owner is held by the
 //!   [`Surface`](crate::surface::surface::Surface) wrapper), so it uses
-//!   `SM_ZONE_TOL_3D`; `CreateOffsetSurface` passes the call to `SmSurface`, which needs
-//!   `SmOffsetSurface` (`surface.offset_surface`); `STEPInversion` runs
-//!   `GlobalPointSolve` (`surface.surface_p4`) and `IsClosed` (`surface.surface_p7`) on
-//!   the owning surface (a plane's `IsSingularity` / `IsClosed` overrides included), but
-//!   calls `SmSurface::LocalPointSolve` and the base `IsSingularity`
-//!   (`surface.surface_p5`). Those calls return [`SolidError::Unported`] until the units are ported.
+//!   `SM_ZONE_TOL_3D`; `CreateOffsetSurface` uses the base `SmSurface` body and
+//!   constructs an `OffsetSurface`, asking the copy for its singularities.
+//!   `STEPInversion` runs `GlobalPointSolve` and `IsClosed` on the owning surface
+//!   (including plane overrides) and calls the base `LocalPointSolve` and
+//!   `IsSingularity`. Errors and unported prerequisites of these calls propagate.
 //!   `IsDegenerateCurve` runs the `SmSurface` base body on a copy of the B-spline
 //!   wrapped as a `Surface` (without owner).
 
@@ -497,19 +496,6 @@ fn evaluate_normal(srf: &BSplineSurface, uv: Point2) -> Result<Vec3> {
 /// `Surface::is_planar` do); the patch boxes of surface caches are ownerless.
 const fn owner_zone_tolerance(_srf: &BSplineSurface) -> f64 {
     crate::geom::tol::ZONE_TOL_3D
-}
-
-/// `SmSurface::CreateOffsetSurface`: its body constructs an `SmOffsetSurface`.
-fn surface_create_offset_surface(
-    _srf: &BSplineSurface,
-    _signed_offset_distance: f64,
-    _approx_tol_3d: f64,
-) -> Result<BSplineSurface> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface (from SmSurface::CreateOffsetSurface)
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface",
-        unit: "surface.offset_surface",
-    })
 }
 
 /// `SmSurface::IsDegenerateCurve` (the base body, on a copy of the B-spline as an
@@ -1718,21 +1704,32 @@ impl BSplineSurface {
         Ok(Self::from_gw_nurb(&sur))
     }
 
-    /// The offset of this surface by `signed_offset_distance` along its normal, within
-    /// `approx_tol_3d` (`CreateOffsetSurface`): passed to
-    /// `SmSurface::CreateOffsetSurface`, which returns an `SmSurface` (an offset
-    /// surface, approximated when necessary); the result type follows that port.
+    /// The offset of this surface by `signed_offset_distance` along its normal
+    /// (`CreateOffsetSurface`: passed to `SmSurface::CreateOffsetSurface`, an implicit
+    /// `SmOffsetSurface` that owns a copy of this surface; `approx_tol_3d` is not used).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::CreateOffsetSurface` is not ported yet.
+    /// Those of [`OffsetSurface::new`](crate::surface::offset_surface::OffsetSurface::new).
     pub fn create_offset_surface(
         &self,
+        k: &Kernel,
         signed_offset_distance: f64,
         approx_tol_3d: f64,
-    ) -> Result<Self> {
-        // Create implicit offset surface
-        surface_create_offset_surface(self, signed_offset_distance, approx_tol_3d)
+    ) -> Result<crate::surface::surface::Surface> {
+        let _ = approx_tol_3d;
+        // Create implicit offset surface (SmSurface::CreateOffsetSurface: Copy, then
+        // an owning SmOffsetSurface)
+        let copy = crate::surface::surface::Surface::from(self.copy());
+        Ok(crate::surface::surface::Surface::from(
+            crate::surface::offset_surface::OffsetSurface::new(
+                k,
+                signed_offset_distance,
+                copy,
+                true,
+                crate::surface::offset_surface::SS_UNKNOWN,
+            )?,
+        ))
     }
 
     // ---- editing ----------------------------------------------------------------------

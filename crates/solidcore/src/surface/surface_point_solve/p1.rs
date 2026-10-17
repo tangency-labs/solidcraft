@@ -45,7 +45,8 @@
 //!   stepper hold a [`SurfacePointSolver`] (`base`) instead of deriving from it. The
 //!   surface is borrowed for the life of the solver (`m_pSrf`, not owned upstream
 //!   either); `m_pBSplSrf` is the B-spline part of a B-spline or plane with a NURB.
-//!   `SmOffsetSurface` is not ported, so its base-surface lookup is not reachable.
+//!   An `SmOffsetSurface` contributes its base's B-spline part (one level, as
+//!   upstream).
 //! - **Out-params** become return values: [`PolygonTriangleGuess`],
 //!   [`BoundsCheck`], `(bool, SurfParamType)` from the boundary test, the new grid
 //!   point of the stride check. Upstream's in/out best indices of
@@ -273,14 +274,20 @@ impl<'s> SurfacePointSolver<'s> {
     }
 }
 
-/// `m_pBSplSrf`: the surface as an `SmBSplineSurface` with a NURB, if it is one (an
-/// `SmOffsetSurface` would work from its base surface: not ported).
+/// `m_pBSplSrf`: the B-spline part with a NURB, looking through one offset as upstream.
 fn b_spline_part(surface: &Surface) -> Option<&BSplineSurface> {
-    match surface.kind() {
+    let base = match surface.kind() {
+        SurfaceKind::OffsetSurface(offset) => offset.base_surface(),
+        _ => surface,
+    };
+    match base.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => None,
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => None,
     }
     .filter(|b| b.gw_nurb().is_some())
 }
@@ -1282,6 +1289,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => Ok(surface.is_on_seam(k, uv, None)?.on_seam),
     }
 }

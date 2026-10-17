@@ -1346,6 +1346,7 @@ fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<b
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
             Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
         }

@@ -1915,7 +1915,8 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
         } => {
             let s = rust_surface(surface)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let e = fp2::OdeIsoCurveLength::new(&s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
+            let k = Kernel::default();
+            let e = fp2::OdeIsoCurveLength::new(&k, &s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
             let mut d = vec![7.0; *n];
             let r = e.evaluate(*t, &mut d);
             match r {
@@ -1940,7 +1941,9 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             let s = rust_surface(surface)?;
             let c = rust_curve(curve)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
+            let k = Kernel::default();
             let e = fp2::OdeArea {
+                kernel: &k,
                 surface: &s,
                 uv_curve: &c,
                 min_v: *min_v,

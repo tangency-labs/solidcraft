@@ -25,7 +25,7 @@
 //! | [`Surface::reverse`] / [`Surface::reversed`] | `N_SrfReverse` (in place / into a new surface) |
 //! | [`Surface::surface_type`], [`SurfaceType`], [`SurfaceKind`] | `N_SrfType`            |
 //! | [`Surface::reparam`]                         | `N_SrfReparam`                        |
-//! | [`Surface::is_closed_smooth`]                | `N_SrfIsClosedSmooth`                 |
+//! | [`Surface::is_closed_smooth`], [`Surface::is_closed_smooth_flag`] | `N_SrfIsClosedSmooth` |
 //! | [`Surface::eval_pt_deriv_normal_pole`]       | `N_SrfEvalPtPtDerivNormalPole`        |
 //! | [`Surface::eval_pt_normal_at_pole`]          | `N_SrfEvalPtNormalAtPole`             |
 //! | [`cone_elliptic_ends`], [`EllipticCone`]     | `N_ConeEllipticEnds`                  |
@@ -1042,6 +1042,26 @@ impl Surface {
         tols: &[f64],
         dflg: Direction,
     ) -> Result<Option<Direction>> {
+        match self.is_closed_smooth_flag(level, tols, dflg)? {
+            (_, Some(e)) => Err(e),
+            (closed, None) => Ok(closed),
+        }
+    }
+
+    /// [`Surface::is_closed_smooth`] split as upstream returns it: the closed
+    /// direction(s) upstream stores in `*gnflg`, and the error of a failed derivative
+    /// angle that nothing cleared, which upstream returns after storing the flag.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::is_closed_smooth`] that upstream returns before storing the
+    /// flag (bad level, knots, evaluations).
+    pub fn is_closed_smooth_flag(
+        &self,
+        level: usize,
+        tols: &[f64],
+        dflg: Direction,
+    ) -> Result<(Option<Direction>, Option<SolidError>)> {
         const OP: &str = "nurbs::srf_nurb::Surface::is_closed_smooth";
         let tol = |i: usize| -> Result<f64> {
             tols.get(i)
@@ -1067,7 +1087,7 @@ impl Surface {
             if do_v {
                 vboo = self.is_closed_tol(Direction::V, t0);
             }
-            return Ok(flag_of(uboo, vboo));
+            return Ok((flag_of(uboo, vboo), None));
         }
 
         // Get local notation.
@@ -1205,10 +1225,8 @@ impl Surface {
             }
         }
 
-        match pending {
-            Some(e) => Err(e),
-            None => Ok(flag_of(uboo, vboo)),
-        }
+        // set the output flag (also when a failed angle is returned)
+        Ok((flag_of(uboo, vboo), pending))
     }
 
     /// Point, unit partial derivatives and unit normal where the parameter may be at a

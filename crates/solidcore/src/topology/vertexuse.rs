@@ -795,7 +795,8 @@ fn is_singularity(
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
+        | SurfaceKind::SrfInVolume(_)
+        | SurfaceKind::OffsetSurface(_) => {
             let r = surface.is_singularity(k, uv, tol, false)?;
             Ok((r.singular, r.direction))
         }
@@ -811,7 +812,8 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfPa
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
+        | SurfaceKind::SrfInVolume(_)
+        | SurfaceKind::OffsetSurface(_) => {
             let info = surface.is_on_seam(k, uv, None)?;
             Ok((info.on_seam, info.seam_dir))
         }

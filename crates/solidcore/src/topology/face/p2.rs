@@ -94,8 +94,8 @@
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` (`topology.face_p1`),
 //!   `SmEdgeuse::NormalizedEvaluate` / `GetOrCreateUVTrimCurve`
 //!   (`topology.edgeuse_p3`), `SmSurface::IsSingularity` of a non-plane
-//!   (`surface.surface_p5`) and `SmOffsetSurface` (`surface.offset_surface`) return
-//!   [`SolidError::Unported`].
+//!   (`surface.surface_p5`) return [`SolidError::Unported`]. A thick face's temporary
+//!   `SmOffsetSurface` is built over a copy of the face surface (upstream shares it).
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
@@ -116,6 +116,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
+use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -441,20 +442,48 @@ fn is_singularity(
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
+        | SurfaceKind::SrfInVolume(_)
+        | SurfaceKind::OffsetSurface(_) => {
             let r = surface.is_singularity(k, uv, tol, false)?;
             Ok((r.singular, r.direction))
         }
     }
 }
 
-/// `SmOffsetSurface(dOffset, rSurface).EvaluateSimple(uv, 1, 1, TRUE, TRUE, TRUE, ..)`.
-fn offset_evaluate_simple(_surface: &Surface, _offset: f64, _uv: Point2) -> Result<[[Vec3; 2]; 2]> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::EvaluateSimple
-    Err(SolidError::unported(
-        "SmOffsetSurface::EvaluateSimple",
-        "surface.offset_surface",
-    ))
+/// `SmOffsetSurface(dOffset, rSurface).EvaluateSimple(uv, 1, 1, TRUE, TRUE, TRUE, ..)`:
+/// a temporary offset (not owning, default singularities, so its constructor runs the
+/// surface's `IsPeriodic` and `GetSingularities`) over a copy of `surface` that keeps
+/// its owner (upstream shares it).
+fn offset_evaluate_simple(
+    k: &Kernel,
+    surface: &Surface,
+    offset: f64,
+    uv: Point2,
+) -> Result<Vec<Vec<Vec3>>> {
+    let off = OffsetSurface::new(k, offset, surface.clone_keeping_owner(), false, SS_UNKNOWN)?;
+    off.evaluate_simple(uv, 1, 1, simple_flags())
+}
+
+/// `EvaluateSimple(.., TRUE, TRUE, TRUE, ..)`: from the left, upper half.
+const fn simple_flags() -> EvaluateFlags {
+    EvaluateFlags {
+        u_side: Side::Left,
+        v_side: Side::Left,
+        only_upper_half: true,
+        non_zero_tangents: true,
+    }
+}
+
+/// Copies an evaluation into the caller's first-derivative block (entries it does not
+/// have keep their values).
+fn copy_block(pv: &mut [[Vec3; 2]; 2], r: &[Vec<Vec3>]) {
+    for (ii, row) in pv.iter_mut().enumerate() {
+        for (jj, slot) in row.iter_mut().enumerate() {
+            if let Some(v) = r.get(ii).and_then(|x| x.get(jj)) {
+                *slot = *v;
+            }
+        }
+    }
 }
 
 /// `SmODEIntegrator(eval).RungeKuttaODEIntegrate(dY, x1, x2, eps, h1, 0, .., pYScale)`.
@@ -1110,6 +1139,7 @@ fn put(dydx: &mut [f64], i: usize, v: f64, set: bool) -> Result<()> {
 /// face, of its two offset surfaces) and the volume under it and its moments.
 #[derive(Debug, Clone, Copy)]
 pub struct OdeIsoCurveLength<'a> {
+    kernel: &'a Kernel,
     surface: &'a Surface,
     u_iso_value: f64,
     origin: Point3,
@@ -1118,9 +1148,11 @@ pub struct OdeIsoCurveLength<'a> {
 }
 
 impl<'a> OdeIsoCurveLength<'a> {
-    /// The integrand on `surface` at `u = u_iso_value` relative to `origin`.
+    /// The integrand on `surface` at `u = u_iso_value` relative to `origin` (`kernel`
+    /// is the context of a thick face's temporary offset surfaces).
     #[must_use]
     pub const fn new(
+        kernel: &'a Kernel,
         surface: &'a Surface,
         u_iso_value: f64,
         origin: Point3,
@@ -1128,6 +1160,7 @@ impl<'a> OdeIsoCurveLength<'a> {
         layout: &'a PrecisePropertyLayout,
     ) -> Self {
         Self {
+            kernel,
             surface,
             u_iso_value,
             origin,
@@ -1140,9 +1173,9 @@ impl<'a> OdeIsoCurveLength<'a> {
     ///
     /// # Errors
     ///
-    /// Those of the surface evaluation; [`SolidError::InvalidInput`] for a layout
-    /// index outside `dydx`; [`SolidError::Unported`] for a thick face (the offset
-    /// surfaces).
+    /// Those of the surface evaluation (for a thick face, of constructing and
+    /// evaluating its offset surfaces); [`SolidError::InvalidInput`] for a layout
+    /// index outside `dydx`.
     #[allow(clippy::too_many_lines)] // one upstream function
     pub fn evaluate(&self, t: f64, dydx: &mut [f64]) -> Result<()> {
         let lay = self.layout;
@@ -1162,31 +1195,27 @@ impl<'a> OdeIsoCurveLength<'a> {
             let uv = Point2::new(self.u_iso_value, t);
 
             if self.face_thickness < EFF_ZERO {
-                let r = self.surface.evaluate_simple(
-                    uv,
-                    1,
-                    1,
-                    EvaluateFlags {
-                        u_side: Side::Left,
-                        v_side: Side::Left,
-                        only_upper_half: true,
-                        non_zero_tangents: true,
-                    },
-                )?;
-                for (ii, row) in pv.iter_mut().enumerate() {
-                    for (jj, slot) in row.iter_mut().enumerate() {
-                        if let Some(v) = r.get(ii).and_then(|x| x.get(jj)) {
-                            *slot = *v;
-                        }
-                    }
-                }
+                let r = self.surface.evaluate_simple(uv, 1, 1, simple_flags())?;
+                copy_block(&mut pv, &r);
             } else if i == 0 {
-                pv = offset_evaluate_simple(self.surface, self.face_thickness / 2.0, uv)?;
+                let r = offset_evaluate_simple(
+                    self.kernel,
+                    self.surface,
+                    self.face_thickness / 2.0,
+                    uv,
+                )?;
+                copy_block(&mut pv, &r);
             } else {
                 pv2[0][0] = pv[0][0];
                 pv2[1][0] = pv[1][0];
                 pv2[0][1] = pv[0][1];
-                pv = offset_evaluate_simple(self.surface, -self.face_thickness / 2.0, uv)?;
+                let r = offset_evaluate_simple(
+                    self.kernel,
+                    self.surface,
+                    -self.face_thickness / 2.0,
+                    uv,
+                )?;
+                copy_block(&mut pv, &r);
             }
 
             pv[0][0] -= self.origin;
@@ -1390,6 +1419,8 @@ impl<'a> OdeIsoCurveLength<'a> {
 /// by the curve's negated `du/dt`.
 #[derive(Debug, Clone, Copy)]
 pub struct OdeArea<'a> {
+    /// The context of a thick face's offset surfaces (`m_crSurface`'s).
+    pub kernel: &'a Kernel,
     /// `m_crSurface`.
     pub surface: &'a Surface,
     /// `m_crUVCurve`.
@@ -1427,6 +1458,7 @@ impl OdeArea<'_> {
             .ok_or_else(|| null("OdeArea: no curve tangent"))?;
 
         let eval = OdeIsoCurveLength::new(
+            self.kernel,
             self.surface,
             p0.x,
             self.origin,
@@ -2389,7 +2421,8 @@ mod tests {
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         ));
         let lay = PrecisePropertyLayout::new(PPF_ALL);
-        let e = OdeIsoCurveLength::new(&p, 0.5, Vec3::ZERO, 0.0, &lay);
+        let k = Kernel::default();
+        let e = OdeIsoCurveLength::new(&k, &p, 0.5, Vec3::ZERO, 0.0, &lay);
         let mut d = vec![9.0; lay.num_components + 1];
         e.evaluate(0.25, &mut d).unwrap();
         assert_eq!(d[0], 0.0);
@@ -2399,9 +2432,10 @@ mod tests {
         // too short an array
         let mut short = vec![0.0; 3];
         assert!(e.evaluate(0.25, &mut short).is_err());
-        // thick faces need the offset surface
-        let thick = OdeIsoCurveLength::new(&p, 0.5, Vec3::ZERO, 0.1, &lay);
-        assert!(thick.evaluate(0.25, &mut d).unwrap_err().is_unported());
+        // a thick face integrates its two offsets at +-thickness/2: twice the area
+        let thick = OdeIsoCurveLength::new(&k, &p, 0.5, Vec3::ZERO, 0.1, &lay);
+        thick.evaluate(0.25, &mut d).unwrap();
+        assert_eq!(d[lay.area], 2.0);
     }
 
     #[test]

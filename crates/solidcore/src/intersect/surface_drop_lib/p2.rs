@@ -26,10 +26,10 @@
 //!   code); [`SolidError::Unported`] always propagates.
 //! - **Offset surface.** `DropCurve`'s `SmOffsetSurface` always offsets the drop
 //!   surface itself, so it is a [`DropOffset`] (its offset distance and the
-//!   singularities it was built with) next to that surface. Its evaluations
-//!   (`DropVectors` and `EvaluateDirectionalDerivs` evaluate the offset,
-//!   `SmOffsetSurface::Evaluate`, unit `surface.offset_surface`) return
-//!   [`SolidError::Unported`].
+//!   singularities it was built with) next to that surface. `DropVectors` and
+//!   `EvaluateDirectionalDerivs` build the ported
+//!   [`OffsetSurface`] over a copy of that surface (upstream shares it) and run the
+//!   `SmSurface` bodies on it.
 //! - **Ignored statuses.** `GetNextPoint` ignores the status of its start
 //!   `Evaluate2ndDerivatives` (upstream then goes on with what the failed evaluator
 //!   left in its outputs): that failure path is not ported, the error propagates
@@ -67,9 +67,11 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::surface::p1::{map_to_2d_dir, zone_tol_3d};
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::Surface;
 use crate::topology::ObjectHandle;
 
@@ -136,38 +138,58 @@ impl DropOffset {
         self.offset_distance = offset_distance;
     }
 
+    /// The `SmOffsetSurface` this stands for over `surface` (not owning it, with the
+    /// stored singularities; the copy keeps `surface`'s owner, as upstream's shared base
+    /// does): its constructor's `IsPeriodic` (and, for [`SS_UNKNOWN`],
+    /// `GetSingularities`) depend only on `surface`, so building it per call gives the
+    /// object upstream builds once.
+    fn offset_of(&self, k: &Kernel, surface: &Surface) -> Result<Surface> {
+        Ok(Surface::from(OffsetSurface::new(
+            k,
+            self.offset_distance,
+            surface.clone_keeping_owner(),
+            false,
+            self.singularities,
+        )?))
+    }
+
     /// `rOffset.DropVectors(uv, bFromLeftU, bFromLeftV, 1, &vector, &duv)` on the
-    /// offset of `surface`.
+    /// offset of `surface` (the `SmSurface` body: `SmOffsetSurface` does not override
+    /// it).
     fn drop_vectors(
-        _offset: &Self,
-        _surface: &Surface,
-        _uv: Point2,
-        _from_left_u: bool,
-        _from_left_v: bool,
-        _vector: Vec3,
+        offset: &Self,
+        k: &Kernel,
+        surface: &Surface,
+        uv: Point2,
+        from_left_u: bool,
+        from_left_v: bool,
+        vector: Vec3,
     ) -> Result<Vec2> {
-        // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate
-        Err(SolidError::unported(
-            "SmOffsetSurface::Evaluate",
-            "surface.offset_surface",
-        ))
+        let off = offset.offset_of(k, surface)?;
+        drop_vectors_at(&off, uv, side(from_left_u), side(from_left_v), &[vector])?
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::sm_err(OP_SET))
     }
 
     /// `rOffset.EvaluateDirectionalDerivs(uv, uv_dir, 1, pd, bFromLeftU, bFromLeftV)`
-    /// on the offset of `surface`: the point and first directional derivative.
+    /// on the offset of `surface`: the point and first directional derivative (the
+    /// `SmSurface` body: `SmOffsetSurface` does not override it).
     fn evaluate_directional_derivs(
-        _offset: &Self,
-        _surface: &Surface,
-        _uv: Point2,
-        _uv_dir: Vec2,
-        _from_left_u: bool,
-        _from_left_v: bool,
+        offset: &Self,
+        k: &Kernel,
+        surface: &Surface,
+        uv: Point2,
+        uv_dir: Vec2,
+        from_left_u: bool,
+        from_left_v: bool,
     ) -> Result<[Point3; 2]> {
-        // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate
-        Err(SolidError::unported(
-            "SmOffsetSurface::Evaluate",
-            "surface.offset_surface",
-        ))
+        let off = offset.offset_of(k, surface)?;
+        let d = off.evaluate_directional_derivs(uv, uv_dir, 1, from_left_u, from_left_v)?;
+        match d.as_slice() {
+            [p, d1, ..] => Ok([*p, *d1]),
+            _ => Err(SolidError::sm_err(OP_SET)),
+        }
     }
 }
 
@@ -537,6 +559,7 @@ impl DropPt {
             self.uv_pd[0] = uv_domain.clamp_point(self.uv_pd[0]); // note: perhaps no longer needed. [061001]
             self.uv_pd[1] = DropOffset::drop_vectors(
                 offset,
+                k,
                 surface,
                 self.uv_pd[0],
                 from_left_u,
@@ -561,6 +584,7 @@ impl DropPt {
             if !self.uv_pd[1].is_zero(EFF_ZERO) {
                 let [_, mut offset_d1] = DropOffset::evaluate_directional_derivs(
                     offset,
+                    k,
                     surface,
                     self.uv_pd[0],
                     self.uv_pd[1],

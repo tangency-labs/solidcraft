@@ -87,6 +87,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
+use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::surface::p2::{B_SPLINE_SURFACE_TYPE, OFFSET_SURFACE_TYPE};
 use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
@@ -1860,9 +1861,8 @@ fn read_old_composite(
 ///
 /// # Errors
 ///
-/// `SM_ERR` for another type up to version 32; [`SolidError::Unported`] for an
-/// offset surface (`SmOffsetSurface`, unit `surface.offset_surface`);
-/// [`SolidError::InvalidInput`] for an attribute index past the table (upstream reads
+/// `SM_ERR` for another type up to version 32; those of
+/// [`OffsetSurface::new`] for an offset surface; [`SolidError::InvalidInput`] for an attribute index past the table (upstream reads
 /// past the array) or an ASCII type header that could not be read; those of the
 /// surface readers.
 pub fn read_surface_from_db(
@@ -1899,13 +1899,14 @@ pub fn read_surface_from_db(
                     offset_radius = db.read_double()?;
                 }
                 // read the base surface
-                let _base = BSplineSurface::read_from_db(db, version)?;
-                let _ = offset_radius;
-                // UNPORTED(surface.offset_surface): SmOffsetSurface::SmOffsetSurface
-                return Err(SolidError::unported(
-                    "SmOffsetSurface::SmOffsetSurface",
-                    "surface.offset_surface",
-                ));
+                let base = BSplineSurface::read_from_db(db, version)?;
+                Surface::from(OffsetSurface::new(
+                    k,
+                    offset_radius,
+                    Surface::from(base),
+                    true,
+                    SS_UNKNOWN,
+                )?)
             }
             _ => return Err(SolidError::sm_err(OP_SURFACE)),
         }

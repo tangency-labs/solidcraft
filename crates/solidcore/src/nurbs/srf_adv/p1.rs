@@ -22,8 +22,10 @@
 //! - `N_SrfEvalPtDerivsUnbounded`'s in/out pair `esur` / `gflg` (an extension that
 //!   is "NULL" until first needed, and the G1-closed directions computed with it) is
 //!   one `Option<UnboundedExtension>`. Upstream copies the surface into `esur` before
-//!   `N_SrfIsClosedSmooth`; when that test fails the Rust function leaves the option
-//!   `None`. Its bare error flag for `|u|` or `|v|` above `1e12` (no `NL_ERROR`
+//!   `N_SrfIsClosedSmooth`. When that test returns the error of a failed derivative
+//!   angle (after storing the closed directions in `gflg`) the option holds the copy
+//!   and the directions, as upstream, so that a retry extends it; when it fails
+//!   earlier (no flag stored upstream) the Rust function leaves the option `None`. Its bare error flag for `|u|` or `|v|` above `1e12` (no `NL_ERROR`
 //!   number) is `InvalidInput` with reason [`BARE_FLAG_REASON`].
 //! - The periodic parameter wrap of `N_SrfEvalPtDerivsUnbounded` loops while the
 //!   parameter is outside the domain; where upstream would loop forever (a shift that
@@ -352,11 +354,17 @@ pub fn eval_pt_derivs_unbounded(
         // Must extend or adjust periodic parameter.
         if ext.is_none() {
             let tols = [MODEL_TOL, G1_ANGLE_TOL];
-            let closed = sur.is_closed_smooth(1, &tols, Direction::UV)?;
+            // (upstream copies the surface into `esur` first; a failed derivative
+            // angle still stores the closed directions in `*gflg` before it is
+            // returned, so a later call extends that copy)
+            let (closed, failed_angle) = sur.is_closed_smooth_flag(1, &tols, Direction::UV)?;
             *ext = Some(UnboundedExtension {
                 surface: sur.clone(),
                 closed,
             });
+            if let Some(e) = failed_angle {
+                return Err(e);
+            }
             g1_flag = closed;
         }
         let e = ext.as_mut().ok_or_else(|| oob(OP))?;

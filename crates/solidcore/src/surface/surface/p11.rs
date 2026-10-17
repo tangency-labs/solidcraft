@@ -1918,7 +1918,8 @@ impl Surface {
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::SrfInVolume(_)
-            | SurfaceKind::Step(_) => {
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_) => {
                 // DISPATCH GAP: SmCrvOnSurf over a surface that is not a B-spline (the
                 // ported CrvOnSurf holds an SmBSplineSurface and would drop the kind's
                 // evaluation overrides). SmCrvOnSurf is ported, so this is a dispatch gap

@@ -1342,16 +1342,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
-      "max_rel_err": 0.0,
+      "max_rel_err": 2.1147105230955357e-16,
       "name": "face_thickness_dependency",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/mass.integrator/properties.json#132 (upstream tests/SM_API_test/src/TestSmBrep.cpp:260)",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -12259,14 +12255,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 8,
+  "cases_deferred": 7,
   "cases_failed": 0,
-  "cases_passed": 1520,
+  "cases_passed": 1521,
   "cases_total": 1528,
   "deferred_by_unit": {
     "query.brep": 3,
     "query.face_p1": 2,
-    "surface.offset_surface": 1,
     "topology.brep_p1": 2
   },
   "max_rel_err": 4.979280456316938e-14,

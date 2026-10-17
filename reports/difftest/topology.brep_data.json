@@ -114,16 +114,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "offset_surface_v30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/edge_cases.json#14 (upstream source/SMLib/src/SmBrepData.cpp:5688 (offset branch))",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -1290,28 +1286,20 @@
       "values_compared": 579
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "file_Fillet_fillet1017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#136 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 1133
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "db_v30_Fillet_fillet1017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#137 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 1133
     },
     {
       "max_rel_err": 0.0,
@@ -1842,100 +1830,68 @@
       "values_compared": 235
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "file_Fillet_vase",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#204 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 1133
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "db_v30_Fillet_vase",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#205 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 1133
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "file_Fillet_vase1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#206 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 2205
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "db_v30_Fillet_vase1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#207 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 2205
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "file_Fillet_vase2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#208 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 1133
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "db_v30_Fillet_vase2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#209 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 1133
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "file_Fillet_vase3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#210 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 2029
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "db_v30_Fillet_vase3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#211 (upstream TestFiles/pt_TestFiles (SmBrep::ReadFromFile input))",
-      "values_compared": 0
+      "values_compared": 2029
     },
     {
       "max_rel_err": 0.0,
@@ -3882,16 +3838,12 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0096",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658184",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -4038,16 +3990,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0115",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658203",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -4554,16 +4502,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658267",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -5110,16 +5054,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0248",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658336",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -6250,16 +6190,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0390",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658478",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -6278,16 +6214,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0393",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658481",
-      "values_compared": 0
+      "values_compared": 45
     },
     {
       "max_rel_err": 0.0,
@@ -6442,16 +6374,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658501",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -6606,16 +6534,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0433",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658521",
-      "values_compared": 0
+      "values_compared": 79
     },
     {
       "max_rel_err": 0.0,
@@ -6882,16 +6806,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0467",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658555",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -7078,16 +6998,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0491",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658579",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -7314,16 +7230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0520",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658608",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8278,16 +8190,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658728",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -8418,16 +8326,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0657",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658745",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -8502,16 +8406,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0667",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658755",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -9290,16 +9190,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658853",
-      "values_compared": 0
+      "values_compared": 44
     },
     {
       "max_rel_err": 0.0,
@@ -9390,28 +9286,20 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0777",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658865",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0778",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658866",
-      "values_compared": 0
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -9606,16 +9494,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0803",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658891",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -10434,16 +10318,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0906",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556658994",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -11142,16 +11022,12 @@
       "values_compared": 93
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen0994",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659082",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -11714,16 +11590,12 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1065",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659153",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -12062,16 +11934,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1108",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659196",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -12394,16 +12262,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1149",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659237",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -13270,16 +13134,12 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659346",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -13378,16 +13238,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659359",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -13878,16 +13734,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659421",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -14202,16 +14054,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1373",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659461",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -14982,16 +14830,12 @@
       "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1470",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659558",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -15178,16 +15022,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1494",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659582",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -15654,16 +15494,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1553",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659641",
-      "values_compared": 0
+      "values_compared": 88
     },
     {
       "max_rel_err": 0.0,
@@ -16330,16 +16166,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1637",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659725",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -16958,16 +16790,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1715",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659803",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -17258,16 +17086,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1752",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659840",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -17694,16 +17518,12 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1806",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659894",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -18066,16 +17886,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::SmOffsetSurface",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "gen1852",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1564093854556659940",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -19255,13 +19071,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 55,
+  "cases_deferred": 9,
   "cases_failed": 0,
-  "cases_passed": 2324,
+  "cases_passed": 2370,
   "cases_total": 2379,
   "deferred_by_unit": {
     "surface.cone_p1": 7,
-    "surface.offset_surface": 46,
     "surface.surf_of_extrusion_p2": 2
   },
   "max_rel_err": 0.0,

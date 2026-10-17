@@ -1387,6 +1387,7 @@ pub(crate) fn global_surface_intersect(
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {}
     }
 

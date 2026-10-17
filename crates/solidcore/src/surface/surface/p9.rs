@@ -52,7 +52,10 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // `SmIsoCurve` holds B-spline surfaces only (plan/findings.md, surface.surface_p5)
             // UNPORTED(curve.iso_curve): SmIsoCurve over a non-B-spline surface
             Err(SolidError::unported(

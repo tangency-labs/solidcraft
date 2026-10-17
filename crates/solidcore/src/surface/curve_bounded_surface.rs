@@ -609,7 +609,7 @@ mod tests {
             s.degree(crate::nurbs::b_spline_surface::SurfParamType::U),
             surface_p2::base_degree()
         );
-        assert!(s.copy().is_err());
+        assert!(s.copy(&Kernel::default()).is_err());
         assert_eq!(
             c.evaluate_normal(uv, Side::Left, Side::Left).unwrap(),
             Surface::from(b.clone())

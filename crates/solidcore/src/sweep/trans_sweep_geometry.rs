@@ -177,7 +177,7 @@ impl TranslationalSweepGeometry {
         if self.sweep_vector.length() < 2.0 * tol {
             return Err(SolidError::sm_err(OP));
         }
-        let mut surface = original.copy_and_add_analytics()?;
+        let mut surface = original.copy_and_add_analytics(k)?;
         surface.transform(k, &self.sweep_transform(), None)?;
         Ok((surface, tol))
     }

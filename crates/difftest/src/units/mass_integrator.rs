@@ -523,6 +523,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                     });
                 }
                 let properties = props::boundary_properties(
+                    &kernel,
                     &surface,
                     &curves,
                     &domain,

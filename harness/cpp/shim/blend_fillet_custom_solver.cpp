@@ -208,9 +208,10 @@ Shim<SmSecantConstantRadiusFS>::Shim(const SmContext& ctx, double tol, double r0
 {
 }
 
-// The solver input block: `same_base surfaceA [surfaceB] r0 r1 o0 o1 angle ext_factor`, built
-// into a solver whose rail 0 offsets base A and rail 1 base B (A again when same_base). `extra`
-// receives the two extra offset surfaces of the selectors (on base A, on a copy of A).
+// The solver input block: `same_base surfaceA [surfaceB] r0 r1 o0 o1 angle ext_factor sing`,
+// built into a solver whose rail 0 offsets base A and rail 1 base B (A again when same_base),
+// every offset surface with lSingularities `sing`. `extra` receives the two extra offset
+// surfaces of the selectors (on base A, on a copy of A).
 template <class FS> struct Solver
 {
     SmBrep* brep = NULL;
@@ -244,6 +245,7 @@ template <class FS> struct Solver
         double o1 = rd.num();
         double ang = rd.num();
         double ext = rd.num();
+        ULONG sing = (ULONG)rd.idx();
         if (SmApiCreateBox(SmVector3d(0.0, 0.0, 0.0), 1.0, 1.0, 1.0, brep) != SM_SUCCESS ||
             brep == NULL)
             return false;
@@ -255,8 +257,8 @@ template <class FS> struct Solver
         if (eu == NULL)
             return false;
         fs = new (ctx) Shim<FS>(ctx, 1.0e-6, r0, r1, ang, eu);
-        SmOffsetSurface* s0 = new (ctx) SmOffsetSurface(r0 * o0, *a);
-        SmOffsetSurface* s1 = new (ctx) SmOffsetSurface(r1 * o1, *b);
+        SmOffsetSurface* s0 = new (ctx) SmOffsetSurface(r0 * o0, *a, FALSE, sing);
+        SmOffsetSurface* s1 = new (ctx) SmOffsetSurface(r1 * o1, *b, FALSE, sing);
         s0->SetAllowExtension(TRUE);
         s1->SetAllowExtension(TRUE);
         fs->setup(s0, s1, r0, r1, o0, o1, ext);
@@ -265,8 +267,8 @@ template <class FS> struct Solver
         if (a->Copy(ctx, copy) != SM_SUCCESS || copy == NULL)
             return false;
         foreign = (SmBSplineSurface*)copy;
-        extra_a = new (ctx) SmOffsetSurface(r0 * o0, *a);
-        extra_foreign = new (ctx) SmOffsetSurface(r0 * o0, *foreign);
+        extra_a = new (ctx) SmOffsetSurface(r0 * o0, *a, FALSE, sing);
+        extra_foreign = new (ctx) SmOffsetSurface(r0 * o0, *foreign, FALSE, sing);
         return true;
     }
 

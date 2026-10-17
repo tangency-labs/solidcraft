@@ -1844,7 +1844,8 @@ pub(super) fn boundary_iso_curve(
             from_left,
             true,
         ))),
-        SurfaceKind::Plane(_)
+        SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
@@ -1891,7 +1892,10 @@ pub(super) fn create_iso_parametric_curve(
             let iso = s.create_iso_parametric_curve(k, dir, value, domain)?;
             Ok((iso.curve, iso.max_gap_3d))
         }
-        SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) | SurfaceKind::Step(_) => {
+        SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::CurveBounded(_)
+        | SurfaceKind::SrfInVolume(_)
+        | SurfaceKind::Step(_) => {
             // the SmSurface body
             let iso = surface.create_iso_parametric_curve(k, dir, value, 0.0, domain, false)?;
             Ok((iso.curve, iso.max_gap_3d))
@@ -1913,7 +1917,8 @@ fn is_singularity(
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_) => {
             let r = surface.is_singularity(k, uv, tol, false)?;
             Ok((r.singular, r.direction))
         }
@@ -1929,7 +1934,8 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => Ok(surface.is_on_seam(k, uv, None)?.on_seam),
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_) => Ok(surface.is_on_seam(k, uv, None)?.on_seam),
     }
 }
 

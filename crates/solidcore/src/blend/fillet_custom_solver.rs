@@ -17,7 +17,7 @@
 //! | [`SecantConstantRadiusFs::load_initial_values`]   | `SmSecantConstantRadiusFS::LoadInitialValues`     |
 //! | [`SecantConstantRadiusFs::load_jacobian`]         | `SmSecantConstantRadiusFS::LoadJacobian`          |
 //! | [`ConstantRadiusAssistedFs`] (CO-PORTED)          | the data of `SmFilletSolver`, `SmConstantRadiusFS` and `SmConstantRadiusAssistedFS` these solvers read |
-//! | [`OffsetSurface`], [`SurfaceId`] (CO-PORTED)      | `SmOffsetSurface` (base pointer, offset distance, `GetBaseSurface`, `SetOffsetDistance`) |
+//! | [`OffsetSurface`], [`SurfaceId`]                  | an `SmOffsetSurface*` rail surface (unit `surface.offset_surface`) and the identity of its base pointer |
 //! | [`JacobianLoad`], [`InitialValues`]               | the in/out arguments of `LoadJacobian`, `LoadInitialValues` |
 //!
 //! Deviations:
@@ -33,14 +33,18 @@
 //!   belongs to `blend.fillet_standard_solver_p1` and returns
 //!   [`SolidError::Unported`]; [`ConstantRadiusAssistedFs::from_parts`] builds the
 //!   members directly with the base-class defaults.
-//! - **Offset surfaces.** [`OffsetSurface`] co-ports only the `SmOffsetSurface` data
-//!   these methods touch (base surface, offset distance, extension flag). Its base is
-//!   owned and carries a [`SurfaceId`] standing for the base `SmSurface*`: upstream
-//!   compares base pointers (`GetBaseSurface() == ...`, `pF->GetSurface() != pBase2`),
-//!   which compare these ids. Every evaluation of an offset surface (`EvaluatePoint`,
-//!   `Evaluate1stDerivatives`, `Evaluate2ndDerivatives`, `GetNaturalUVDomain`,
-//!   `ComputeInwardVector`, `LocalPointSolve`) belongs to `surface.offset_surface` /
-//!   `surface.surface_p5` and returns [`SolidError::Unported`].
+//! - **Offset surfaces.** A rail surface is an [`OffsetSurface`]: the ported
+//!   `SmOffsetSurface` ([`offset_surface::OffsetSurface`], which owns a copy of its
+//!   base) with a [`SurfaceId`] standing for the base `SmSurface*`: upstream compares
+//!   base pointers (`GetBaseSurface() == ...`, `pF->GetSurface() != pBase2`), which
+//!   compare these ids. Its evaluations store the base extension they make, as
+//!   upstream's `const` evaluators do, so `crSurface1` of `LoadInitialValues` is
+//!   `&mut`. Upstream's `crSurface1` may be one of the solver's own surfaces
+//!   (`GetSurface(i)`), which then keeps that extension after the call; here it is the
+//!   caller's surface (the solver is borrowed shared), so the solver's copy does not.
+//!   For the same reason `rpSurface2->LocalPointSolve` runs on a copy of the other
+//!   rail's offset and drops an extension it makes (its `MINIMIZE` solve is
+//!   `LocalPointSolve_1`).
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are dropped.
 //!   `LoadJacobian` takes the base-surface identities of `rpSurface1` / `rpSurface2`
 //!   (the only use of those pointers) and their offsets by value (never written);
@@ -57,9 +61,9 @@
 //!   [`SolidError::InvalidInput`]. `rIntervals` must have room for the two new
 //!   intervals, as upstream's fixed-size `SmExtentNd`.
 //! - **Unported callees.** `SmConstantRadiusAssistedFS::GuessPointOnPlaneSolve`
-//!   (`blend.fillet_standard_solver_p2`), `SmSurface::LocalPointSolve` (`surface.surface_p5`) and
-//!   the offset surface evaluations (`surface.surface_p5`, `surface.offset_surface`)
-//!   return [`SolidError::Unported`].
+//!   (`blend.fillet_standard_solver_p2`) returns [`SolidError::Unported`]. Offset
+//!   evaluations use the real offset port; point solvers and default singularity
+//!   construction propagate the errors of their surface dispatchers.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
@@ -80,8 +84,11 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use crate::nurbs::knots::Side;
+use crate::surface::offset_surface;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
-use crate::surface::surface::p7::drop_vectors_at;
+use crate::surface::surface::p1::{evaluate_1st_derivatives, evaluate_2nd_derivatives};
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p7::{compute_inward_vector, drop_vectors_at};
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as edgeuse;
 use crate::topology::{Brep, EdgeuseId, FaceId, ObjectHandle};
@@ -100,7 +107,7 @@ const ANALYTIC_TOL: f64 = 1.0e-8;
 /// Sample count of `CreateSurface`'s `IsLine` / `IsArc` tests.
 const ANALYTIC_SAMPLES: u64 = 11;
 
-// ---- co-ported offset surface ---------------------------------------------------------
+// ---- rail offset surfaces -------------------------------------------------------------
 
 /// The identity of a base surface: upstream compares `SmSurface*` pointers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -111,117 +118,129 @@ pub enum SurfaceId {
     Free(u32),
 }
 
-/// An offset surface (`SmOffsetSurface`, CO-PORTED from unit `surface.offset_surface`):
-/// the base surface it offsets (`m_pSurface`, here owned, with the [`SurfaceId`] of
-/// the pointer upstream stores), its offset distance and whether it may extend its
-/// base. Evaluation is not ported (see the module notes).
+/// A rail's offset surface: the `SmOffsetSurface` (unit `surface.offset_surface`) and
+/// the [`SurfaceId`] of the base pointer (`m_pSurface`) upstream compares.
 #[derive(Debug, Clone)]
 pub struct OffsetSurface {
-    /// `m_pSurface`: the base surface.
-    pub base: Surface,
+    /// The offset surface.
+    pub surface: offset_surface::OffsetSurface,
     /// The identity of `m_pSurface`.
     pub base_id: SurfaceId,
-    /// `m_dOffsetDistance`.
-    pub offset_distance: f64,
-    /// `m_bAllowExtension`.
-    pub allow_extension: bool,
 }
 
 impl OffsetSurface {
-    /// `SmOffsetSurface(dOffsetDistance, rSurface)`: extension not allowed.
-    #[must_use]
-    pub const fn new(offset_distance: f64, base: Surface, base_id: SurfaceId) -> Self {
-        Self {
-            base,
+    /// `SmOffsetSurface(dOffsetDistance, rSurface, FALSE, lSingularities)`: extension
+    /// not allowed. The fillet solvers pass the default `lSingularities`,
+    /// [`SS_UNKNOWN`](offset_surface::SS_UNKNOWN).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`offset_surface::OffsetSurface::new`] ([`SolidError::Unported`] for
+    /// [`SS_UNKNOWN`](offset_surface::SS_UNKNOWN) until `surface.surface_p3` lands).
+    pub fn new(
+        k: &Kernel,
+        offset_distance: f64,
+        base: Surface,
+        base_id: SurfaceId,
+        singularities: u32,
+    ) -> Result<Self> {
+        Ok(Self {
+            surface: offset_surface::OffsetSurface::new(
+                k,
+                offset_distance,
+                base,
+                false,
+                singularities,
+            )?,
             base_id,
-            offset_distance,
-            allow_extension: false,
-        }
+        })
     }
 
     /// `GetBaseSurface`.
     #[must_use]
-    pub const fn base_surface(&self) -> &Surface {
-        &self.base
+    pub fn base_surface(&self) -> &Surface {
+        self.surface.base_surface()
+    }
+
+    /// `GetOffsetDistance`.
+    #[must_use]
+    pub const fn offset_distance(&self) -> f64 {
+        self.surface.offset_distance()
     }
 
     /// `SetOffsetDistance`.
     pub fn set_offset_distance(&mut self, offset_distance: f64) {
-        self.offset_distance = offset_distance;
+        self.surface.set_offset_distance(offset_distance);
     }
 
     /// `SetAllowExtension`.
     pub fn set_allow_extension(&mut self, allow: bool) {
-        self.allow_extension = allow;
+        self.surface.set_allow_extension(allow);
     }
 }
 
 /// `SmOffsetSurface::EvaluatePoint`.
-fn offset_evaluate_point(_s: &OffsetSurface, _uv: Point2) -> Result<Point3> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::EvaluatePoint
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface::EvaluatePoint",
-        unit: "surface.offset_surface",
-    })
+fn offset_evaluate_point(s: &mut OffsetSurface, uv: Point2) -> Result<Point3> {
+    s.surface.evaluate_point_extending(uv)
 }
 
 /// `SmOffsetSurface::GetNaturalUVDomain`.
-fn offset_natural_uv_domain(_s: &OffsetSurface) -> Result<Extent2d> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::GetNaturalUVDomain
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface::GetNaturalUVDomain",
-        unit: "surface.offset_surface",
-    })
+fn offset_natural_uv_domain(s: &OffsetSurface) -> Extent2d {
+    s.surface.natural_uv_domain()
 }
 
 /// `Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` of an offset surface:
 /// `(P, S_u, S_v)`.
-fn offset_evaluate_1st(_s: &OffsetSurface, _uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface::Evaluate",
-        unit: "surface.offset_surface",
-    })
+fn offset_evaluate_1st(s: &mut OffsetSurface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
+    s.surface
+        .with_evaluator(|e| evaluate_1st_derivatives(e, uv, Side::Left, Side::Left))
 }
 
 /// `Evaluate2ndDerivatives(uv, TRUE, TRUE, ..)` of an offset surface:
 /// `(P, S_u, S_v, S_uv, S_uu, S_vv)`.
-fn offset_evaluate_2nd(_s: &OffsetSurface, _uv: Point2) -> Result<[Vec3; 6]> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface::Evaluate",
-        unit: "surface.offset_surface",
-    })
+fn offset_evaluate_2nd(s: &mut OffsetSurface, uv: Point2) -> Result<[Vec3; 6]> {
+    let d = s
+        .surface
+        .with_evaluator(|e| evaluate_2nd_derivatives(e, uv, Side::Left, Side::Left))?;
+    Ok([d.point, d.du, d.dv, d.duv, d.duu, d.dvv])
 }
 
 /// `SmSurface::ComputeInwardVector` of an offset surface (it evaluates the offset
-/// surface). `ComputeInwardVector` itself is ported (`surface::surface::p7::
-/// compute_inward_vector`); only the offset surface's evaluation is missing, so the
-/// porter of `surface.offset_surface` wires this through that function.
-fn offset_compute_inward_vector(_s: &OffsetSurface, _uv: Point2) -> Result<Vec3> {
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate (from SmSurface::ComputeInwardVector)
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface::Evaluate",
-        unit: "surface.offset_surface",
-    })
+/// surface).
+fn offset_compute_inward_vector(s: &mut OffsetSurface, uv: Point2) -> Result<Vec3> {
+    s.surface.with_evaluator(|e| compute_inward_vector(e, uv))
 }
 
 /// `LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, bFound, sSol)` of an offset
 /// surface: the found UV point and its distance.
+/// `None` when no answer was found. The solve runs on a copy of the offset (the solver
+/// is borrowed shared), so a base extension it makes is not kept (see the module
+/// deviations).
 fn offset_local_point_solve(
-    _s: &OffsetSurface,
-    _domain: &Extent2d,
-    _point: Point3,
-    _guess: Point2,
+    k: &Kernel,
+    s: &OffsetSurface,
+    domain: &Extent2d,
+    point: Point3,
+    guess: Point2,
 ) -> Result<Option<(Point2, f64)>> {
-    // SmSurface::LocalPointSolve is ported (surface.surface_p5, `Surface::local_point_solve`) but an
-    // SmOffsetSurface is not a `Surface` kind: the solve evaluates it through
-    // SmOffsetSurface::Evaluate.
-    // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate (via SmSurface::LocalPointSolve)
-    Err(SolidError::Unported {
-        upstream: "SmOffsetSurface::Evaluate",
-        unit: "surface.offset_surface",
-    })
+    // SmSurface::LocalPointSolve on the offset: its evaluations dispatch to
+    // SmOffsetSurface (a MINIMIZE solve runs LocalPointSolve_1)
+    let surface = Surface::from(s.surface.clone());
+    let r = surface.local_point_solve::<NoObject>(
+        k,
+        domain,
+        SolverOperation::Minimize,
+        point,
+        guess,
+    )?;
+    if !r.found {
+        return Ok(None);
+    }
+    let start = &r.solution.start;
+    Ok(Some((
+        Point2::new(start.param(0)?, start.param(1)?),
+        start.solution_value,
+    )))
 }
 
 /// `GlobalPointSolve(domain, SM_SO_MINIMIZE, point, SM_EFF_ZERO_SQ, NULL, SM_SR_SINGLE,
@@ -503,7 +522,7 @@ fn initial_setup(
     k: &Kernel,
     brep: Option<&Brep>,
     rail_index: usize,
-    surface1: &OffsetSurface,
+    surface1: &mut OffsetSurface,
     surface1_index: usize,
     intervals: &ExtentNd,
     guess_t: &[f64],
@@ -520,10 +539,9 @@ fn initial_setup(
         x_at(guess_t, checked_add(surface1_index, 1, op)?, op)?,
     );
     let pnt = offset_evaluate_point(surface1, uv1)?;
-    let base1 = surface1.base_surface();
     let base2 = surface2.base_surface();
-    let mut domain1 = offset_natural_uv_domain(surface1)?;
-    let mut domain2 = offset_natural_uv_domain(surface2)?;
+    let mut domain1 = offset_natural_uv_domain(surface1);
+    let mut domain2 = offset_natural_uv_domain(surface2);
 
     // Now find the UV guess on the other Rail's surface
     let mut fillet_edge: Option<(&Curve, f64)> = None;
@@ -610,7 +628,8 @@ fn initial_setup(
         let mut guess2 = Point2::new(p2d.x, p2d.y);
 
         // Before we add it drop point to other surface to get a better guess
-        if let Some((sol_uv, dist)) = offset_local_point_solve(surface2, &domain2, pnt, guess2)? {
+        if let Some((sol_uv, dist)) = offset_local_point_solve(k, surface2, &domain2, pnt, guess2)?
+        {
             if dist < (fs.radius(0)?.abs() + fs.radius(1)?.abs()) {
                 guess2 = sol_uv;
             }
@@ -629,6 +648,7 @@ fn initial_setup(
             .ok_or_else(|| SolidError::sm_err(op))?;
     }
 
+    let base1 = surface1.base_surface();
     let normal1 = base1
         .evaluate_normal(uv1, Side::Left, Side::Left)?
         .unitize()?;
@@ -761,7 +781,7 @@ impl EiffelTowerFs {
         brep: Option<&Brep>,
         do_surf2_calcs: bool,
         rail_index: usize,
-        surface1: &OffsetSurface,
+        surface1: &mut OffsetSurface,
         surface1_index: usize,
         intervals: &mut ExtentNd,
         periodicities: &mut Vec<bool>,
@@ -901,7 +921,7 @@ impl EiffelTowerFs {
             x_at(x, checked_add(surf1_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(0)?.set_offset_distance(0.0);
-        let [_, duf, dvf, duvf, duuf, dvvf] = offset_evaluate_2nd(fs.surface(0)?, uv)?;
+        let [_, duf, dvf, duvf, duuf, dvvf] = offset_evaluate_2nd(fs.surface_mut(0)?, uv)?;
 
         // get lSurf2Off index into crX array for lSurf2 parameters
         let base1 = fs.surface(1)?.base_id;
@@ -913,7 +933,7 @@ impl EiffelTowerFs {
             x_at(x, checked_add(surf2_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(1)?.set_offset_distance(0.0);
-        let [_, dug, dvg, duvg, duug, dvvg] = offset_evaluate_2nd(fs.surface(1)?, uv2)?;
+        let [_, dug, dvg, duvg, duug, dvvg] = offset_evaluate_2nd(fs.surface_mut(1)?, uv2)?;
 
         // check surface tangent magnitudes
         let duf_len_sq = duf.length_squared();
@@ -963,10 +983,10 @@ impl EiffelTowerFs {
         // evaluate offsetSurface F and G point positions
         let d0 = fs.radius(0)? * orient0;
         fs.surface_mut(0)?.set_offset_distance(d0);
-        let (pf, duf, dvf) = offset_evaluate_1st(fs.surface(0)?, uv)?;
+        let (pf, duf, dvf) = offset_evaluate_1st(fs.surface_mut(0)?, uv)?;
         let d1 = fs.radius(1)? * fs.orientation(1)?;
         fs.surface_mut(1)?.set_offset_distance(d1);
-        let (pg, dug, dvg) = offset_evaluate_1st(fs.surface(1)?, uv2)?;
+        let (pg, dug, dvg) = offset_evaluate_1st(fs.surface_mut(1)?, uv2)?;
 
         // set sV = distance between offsetSurface points
         let v = pf - pg;
@@ -1329,7 +1349,7 @@ impl SecantConstantRadiusFs {
         brep: Option<&Brep>,
         do_surf2_calcs: bool,
         rail_index: usize,
-        surface1: &OffsetSurface,
+        surface1: &mut OffsetSurface,
         surface1_index: usize,
         intervals: &mut ExtentNd,
         periodicities: &mut Vec<bool>,
@@ -1453,7 +1473,7 @@ impl SecantConstantRadiusFs {
             x_at(x, checked_add(surf1_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(0)?.set_offset_distance(0.0);
-        let (_, duf2, dvf2) = offset_evaluate_1st(fs.surface(0)?, uv)?;
+        let (_, duf2, dvf2) = offset_evaluate_1st(fs.surface_mut(0)?, uv)?;
 
         // get baseSurface1 surface normal and check its size
         let n = duf2.cross(dvf2);
@@ -1466,7 +1486,7 @@ impl SecantConstantRadiusFs {
         // get offsetSurface1 F point values for given crX
         let d0 = fs.radius(0)? * orient0;
         fs.surface_mut(0)?.set_offset_distance(d0);
-        let (pf, duf, dvf) = offset_evaluate_1st(fs.surface(0)?, uv)?;
+        let (pf, duf, dvf) = offset_evaluate_1st(fs.surface_mut(0)?, uv)?;
 
         // get lSurf2Off index into crX array for lSurf2 parameters
         let base1 = fs.surface(1)?.base_id;
@@ -1478,7 +1498,7 @@ impl SecantConstantRadiusFs {
             x_at(x, checked_add(surf2_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(1)?.set_offset_distance(0.0);
-        let (pg2, dug2, dvg2) = offset_evaluate_1st(fs.surface(1)?, uv2)?;
+        let (pg2, dug2, dvg2) = offset_evaluate_1st(fs.surface_mut(1)?, uv2)?;
 
         // get baseSurface surface normal value
         let n2 = dug2.cross(dvg2);
@@ -1566,6 +1586,21 @@ mod tests {
         BSplineCurve::create_line_segment(3, a, b).expect("line")
     }
 
+    /// A plane through `origin` spanned by `x` and `y`, domain `[0,1]^2`.
+    fn plane(origin: Point3, x: Vec3, y: Vec3) -> Surface {
+        Surface::from(crate::surface::plane::Plane::new(
+            origin,
+            x,
+            y,
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ))
+    }
+
+    fn rail(k: &Kernel, d: f64, base: Surface, id: u32) -> OffsetSurface {
+        OffsetSurface::new(k, d, base, SurfaceId::Free(id), 0).expect("offset")
+    }
+
     fn tsect(p1: Point3, p2: Point3) -> TsectPnt {
         let mut t = TsectPnt::new();
         *t.srf_pos_mut(SrfIndex::First) = p1;
@@ -1628,31 +1663,42 @@ mod tests {
     }
 
     #[test]
-    fn load_jacobian_needs_offset_surfaces() {
-        let srf = BSplineSurface::new();
+    fn rail_surfaces_take_base_singularities_then_evaluate() {
+        let k = Kernel::default();
+        let o = Vec3::new(0.0, 0.0, 0.0);
+        let (x, y, z) = (
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        // upstream's default lSingularities asks the base: a plane has none
+        let rail0 = OffsetSurface::new(
+            &k,
+            2.0,
+            plane(o, x, y),
+            SurfaceId::Free(0),
+            offset_surface::SS_UNKNOWN,
+        )
+        .unwrap();
+        assert_eq!(
+            rail0.surface.singularities(),
+            crate::geom::extent2d::SS_NONE
+        );
         let base = ConstantRadiusAssistedFs::from_parts(
             1e-6,
             0.5,
             0.03,
             [2.0, 1.0],
             [
-                Some(OffsetSurface::new(
-                    2.0,
-                    Surface::from(srf.clone()),
-                    SurfaceId::Free(0),
-                )),
-                Some(OffsetSurface::new(
-                    1.0,
-                    Surface::from(srf),
-                    SurfaceId::Free(1),
-                )),
+                Some(rail(&k, 2.0, plane(o, x, y), 0)),
+                Some(rail(&k, 1.0, plane(o, y, z), 1)),
             ],
             [1.0, 1.0],
             [None, None],
         );
         let mut fs = EiffelTowerFs::new(base, 0.3);
         let (mut ne, mut np) = (0, 0);
-        let x = [0.5, 0.5, 0.5, 0.5];
+        let xs = [0.5, 0.5, 0.5, 0.5];
         let mut f = [0.0; 3];
         let load = JacobianLoad {
             rail_index: 0,
@@ -1660,18 +1706,28 @@ mod tests {
             surf1_offset: 0,
             surface2: None,
             surf2_offset: 0,
-            x: &x,
+            x: &xs,
         };
         let r = fs.load_jacobian(&mut ne, &mut np, &load, &mut f, None);
-        assert!(matches!(r, Err(SolidError::Unported { .. })));
-        assert_eq!(np, 2);
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(np, 4);
+        assert!(f.iter().all(|v| v.is_finite()));
+        // left at the fillet offsets
+        assert_eq!(fs.base.surface(0).expect("rail 0").offset_distance(), 2.0);
+        assert_eq!(fs.base.surface(1).expect("rail 1").offset_distance(), 1.0);
         let _ = NurbCircleParam::Quadratic;
     }
 
     #[test]
     fn load_initial_values_without_surf2_calcs_is_a_no_op() {
-        let srf = BSplineSurface::new();
-        let off = OffsetSurface::new(1.0, Surface::from(srf), SurfaceId::Free(0));
+        let k = Kernel::default();
+        let o = Vec3::new(0.0, 0.0, 0.0);
+        let off = rail(
+            &k,
+            1.0,
+            plane(o, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+            0,
+        );
         let base = ConstantRadiusAssistedFs::from_parts(
             1e-6,
             0.5,
@@ -1682,12 +1738,22 @@ mod tests {
             [None, None],
         );
         let fs = SecantConstantRadiusFs::new(base, 0.2);
-        let k = Kernel::default();
         let mut ivl = ExtentNd::new(4);
         let mut per = vec![false, true];
         let mut g = vec![0.25, 0.75];
+        let mut surface1 = off;
         let r = fs
-            .load_initial_values(&k, None, false, 0, &off, 0, &mut ivl, &mut per, &mut g)
+            .load_initial_values(
+                &k,
+                None,
+                false,
+                0,
+                &mut surface1,
+                0,
+                &mut ivl,
+                &mut per,
+                &mut g,
+            )
             .expect("no-op");
         assert_eq!(r, None);
         assert_eq!(per, vec![false, true]);

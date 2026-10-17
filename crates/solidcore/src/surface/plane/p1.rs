@@ -1627,7 +1627,7 @@ impl Plane {
         }
 
         // Quick check: other surface would have to be planar.
-        if !surface_is_planar(other, tol_3d)? {
+        if !surface_is_planar(k, other, tol_3d)? {
             return Ok(res);
         }
 
@@ -2142,8 +2142,8 @@ fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
 // ---- unported callees ---------------------------------------------------------------------
 
 /// `crOther.IsPlanar(tol)`: a plane is planar; other kinds run `SmSurface::IsPlanar`.
-fn surface_is_planar(s: &Surface, tol: f64) -> Result<bool> {
-    Ok(s.is_planar(tol)?.is_planar)
+fn surface_is_planar(k: &Kernel, s: &Surface, tol: f64) -> Result<bool> {
+    Ok(s.is_planar(k, tol)?.is_planar)
 }
 
 /// `crOther.EvaluateNormal(uv, TRUE, TRUE, ..)`: the plane override; other kinds run

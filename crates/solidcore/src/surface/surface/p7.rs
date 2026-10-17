@@ -752,12 +752,13 @@ pub struct CurveSurfaceSolution {
 
 impl Surface {
     /// The unit normal at `uv` (`EvaluateNormal`, virtual): the plane's axis for a
-    /// plane, the basis surface's normal for a curve-bounded surface, the
-    /// [`base_evaluate_normal`] body otherwise.
+    /// plane, the basis surface's normal for a curve-bounded surface, the offset
+    /// surface's override, the [`base_evaluate_normal`] body otherwise.
     ///
     /// # Errors
     ///
-    /// Only [`SolidError::Unported`].
+    /// [`SolidError::Unported`]; those of
+    /// [`OffsetSurface::evaluate_normal`](crate::surface::offset_surface::OffsetSurface::evaluate_normal).
     pub fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         match self.kind() {
             SurfaceKind::BSpline(_) | SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Step(_) => {
@@ -766,6 +767,7 @@ impl Surface {
             SurfaceKind::CurveBounded(s) => s.evaluate_normal(uv, u_side, v_side),
             SurfaceKind::SrfInVolume(s) => s.evaluate_normal(uv, u_side, v_side),
             SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
+            SurfaceKind::OffsetSurface(s) => s.evaluate_normal(uv, u_side, v_side),
         }
     }
 
@@ -792,6 +794,7 @@ impl Surface {
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => {
                 base_is_closed(self, uv_domain, param, opt_tol, want_continuity)
             }
@@ -805,8 +808,10 @@ impl Surface {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the bounding box (the base
-    /// `SmSurface::CalculateBoundingBox` of a curve-bounded surface).
-    pub fn is_planar(&self, tol_3d: f64) -> Result<Planar> {
+    /// `SmSurface::CalculateBoundingBox` of a curve-bounded surface); `Unported` errors
+    /// of an offset surface's bounding box (its other failures are ignored, as
+    /// upstream).
+    pub fn is_planar(&self, k: &Kernel, tol_3d: f64) -> Result<Planar> {
         match self.kind() {
             SurfaceKind::Plane(p) => {
                 let (point, normal, deviation) = p.is_planar();
@@ -832,19 +837,21 @@ impl Surface {
             SurfaceKind::SurfOfRevolution(s) => {
                 Ok(planar_of(s.base(), &self.natural_uv_domain())?.is_planar(tol_3d))
             }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-                // DISPATCH GAP: SmSurface::CalculateBoundingBox
-                // (Surface::base_calculate_bounding_box, surface::surface::p1) builds the
-                // surface's cache, which needs the kernel this signature does not take. No
-                // UNPORTED marker: the callees are ported (the continuities of the cache's
-                // tree build are surface::surface::p6); the error names the owner of the
-                // base body. Once the kernel is plumbed, the next blocker for these kinds is
-                // surface.surface_p5: CalculateContinuities calls the base
-                // CreateIsoParametricCurve, which that unit owns.
-                Err(SolidError::unported(
-                    "SmSurface::CalculateBoundingBox",
-                    "surface.surface_p1",
-                ))
+            // SmSurface body: use the virtual box and ignore ordinary failures,
+            // which leave the default pseudo box. The kernel is available here.
+            SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::SrfInVolume(_) => {
+                let pseudo = ignored(self.calculate_bounding_box(
+                    k,
+                    &self.natural_uv_domain(),
+                    [false, true, false],
+                    true,
+                ))?
+                .and_then(|b| b.pseudo_box)
+                .unwrap_or_else(PseudoBox::new);
+                Ok(pseudo.is_planar(tol_3d))
             }
         }
     }

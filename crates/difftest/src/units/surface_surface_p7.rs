@@ -878,7 +878,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             if *base && matches!(i.surface, SrfIn::Plane { .. }) {
                 return Err(harness("base IsPlanar of a plane is not compared").into());
             }
-            let pl = st(s.is_planar(*tol))?.map_err(|c| harness(format!("IsPlanar failed: {c}")))?;
+            let pl = st(s.is_planar(&Kernel::default(), *tol))?.map_err(|c| harness(format!("IsPlanar failed: {c}")))?;
             o.extend([0.0, b(pl.is_planar)]);
             pv(&mut o, pl.point);
             pv(&mut o, pl.normal);

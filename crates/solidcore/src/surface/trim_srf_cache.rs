@@ -804,7 +804,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         dir: SurfParamType,
     ) -> Result<(NodeId, NodeId)> {
         const OP: &str = "surface::trim_srf_cache::TrimSrfCache::subdivide_node";
-        if let Some((node1, node2)) = self.base.subdivide_node_split(node, dir, true)? {
+        if let Some((node1, node2)) = self.base.subdivide_node_split(k, node, dir, true)? {
             if self.base.aux(node)?.poly_edge_list.is_empty() {
                 // for every edge use in the parent node, last first
                 while let Some(eu) = self.base.aux(node)?.edgeuse_list.last().copied() {

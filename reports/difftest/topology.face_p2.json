@@ -1540,40 +1540,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_1_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#181 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_1_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#182 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_1_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#183 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -1624,40 +1612,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_2_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#190 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_2_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#191 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_2_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#192 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1708,40 +1684,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_4_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#199 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_4_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#200 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_4_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#201 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -1792,40 +1756,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_8_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#208 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_8_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#209 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_8_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#210 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -1876,40 +1828,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_16_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#217 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_16_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#218 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_16_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#219 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1960,40 +1900,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_32_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#226 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_32_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#227 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_32_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#228 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2044,40 +1972,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_3_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#235 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_3_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#236 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_3_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#237 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2128,40 +2044,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_24_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#244 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_24_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#245 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_24_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#246 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2212,40 +2116,28 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_63_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#253 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_63_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#254 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_plane_63_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#255 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -2296,40 +2188,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_1_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#262 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_1_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#263 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_1_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#264 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2380,40 +2260,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_2_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#271 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_2_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#272 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_2_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#273 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -2464,40 +2332,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_4_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#280 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_4_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#281 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_4_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#282 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2548,40 +2404,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_8_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#289 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_8_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#290 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_8_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#291 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2632,40 +2476,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_16_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#298 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_16_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#299 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_16_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#300 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -2716,40 +2548,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_32_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#307 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_32_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#308 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_32_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#309 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2800,40 +2620,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_3_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#316 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_3_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#317 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_3_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#318 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2884,40 +2692,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_24_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#325 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_24_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#326 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_24_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#327 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2968,40 +2764,28 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_63_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#334 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_63_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#335 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_63_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#336 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -3052,40 +2836,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_1_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#343 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_1_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#344 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_1_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#345 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3136,40 +2908,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_2_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#352 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_2_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#353 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_2_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#354 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3220,40 +2980,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_4_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#361 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_4_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#362 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_4_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#363 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3304,40 +3052,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_8_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#370 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_8_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#371 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_8_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#372 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3388,40 +3124,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_16_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#379 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_16_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#380 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_16_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#381 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3472,40 +3196,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_32_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#388 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_32_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#389 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_32_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#390 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3556,40 +3268,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_3_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#397 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_3_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#398 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_3_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#399 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3640,40 +3340,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_24_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#406 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_24_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#407 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_24_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#408 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3724,40 +3412,28 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_63_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#415 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_63_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#416 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_huge_63_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#417 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -3808,40 +3484,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_1_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#424 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_1_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#425 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_1_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#426 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3892,40 +3556,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_2_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#433 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_2_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#434 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_2_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#435 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3976,40 +3628,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_4_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#442 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_4_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#443 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_4_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#444 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -4060,40 +3700,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_8_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#451 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_8_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#452 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_8_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#453 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4144,40 +3772,28 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_16_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#460 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_16_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#461 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_16_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#462 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -4228,40 +3844,28 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_32_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#469 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_32_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#470 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_32_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#471 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -4312,40 +3916,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_3_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#478 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_3_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#479 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_3_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#480 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4396,40 +3988,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_24_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#487 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_24_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#488 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_24_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#489 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4480,40 +4060,28 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_63_0.1_0.3_0.6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#496 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_63_0.1_0.0_0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#497 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "ode_iso_bss_pinched_63_0.1_1.0_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#498 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -12296,16 +11864,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "extra00186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "both_errored": true,
@@ -14036,16 +13600,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "extra00377",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -14172,16 +13732,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "extra00393",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -20142,16 +19698,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetSurface::EvaluateSimple",
-        "unit": "surface.offset_surface"
-      },
       "max_rel_err": 0.0,
       "name": "extra01066",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -23961,15 +23513,14 @@
     }
   ],
   "cases_both_errored": 494,
-  "cases_deferred": 482,
+  "cases_deferred": 370,
   "cases_failed": 0,
-  "cases_passed": 2210,
+  "cases_passed": 2322,
   "cases_total": 2692,
   "deferred_by_unit": {
     "curve.crv_on_surf": 74,
     "intersect.curve_class_p4": 30,
     "query.face_p3": 47,
-    "surface.offset_surface": 112,
     "topology.edgeuse_p3": 156,
     "topology.face_p3": 63
   },

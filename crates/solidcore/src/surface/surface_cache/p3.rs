@@ -334,11 +334,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// surface) and from the part 1 implants.
     pub fn subdivide_node(
         &mut self,
+        k: &Kernel,
         node: NodeId,
         direction: SurfParamType,
         only_aux_data: bool,
     ) -> Result<()> {
-        if let Some((node1, node2)) = self.subdivide_node_split(node, direction, only_aux_data)? {
+        if let Some((node1, node2)) =
+            self.subdivide_node_split(k, node, direction, only_aux_data)?
+        {
             self.move_boundary_uses_base(node, node1, node2)?;
         }
         Ok(())
@@ -357,6 +360,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// Those of [`SurfaceCache::subdivide_node`] but the implants.
     pub fn subdivide_node_split(
         &mut self,
+        k: &Kernel,
         node: NodeId,
         direction: SurfParamType,
         only_aux_data: bool,
@@ -488,6 +492,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 // if possible move the split parameter to a nearby existing knot, then
                 // split the subdivision surface in two (child boxes from the halves)
                 let split_param = self.split_subdivision_surface(
+                    k,
                     handle,
                     [node1, node2],
                     SurfParamType::U,
@@ -523,6 +528,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 // if possible move the split parameter to a nearby existing knot, then
                 // split the subdivision surface in two (child boxes from the halves)
                 let split_param = self.split_subdivision_surface(
+                    k,
                     handle,
                     [node1, node2],
                     SurfParamType::V,
@@ -599,6 +605,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// the box statuses, the v split returns them (as upstream).
     fn split_subdivision_surface(
         &mut self,
+        k: &Kernel,
         handle: O,
         [node1, node2]: [NodeId; 2],
         direction: SurfParamType,
@@ -626,7 +633,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         };
 
         // build two new split child surfaces from the original - don't modify the original
-        let (half1, half2) = sub.split_at(split_param, direction)?;
+        let (half1, half2) = sub.split_at(k, split_param, direction)?;
 
         // store the child surfaces in the subdivision surface list and on the nodes
         let mut handles = [None, None];
@@ -802,7 +809,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 "subdivision tree exceeds MAX_SUBDIVISION_NODES",
             ));
         }
-        self.subdivide_node(node, test.direction, false)?;
+        self.subdivide_node(k, node, test.direction, false)?;
 
         // recursion - keep subdividing until we satisfy tolerances
         let (c1, c2) = {
@@ -891,9 +898,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     Some(std::borrow::Cow::Owned(tmp.base().clone()))
                 }
             }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-                None
-            }
+            SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_) => None,
         };
         let (u_count, v_count, beziers) = if let Some(b) = bspline {
             let nurb = b

@@ -52,9 +52,9 @@
 //!   and the walk over the pairs is
 //!   [`SurfaceIntersector::find_interior_curves_from_node_pairs`].
 //! - **Offset surfaces.** `DoLawIntersection` needs both surfaces to be
-//!   `SmOffsetSurface`s (else `SM_ERR_NULL_POINTER`). No [`SurfaceKind`] is one yet
-//!   (unit `surface.offset_surface`), so with the surfaces that exist the call ends
-//!   there.
+//!   `SmOffsetSurface`s ([`SurfaceKind::OffsetSurface`], else `SM_ERR_NULL_POINTER`).
+//!   Past that check its law points wait on `SmFilletLaw::Evaluate`
+//!   (`blend.fillet_executive_p1`).
 //! - **Unported callees.** `SmSurface::IsSingularity` of a surface that is not a plane
 //!   (`surface.surface_p5`) and the callees of `SmSurface::LocalSurfaceIntersect` and of
 //!   the global surface solve's leaf solve that are not ported yet (`surface.surface_p3`,
@@ -1197,17 +1197,9 @@ fn join_curves(this: &mut Curve, other: &mut Curve) -> Result<()> {
     this.join_with(true, other, false, None)
 }
 
-/// `SM_CAST_PTR(SmOffsetSurface, surface) != NULL`: no surface kind is an offset
-/// surface until unit `surface.offset_surface` adds `SmOffsetSurface`.
+/// `SM_CAST_PTR(SmOffsetSurface, surface) != NULL`.
 const fn is_offset_surface(surface: &Surface) -> bool {
-    match surface.kind() {
-        SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::Plane(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => false,
-    }
+    matches!(surface.kind(), SurfaceKind::OffsetSurface(_))
 }
 
 /// `surface.IsSingularity(uv, eWhichDir)` (default tolerance): the plane override
@@ -1219,6 +1211,7 @@ fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<b
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
             Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
         }

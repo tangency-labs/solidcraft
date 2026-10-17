@@ -203,7 +203,10 @@ pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => None,
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => None,
     }
 }
 
@@ -249,7 +252,10 @@ fn create_iso_parametric_curve(
             "surface.surface_cache_p1",
         )),
         // the SmSurface body (surface.surface_p5); tolerance 0.0 as upstream's callers
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => {
             let r =
                 surface.create_iso_parametric_curve(k, param, iso, 0.0, domain.as_ref(), false)?;
             match r.curve.into_kind() {
@@ -312,6 +318,15 @@ pub(super) fn calculate_bounding_box(
                 "surface.surface_p1",
             ))
         }
+        // DISPATCH GAP: OffsetSurface::calculate_bounding_box is ported, but this
+        // cache callback has no Kernel (the offset's constructor-time queries and its
+        // base box need one), and upstream forwards the basis guesses to the base, which
+        // Surface::calculate_bounding_box does not take. No UNPORTED marker: the callees
+        // are ported; the error names this callback's unit. No difftest reaches it.
+        SurfaceKind::OffsetSurface(_) => Err(SolidError::unported(
+            "SmOffsetSurface::CalculateBoundingBox from a surface cache",
+            "surface.surface_cache_p1",
+        )),
     }
 }
 
@@ -324,6 +339,7 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
             Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
         }

@@ -1152,7 +1152,7 @@ fn rust_surface(op: &OpIn, s: &mut BSplineSurface, o: &mut Vec<f64>) -> Result<(
         OpIn::MakeNurb => s.make_nurb()?,
         OpIn::Copy => dump_state(o, &s.copy()),
         OpIn::Offset { dist, tol } => {
-            let r = s.create_offset_surface(*dist, *tol)?;
+            let r = s.create_offset_surface(&Kernel::default(), *dist, *tol)?;
             o.push(r.type_code() as f64);
         }
         OpIn::DegenCurve { angle, domain, tol } => {

@@ -136,6 +136,7 @@ fn evaluate_geometric_at(surface: &Surface, uv: Point2) -> Result<GeometricPrope
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => surface.evaluate_geometric(uv, Side::Left, Side::Left),
     }
 }
@@ -155,6 +156,7 @@ fn evaluate_normal_section(
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
             let n = surface.evaluate_normal_section(uv, Side::Left, Side::Left, direction)?;
             Ok(NormalSection {

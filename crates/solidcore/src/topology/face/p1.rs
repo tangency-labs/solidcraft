@@ -1607,7 +1607,7 @@ pub fn move_seam<O: LoopObject>(
         if ivl.classify_point(new_param, EFF_ZERO) == ExtentPointType::Inside
             && (!periodic.is_full_period() || opts.ok_to_move_to_center || opts.ok_to_split)
         {
-            let (left, right) = surface.split_at(new_param, surf_param).map_err(|e| {
+            let (left, right) = surface.split_at(k, new_param, surf_param).map_err(|e| {
                 if e.is_unported() {
                     e
                 } else {

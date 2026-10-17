@@ -513,7 +513,10 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
+            SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::SrfInVolume(_) => {}
         }
 
         // define the isoParameter Curve as an object

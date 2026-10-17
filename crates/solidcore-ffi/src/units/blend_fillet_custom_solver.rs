@@ -8,10 +8,11 @@
 //! (`SmBSplineCurve(gw_CURVE*, 3, FALSE)`). A surface is `n m p q r s`, `(n+1)(m+1)`
 //! control points `x y z w` (v index fastest), `r+1` u knots, `s+1` v knots
 //! (`SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`). A solver block is `same_base`, surface
-//! A, surface B (absent when `same_base`), `r0 r1 o0 o1 angle ext`: the solver's rail 0
-//! offsets A by `r0 * o0`, rail 1 offsets B (or A) by `r1 * o1`, the radii are
+//! A, surface B (absent when `same_base`), `r0 r1 o0 o1 angle ext sing`: the solver's
+//! rail 0 offsets A by `r0 * o0`, rail 1 offsets B (or A) by `r1 * o1`, the radii are
 //! `m_dFilletRadii`, the orientations `m_dOrientations`, `angle` is the tower or secant
-//! angle and `ext` `m_dSurfaceExtensionFactor`; its edge uses are `NULL`. A surface
+//! angle, `ext` `m_dSurfaceExtensionFactor` and `sing` (`0..=16`) the offset surfaces'
+//! `lSingularities` (`16` = `SM_SS_UNKNOWN`, the default); its edge uses are `NULL`. A surface
 //! selector is `0` `NULL`, `1` `GetSurface(0)`, `2` `GetSurface(1)`, `3` another offset
 //! surface of A, `4` an offset surface of a copy of A.
 //!
@@ -317,6 +318,8 @@ fn solver(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
         surface(rd)?;
     }
     rd.finites(6)?;
+    // lSingularities: SM_SS_NONE, an or of SM_SS_UMIN..SM_SS_VMAX, or SM_SS_UNKNOWN
+    rd.index(16)?;
     Ok(same)
 }
 

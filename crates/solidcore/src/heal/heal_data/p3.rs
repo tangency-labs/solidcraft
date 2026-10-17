@@ -534,7 +534,7 @@ impl<O: LoopObject> HealData<O> {
                         .vertexuse(vu)?
                         .vertex
                         .ok_or_else(|| invalid("vertex loop without vertex"))?;
-                    let new_surface = ignore_soft(surface.copy_and_add_analytics())?;
+                    let new_surface = ignore_soft(surface.copy_and_add_analytics(k))?;
                     let deleted =
                         ignore_soft(delete_face(b, f, true, Some(old_region)))?.unwrap_or_default();
                     let vertex_deleted = deleted.removed.contains(&EntityRef::Vertex(old_vertex));

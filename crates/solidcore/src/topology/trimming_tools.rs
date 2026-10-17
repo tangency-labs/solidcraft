@@ -1852,9 +1852,11 @@ pub fn is_loop_uv_gap_within_tolerance(
             Err(_) => return Ok(false),
         },
         SurfaceKind::SurfOfRevolution(s) => Cow::Borrowed(s.base()),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-            return Ok(false)
-        }
+        // (dynamic_cast<const SmBSplineSurface*> fails: FALSE)
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_)
+        | SurfaceKind::OffsetSurface(_) => return Ok(false),
     };
 
     let mut gap = Extent2d::new();

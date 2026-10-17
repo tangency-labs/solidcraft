@@ -472,8 +472,9 @@ fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
     }
 }
 
-fn build(c: &SivIn) -> Result<SrfInVolume, HarnessError> {
+fn build(k: &Kernel, c: &SivIn) -> Result<SrfInVolume, HarnessError> {
     SrfInVolume::new(
+        k,
         build_surface(&c.surface)?,
         c.in_param,
         build_volume(&c.volume)?,
@@ -686,7 +687,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         return Ok(to_output(&o));
     }
-    let mut s = Surface::from(build(&i.siv)?);
+    let mut s = Surface::from(build(&k, &i.siv)?);
     match &i.op {
         OpIn::Info { uv, types } => {
             let c = siv_of(&s)?;
@@ -796,13 +797,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             put_state(&mut o, siv_of(&s)?);
         }
         OpIn::Split { v_dir, t } => {
-            let (l, r) = tri!(o, s.split_at(*t, param(*v_dir)));
+            let (l, r) = tri!(o, s.split_at(&k, *t, param(*v_dir)));
             o.push(0.0);
             put_state(&mut o, siv_of(&l)?);
             put_state(&mut o, siv_of(&r)?);
         }
         OpIn::Copy => {
-            let c = tri!(o, s.copy());
+            let c = tri!(o, s.copy(&k));
             o.push(0.0);
             put_state(&mut o, siv_of(&c)?);
         }
@@ -810,7 +811,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let c = siv_of(&s)?;
             let eq = match other {
                 None => tri!(o, c.approx_eq(c)),
-                Some(oc) => tri!(o, c.approx_eq(&build(oc)?)),
+                Some(oc) => tri!(o, c.approx_eq(&build(&k, oc)?)),
             };
             o.extend([0.0, b(eq)]);
         }
@@ -823,7 +824,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::MakeOwner => {
             let r = match s.kind_mut() {
-                SurfaceKind::SrfInVolume(c) => c.make_owner(),
+                SurfaceKind::SrfInVolume(c) => c.make_owner(&k),
                 _ => return Err(harness("not a surface in volume")),
             };
             st!(o, r);
@@ -837,7 +838,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let ns = build_surface(surface)?;
             if let SurfaceKind::SrfInVolume(c) = s.kind_mut() {
-                tri!(o, c.set_base_surface(ns, *in_param, *copy, *owns));
+                tri!(o, c.set_base_surface(&k, ns, *in_param, *copy, *owns));
             }
             o.push(0.0);
             put_state(&mut o, siv_of(&s)?);
@@ -852,7 +853,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Mirror { origin, x, y } => {
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
-            tri!(o, siv_of(&s)?.create_mirror_surface(&ax));
+            tri!(o, siv_of(&s)?.create_mirror_surface(&k, &ax));
             o.push(0.0);
         }
         OpIn::Exact => {
