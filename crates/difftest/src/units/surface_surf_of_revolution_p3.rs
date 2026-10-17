@@ -25,8 +25,8 @@
 //! bounding box's zone tolerance, `SmSurface::GetFace`, `surface.surface_p1`) or
 //! reaching `ConvertUVFromNURBSToSTEP` without exact conversion (`SmSTEPSurface`,
 //! `surface.surface_p1`); `UpdateAnalyticalDomain` reaching the latter; every
-//! `IntersectWithCone` / `IntersectWithSphere` case (the Rust side cannot build the
-//! `SmCone` / `SmSphere` operand: `surface.cone_p1`, `surface.sphere`).
+//! `IntersectWithCone` case (the Rust side cannot build the `SmCone` operand:
+//! `surface.cone_p1`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,6 +38,7 @@ use solidcore::geom::solution_array::{ObjectKind, SolutionObject};
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
@@ -417,7 +418,7 @@ fn rust_op(
         } => {
             let built;
             let other_s: &SurfOfRevolution = match other {
-                OtherIn::Revolution { surf: None } => s,
+                OtherIn::Revolution { surf: None } | OtherIn::Sphere { .. } => s,
                 OtherIn::Revolution { surf: Some(os) } => match rust_surf(k, os)? {
                     Err(e) if e.is_unported() => return Ok(Err(e)),
                     Err(e) => {
@@ -435,21 +436,40 @@ fn rust_op(
                         "surface.cone_p1",
                     )))
                 }
-                OtherIn::Sphere { .. } => {
-                    return Ok(Err(solidcore::SolidError::unported(
-                        "SmSphere::CreateCanonical",
-                        "surface.sphere",
-                    )))
+            };
+            let sphere = match other {
+                OtherIn::Sphere { frame, r } => {
+                    let f = Axis2Placement::new(v3(frame[0]), v3(frame[1]), v3(frame[2]));
+                    match Sphere::create_canonical(k, &f, *r) {
+                        Ok(sp) => Some(sp),
+                        Err(e) => {
+                            o.push(status(&e));
+                            return Ok(Ok(()));
+                        }
+                    }
                 }
+                _ => None,
             };
             o.push(0.0);
-            s.intersect_with_surf_of_revolution(
-                k,
-                &dom_of(s, *dom),
-                other_s,
-                &dom_of(other_s, *other_dom),
-                *tol,
-            )
+            match &sphere {
+                Some(sp) => s.intersect_with_sphere(
+                    k,
+                    &dom_of(s, *dom),
+                    sp,
+                    &other_dom.map_or_else(
+                        || sp.base().base().natural_uv_domain(),
+                        |[a, b, c, e]| Extent2d::from_bounds(a, b, c, e),
+                    ),
+                    *tol,
+                ),
+                None => s.intersect_with_surf_of_revolution(
+                    k,
+                    &dom_of(s, *dom),
+                    other_s,
+                    &dom_of(other_s, *other_dom),
+                    *tol,
+                ),
+            }
             .map(|(more, x)| {
                 o.extend([0.0, flag(more), x.curves_3d.len() as f64]);
                 for c in &x.curves_3d {

@@ -350,16 +350,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "surfaces_line_x_sphere",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surf_of_revolution_p3/cases.json#43 (upstream tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -206994,16 +206990,12 @@
       "values_compared": 334
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322063",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207270,16 +207262,12 @@
       "values_compared": 159
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0101",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322097",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207346,16 +207334,12 @@
       "values_compared": 407
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0110",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322106",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207522,16 +207506,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0131",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322127",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207742,16 +207722,12 @@
       "values_compared": 419
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0158",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322154",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208058,16 +208034,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0197",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322193",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208894,16 +208866,12 @@
       "values_compared": 333
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0299",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322295",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209394,16 +209362,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0361",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322357",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209558,16 +209522,12 @@
       "values_compared": 205
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0381",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322377",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209738,16 +209698,12 @@
       "values_compared": 127
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322399",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210042,16 +209998,12 @@
       "values_compared": 420
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0440",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322436",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210170,16 +210122,12 @@
       "values_compared": 419
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0455",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322451",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210206,28 +210154,20 @@
       "values_compared": 420
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0459",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322455",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0460",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322456",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210334,16 +210274,12 @@
       "values_compared": 160
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0474",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322470",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210850,16 +210786,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0537",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322533",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211178,16 +211110,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0577",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322573",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211738,16 +211666,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0646",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322642",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211910,16 +211834,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0667",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322663",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212010,16 +211930,12 @@
       "values_compared": 417
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0679",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322675",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212054,16 +211970,12 @@
       "values_compared": 149
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0684",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322680",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212694,16 +212606,12 @@
       "values_compared": 417
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0763",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322759",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212738,16 +212646,12 @@
       "values_compared": 289
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0768",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322764",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213538,16 +213442,12 @@
       "values_compared": 335
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0866",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322862",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213686,16 +213586,12 @@
       "values_compared": 201
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::CreateCanonical",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0884",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322880",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213819,13 +213715,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 44,
+  "cases_deferred": 18,
   "cases_failed": 0,
-  "cases_passed": 26661,
+  "cases_passed": 26687,
   "cases_total": 26705,
   "deferred_by_unit": {
-    "surface.cone_p1": 18,
-    "surface.sphere": 26
+    "surface.cone_p1": 18
   },
   "max_rel_err": 0.0,
   "pass": true,
