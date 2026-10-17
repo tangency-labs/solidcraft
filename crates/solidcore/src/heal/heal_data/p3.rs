@@ -45,13 +45,20 @@ use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
 
 use super::p2::{EdgeProps, FacePropsEntry, HealData, PropsStore, VertexProps};
 
+use crate::curve::curve::Curve;
+use crate::geom::object::ObjectRef;
 use crate::geom::tol::xsect_tol_3d_from_zones;
 use crate::heal::face_props::{
     FaceProps, PropStage, TriedLinkType, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN,
 };
 use crate::intersect::curve_class::p1::CurveClassification;
+use crate::intersect::point_class::ClassGeometry;
+use crate::math::Point3;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::surface::surface::Surface;
+use crate::surface::volume::Volume;
+use crate::topology::brep_cache::{arena_identity, CacheObject};
+use crate::topology::face::p1::{self as fp1, SeamProblem};
 use crate::topology::face::p2 as face;
 use crate::topology::{loopuse, vertex, RegionId};
 
@@ -657,7 +664,7 @@ impl<O: LoopObject> HealData<O> {
             }
             marks.mark(k, Entity::Face(f), lock.mark_type());
             // MoveSeam(TRUE /* move inside */, FALSE /* do not split */, props).
-            changes.append(ignore_soft(move_seam(b, f, p, true, false))?.unwrap_or_default());
+            changes.append(ignore_soft(move_seam(k, b, f, p, true, false))?.unwrap_or_default());
         }
         self.update_target_lists(
             k,
@@ -845,7 +852,8 @@ impl<O: LoopObject> HealData<O> {
                     continue;
                 }
             }
-            let (new_faces, edits) = ignore_soft(split_face_at_seam(b, f, p))?.unwrap_or_default();
+            let (new_faces, edits) =
+                ignore_soft(split_face_at_seam(k, b, f, p))?.unwrap_or_default();
             changes.append(edits);
             if new_faces.is_empty() {
                 self.ran_face_props_split_edges_at_seam.add(
@@ -976,15 +984,98 @@ fn delete_vertex(_b: &mut Brep, _v: VertexId) -> Result<Changes> {
         "topology.brep_p4",
     ))
 }
+/// The face as the owner of its surface (`this` of the face's members): the surface's
+/// owner, or the face's arena identity when it has none.
+fn face_ref(b: &Brep, f: FaceId) -> Result<ObjectRef> {
+    Ok(b.face(f)?
+        .surface
+        .as_ref()
+        .and_then(Surface::owner)
+        .unwrap_or_else(|| arena_identity(CacheObject::Face(f))))
+}
+
+/// The seam problem of the face properties (`m_eBadCrossedSeam`, `m_eBadMissingSeam`,
+/// `m_eBadNearMissSeam`).
+fn props_seam_problem<O: LoopObject>(p: &FaceProps<O>) -> SeamProblem {
+    SeamProblem {
+        crossed: p.bad_crossed_seam_dir,
+        missing: p.bad_missing_seam_dir,
+        near_miss: p.bad_near_miss_seam_dir,
+    }
+}
+
+/// Classification geometry that resolves nothing: the seam members read it only without
+/// face properties, and the healer always passes them.
+struct NoGeometry;
+
+impl<O> ClassGeometry<O> for NoGeometry {
+    fn curve(&self, _: O) -> Option<&Curve> {
+        None
+    }
+    fn surface(&self, _: O) -> Option<&Surface> {
+        None
+    }
+    fn volume(&self, _: O) -> Option<&Volume> {
+        None
+    }
+    fn point(&self, _: O) -> Option<Point3> {
+        None
+    }
+}
+
+/// Runs `op` on the face properties' two classifications (`*m_pCrvClassU`,
+/// `*m_pCrvClassV`, dereferenced unchecked upstream), lent out of `p` for the call.
+fn with_classes<O: LoopObject, T>(
+    p: &mut FaceProps<O>,
+    op: impl FnOnce(
+        &mut CurveClassification<O>,
+        &mut CurveClassification<O>,
+        &FaceProps<O>,
+    ) -> Result<T>,
+) -> Result<T> {
+    let (Some(mut cu), Some(mut cv)) = (p.crv_class_u.take(), p.crv_class_v.take()) else {
+        return Err(invalid("seam props without classifications"));
+    };
+    let r = op(&mut cu, &mut cv, p);
+    p.crv_class_u = Some(cu);
+    p.crv_class_v = Some(cv);
+    r
+}
+
+/// `pThisFace->MoveSeam(eU, eV, *m_pCrvClassU, *m_pCrvClassV, m_eBadCrossedSeam,
+/// m_eBadMissingSeam, m_eBadNearMissSeam, bOkToMoveToCenter, bOkToSplit, NULL, NULL, NULL,
+/// pThisFaceProps)`; upstream ignores the plan results (debug output only) and keeps no
+/// new topology.
 fn move_seam<O: LoopObject>(
-    _b: &mut Brep,
-    _f: FaceId,
-    _p: &mut FaceProps<O>,
-    _move_inside: bool,
-    _split: bool,
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    p: &mut FaceProps<O>,
+    move_inside: bool,
+    split: bool,
 ) -> Result<Changes> {
-    // UNPORTED(topology.face_p1): SmFace::MoveSeam
-    Err(SolidError::unported("SmFace::MoveSeam", "topology.face_p1"))
+    let this = face_ref(b, f)?;
+    let problem = props_seam_problem(p);
+    with_classes(p, |cu, cv, p| {
+        fp1::move_seam(
+            k,
+            b,
+            f,
+            this,
+            cu,
+            cv,
+            problem,
+            fp1::MoveSeamOptions {
+                ok_to_move_to_center: move_inside,
+                ok_to_split: split,
+            },
+            Some(p),
+            &NoGeometry,
+            // (no new topology without split; a handle would be InvalidInput)
+            &|_| None,
+        )
+    })?;
+    Ok(Changes::default())
 }
 fn classification_has_dead_topology<O: LoopObject>(
     _b: &Brep,
@@ -1025,15 +1116,35 @@ fn merged_changes<O: LoopObject>(
         "merged topology handles require a typed B-rep resolver",
     ))
 }
+/// `pThisFace->SplitAtSeam(*m_pCrvClassU, *m_pCrvClassV, m_eBadCrossedSeam,
+/// m_eBadMissingSeam, m_eBadNearMissSeam, &sThisNewFaces, NULL, NULL, pThisFaceProps)`:
+/// the new faces, and the new faces, edges and vertices as added topology. Classification
+/// handles have no B-rep meaning here (as in [`merged_changes`]): a merge that makes
+/// topology is `InvalidInput` from the resolver, never an invented id.
 fn split_face_at_seam<O: LoopObject>(
-    _b: &mut Brep,
-    _f: FaceId,
-    _p: &mut FaceProps<O>,
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    p: &mut FaceProps<O>,
 ) -> Result<(Vec<FaceId>, Changes)> {
-    // UNPORTED(topology.face_p1): SmFace::SplitAtSeam
-    Err(SolidError::unported(
-        "SmFace::SplitAtSeam",
-        "topology.face_p1",
+    let problem = props_seam_problem(p);
+    let split = with_classes(p, |cu, cv, p| {
+        fp1::split_at_seam(k, b, f, cu, cv, problem, Some(p), &|_| None)
+    })?;
+    let added = split
+        .faces
+        .iter()
+        .map(|&x| EntityRef::Face(x))
+        .chain(split.edges.iter().map(|&x| EntityRef::Edge(x)))
+        .chain(split.vertices.iter().map(|&x| EntityRef::Vertex(x)))
+        .map(Some)
+        .collect();
+    Ok((
+        split.faces,
+        Changes {
+            removed: Vec::new(),
+            added,
+        },
     ))
 }
 

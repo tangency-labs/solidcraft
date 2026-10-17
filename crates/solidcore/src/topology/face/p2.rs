@@ -51,7 +51,8 @@
 //!   bounds).
 //! - **Statuses ignored upstream** (`ComputeUVPoint` in `sm_AreConnected` and
 //!   `sm_FixUVTrimCurves`, the vertex/edge evaluations and `DropPoint` of
-//!   `sm_FixUVTrimCurves`, `GetEnds`, the surface evaluations of `GetPointsInFace`) are
+//!   `sm_FixUVTrimCurves`, `GetEnds`, the surface evaluations and the
+//!   `CalculateUVDomainFromUVTrimCurves` of `GetPointsInFace`) are
 //!   ignored; [`SolidError::Unported`] still propagates. A failed `ComputeUVPoint`
 //!   leaves the caller's default point ([`Point2::UNDEF`]); a failed `DropPoint` is
 //!   no drop point; a failed evaluation keeps the previous value (initially
@@ -395,13 +396,17 @@ fn ivl_bound_edgeuse_obj<O>(_interval: &CurveInterval<O>, _min_end: bool) -> Res
     ))
 }
 
-/// `SmFace::CalculateUVDomainFromUVTrimCurves(rTrimUVDomain)`.
-fn calculate_uv_domain_from_uv_trim_curves(_b: &Brep, _f: FaceId) -> Result<Extent2d> {
-    // UNPORTED(topology.face_p1): SmFace::CalculateUVDomainFromUVTrimCurves
-    Err(SolidError::unported(
-        "SmFace::CalculateUVDomainFromUVTrimCurves",
-        "topology.face_p1",
-    ))
+/// `SmFace::CalculateUVDomainFromUVTrimCurves(rTrimUVDomain)` (unit `topology.face_p1`),
+/// on a copy of the B-rep: the caller holds it shared, so the UV trim curves the call
+/// makes (a cache upstream fills through a `const` method) are not kept. The copy costs
+/// a whole-B-rep clone per call (O(faces * B-rep size) over a sweep of every face); pass
+/// the B-rep mutably once [`points_in_face`]'s callers can.
+fn calculate_uv_domain_from_uv_trim_curves(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent2d> {
+    let mut copy = b.clone();
+    crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(
+        k, &mut copy, f, true, false, false,
+    )
+    .map(|r| r.domain)
 }
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation).
@@ -894,7 +899,13 @@ pub fn points_in_face(
         let u_inc = 1.0 / ((trim_curve_cnt + 1) as f64);
 
         // set search range to face boundary domain
-        let trim_uv_domain = calculate_uv_domain_from_uv_trim_curves(b, f)?;
+        // (status ignored upstream: on a failure the output is still the face's UV
+        // domain, which CalculateUVDomainFromUVTrimCurves sets first)
+        let trim_uv_domain = match calculate_uv_domain_from_uv_trim_curves(k, b, f) {
+            Ok(d) => d,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => b.face(f)?.uv_domain,
+        };
         let srf_dom = surf.natural_uv_domain();
         // (SmExtent2d::Intersect leaves the output unchanged when disjoint)
         let uv_dom = srf_dom

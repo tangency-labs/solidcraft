@@ -181,12 +181,23 @@ pub fn curve_properties(
     Ok(EdgeProperties { length, properties })
 }
 
-fn boundary(_k: &Kernel, _b: &Brep, _f: FaceId) -> Result<Vec<Curve>> {
-    // UNPORTED(topology.face_p1): SmFace::CreateOrientedTrimBoundary
-    Err(SolidError::unported(
-        "SmFace::CreateOrientedTrimBoundary",
-        "topology.face_p1",
-    ))
+/// `SmFace::CreateOrientedTrimBoundary(ctx, TRUE, TRUE, ..)` (unit `topology.face_p1`) on
+/// a copy of the B-rep (the caller holds it shared; the UV trim curves the call makes are
+/// not kept; the copy is a whole-B-rep clone per face). The copied curves' edge-use
+/// owners are not read here.
+fn boundary(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Curve>> {
+    let mut copy = b.clone();
+    let key_of = |e: EntityRef| crate::geom::object::ObjectRef {
+        type_code: 0,
+        key: ObjectKey(match e {
+            EntityRef::Edgeuse(eu) => u64::from(eu.index()),
+            _ => 0,
+        }),
+    };
+    crate::topology::face::p1::create_oriented_trim_boundary(
+        k, &mut copy, f, true, true, None, &key_of,
+    )
+    .map(|t| t.curves)
 }
 /// `SmFace::ComputePreciseProperties`; the default property mask is `PPF_ALL`.
 pub fn face_properties(

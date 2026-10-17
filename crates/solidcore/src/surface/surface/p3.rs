@@ -1029,6 +1029,8 @@ impl Surface {
             .is_some_and(|o| o.type_code == labels::FACE_TYPE)
         {
             // UNPORTED(topology.face_p1): SmFace::RemoveUVTrimCurves
+            // (ported as topology::face::p1::remove_uv_trim_curves, but a surface cannot
+            // reach the B-rep of its owner face here: the call needs the B-rep passed in)
             return Err(SolidError::unported(
                 "SmFace::RemoveUVTrimCurves",
                 "topology.face_p1",

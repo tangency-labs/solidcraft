@@ -345,6 +345,9 @@ fn make_edge_in_face<O>() -> Result<(Option<O>, Option<O>, Option<O>)> {
 fn calculate_uv_domain_from_uv_trim_curves<O: Copy>(face: O) -> Result<Extent2d> {
     let _ = face;
     // UNPORTED(topology.face_p1): SmFace::CalculateUVDomainFromUVTrimCurves
+    // (ported as topology::face::p1::calculate_uv_domain_from_uv_trim_curves, which takes
+    // a Brep face; a ProtoBrep face handle cannot reach it until the ProtoBrep trait has
+    // a B-rep face query)
     Err(SolidError::unported(
         "SmFace::CalculateUVDomainFromUVTrimCurves",
         "topology.face_p1",

@@ -308,13 +308,13 @@ fn cover_other_coincident_surface(
 }
 
 /// `SmFace::CalculateUVDomainFromUVTrimCurves(dom, TRUE)` (unit `topology.face_p1`).
-fn calculate_uv_domain_from_uv_trim_curves(b: &Brep, f: FaceId) -> Result<Extent2d> {
-    let _ = (b, f);
-    // UNPORTED(topology.face_p1): SmFace::CalculateUVDomainFromUVTrimCurves
-    Err(SolidError::unported(
-        "SmFace::CalculateUVDomainFromUVTrimCurves",
-        "topology.face_p1",
-    ))
+fn calculate_uv_domain_from_uv_trim_curves(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<Extent2d> {
+    crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(k, b, f, true, false, false)
+        .map(|r| r.domain)
 }
 
 // ---- simple accessors -------------------------------------------------------------------
@@ -1653,7 +1653,7 @@ fn cover_other_coincident_face(
     let mut domain1 = face2::uv_domain(b, face1)?;
 
     if refine_domains {
-        let trim0 = calculate_uv_domain_from_uv_trim_curves(b, face0);
+        let trim0 = calculate_uv_domain_from_uv_trim_curves(k, b, face0);
         if let Ok(d) = trim0 {
             if !d.is_degenerate(0.0) {
                 domain0 = d;
@@ -1661,7 +1661,7 @@ fn cover_other_coincident_face(
         } else if let Err(err) = trim0 {
             failed(err)?;
         }
-        let trim1 = calculate_uv_domain_from_uv_trim_curves(b, face1);
+        let trim1 = calculate_uv_domain_from_uv_trim_curves(k, b, face1);
         if let Ok(d) = trim1 {
             if !d.is_degenerate(0.0) {
                 domain1 = d;
