@@ -737,13 +737,13 @@ fn fuzz_unit(
     let cases = fuzz_cases(unit.id(), &bases, opts.cases);
     let exe =
         std::env::current_exe().map_err(|e| HarnessError::new(format!("current_exe: {e}")))?;
-    let scratch = std::env::temp_dir().join(format!(
-        "difftest-fuzz-{}-{}.json",
-        std::process::id(),
-        unit.id()
-    ));
     let dir = opts.out_dir.join(unit.id());
     clear_old(&dir);
+    // The case list handed to each child lives in the fuzz output directory, not the
+    // shared temp directory, so another local user cannot pre-create or symlink it.
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?;
+    let scratch = dir.join(format!(".cases-{}.json", std::process::id()));
     let run = run_all(unit.id(), &cases, &exe, &scratch, &dir, res);
     let _ = std::fs::remove_file(&scratch);
     run
