@@ -1,0 +1,17 @@
+[package]
+name = "solidcraft-cam"
+description = "SolidCraft manufacturing: cutting tools, toolpaths, 2D contour and pocket milling, G-code and post processors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
