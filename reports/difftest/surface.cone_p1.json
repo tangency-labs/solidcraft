@@ -1471,7 +1471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/cases.json#183 (upstream edge case)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -2019,6 +2019,70 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "height_without_polar_tiny_axis_swap0_inside0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#0 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 249
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_tiny_axis_swap0_inside1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#1 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 192
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_tiny_axis_swap1_inside0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#2 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 249
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_tiny_axis_swap1_inside1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#3 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 192
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_negative_radius_swap0_inside0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#4 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 192
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_negative_radius_swap0_inside1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#5 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 192
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_negative_radius_swap1_inside0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#6 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 192
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "height_without_polar_negative_radius_swap1_inside1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p1/height_without_polar.json#7 (upstream source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails))",
+      "values_compared": 192
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "review_c123_build",
       "outcome": "pass",
       "pass": true,
@@ -2407,7 +2471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#48 (upstream review adversarial)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -2415,7 +2479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#49 (upstream review adversarial)",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -32911,7 +32975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#694 (upstream review 2 adversarial)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -32919,7 +32983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#695 (upstream review 2 adversarial)",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -33007,7 +33071,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#706 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33015,7 +33079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#707 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33039,7 +33103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#710 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33119,7 +33183,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#720 (upstream review 2 adversarial)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -33127,7 +33191,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#721 (upstream review 2 adversarial)",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -33215,7 +33279,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#732 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33223,7 +33287,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#733 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33247,7 +33311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#736 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33351,7 +33415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#749 (upstream review 2 adversarial)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -33359,7 +33423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#750 (upstream review 2 adversarial)",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -33439,7 +33503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#760 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33447,7 +33511,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#761 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33455,7 +33519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#762 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33479,7 +33543,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#765 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33559,7 +33623,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#775 (upstream review 2 adversarial)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -33567,7 +33631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#776 (upstream review 2 adversarial)",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -33623,7 +33687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#783 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33655,7 +33719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#787 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33663,7 +33727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#788 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33687,7 +33751,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#791 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33759,7 +33823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#800 (upstream review 2 adversarial)",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -33767,7 +33831,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#801 (upstream review 2 adversarial)",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -33839,7 +33903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#810 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33847,7 +33911,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#811 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33871,7 +33935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#814 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33879,7 +33943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#815 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -33903,7 +33967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review2.json#818 (upstream review 2 adversarial)",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -104815,7 +104879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1707 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105015,7 +105079,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1732 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105215,7 +105279,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1757 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -105223,7 +105287,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1758 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105415,7 +105479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1782 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -105423,7 +105487,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1783 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105431,7 +105495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1784 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105631,7 +105695,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1809 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105639,7 +105703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1810 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -105847,7 +105911,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1836 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -106047,7 +106111,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1861 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -106247,7 +106311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1886 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -106255,7 +106319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1887 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -106263,7 +106327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1888 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -106455,7 +106519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1912 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -106463,7 +106527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#1913 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -108959,7 +109023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#2225 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -109159,7 +109223,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#2250 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -109359,7 +109423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#2275 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -118871,7 +118935,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#3464 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -119071,7 +119135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#3489 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -119703,7 +119767,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#3568 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -119895,7 +119959,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#3592 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -119903,7 +119967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#3593 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -123423,7 +123487,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#4033 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -123623,7 +123687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#4058 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -124247,7 +124311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#4136 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -124455,7 +124519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#4162 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -152743,7 +152807,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#7698 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 199
+      "values_compared": 200
     },
     {
       "max_rel_err": 0.0,
@@ -152823,7 +152887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#7708 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 200
+      "values_compared": 201
     },
     {
       "max_rel_err": 0.0,
@@ -152831,7 +152895,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#7709 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 199
+      "values_compared": 200
     },
     {
       "max_rel_err": 0.0,
@@ -152911,7 +152975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review4.json#7719 (upstream fourth review adversarial (surface.cone_p1))",
-      "values_compared": 200
+      "values_compared": 201
     },
     {
       "max_rel_err": 0.0,
@@ -156039,7 +156103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390159711",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -156231,7 +156295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390159735",
-      "values_compared": 199
+      "values_compared": 200
     },
     {
       "max_rel_err": 0.0,
@@ -156527,7 +156591,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390159772",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -158023,7 +158087,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390159959",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -158295,7 +158359,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390159993",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -159367,7 +159431,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160127",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -159943,7 +160007,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160199",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -160175,7 +160239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160228",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -160471,7 +160535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160265",
-      "values_compared": 193
+      "values_compared": 194
     },
     {
       "max_rel_err": 0.0,
@@ -161791,7 +161855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160430",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -162959,7 +163023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160576",
-      "values_compared": 199
+      "values_compared": 200
     },
     {
       "max_rel_err": 0.0,
@@ -163455,7 +163519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160638",
-      "values_compared": 191
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -164039,7 +164103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160711",
-      "values_compared": 201
+      "values_compared": 202
     },
     {
       "max_rel_err": 0.0,
@@ -164439,7 +164503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=5844057181390160761",
-      "values_compared": 192
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -165557,8 +165621,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 20694,
-  "cases_total": 20694,
+  "cases_passed": 20702,
+  "cases_total": 20702,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

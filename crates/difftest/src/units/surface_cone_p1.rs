@@ -706,11 +706,9 @@ fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &Cone) -> solidcore::Result<()> {
         flag(can.swap_uv),
         flag(can.inside_out),
     ]);
-    let height_ok = rev.base().gw_nurb().is_none() || rev.polar_curve().is_some();
-    o.push(flag(height_ok));
-    if height_ok {
-        o.push(s.height(k)?);
-    }
+    // GetHeight's failed evaluations leave initialized SmPoint3d sentinels.
+    // Compare that defined result even when the polar curve is missing.
+    o.extend([1.0, s.height(k)?]);
     let pc = rev.polar_converter();
     o.push(flag(rev.have_polar_conversion()));
     let angles = pc.angles();

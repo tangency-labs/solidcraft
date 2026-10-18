@@ -86,12 +86,24 @@ void put_curve(std::vector<double>& o, const SmCurve* c)
 }
 
 
-struct TestCone : SmCone {
-    TestCone(const double* v) : SmCone(SmPoint3d(v[0],v[1],v[2]), SmVector3d(v[3],v[4],v[5]),
+struct MissingPolarCurve {};
+template<class Base> struct CheckedCone : Base {
+    using Base::Base;
+    SmStatus ConvertUVFromSTEPToNURBS(const SmPoint2d& step, SmPoint2d& nurbs) const override {
+        // MakeNurb ignores RebuildPolarConverter's failure. ConvertToNURBSParameter
+        // then dereferences GetCurve() without checking it (SmEllipse.cpp:491).
+        // Guard the actual conversion, preserving early returns and converters
+        // that have a curve but no exact table (HavePolarConversion() == FALSE).
+        if (!this->m_vPolarConverter.GetCurve()) throw MissingPolarCurve();
+        return Base::ConvertUVFromSTEPToNURBS(step, nurbs);
+    }
+};
+struct TestCone : CheckedCone<SmCone> {
+    TestCone(const double* v) : CheckedCone<SmCone>(SmPoint3d(v[0],v[1],v[2]), SmVector3d(v[3],v[4],v[5]),
         SmVector3d(v[6],v[7],v[8]),v[9],v[10],v[12],v[13],v[11],(SmBoolean)v[14],(SmBoolean)v[15],FALSE) {}
 };
 SmCone* make_cone(const SmContext& ctx, const double* v) {
-    if(v[16]) return new(ctx) SmCylinder(SmPoint3d(v[0],v[1],v[2]),SmVector3d(v[3],v[4],v[5]),
+    if(v[16]) return new(ctx) CheckedCone<SmCylinder>(SmPoint3d(v[0],v[1],v[2]),SmVector3d(v[3],v[4],v[5]),
         SmVector3d(v[6],v[7],v[8]),v[9],v[12],v[13],v[11],(SmBoolean)v[14],(SmBoolean)v[15],FALSE,&ctx);
     return new(ctx) TestCone(v);
 }
@@ -114,7 +126,7 @@ struct Curves {
 SC_EXPORT int32_t sc_surface_cone_p3_intersect(int32_t op,const double* cone,const double* other,
     const double* domains,double tolerance,int32_t has_tolerance,int32_t same,
     double* out,int64_t cap,int64_t* len) {
-    SC_TRY
+    try {
     SmContext ctx;
     std::unique_ptr<SmCone> a(make_cone(ctx,cone));
     SmStatus build=a->MakeNurb();
@@ -184,5 +196,9 @@ SC_EXPORT int32_t sc_surface_cone_p3_intersect(int32_t op,const double* cone,con
     result.push_back(curves.deviations.GetSize());
     for(ULONG i=0;i<curves.deviations.GetSize();++i) result.push_back(curves.deviations[i]);
     return sc_copy_out(result.data(),(int64_t)result.size(),out,cap,len);
-    SC_CATCH
+    } catch (const MissingPolarCurve&) {
+        return SC_ERR_ARG;
+    } catch (...) {
+        return SC_ERR_EXCEPTION;
+    }
 }

@@ -9,6 +9,29 @@ Latest main integration: `surface.surface_p11` partial (PR #120: 176 ported unit
 Latest unit: `intersect.curve_class_p9` ([PR #151](https://github.com/bherbruck/solidcore/pull/151)) is partial on a standalone official-main base: review validation has 424 differential cases, 225 bit-identical passes, 197 dependency deferrals, 2 native setup rejections and zero failures. It ports edge and trim-boundary intersections with concrete query handle mappings. Pole lookup now matches the native FALSE default; collapsed caches, wider input ranges and positive endpoint classification are covered. Interior partition insertion awaits part 2. No open dependency PR is bundled. The manifest has 195 ported units (108 green, 87 partial); final integration results are recorded in the PR checks.
 
 
+## Port review note (2026-10-18, issue #210)
+
+Carry forward [issue #210](https://github.com/tangency-labs/solidcore/issues/210)
+when extending or reviewing partial ports:
+
+- Stub the missing call and retain the upstream logic after it. A function that stops
+  at its first missing callee does not establish completion of its assigned body.
+- Separate successful operations that change geometry/topology from refusals, empty
+  results, no-ops and guard assertions. `partial`, `max_rel_err=0` and `with_values`
+  alone do not certify the success paths; record the unexercised operations explicitly.
+- Treat B-rep `Notify` integration as a critical dependency for meaningful topology
+  coverage, and coordinate the canonical `Brep` fields and editing state across ports.
+- Review defaults and unreachable tails against upstream before their dependencies
+  land. Merge current main before readiness, wire stale stubs, and rerun affected
+  topology units with expanded seeds when the shared dependencies become available.
+
+These are review/handoff notes from the issue, not a claim that its proposed process
+or reporting changes have already been implemented. For cone follow-up #207, the
+rejection fixtures compare only the native guard (Rust runs on them but its result is
+not compared) and the missing general Cone adapter remains an explicit dependency
+deferral.
+
+
 ## Integration update (2026-10-15, PR #119)
 
 The manifest now has 173 ported units: 97 green and 76 partial. `mass.integrator`

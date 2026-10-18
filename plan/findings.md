@@ -6370,6 +6370,88 @@ checkout. The platform prerequisites remain excluded from the submitted branch.
   written U falls outside a trimmed domain for one line) and `_swapped` (swap UV: the
   failed conversion returns before the exchange).
 
+
+### surface.cone_p3 tiny-axis follow-up (issue #207)
+
+- A tiny Y axis can leave a cone with a NURB but no polar circle: `MakeNurbWithSweepParams`
+  ignores the converter rebuild's failure (`SmSurfOfRevolution.cpp:1033`). In the parallel
+  cylinder branch, `IntersectWithCone` reaches `ConvertUVFromSTEPToNURBS` at
+  `SmCone.cpp:2966-2967`, which enters `SmPolarConversion::ConvertToNURBSParameter` and
+  dereferences the missing circle at `SmEllipse.cpp:491` (upstream-issues UB-179).
+- The native shim overrides that virtual conversion for real `SmCone` and `SmCylinder`
+  subclasses and rejects only when the conversion is actually called with a null circle.
+  This preserves self-intersection/disjoint early returns, constructor errors, and
+  converters that have a circle even when their exact conversion table is unavailable.
+  A dedicated exception exits the native call with `SC_ERR_ARG`; owned native objects
+  unwind normally. Neither a blanket small-axis check nor `HavePolarConversion()` is used.
+- `GetHeight` also encountered the missing circle, but its native behavior is defined:
+  `SmPoint3d` members initialize to `SM_UNDEF_DOUBLE` (`SmVector3d.h:56-58`). Both ignored
+  `EvaluatePoint` failures leave those points unchanged, so their difference, and the
+  resulting height, are zero (`SmCone.cpp:2264-2268`). Rust previously propagated status
+  1006. `Cone::height` now preserves the default point on ignored evaluation failures;
+  `Unported` still propagates. The part-1 state adapters now compare height without the
+  former polar-circle restriction, and `height_without_polar.json` checks tiny axes and
+  negative radii with every swap/inside-out combination.
+- `tiny_axis.json` has eight `rejected_*` guard assertions (both operand orders, direct
+  and global cone calls, real cylinders, zero and sub-threshold axes) and eight defined
+  neighboring calls (self/disjoint early returns and nondegenerate axes). Guard assertions
+  are status-only tests of `SC_ERR_ARG`, not geometry parity; Rust intersection is not
+  executed for them. Four `missing_polar_height_plane_*` cases exercise the corrected
+  height through direct/global plane intersections; two compare a returned circle.
+  The original overflow-axis fixtures remain covered.
+- Before the height fix, a 10,000-case probe of the original 1,312-case corpus found
+  eight status-1006 disagreements, all retained in `fuzz_height.json`: fuzz00226,
+  fuzz02052, fuzz02407, fuzz05279, fuzz05558, fuzz06289, fuzz06674 and fuzz09442.
+  It also found three status-1007 disagreements on global calls (fuzz04485, fuzz04639,
+  fuzz07170). Those reached the runner's general-intersector callback, whose temporary
+  `InvalidInput` hid the existing missing typed Cone adapter. The callback now returns
+  `Unported(surface.surface_p2)` for that adapter, as the cone's boundary path already
+  does. `fuzz_general.json` retains those cases as dependency deferrals; no general
+  intersection result is fabricated or counted as a pass.
+- Affected-unit comparison with the polar set-up bound passes on Linux:
+  `PASS surface.cone_p1 cases=20702 passed=20702 failed=0 deferred=0 max_rel_err=0e0`;
+  `PARTIAL surface.cone_p3 cases=1415 passed=1289 failed=0 deferred=126 max_rel_err=0e0`.
+  Part 3 has 1281 passes with values (72 of them the `angle_bounds.json` cones) and
+  eight native-guard status assertions (Rust runs on them; its result is not
+  compared). All eight
+  status-1006 regressions and all four reduced plane intersections pass. Its 126
+  deferrals comprise 91 on `surface.cone_p2` and 35 on the typed Cone adapter in
+  `surface.surface_p2`; the latter includes the three general fuzz cases and two
+  valid-axis global neighbors whose native general fallback cannot yet be compared.
+- A 10,000-case fuzz of the final corpus found one timeout, fuzz02755: a global
+  cone/cone call whose second cone has start and end angles near `9.2e18` degrees. The
+  Rust side spun in `Ellipse::set_up_polar_conversion`'s whole-turn shift loop (upstream
+  `SmEllipse.cpp:278-289`), which never ends once adding 360 no longer changes the
+  midpoint; a well-formed native record with the same angles also does not return
+  (upstream-issues HANG-23). The fuzzed record itself had 18 doubles, so the native
+  wrapper refused it, but the harness still runs Rust on wrapper refusals. The Rust loop
+  now stops with `NotConverged` after `MAX_PERIOD_SHIFTS` (2^20) turns.
+- The `surface.cone_p3` FFI first accepted angles up to `360 * (2^20 - 3)` degrees, the
+  largest the bounded set-up reaches. Fuzzing seeded from cones at that bound then found
+  three native timeouts (fuzz05643, fuzz07048, fuzz07266: the bound plus a tolerance of
+  `-1` or `0`, or a radius of 8). gdb showed each in `SmExtent1d::PeriodicWrap` under
+  `SmEllipse::STEPInversion` / `SmPolarConversion::ConvertToPolarParameter` /
+  `SmCone::ConvertUVFromNURBSToSTEP`, reached from `SmSurface::DropPoint`,
+  `SmSurfPtSolveStepper` and `SmSurfaceIntersector::TraceCurve`: every evaluation wraps
+  the angle one turn per iteration (HANG-1, ported faithfully), so the cost grows with
+  the angle on both sides. The FFI therefore accepts start and end angles only within
+  upstream's documented `[-360, 360]` (`SmCone.h:205-206`), as `surface.cone_p1` does for
+  circles. No earlier fixture uses angles outside it; `angle_bounds.json` (72 cases)
+  compares cones at both limits, a full negative turn and a straddling domain with every
+  swap and inside-out flag, through direct and global cone and plane intersections.
+  After the change: `FUZZ-PASS surface.cone_p3 cases=10000 rejected=4242 malformed=3032
+  ran=2726 differs=0 crashes=0 panics=0 timeouts=0`; perturbation detects 1289/1289
+  (`cone_p3`) and 20702/20702 (`cone_p1`); `curve.ellipse_p1` (2028) and
+  `curve.ellipse_p2` (2102) still pass bit-identically; after merging official main
+  `f1d0f1d5`, `--green` reports 203 units, 113 passed, 90 partial, 0 failed.
+- Linux validation uses Proxmox VM 107 (`runner-codex-02`, x86-64, GNU C++ 15.2), a fresh
+  snapshot of official main `53ba102b` plus this change, and the shared C++ reference build.
+  Its allowed source trees were byte-checked against pinned `c9c5979`. The first default
+  runner build was killed by signal 9 near the 8 GiB VM memory limit. Validation retries
+  use `--config 'profile.difftest.package.difftest.opt-level=0'` for the runner package
+  only; Rust kernel and C++ reference settings are unchanged. No Apple Clang prerequisites
+  are used.
+
 ## surface.surface_p11 (`LocalSurfaceIntersect`, `SmCSGlobalSolver` / `SmSSGlobalSolver::LocalSolve`, `IntersectSurfaceBoundaries`, `LiftCurve`, PR #120, 2026-10-15; partial)
 
 - **Known disagreement (not generated): boundaries of an `SmPlane`.** In

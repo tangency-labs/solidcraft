@@ -1,7 +1,8 @@
 //! Native cone/plane and cone/cone intersection adapters.
 //!
 //! Cone records: origin, x axis, y axis, bottom/top radii, height, start/end
-//! angles, swap UV, inside out, cylinder class (17 doubles). Plane records:
+//! angles (within `[-MAX_ANGLE, MAX_ANGLE]`, [`MAX_ANGLE`]), swap UV, inside out, cylinder class
+//! (17 doubles). Plane records:
 //! origin, x axis, y axis, STEP domain (13 doubles). Domain records contain
 //! two rectangles as fractions of each natural NURB domain. The result stores
 //! status, needs-general, full curve geometry and NURBS, UV nullness, types and
@@ -26,9 +27,21 @@ mod sys {
     }
 }
 
+/// Largest start or end angle magnitude (degrees) of a cone record, upstream's
+/// documented range (`SmCone.h:205-206`). Native evaluation wraps angles one turn
+/// per iteration (`SmExtent1d::PeriodicWrap`, upstream-issues HANG-1) and polar
+/// set-up shifts them one turn per iteration (HANG-23), so the cost of every
+/// evaluation grows with the angle: fuzzing found intersections of cones near
+/// `3.8e8` degrees that did not finish in 20 s, and near `9.2e18` set-up never ends.
+pub const MAX_ANGLE: f64 = 360.0;
+
 fn cone_valid(v: &[f64]) -> bool {
     v.len() == 17
         && v.iter().all(|x| x.is_finite())
+        && v.get(12..14)
+            .unwrap_or(&[])
+            .iter()
+            .all(|x| x.abs() <= MAX_ANGLE)
         && v.get(14..)
             .unwrap_or(&[])
             .iter()
@@ -67,6 +80,8 @@ pub fn intersect(
     // Coincident native cylinders dereference the optional tolerance unconditionally.
     // The shim guards that exact path after computing its geometry, rather than
     // rejecting all calls without a tolerance here.
+    // The shim also rejects a STEP-to-NURBS conversion whose cone has no polar
+    // curve after MakeNurb, at the virtual call that would dereference it.
     call_with_buffer(4096, |out, len| {
         // SAFETY: fixed record lengths and values checked above; output and length
         // are writable, and native-owned curves are destroyed before returning.
@@ -130,6 +145,36 @@ mod tests {
             }
         }
         assert!(intersect(0, &a, &nested, &DOMAINS, None, false).is_ok());
+    }
+
+    #[test]
+    fn rejects_only_angles_outside_the_documented_range() {
+        for index in [12, 13] {
+            for value in [
+                MAX_ANGLE + 1e-9,
+                -MAX_ANGLE - 1e-9,
+                720.0,
+                3.774_862_8e8,
+                -9.223_372_036_854_776e18,
+            ] {
+                let mut a = cone();
+                a[index] = value;
+                assert!(matches!(
+                    intersect(3, &cone(), &a, &DOMAINS, Some(1e-7), false),
+                    Err(FfiError::InvalidArgument(_))
+                ));
+            }
+        }
+        // Native may still report a status for these; the wrapper must not refuse them.
+        for (start, end) in [(-MAX_ANGLE, -270.0), (270.0, MAX_ANGLE), (-MAX_ANGLE, MAX_ANGLE)] {
+            let mut other = cone();
+            other[12] = start;
+            other[13] = end;
+            assert!(!matches!(
+                intersect(3, &cone(), &other, &DOMAINS, Some(1e-7), false),
+                Err(FfiError::InvalidArgument(_))
+            ));
+        }
     }
 
     fn plane() -> Vec<f64> {
@@ -244,7 +289,6 @@ mod tests {
             (11, -1.0),
             (13, 0.0),
             (13, -90.0),
-            (13, 720.0),
             (12, -360.0),
             (3, 0.0),
             (7, 0.0),
@@ -257,6 +301,13 @@ mod tests {
                 "constructor boundary index={index} value={value}"
             );
         }
+        // A two-turn end angle is outside the documented range ([`MAX_ANGLE`]).
+        let mut a = cone();
+        a[13] = 720.0;
+        assert!(matches!(
+            intersect(1, &a, &plane(), &DOMAINS, Some(1e-7), false),
+            Err(FfiError::InvalidArgument(_))
+        ));
     }
 
     #[test]
@@ -267,5 +318,39 @@ mod tests {
         // SmCylinder_TYPE falls through the native global switch into the
         // general intersector; it never dereferences the analytic tolerance.
         assert!(intersect(3, &a, &b, &DOMAINS, None, false).is_ok());
+    }
+
+    #[test]
+    fn guards_missing_polar_curve_only_when_conversion_is_reached() {
+        let mut a = vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1e-300, 0.0, 1.5628, 1.5628,
+            1.10780, 0.0, 360.0, 0.0, 1.0, 0.0,
+        ];
+        let mut b = vec![
+            0.0, 0.5539, 0.5539, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.5628, 1.5628,
+            1.10780, 0.0, 360.0, 0.0, 0.0, 0.0,
+        ];
+        let domains = [0.0, 0.0, 1.0, 1.0, 0.0, 0.125, 1.0, 0.875];
+        for class in [0.0, 1.0] {
+            a[16] = class;
+            b[16] = class;
+            for (first, second) in [(&a, &b), (&b, &a)] {
+                assert_eq!(
+                    intersect(0, first, second, &domains, Some(1e-7), false),
+                    Err(FfiError::Status(crate::SC_ERR_ARG))
+                );
+            }
+        }
+        a[16] = 0.0;
+        b[16] = 0.0;
+        assert_eq!(
+            intersect(3, &a, &b, &domains, Some(1e-7), false),
+            Err(FfiError::Status(crate::SC_ERR_ARG))
+        );
+        // Missing polar state alone is not a reason to reject: these paths
+        // return before requesting the undefined conversion.
+        assert!(intersect(0, &a, &b, &domains, Some(1e-7), true).is_ok());
+        b[1] = 10.0;
+        assert!(intersect(0, &a, &b, &domains, Some(1e-7), false).is_ok());
     }
 }

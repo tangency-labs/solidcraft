@@ -915,6 +915,858 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#0 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i0_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#1 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#2 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i0_global_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#3 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#4 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#5 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#6 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#7 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#8 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s0i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#9 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#10 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#11 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#12 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#13 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#14 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#15 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#16 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_s1i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#17 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#18 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i0_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#19 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#20 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i0_global_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#21 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#22 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#23 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#24 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#25 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#26 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s0i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#27 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#28 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#29 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#30 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#31 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#32 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#33 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#34 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_pos_s1i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#35 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#36 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i0_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#37 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#38 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i0_global_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#39 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#40 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#41 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#42 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#43 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#44 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s0i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#45 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#46 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#47 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#48 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#49 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#50 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#51 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#52 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_neg_turn_s1i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#53 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#54 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i0_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#55 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#56 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i0_global_cone_second",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#57 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#58 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#59 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#60 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#61 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#62 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s0i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#63 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i0_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#64 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i0_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#65 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i0_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#66 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i0_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#67 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i1_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#68 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i1_global_cone_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#69 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i1_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#70 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "angle_bound_straddle_s1i1_global_plane_first",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/angle_bounds.json#71 (upstream source/SMLib/inc/SmCone.h:205 (start/end angles at the documented [-360, 360] limits; FFI angle guard, issue #207))",
+      "values_compared": 82
+    },
+    {
+      "deferred": {
+        "symbol": "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
+        "unit": "surface.surface_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "fuzz_general_04485",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_general.json#0 (upstream source/SMLib/src/SmCone.cpp:GlobalSurfaceIntersect (issue #207 expanded fuzz; typed general Cone adapter remains unported))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
+        "unit": "surface.surface_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "fuzz_general_04639",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_general.json#1 (upstream source/SMLib/src/SmCone.cpp:GlobalSurfaceIntersect (issue #207 expanded fuzz; typed general Cone adapter remains unported))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
+        "unit": "surface.surface_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "fuzz_general_07170",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_general.json#2 (upstream source/SMLib/src/SmCone.cpp:GlobalSurfaceIntersect (issue #207 expanded fuzz; typed general Cone adapter remains unported))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_00226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#0 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_02052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#1 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_02407",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#2 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_05279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#3 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_05558",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#4 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_06289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#5 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_06674",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#6 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_height_09442",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_height.json#7 (upstream source/SMLib/src/SmCone.cpp:2251-2268 (issue #207; ignored evaluation errors leave initialized height points))",
+      "values_compared": 5
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_tiny_axis_0_cone",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#0 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_tiny_axis_0_other",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#1 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_tiny_axis_3_cone",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#2 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_tiny_axis_3_other",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#3 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_tiny_axis_cylinders_cone",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#4 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_tiny_axis_cylinders_other",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#5 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_zero_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#6 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "rejected_below_unitize_threshold_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#7 (upstream source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_0_self",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#8 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_0_disjoint",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#9 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_0_unit_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#10 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_0_above_unitize_threshold",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#11 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_3_self",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#12 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_3_disjoint",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#13 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
+        "unit": "surface.surface_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_3_unit_axis",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#14 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
+        "unit": "surface.surface_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "tiny_axis_neighbor_3_above_unitize_threshold",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#15 (upstream source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "missing_polar_height_plane_1_z",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#16 (upstream source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "missing_polar_height_plane_1_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#17 (upstream source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "missing_polar_height_plane_2_z",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#18 (upstream source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "missing_polar_height_plane_2_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/tiny_axis.json#19 (upstream source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle))",
+      "values_compared": 82
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -10618,13 +11470,14 @@
       "values_compared": 79
     }
   ],
-  "cases_both_errored": 0,
-  "cases_deferred": 30,
+  "cases_both_errored": 8,
+  "cases_deferred": 126,
   "cases_failed": 0,
-  "cases_passed": 1282,
-  "cases_total": 1312,
+  "cases_passed": 1289,
+  "cases_total": 1415,
   "deferred_by_unit": {
-    "surface.surface_p2": 30
+    "surface.cone_p2": 91,
+    "surface.surface_p2": 35
   },
   "max_rel_err": 0.0,
   "pass": true,

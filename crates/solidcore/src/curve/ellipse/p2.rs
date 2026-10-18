@@ -38,6 +38,7 @@
 //! | [`Ellipse::start_angle_deg`], [`Ellipse::end_angle_deg`], [`Ellipse::position`] | `GetStartAngleDeg`, `GetEndAngleDeg`, `GetPosition` (inline) |
 //! | [`Ellipse::x_radius`], [`Ellipse::y_radius`], [`Ellipse::inside_out`] | `GetXRadius`, `GetYRadius`, `GetInsideOut` (inline) |
 //! | [`Ellipse::is_analytic`], [`Ellipse::is_domain_boundary`] | `IsAnalytic`, `IsDomainBoundary` (inline)  |
+//! | [`MAX_PERIOD_SHIFTS`]                             | no counterpart (loop bound)                      |
 //!
 //! Deviations:
 //! - **Derived class.** `SmEllipse` derives from `SmBSplineCurve`; the base object is
@@ -60,6 +61,11 @@
 //!   An ellipse without NURB (only [`Ellipse::empty`]) is not set up: upstream makes
 //!   the NURB lazily inside `GetKnots`, re-entering the set-up; here that is
 //!   `SM_ERR`.
+//!   Its two `while` loops that shift the NURB's angles by whole turns towards the
+//!   STEP interval are bounded: where upstream would loop forever (a shift that no
+//!   longer changes the midpoint, from STEP angles beyond about 2^61 (~2.3e18) degrees) or for more
+//!   than [`MAX_PERIOD_SHIFTS`] shifts, the set-up returns
+//!   [`SolidError::NotConverged`] with the converter left impossible.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
@@ -117,6 +123,11 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 
 const OP_SET_UP: &str = "curve::ellipse::p2::Ellipse::set_up_polar_conversion";
+
+/// Largest number of whole-turn shifts [`Ellipse::set_up_polar_conversion`] applies
+/// to move the NURB's angles next to the STEP interval (upstream loops without a
+/// bound).
+pub const MAX_PERIOD_SHIFTS: usize = 1 << 20;
 const OP_TO_NURBS: &str = "curve::ellipse::p2::PolarConversion::convert_to_nurbs_parameter";
 const OP_ANGLE: &str = "curve::ellipse::p2::PolarConversion::angle_param_to_nurb_param";
 const OP_EVAL_STEP: &str = "curve::ellipse::p2::Ellipse::evaluate_step";
@@ -2048,15 +2059,32 @@ pub(crate) fn set_up_polar_conversion(
         let input_mid = anal_ivl.mid();
         let mut this_mid = (lowest_deg + highest_deg) / 2.0;
 
+        // Upstream loops without a bound; a shift that no longer changes the midpoint
+        // (beyond about 2^61 degrees) would never end.
+        let stuck = || SolidError::NotConverged {
+            operation: OP_SET_UP,
+            iterations: u32::try_from(MAX_PERIOD_SHIFTS).unwrap_or(u32::MAX),
+        };
+        let mut shifts = 0usize;
         while this_mid > input_mid + 180.0 + EFF_ZERO {
+            let next_mid = this_mid - 360.0;
+            shifts += 1;
+            if next_mid == this_mid || shifts > MAX_PERIOD_SHIFTS {
+                return Err(stuck());
+            }
             lowest_deg -= 360.0;
             highest_deg -= 360.0;
-            this_mid -= 360.0;
+            this_mid = next_mid;
         }
         while this_mid < input_mid - 180.0 - EFF_ZERO {
+            let next_mid = this_mid + 360.0;
+            shifts += 1;
+            if next_mid == this_mid || shifts > MAX_PERIOD_SHIFTS {
+                return Err(stuck());
+            }
             lowest_deg += 360.0;
             highest_deg += 360.0;
-            this_mid += 360.0;
+            this_mid = next_mid;
         }
 
         // watch out for tolerance creep
@@ -2236,6 +2264,49 @@ mod tests {
                 assert!(p.distance(q) < 1e-9, "{a} {io}: {p:?} {q:?}");
             }
         }
+    }
+
+    #[test]
+    fn polar_set_up_bounds_period_shifts() {
+        let k = kernel();
+        // A quarter circle whose STEP interval is moved far away after its NURB is
+        // made, as the cone's iso-curves are.
+        let arc = |start: f64| {
+            let mut e = Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 90.0),
+                1.0,
+                &EllipseOptions::default(),
+            )
+            .expect("circle");
+            e.set_step_interval(Extent1d::from_min_max(start, start + 90.0));
+            e
+        };
+        // Far but reachable: the angles shift into place as upstream.
+        let mut e = arc(1e8);
+        e.set_up_polar_conversion(&k).expect("set-up");
+        assert!(e.polar.is_polar_conversion_possible());
+        assert!((e.step_interval().mid() - (1e8 + 45.0)).abs() <= 180.0);
+        // The largest angles that shift within the bound.
+        let edge = 360.0 * (MAX_PERIOD_SHIFTS - 3) as f64;
+        for (lo, hi) in [(edge - 90.0, edge), (-edge, 90.0 - edge)] {
+            let mut e = arc(lo);
+            e.set_step_interval(Extent1d::from_min_max(lo, hi));
+            e.set_up_polar_conversion(&k)
+                .expect("largest angles that shift within MAX_PERIOD_SHIFTS");
+            assert!(e.polar.is_polar_conversion_possible());
+        }
+        // Upstream never ends: adding a turn no longer changes the midpoint.
+        let mut e = arc(9.223_372_036_854_776e18);
+        let err = e.set_up_polar_conversion(&k).unwrap_err();
+        assert!(matches!(err, SolidError::NotConverged { .. }), "{err:?}");
+        assert!(!e.polar.is_polar_conversion_possible());
+        // Representable shifts beyond the bound stop as well.
+        let mut e = arc(1e12);
+        assert!(e.set_up_polar_conversion(&k).is_err());
     }
 
     #[test]

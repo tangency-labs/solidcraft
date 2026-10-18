@@ -66,7 +66,7 @@
 //!   arguments upstream marks `NotUsed` are dropped. Calls whose status upstream
 //!   ignores keep upstream's values, except that [`SolidError::Unported`] always
 //!   propagates and a failure whose output upstream would read uninitialised (a failed
-//!   point evaluation in `CreateIsoParametricCurve` and `GetHeight`, a failed STEP
+//!   point evaluation in `CreateIsoParametricCurve`, a failed STEP
 //!   inversion in `CreateIsoCircleFromPoint`) is returned. `GetApex` of a cylinder and
 //!   `STEPInversion` of a point outside the sweep return `SM_ERR` upstream with their
 //!   outputs set (callers use them): here they return the outputs ([`Apex::is_cylinder`],
@@ -75,6 +75,9 @@
 //!   dereferences `NULL`) is `InvalidInput`. The unbounded constructor propagates an
 //!   error from `GetApex` (upstream ignores its status and then reads an
 //!   uninitialised `dApexParam`); a cylinder's apex is not an error here.
+//!   `GetHeight` ignores point-evaluation errors and retains `Vec3::UNDEF` for an
+//!   unwritten point (the initialized default `SmPoint3d`), including zero height
+//!   when both conversions fail because the polar curve is missing.
 //!   [`Cone::apex`] propagates an error from the generator's STEP inversion of the
 //!   apex, whereas `GetPositivePoint` and `STEPInversion` upstream ignore `GetApex`'s
 //!   status and still use the apex point it wrote. This differs only for a generator
@@ -1098,8 +1101,8 @@ impl Cone {
     ///
     /// # Errors
     ///
-    /// Those of [`Self::evaluate_point`] (whose status upstream ignores, then reading
-    /// uninitialised points).
+    /// [`SolidError::Unported`] from evaluation. Other evaluation failures retain
+    /// the default [`Vec3::UNDEF`] point, as upstream's ignored statuses do.
     pub fn height(&self, k: &Kernel) -> Result<f64> {
         if self.rev.base.gw_nurb().is_none() {
             return Ok(self.rev.anal_uv_domain.max().y - self.rev.anal_uv_domain.min().y);
@@ -1110,8 +1113,8 @@ impl Cone {
         } else {
             (nurb_domain.max(), nurb_domain.min())
         };
-        let top = self.evaluate_point(k, top_uv)?;
-        let bot = self.evaluate_point(k, bot_uv)?;
+        let top = ignored(self.evaluate_point(k, top_uv))?.unwrap_or(Vec3::UNDEF);
+        let bot = ignored(self.evaluate_point(k, bot_uv))?.unwrap_or(Vec3::UNDEF);
         Ok((top - bot).dot(self.rev.position.z_axis()))
     }
 
@@ -2114,6 +2117,7 @@ mod tests {
         );
         c.make_nurb(&k()).unwrap();
         assert!(c.rev().polar_curve().is_none());
+        assert_eq!(c.height(&k()).unwrap(), 0.0);
         assert!(c
             .convert_uv_from_step_to_nurbs(&k(), Point2::new(10.0, 1.0))
             .is_err());

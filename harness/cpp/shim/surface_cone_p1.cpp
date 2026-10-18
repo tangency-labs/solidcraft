@@ -466,12 +466,10 @@ void put_state(std::vector<double>& o, const SmCone* s)
     o.push_back(csa);
     o.push_back(flg(cswap));
     o.push_back(flg(cinside));
-    // GetHeight evaluates through the polar converter's curve (read uninitialised
-    // points when that fails): only with a polar curve or without NURB.
-    bool height_ok = s->GetGwNurbPointer() == NULL || has_polar_curve(s);
-    o.push_back(flg(height_ok));
-    if (height_ok)
-        o.push_back(s->GetHeight());
+    // Failed evaluations retain the initialized default SmPoint3d sentinels;
+    // GetHeight is defined even without a polar curve (both failures give zero).
+    o.push_back(1.0);
+    o.push_back(s->GetHeight());
     const SmPolarConversion& pc = s->*ConePeek::polar();
     o.push_back(flg(s->HavePolarConversion()));
     ULONG cnt = pc.GetAngleCount();
