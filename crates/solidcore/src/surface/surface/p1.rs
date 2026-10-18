@@ -1676,7 +1676,8 @@ impl Surface {
 
     /// The silhouette curves of the surface over `uv_domain` for a parallel
     /// (`eye_point_or_view_vector` the view vector) or perspective projection
-    /// (`CreateSilhouetteCurves`).
+    /// (`CreateSilhouetteCurves`), with the walk tolerances `pOptApproxTol3d` and
+    /// `cpdOptAngleTolRadians`.
     ///
     /// # Errors
     ///
@@ -1688,6 +1689,8 @@ impl Surface {
         uv_domain: &Extent2d,
         _eye_point_or_view_vector: Point3,
         _perspective: bool,
+        _approx_tol_3d: Option<f64>,
+        _ang_tol_rad: Option<f64>,
     ) -> Result<(Vec<Curve>, Vec<Curve>)> {
         let cache = get_surface_cache::<()>(k, self, None)?;
 

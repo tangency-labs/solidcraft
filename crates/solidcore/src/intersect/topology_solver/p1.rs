@@ -1779,8 +1779,14 @@ pub(super) fn face_silhouettes<O: Copy + PartialEq>(
     }
 
     // Create the planar section curves from the brep and the plane
-    let (_curves_3d, _curves_uv) =
-        srf.create_silhouette_curves(k, &objects.face_uv_domain(face)?, view, false)?;
+    let (_curves_3d, _curves_uv) = srf.create_silhouette_curves(
+        k,
+        &objects.face_uv_domain(face)?,
+        view,
+        false,
+        Some(approx_tol),
+        Some(angle_tol),
+    )?;
 
     // Now trim the curves (then SmSurfaceCache::AddCurvesToCache(SM_AS_TRIMMED_SILHOUETTE,
     // ..) and HasCachedCurves again, SM_ERR when they are not found).
