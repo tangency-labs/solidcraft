@@ -12,25 +12,27 @@
 //! reading `SmMerge::m_vTI`; ids replace pointers. Output stays mutable because
 //! upstream preserves its partial contents on failure. Classification (including
 //! face/edge-to-region resolution) waits for `query.brep`; graph deletion waits
-//! for `topology.brep_p4`; edge copying waits for `boolean.merge_p2`. Vertex
-//! copying delegates to [`p1::merge_vertex`]. B-rep
+//! for `topology.brep_p4`. Edge copying is [`p2::merge_edge`] of each edge's
+//! primary edge use; vertex copying delegates to [`p1::merge_vertex`]. B-rep
 //! caches are not attached to arena B-reps yet, so the optional cache resizing is
 //! absent. The deletion retry loop is iterative; wire collection uses the bounded
 //! explicit stack of `topology_traverser`. No input-dependent recursion is added.
-//! Relations are shared mutably with `merge_p1`; notifications use its caller-owned
-//! records and attribute store. Newly created vertex relationships go through
-//! `Relate` ([`Relations::relate_vertices`]), which may raise the other operand's
+//! Relations are shared mutably with `merge_p1` and `merge_p2`; notifications use
+//! the caller-owned records, attribute store and identities of [`TopologyCopy`].
+//! Newly created vertex relationships go through `Relate` ([`Relations::relate_vertices`]), which may raise the other operand's
 //! vertex tolerance, so `other` is mutable.
 //! Missing/dangling mates are rejected only when added to the keep list:
 //! typed ids cannot represent the null pointer upstream can append there.
 
-use crate::boolean::merge::p1::{self, VertexCopy};
+use crate::boolean::merge::p1;
+use crate::boolean::merge::p2::{self, TopologyCopy};
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::context::{Context, MarkType};
 use crate::kernel::Kernel;
 use crate::math::Point3;
+use crate::topology::edgeuse::p1 as eu;
 use crate::topology::topology_traverser::{collect_wire_edges, Entity, Marks};
 use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, RegionId, VertexId};
 
@@ -77,14 +79,6 @@ fn delete_vertex(_brep: &mut Brep, _vertex: VertexId) -> Result<()> {
     Err(SolidError::unported(
         "SmBrep::DeleteVertex",
         "topology.brep_p4",
-    ))
-}
-
-fn merge_edge(_brep: &mut Brep, _other: &Brep, _edge: EdgeId, _region: RegionId) -> Result<()> {
-    // UNPORTED(boolean.merge_p2): SmMerge::MergeEdge
-    Err(SolidError::unported(
-        "SmMerge::MergeEdge",
-        "boolean.merge_p2",
     ))
 }
 
@@ -144,7 +138,7 @@ pub fn process_wires_and_shell_vertices(
     brep_marks: &mut Marks,
     other_marks: &mut Marks,
     relations: &mut Relations,
-    copy: &mut VertexCopy<'_>,
+    copy: &mut TopologyCopy<'_>,
     mut context: Option<&mut Context>,
     operation: BooleanOperation,
     brep_mark: MarkType,
@@ -293,7 +287,9 @@ fn collect_wires_and_shell_vertices(
         }
     }
 
-    for id in other.edges().ids() {
+    // m_vTI.m_pOther->GetEdges(sEdges): the list is taken before any edge is merged.
+    let other_edges: Vec<EdgeId> = other.edges().ids().collect();
+    for id in other_edges {
         let is_wire = vertexuse::edge_is_wire(other, id)?;
         let marked = other_marks.is_marked(other_k, Entity::Edge(id), other_mark);
         if is_wire && marked {
@@ -336,7 +332,18 @@ fn collect_wires_and_shell_vertices(
         )?;
         if keep_other(operation, region.is_void) {
             for &edge in &collected {
-                merge_edge(brep, other, edge, region.id)?;
+                // merge the edge into the Brep model
+                let edgeuse = eu::primary_edgeuse(other, edge)?;
+                p2::merge_edge(
+                    k,
+                    brep,
+                    other,
+                    edgeuse,
+                    Some(region.id),
+                    relations,
+                    copy,
+                    context.as_deref_mut(),
+                )?;
             }
         }
     }
@@ -372,7 +379,18 @@ fn collect_wires_and_shell_vertices(
             keep_vertices.push((v, region.id));
         }
     }
-    Ok(keep_vertices)
+    for (vertex, region) in keep_vertices {
+        p1::merge_vertex(
+            brep,
+            other,
+            Some(vertex),
+            Some(region),
+            relations,
+            &mut copy.vertices,
+            context.as_deref_mut(),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -391,27 +409,35 @@ mod tests {
     fn copy<'a>(
         records: &'a mut BTreeMap<ObjectKey, Topology>,
         attributes: &'a mut AttributeStore,
-    ) -> VertexCopy<'a> {
-        VertexCopy {
-            records,
-            attributes,
-            source_key: &|v| ObjectRef {
-                key: ObjectKey(1_000_000 + u64::from(v.index())),
-                type_code: 16021,
-            },
-            destination_key: &|e| match e {
-                crate::EntityRef::Vertex(v) => ObjectRef {
+    ) -> TopologyCopy<'a> {
+        TopologyCopy {
+            vertices: p1::VertexCopy {
+                records,
+                attributes,
+                source_key: &|v| ObjectRef {
+                    key: ObjectKey(1_000_000 + u64::from(v.index())),
+                    type_code: 16021,
+                },
+                destination_key: &|v| ObjectRef {
                     key: ObjectKey(u64::from(v.index())),
                     type_code: 16021,
                 },
-                crate::EntityRef::Vertexuse(v) => ObjectRef {
-                    key: ObjectKey(2_000_000 + u64::from(v.index())),
-                    type_code: 16006,
-                },
-                _ => ObjectRef {
-                    key: ObjectKey(3_000_000),
-                    type_code: 16001,
-                },
+            },
+            edge_source_key: &|e| ObjectRef {
+                key: ObjectKey(3_000_000 + u64::from(e.index())),
+                type_code: 16016,
+            },
+            edge_destination_key: &|e| ObjectRef {
+                key: ObjectKey(2_000_000 + u64::from(e.index())),
+                type_code: 16016,
+            },
+            face_source_key: &|f| ObjectRef {
+                key: ObjectKey(5_000_000 + u64::from(f.index())),
+                type_code: 16002,
+            },
+            face_destination_key: &|f| ObjectRef {
+                key: ObjectKey(4_000_000 + u64::from(f.index())),
+                type_code: 16002,
             },
         }
     }

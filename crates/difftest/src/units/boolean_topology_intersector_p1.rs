@@ -577,13 +577,13 @@ fn build_failure(export: &[f64]) -> Output {
 // ---- handles ------------------------------------------------------------------------------
 
 /// Handle kinds (the shim's `HKind`, plus the Rust-only kinds).
-pub(super) const K_VERTEX: u8 = 0;
-pub(super) const K_EDGE: u8 = 1;
-pub(super) const K_FACE: u8 = 2;
-pub(super) const K_EDGE_CURVE: u8 = 3;
-pub(super) const K_FACE_SURFACE: u8 = 4;
-pub(super) const K_CURVE: u8 = 5;
-pub(super) const K_BREP: u8 = 6;
+pub(crate) const K_VERTEX: u8 = 0;
+pub(crate) const K_EDGE: u8 = 1;
+pub(crate) const K_FACE: u8 = 2;
+const K_EDGE_CURVE: u8 = 3;
+const K_FACE_SURFACE: u8 = 4;
+const K_CURVE: u8 = 5;
+const K_BREP: u8 = 6;
 /// A curve copy made by the port (never named by an input; `-1 -3 -1` in outputs, as
 /// the shim's table copies).
 const K_EXTRA: u8 = 7;
@@ -604,10 +604,10 @@ const K_TRIM_CURVE: u8 = 13;
 /// curve handle also carries its curve's natural interval (what `SmSolutionArray`
 /// reads through `SmCurve::GetNaturalInterval`); it takes no part in identity.
 #[derive(Debug, Clone, Copy)]
-struct H {
-    b: i8,
-    kind: u8,
-    i: u32,
+pub(crate) struct H {
+    pub(crate) b: i8,
+    pub(crate) kind: u8,
+    pub(crate) i: u32,
     ivl: [f64; 2],
 }
 
@@ -631,7 +631,7 @@ impl Ord for H {
     }
 }
 
-const fn hd(b: i8, kind: u8, i: u32) -> H {
+pub(crate) const fn hd(b: i8, kind: u8, i: u32) -> H {
     H {
         b,
         kind,
@@ -690,7 +690,7 @@ impl SolutionObject for H {
 
 const TI_HANDLE: H = hd(-1, K_TI, 0);
 
-const fn brep_h(b: i8) -> H {
+pub(crate) const fn brep_h(b: i8) -> H {
     hd(b, K_BREP, b as u32)
 }
 
@@ -759,7 +759,7 @@ fn vertexuse_ref(vu: VertexuseId) -> ObjectRef {
 
 /// The two B-reps, the registered curves (kind 5) and the port's curve copies (kind
 /// 7).
-struct Two {
+pub(crate) struct Two {
     breps: [Option<Brep>; 2],
     curves: Vec<SmCurve>,
     extra: Vec<SmCurve>,
@@ -784,7 +784,7 @@ const fn fid(h: H) -> FaceId {
 }
 
 impl Two {
-    fn new(a: Brep, b: Option<Brep>) -> Self {
+    pub(crate) fn new(a: Brep, b: Option<Brep>) -> Self {
         let env = [NotifyEnv::new(Some(&a)), NotifyEnv::new(b.as_ref())];
         Self {
             breps: [Some(a), b],
@@ -803,12 +803,12 @@ impl Two {
         self.breps.get_mut(usize::try_from(h.b).ok()?)?.as_mut()
     }
 
-    fn brep_r(&self, h: H) -> solidcore::Result<&Brep> {
+    pub(crate) fn brep_r(&self, h: H) -> solidcore::Result<&Brep> {
         self.brep(h)
             .ok_or_else(|| invalid("handle names an absent B-rep"))
     }
 
-    fn brep_m(&mut self, h: H) -> solidcore::Result<&mut Brep> {
+    pub(crate) fn brep_m(&mut self, h: H) -> solidcore::Result<&mut Brep> {
         self.brep_mut(h)
             .ok_or_else(|| invalid("handle names an absent B-rep"))
     }

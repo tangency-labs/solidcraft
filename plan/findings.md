@@ -8658,6 +8658,57 @@ regression inputs below; 2000-seed sweep 2051 pass / 116 deferred / 0 failed / 1
   `Relations::relate_vertices`, and `merge_vertex` / `process_wires_and_shell_vertices`
   take the other operand mutably; it stays unreached behind `MakeShellVertex`,
   `topology.brep_p9`.)
+  (PR #229: `MergeEdge` is wired to `boolean.merge_p2`'s `merge_edge` of each edge's
+  primary edge use. `process_wires_and_shell_vertices` takes a `TopologyCopy` (edge
+  and face notification identities around p1's `VertexCopy`) and snapshots the other
+  operand's edge list before the loop, as upstream's `GetEdges`; the call stays
+  unreached behind `Point3DClassify`.)
+
+## boolean.merge_p2 (`SmMerge` constructor, `MergeEdge`, `MakeFaceuse`, `MergeAddedFace`, `MergeAddedTopology`; PR #229, 2026-10-18; partial, no disagreements)
+
+- **Two data models.** `MergeEdge` and `MakeFaceuse` copy other-operand topology into
+  the primary B-rep, like `merge_p1`'s `MergeVertex`, so they work on concrete arena
+  `Brep`s with the shared `Relations` mates (which gain face mates and the edge/face
+  branches of `Relate`). `MergeAddedTopology` drives the intersector's phases, which
+  are generic over handles `O`, so it is generic too: the B-rep and `SmStitch` calls
+  go through the `MergeBrep` trait, one method per upstream function, with
+  `Unported` defaults for callees whose unit is not ported (the `SweepAccess` style of
+  #222). An arena implementation must route those defaults as their units land; the
+  difftest runner implements `MergeBrep` on the intersector runner's `Two` adapter.
+- **Curve and surface mates.** An arena edge owns its curve and a face its surface,
+  so `GetBrepMate(pCurve)` / `GetBrepMate(pOldSurface)` (only reached for an unmated
+  edge or face) are always null; the curve is always copied and the surface always
+  `CopyAndAddAnalytics`-copied. The fixtures build every edge and face with its own
+  curve and surface, as arena B-reps must.
+- **Coverage.** The constructor, `MergeEdge`'s mated and null paths and `MakeFaceuse`'s
+  mated-face fast path and `SM_ERR` paths compare values and both operand snapshots.
+  Everything that creates topology defers (`MakeWireEdge`, `MakeShellVertex`,
+  `MakeFace`); every `MergeAddedTopology` / `MergeAddedFace` case defers at its first
+  call, `SmBrep::Notify(SM_NO_PRE_EDIT)` (`topology.brep_p2`, #149) or
+  `SmFace::GetEdges` (`topology.face_p4`), while the C++ still runs it. When those land,
+  rerun with a high `--seeds`: the tail of `MergeAddedTopology` (culling, stitching,
+  re-mating, region nesting) has only been read against upstream, not compared.
+- **Fixture records.** A copy notification propagates `SmTopology` flags from source
+  to copy, so the runner registers a fresh `Topology` record for every vertex, edge
+  and face of both operands (the flags themselves are not compared).
+- **Guards.** Two inputs crash the reference build and are refused by the FFI
+  wrapper: a computed tolerance with a null other B-rep (UB-181, which makes
+  `SmApiStitch(pBrep, pFace)` crash on every call) and an entity listed twice in a
+  `MergeAddedTopology` list once stitching glues it (UB-180). Non-finite tolerances
+  and angles were probed on every fixture kind and run, so they are not refused.
+- **Upstream defaults.** `MergeAddedTopology`'s header and definition disagree on the
+  position of `bDoGluing` (WR-175); `MergeAddedOptions::default` is the effective
+  `(TRUE, FALSE, TRUE, TRUE)`.
+- **Back-edges.** `boolean.merge_p5`'s `MergeEdge` and `boolean.api_brep`'s
+  `SmMerge::SmMerge` are wired. The two-B-rep API entry points now build the merge and
+  defer on its computed tolerance (`SmBrep::GetMinEdgeBBoxSize`, `topology.brep_p2`);
+  after it come `IsManifoldSolid` (`topology.brep_p2`) and `ManifoldBoolean` /
+  `NonManifoldBoolean` (`boolean.merge_p4` / `_p3`). `api_brep` names its operands to
+  the intersector by a private two-value handle until those stages choose theirs.
+  Difftest re-runs: `boolean.merge_p5` PARTIAL 140/108/32 and `boolean.merge_p1`
+  PARTIAL 248/177/71 unchanged; `boolean.api_brep` PARTIAL 284/142/142 with its 81
+  two-B-rep deferrals moved from `boolean.merge_p2` to `topology.brep_p2`;
+  `boolean.topology_intersector_p1` PARTIAL 827/653/174 unchanged.
 
 ## topology.brep_p5 — historical pre-review coverage (superseded)
 

@@ -38,18 +38,25 @@
 //!   every entry point (the merge engine reads its tolerances).
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR`
 //!   is [`SolidError::Upstream`] with [`crate::error::SM_ERR`].
-//! - **Dependencies.** List folding and tree evaluation call `merge::p3`; its
-//!   construction and topology calls retain narrowly scoped dependency errors.
-//!   Two-B-rep entry points still await the `merge_p2` engine constructor.
-//! - **List context.** `boolean_lists` takes a mutable kernel for the connected
-//!   component traversal's mark locks.
-//! - **Nullable tree output.** Tree operands are `Option<Brep>` slots, preserving
-//!   consumed entries on failure and defined null outputs of repeated leaves.
+//! - **Unported callees.** The two-B-rep entry points build the merge
+//!   ([`MergeState::with_breps`], `boolean.merge_p2`; its computed tolerance waits on
+//!   `SmBrep::GetMinEdgeBBoxSize`, `topology.brep_p2`), then call
+//!   `SmBrep::IsManifoldSolid` (`topology.brep_p2`) and `ManifoldBoolean`
+//!   (`boolean.merge_p4`) or `NonManifoldBoolean` (`boolean.merge_p3`), which return
+//!   [`SolidError::Unported`]. The other entry points validate their inputs as
+//!   upstream, then return [`SolidError::Unported`] for the first engine call they
+//!   would make (`SmMerge::merge_breps`, `SmMerge::BooleanLists`,
+//!   `SmMerge::BooleanTrees`). The intersector names the two operands by a private
+//!   handle type (`Operand`) until the Boolean stages choose theirs.
 //! - The debug drawing (`SM_DEBUG_CODE`) and `SM_ASSERT_VALID` checks are not ported.
 
+use crate::boolean::merge::p1::MergeState;
 use crate::boolean::merge::MergeOptions;
+use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
+use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::intersect::point_class::{ClassObject, ClassObjectKind};
 use crate::kernel::Kernel;
 use crate::surface::surface::Surface;
 use crate::topology::Brep;
@@ -117,11 +124,61 @@ fn merge_boolean(
     operation: BooleanOperation,
     options: Option<MergeOptions>,
 ) -> Result<BooleanOutcome> {
-    // The merge engine takes the context, both operands, the operation and the
-    // options; none of it is reachable until `SmMerge` is ported.
-    let _ = (k, brep1, brep2, operation, options);
-    // UNPORTED(boolean.merge_p2): SmMerge::SmMerge
-    Err(SolidError::unported("SmMerge::SmMerge", "boolean.merge_p2"))
+    // Tolerance and angle 0: both computed by the constructor.
+    let merge = MergeState::<TopologyIntersector<Operand>>::with_breps(
+        (&brep1, Operand::First),
+        Some((&brep2, Operand::Second)),
+        0.0,
+        0.0,
+        options.as_ref(),
+    )?;
+    if is_manifold_solid(&brep1)? && is_manifold_solid(&brep2)? {
+        let _ = (k, merge, brep1, brep2, operation);
+        // UNPORTED(boolean.merge_p4): SmMerge::ManifoldBoolean
+        Err(SolidError::unported(
+            "SmMerge::ManifoldBoolean",
+            "boolean.merge_p4",
+        ))
+    } else {
+        let _ = (k, merge, brep1, brep2, operation);
+        // UNPORTED(boolean.merge_p3): SmMerge::NonManifoldBoolean
+        Err(SolidError::unported(
+            "SmMerge::NonManifoldBoolean",
+            "boolean.merge_p3",
+        ))
+    }
+}
+
+/// The intersector's identities of the two operands: the only objects the merge
+/// constructor names. The Boolean stages that walk the operands' topology choose
+/// their handle type when they are ported (`boolean.merge_p3`, `boolean.merge_p4`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Operand {
+    /// `pBrep1`.
+    First,
+    /// `pBrep2`.
+    Second,
+}
+
+impl ClassObject for Operand {
+    fn class_kind(&self) -> ClassObjectKind {
+        ClassObjectKind::Other
+    }
+}
+
+impl SolutionObject for Operand {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Other
+    }
+}
+
+fn is_manifold_solid(brep: &Brep) -> Result<bool> {
+    let _ = brep;
+    // UNPORTED(topology.brep_p2): SmBrep::IsManifoldSolid
+    Err(SolidError::unported(
+        "SmBrep::IsManifoldSolid",
+        "topology.brep_p2",
+    ))
 }
 
 /// Booleans two B-reps (`SmApiBoolean`): `brep1` is modified into the result; `brep2`
@@ -349,8 +406,10 @@ mod tests {
             if op == BooleanOperation::ExtractSeparate {
                 continue;
             }
+            // The merge is built with a computed tolerance, which waits on the
+            // B-rep query `SmBrep::GetMinEdgeBBoxSize`.
             let e = boolean(&k, Brep::new(), Brep::new(), op).unwrap_err();
-            assert_eq!(unported_unit(&e), "boolean.merge_p2", "{op:?}");
+            assert_eq!(unported_unit(&e), "topology.brep_p2", "{op:?}");
         }
         for e in [
             boolean_union(&k, Brep::new(), Brep::new()).unwrap_err(),
@@ -358,7 +417,7 @@ mod tests {
             boolean_intersection(&k, Brep::new(), Brep::new()).unwrap_err(),
             boolean_merge(&k, Brep::new(), Brep::new()).unwrap_err(),
         ] {
-            assert_eq!(unported_unit(&e), "boolean.merge_p2");
+            assert_eq!(unported_unit(&e), "topology.brep_p2");
         }
     }
 

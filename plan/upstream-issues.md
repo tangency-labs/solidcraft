@@ -1518,76 +1518,23 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash / out-of-range read.
 - **Rust port:** Kernel topology mutation remains deferred. Both the safe FFI validator and the C++ shim require equally sized partners for op 3 with fillets. Six `rejected_fillets_*` fixtures check rejection; 660 isolated probes independently exercise both guards at first and last indices of 1/2/3/32 intervals. Valid equal-sized pairs and non-fillet calls remain accepted.
 
-#### UB-180. `SmFace::GlobalLineIntersect` reads the first interval of an empty UV line classification
-- **Location:** `source/SMLib/src/SmFace.cpp:11769`, `SmFace::GlobalLineIntersect` (def. `:11692`).
-- **What happens:** For a range solution of the surface, `sm_FaceClassifyUVLine` classifies the UV line and, when it returns at most one interval, `sCC[0].m_vMid` is read without checking the size. An empty classification with `SM_SUCCESS` reads past the interval array.
-- **Trigger:** A line lying in the face's surface (a range solution) whose `sm_FaceClassifyUVLine` succeeds without intervals.
-- **How found:** read during porting (`topology.face_p4`).
-- **Confirmed:** no.
-- **Severity:** crash/UB (out-of-bounds read).
-- **Rust port:** Returns `InvalidInput` for an empty classification.
+#### UB-180. `SmMerge::MergeAddedTopology` uses a vertex listed twice after gluing deletes it
+- **Location:** `source/SMLib/src/SmMerge.cpp:5304`, `SmMerge::MergeAddedTopology` (`sAddedVerts = *pMergeVerts` is copied without `AddUnique`); `SmStitch::StitchVertexPairs` (`source/SMLib/src/SmStitch.cpp`).
+- **What happens:** A caller-supplied vertex list is used as given. `StitchVertexPairs` glues the first copy of a duplicated added vertex to a master vertex, deletes it and nulls that one slot; the second slot still holds the deleted vertex, which the stitch then dereferences.
+- **Trigger:** `MergeAddedTopology` with a vertex twice in `pMergeVerts`, within the stitch tolerance (4x the approximation tolerance) of a vertex of the rest of the B-rep: e.g. the ASCII `plane_square.smb` with vertices `[0, 0]`, no faces or edges, tolerance 10.
+- **How found:** adversarial / edge-case fixture: run through the `boolean.merge_p2` shim with its duplicate guard relaxed, the C++ reference segfaults (exit 139); the same request without the duplicate succeeds.
+- **Confirmed:** yes (reference build).
+- **Severity:** crash/UB (use after free).
+- **Rust port:** The FFI guard refuses any entity listed twice in a `MergeAddedTopology` list; the port follows upstream.
 
-#### UB-200. `SmApiCreateSphere` crashes for radii from about `7e9` and for a non-finite center
-- **Location:** `source/SM_API/src/SmApiPrimitives.cpp:335` `SmApiCreateSphere` -> `source/SMLib/src/SmPrimitiveCreation.cpp:894` `SmPrimitiveCreation::CreateSphere`. The API accepts any finite radius up to `SM_BIG_DOUBLE / 100` (`1e18`).
-- **What happens:** Segfault inside `CreateSphere`. A NaN or infinite center coordinate (not validated) also segfaults; `SmApiCreateTorus` (B-rep overload, no validation) segfaults on the same centers.
-- **Trigger:** radius `7e9`, `1e10`, `1e15`, `1e18` or `-6.5e9` (`6e9`, `6.5e9` and `-6e9` are fine); center `(NaN, 0, 0)` or `(0, inf, 0)` with radius `1`.
-- **How found:** crash in the C++ reference run (primitive.api_primitives fixtures and probes).
-- **Confirmed:** yes.
-- **Severity:** crash/UB.
-- **Rust port:** not reached yet (`SmPrimitiveCreation` is unported, the call is deferred); the difftest guard keeps these inputs from the C++ side.
-
-#### UB-201. `SmApiCreateSphereNoPole` crashes or hangs for small and large radii
-- **Location:** `source/SM_API/src/SmApiPrimitives.cpp:870` `SmApiCreateSphereNoPole` -> `source/SMLib/src/SmPrimitiveCreation.cpp:6911` `SmPrimitiveCreation::CreateSphereNoPole` (tolerance `SM_ZONE_TOL_3D`). The API only rejects radius magnitudes not above `SM_EFF_ZERO`.
-- **What happens:** Erratic below about `1e-4`: radius `1.0000001e-12`, `1e-9`, `1e-6`, `2e-6`, `5e-6`, `2e-5` segfault, `5e-5` and `1e-4` do not return, `1e-5` and `3e-4` and up succeed. From about `4e8` (`4e8`, `5e8`, `1e9`, `1e12`, `1e18`, either sign) it segfaults; `3e8` succeeds.
-- **Trigger:** `SmApiCreateSphereNoPole((0,0,0), 2e-5, ..)`; `SmApiCreateSphereNoPole((0,0,0), 4e8, ..)`.
-- **How found:** crash in the C++ reference run (primitive.api_primitives fixtures and probes).
-- **Confirmed:** yes.
-- **Severity:** crash/UB, hang.
-- **Rust port:** not reached yet (deferred); the difftest guard passes only radii in `[3e-4, 3e8]` on to the C++.
-#### UB-191. `CombineCoincidentVertices` deletes its isolated surviving vertex when inputs alias
-- **Location:** `source/SMLib/src/SmBrep.cpp:1354-1366`, `SmBrep::CombineCoincidentVertices`.
-- **What happens:** The zero-incident-edge branch notifies, sets the surviving vertex's point/tolerance, then calls `DeleteVertex(pVertexToDelete)` and returns `SM_SUCCESS`. If both input pointers are the same, the supposedly surviving vertex is deleted too. Nothing inside the function touches it afterwards, so the call itself is defined; a caller that keeps using the survivor pointer reads freed memory.
-- **Trigger:** Pass the same isolated vertex as both `pSurvivingVertex` and `pVertexToDelete`. Aliases with incident edges go through `GlueVertices(v, v)` and keep the survivor.
-- **How found:** PR #194 review and source inspection while porting `topology.brep_p5`; corrected in the second review round (the function was first thought undefined).
-- **Confirmed:** no native reproduction of the caller hazard. The whole call is compared in difftest; only the shim's target-stage op, which reads the survivor afterwards, refuses this input.
-- **Severity:** dangling caller-held survivor (caller use-after-free).
-- **Rust port:** Ported as upstream: the isolated aliased combination deletes the vertex and succeeds. Rust ids cannot dangle into freed memory; a later lookup of the deleted id returns `NotFound`.
-
-#### UB-159. `SmFilletGeom(SmFilletSolver*, SmFilletGeomType)` leaves `m_dOrientations` and `m_bCapped` uninitialised
-- **Location:** `source/SMLib/src/SmFilletGeom.cpp:8971-9004` (`SmFilletGeom::SmFilletGeom`).
-- **What happens:** The constructor's initialiser list and loop set the type, solver, centre line, surface, split flag, status, offset surfaces, rails and deviations, but never `m_dOrientations[2]` or `m_bCapped[2]`. `m_bCapped` is assigned only by `SmFilletGeom::MakeFaceBrep` (`:9427`, `:9476`) and read by `SmFilletGeom::InsertIntersectionTopology` (`:12158`, `if (pV && !m_bCapped[ii])`) and `DumpLevel` (`:13306`): a geometry whose intersection topology is inserted before `MakeFaceBrep` has run reads indeterminate flags. `m_dOrientations` (`SmFilletGeom.h:546`) is never read or written after its declaration (the `m_dOrientations` of the solver classes are their own members), so it is merely dead and uninitialised.
-- **Trigger:** `InsertIntersectionTopology` (or `DumpLevel`) on an `SmFilletGeom` before `MakeFaceBrep`.
-- **How found:** read during porting (`blend.fillet_geom_p1`, PR #147).
-- **Confirmed:** no (source inspection; the difftest never exports these members before they are set).
-- **Severity:** UB (indeterminate reads).
-- **Rust port:** `FilletGeom::new` starts them as `0.0` and `false`.
-
-#### UB-162. `sm_RedistributeSeamUVTrimCurves` reads a fourth edge use that need not exist
-- **Location:** `source/SMLib/src/SmBrep.cpp:12097`-`12105` (`sm_RedistributeSeamUVTrimCurves`): `SM_PTR_ARRAY(sNewEdgeuses, SmEdgeuse, 16)`, `pNewE->GetEdgeuses(sNewEdgeuses); SM_ASSERT(sNewEdgeuses.GetSize() == 4)`, then `sNewEdgeuses[0]` and `sNewEdgeuses[3]`.
-- **What happens:** The assertion is a no-op in release builds. For a seam edge with fewer than four edge uses the function reads slot 3 of the 16-slot stack array, an uninitialised pointer, and calls `GetCWEdgeuse()` on it.
-- **Trigger:** A UV trim curve given, a seam direction other than `SM_SP_NEITHER`, and an edge with one, two or three edge uses (a wire or lamina seam edge, or an edge whose other face is not attached yet).
-- **How found:** source review while porting `topology.brep_p1` (PR #145); the difftest shim refuses the call for edges with fewer than four edge uses.
-- **Confirmed:** no (source inspection only; the shim never runs it).
-- **Severity:** crash/UB.
-- **Rust port:** `topology::brep::p1::redistribute_seam_uv_trim_curves` returns `InvalidInput` for an edge with fewer than four edge uses.
-
-#### UB-165. `SmBrep::MakeFaceWithCurves` with `pbOptCrvOnSurf` and no UV curves dereferences a null array
-- **Location:** `source/SMLib/src/SmBrep.cpp:16591-16606` `SmBrep::MakeFaceWithCurves` (the `pbOptCrvOnSurf && *pbOptCrvOnSurf == TRUE` block after `MakeFace`).
-- **What happens:** The UV curve array `cpOptUVCurves` is optional (only one of the 3D and UV arrays must be given), but the curve-on-surface block copies `cpOptUVCurves->GetAt(ii)` for `ii < cpOptUVCurves->GetSize()` without a null check, so a call with 3D curves only and `*pbOptCrvOnSurf == TRUE` dereferences null as soon as `MakeFace` succeeds (even for one empty loop).
-- **Trigger:** `MakeFaceWithCurves(region, {0}, &curves3d, NULL, orients, {}, plane, domain, SM_OT_SAME, .., &TRUE)` (difftest cases `face_curves_cos_no_uv_*` of `topology.brep_p7`).
-- **How found:** crash in the C++ reference run (pre-review fuzz of PR #155).
-- **Confirmed:** yes (SIGSEGV).
-- **Severity:** crash.
-- **Rust port:** `SolidError::InvalidInput`; the difftest shim keeps such calls away from upstream.
-
-#### UB-166. `sm_DecomposeSrf` writes past the surface cache's patch array when the constructor's knot snap raises the start multiplicity
-- **Location:** `source/SMLib/src/SmNurbsSrf.cpp:1524` `sm_DecomposeSrf` (v-direction loop, `:1690`-`:1740`: `Qw = surA[iq][jq]->net->Pw` with no bound on `jq`; the u direction has the `if (iq >= nsu) NL_QUIT` guard, "B262"), called from `sm_CreateBezierPatchBlock` (`SmSurfaceCache.cpp:4848`) <- `SmSurfaceCache::BuildTreeBase` (`:4996`) <- `SmTrimSrfCache::BuildTree` <- `smsurf_GetSurfaceCache`, reached from `sm_SurfaceDropPoint` (`SmSurface::GlobalPointSolve`) and from `sm_ClassifyFacePoint` through `SmFace::CalculateUVDomainFromUVTrimCurves` -> `SmEdgeuse::CreateUVTrimCurve` -> `SmSurface::DropCurve`; also from `sm_SrfSrfIntersection` (`SmSurfaceIntersector::DoIntersection`, `SmSurfaceIntersector.cpp:6146`) and `SmSurface::GlobalCurveIntersect` (`SmSurface.cpp:17196`). The fixup: `sm_FixupKnotVector` (`SmNurbsCrv.cpp:386`), run by every `SmBSplineSurface` constructor (`SmBSplineSurface.cpp:135/136, 203/204, 295/296, 344/345`) with `SM_EFF_ZERO_PARAM` (`1.2e-8`).
-- **What happens:** `sm_FixupKnotVector` first makes every knot less than `SmTol::GetScaledZero(u0, u1)` (`SM_EFF_ZERO * (1 + max(|u0|, |u1|))`, about `2e-12` on `[0, 1]`) above its already-snapped predecessor equal to it. A first interior knot that close to the start knot therefore becomes the start knot, and the start multiplicity rises to `q + 2`. Its second stage then walks the distinct knots and spreads a pair closer than `SM_EFF_ZERO_PARAM` to `1.01 * SM_EFF_ZERO_PARAM = 1.212e-8` apart: at the first pair the second knot moves up, at the last pair the first knot moves down (`vKts[i] = vKts[i+1] - dIncrement`), elsewhere both move away from their midpoint. Nothing keeps a moved knot off the start knot, so on a knot range under about `2.4e-8` the last-pair move lands a knot exactly on the start and raises its multiplicity the same way (a move below the start leaves a non-monotone vector, which runs or fails with status 1006, no crash). `N_BasisGetSpanCount` (exact comparisons from index `q`) does not count the zero-length first span, but `sm_DecomposeSrf` starts its v loop at `iev = q + 1` without comparing `VP[q]` with `VP[q + 1]`, so it extracts a patch for that zero-length span and then one more patch than the `nsu * nsv` the caller allocated: `surA[iq][nsv]` is read past the `SmTArray` and dereferenced (SIGSEGV). In u the same over-count reaches the B262 guard and the decomposition fails (`NL_QUIT`, an error, no crash). Curves are safe: `sm_CreateBezSegments` (`SmNurbsCrv.cpp:478`) skips a start over-multiplicity ("bad data") and bounds `iq` by the span count.
-- **Trigger:** any surface whose v knot vector, after both fixup stages, has start multiplicity above `degree + 1`: by the snap, `V = [0, 0, 0, 1e-12, 1, 1, 1]` (degree 2) or `[0, 0, 0, 6.2e-31, 6.8e-31, 1, 1, 1]`; by the spread, `[0, 0, 0, 5e-9, 5e-9, 1.212e-8, 1.212e-8, 1.212e-8]` (the snap leaves it, the first pair moves `5e-9` up to `1.212e-8`, the last pair moves it down to exactly `0`); by the end snap first, `[0, 0, 0, 5e-9, 5e-9, E, E + d x3]` with `E = 1.212e-8` and `d` under the scaled zero (the end group snaps to `E` before the spread, which then moves `5e-9` to `E - E = 0`). `(1e-11, 2e-11)` interior knots run. The spread can also leave a non-monotone vector, which upstream handles without undefined behaviour (valgrind clean): `[0, 0, 0, 5e-9, 8e-9, 1.212e-8 x3]` (spread to `[.., 4e-9, 0, ..]`) fails with 1006, `[0, 0, 0, 5e-9, 5e-9, 1e-8 x3]` (a knot moved below the start) returns 1001 (no solution), `[0, 0, 0, 5e-9, 5e-9, E, E + 2e-12 x3]` solves with status 0. The same tiny gaps away from the start (`0.5`, `0.5 + 1e-13`) only raise an interior multiplicity, which the decomposition tolerates. The same vectors in u fail with 1006 (B262 guard). Only the callers that build the surface cache reach it.
-- **How found:** the reviewer's timing fuzz of the `blend.fillet_geom_p1` FFI guards (PR #147 re-review; three reproducers, `SurfaceDropPoint` and `ClassifyFacePoint`), located with gdb; mechanism by source reading (`sm_FixupKnotVector`, `N_BasisGetSpanCount`, `sm_DecomposeSrf`). The spread-stage trigger: the round-3 review; the end-snap route: the round-4 review (three reproducers, gdb, same frames), which a Rust replica of the fixup had missed by one operation.
-- **Confirmed:** yes (gdb backtraces in the reference build for the four reproducers; the FFI's rejection of exactly the constructed condition makes them rejected cases and the fuzz sweeps no longer crash).
-- **Severity:** crash (out-of-bounds read and write through a stale pointer).
-- **Rust port:** `nurbs::nurbs_srf::decompose_srf` bounds the patch index and returns an error. The `blend.fillet_geom_p1` shim reads back the knot vector the real constructor left and refuses (`SC_ERR_ARG`), for the six ops that build a surface cache, a surface whose constructed v vector has start multiplicity above `degree + 1`; that is the crash precondition, so it also refuses some runs that would complete because their path returns before building the cache (28 of 169 such programs in the round-5 review: `TwoPnts` 1001 and Fb-op exits before the cache fetch). It does not re-implement the fixup (a replica in the Rust wrapper missed the end-snap route). The u over-multiplicity, non-monotone constructed vectors, curves and the other ops are compared. Comparing the non-monotone vectors exposed three port bugs on the cache path, fixed in PR #147: the Rust caches held a `Clone` of their surface (the copy constructor, which runs the fixup a second time) where upstream holds a pointer, `compute_net_constants` returned the error of a failed `N_SrfEvalPt` that upstream ignores, and `subdivide_node` returned the error of a failed patch split that upstream's `GW_ERR` only logs (the children stay zero-filled).
+#### UB-181. `SmApiStitch(pBrep, pFaceToStitch)` builds its `SmMerge` with a null other B-rep and a zero tolerance
+- **Location:** `source/SM_API/src/SmApiBrep.cpp:1183`, `SmApiStitch(SmBrep*, SmFace*)`: `SmMerge sMerge(*pContext, pBrep, NULL)`; `source/SMLib/src/SmMerge.cpp:72`, `SmMerge::SmMerge` (`pOtherBrep->GetMinEdgeBBoxSize`).
+- **What happens:** The constructor's tolerance argument defaults to `0`, and a tolerance below `SM_EFF_ZERO` is computed from both B-reps' minimum edge sizes and tolerances. Its comment says the other B-rep "can now be Null, for the Stitch methods", but the computation dereferences it unconditionally, so this overload of `SmApiStitch` crashes on every call that passes its null checks.
+- **Trigger:** Any `SmApiStitch(pBrep, pFace)` with non-null arguments; directly, `SmMerge(ctx, pBrep, NULL)` (or any tolerance below `SM_EFF_ZERO`) on e.g. the ASCII `plane_square.smb`.
+- **How found:** adversarial / edge-case fixture: the `boolean.merge_p2` constructor case with a null other B-rep and tolerance `0`, run with the shim guard relaxed, segfaults the C++ reference (exit 139).
+- **Confirmed:** yes (reference build).
+- **Severity:** crash/UB (null dereference).
+- **Rust port:** `MergeState::with_breps` returns `SolidError::InvalidInput` for a computed tolerance without other B-rep (after the unported `GetMinEdgeBBoxSize` of the primary); the FFI guard refuses the input.
 
 ### Healer target management
 
@@ -2263,32 +2210,14 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Cause:** `s2ndUVCurves.Add(pNewUVTrimCurve)` where `sUVCurves.Add(...)` was meant.
 - **Rust port:** Reproduces it (`topology::edgeuse::p3::create_uv_trim_curve` builds the joined curve into the discarded second-half array and reports the recovery path).
 
-#### WR-176. `SmFace::HasSeamProblem` returns TRUE whenever it has to compute the face properties
-- **Location:** `source/SMLib/src/SmFace.cpp:15650`, `SmFace::HasSeamProblem` (def. `:15540`).
-- **What happens:** When `pOptFaceProps` is NULL or below `SM_PROPSTAGE_2a`, the function runs `SetProps_Stage2`, copies its seam classifications and enums to the outputs, and returns `SM_SUCCESS` (`1000`) from a function returning `SmBoolean`. The result is always TRUE ("seam problem"), even for a face whose seams are fine and whose output enums say `SM_SP_NEITHER`.
-- **Trigger:** `HasSeamProblem` without face properties on a face of a periodic surface (e.g. faces of `TestFiles/pt_TestFiles/Mouse.smb`).
-- **How found:** generated difftest case (`topology.face_p4`: a port returning FALSE there disagreed with the C++).
-- **Confirmed:** yes.
-- **Severity:** wrong result.
-- **Rust port:** Returns `has_problem = true` there, as upstream.
-
-#### WR-177. `SmFace::FindVertexSector` evaluates an empty domain for poles after its first vertex use
-- **Location:** `source/SMLib/src/SmFace.cpp:9762`, `SmFace::FindVertexSector` (def. `:9408`; the pole points `:9788`-`:9803`).
-- **What happens:** In the 3D branch (an edge use without UV trim curve), `SmExtent2d sSurfDomain` is declared inside the loop over vertex uses, but the natural domain is stored in it only on the pass that first fetches the poles (`bCheckedPoles`). On later passes a vertex at a pole gets `sEU1UV` from a default (inside-out) extent, which is then passed to `SectorClassifyCurveOn` as the singular UV point.
-- **Trigger:** A vertex at a surface pole with two or more vertex uses on the face's upward face use, their edge uses without UV trim curves, and sector validation requested.
-- **How found:** read during porting (`topology.face_p4`).
-- **Confirmed:** no.
-- **Severity:** wrong result.
-- **Rust port:** Reproduces it (the domain is only set on the pass that fetches the poles).
-
-#### WR-167. `SmTArray::FindElementInMaskedArray` tests `1<ii` instead of `1<<ii`
-- **Location:** `source/SMLib/inc/SmTArray.h:1543`, `SmTArray<TYPE>::FindElementInMaskedArray` (def. `:1531`). Called by `sms_FindAndClassifyLoopBisector` (`SmFace.cpp:2588`) on `SmFaceProps::m_sPolePoints` with the `m_lPoles` side mask.
-- **What happens:** The mask test is `lBitMask & (1<ii)`, a comparison, not a shift: elements 0 and 1 are never searched, and elements 2 and up are searched exactly when bit 0 of the mask (`SM_SS_UMIN`) is set, whatever their own bits. The bisector therefore never recognises an edge mid point on the u-min or v-min pole, and tests the u-max and v-max poles only when the u-min side is singular.
-- **Trigger:** A face whose surface is singular at its v-min side (e.g. a sphere pole) with an edge mid point on that pole: the edge is not skipped.
-- **How found:** read during porting.
-- **Confirmed:** no (the bisector cases of the `query.face_p3` difftest defer before comparing a pole skip).
-- **Severity:** wrong result.
-- **Rust port:** Ported as is (`query::face::p3`, private `find_element_in_masked_array`).
+#### WR-175. `SmMerge::MergeAddedTopology`'s declared defaults shift into the wrong flags
+- **Location:** `source/SMLib/inc/SmMerge.h:357` (declaration) against `source/SMLib/src/SmMerge.cpp:5304` (definition), `SmMerge::MergeAddedTopology`.
+- **What happens:** The declaration puts `bDoGluing = TRUE` ninth, followed by `bMakingManifoldSolid = FALSE`, `bFastEdgeCompare = TRUE`, `bDoRegionNesting = TRUE`, `bIgnoreProblems = TRUE`. The definition takes the four flags ninth to twelfth and the unused gluing flag last. A call relying on the defaults therefore runs with making-manifold-solid `TRUE` and fast edge compare `FALSE`, the opposite of what the declaration documents.
+- **Trigger:** Any call that omits the trailing arguments. Both upstream callers (`MergeAddedFace`, `SmFeatureExecutive`) pass all four flags explicitly, so they are not affected.
+- **How found:** read during porting (`boolean.merge_p2`).
+- **Confirmed:** no (no upstream caller uses the defaults).
+- **Severity:** wrong result (latent).
+- **Rust port:** `MergeAddedOptions::default()` is what the declared defaults actually pass, `(TRUE, FALSE, TRUE, TRUE)`; `MERGE_ADDED_FACE_OPTIONS` is `MergeAddedFace`'s explicit `(FALSE, TRUE, TRUE, TRUE)`.
 
 ### NLib
 

@@ -1,0 +1,1932 @@
+//! The merge constructor, copying an other-operand edge or face use into the primary
+//! B-rep, and merging freshly added topology into the rest of the B-rep.
+//!
+//! Upstream: `source/SMLib/src/SmMerge.cpp`, `source/SMLib/inc/SmMerge.h`.
+//!
+//! | Rust                               | Upstream                                       |
+//! |------------------------------------|------------------------------------------------|
+//! | [`MergeState::with_breps`]         | `SmMerge::SmMerge(crContext, pBrep, pOtherBrep, ...)` |
+//! | [`merge_edge`]                     | `SmMerge::MergeEdge`                           |
+//! | [`make_faceuse`], [`MadeFaceuse`]  | `SmMerge::MakeFaceuse`                         |
+//! | [`TopologyCopy`]                   | the `Notify(SM_NO_COPY, ...)` identities       |
+//! | `reverse_orientation` (private)    | `SM_REVERSE_ORIENTATION`                       |
+//! | [`MergeState::merge_added_face`]   | `SmMerge::MergeAddedFace`                      |
+//! | [`MergeState::merge_added_topology`], [`MergeAddedOptions`], [`MergedTopology`] | `SmMerge::MergeAddedTopology` |
+//! | [`MergeBrep`], [`StitchSettings`], [`StitchedVertices`], [`SplitEdges`], [`StitchedEdges`] | what `MergeAddedTopology` reads from and does to its B-rep and `SmStitch` |
+//!
+//! Deviations:
+//! - Operands, mates and notification storage are borrowed explicitly, as in
+//!   [`p1`] and [`p5`](super::p5); arena ids replace pointers.
+//!   `MergeEdge` and `MakeFaceuse` work on concrete [`Brep`] operands and the
+//!   [`Relations`] mates, which gain face mates and edge/face `Relate` here.
+//! - **Curve and surface mates.** An arena edge owns its curve and a face its
+//!   surface, so neither can be shared by two edges or faces and neither has a mate
+//!   of its own. `GetBrepMate(pCurve)` (`MergeEdge`) and `GetBrepMate(pOldSurface)`
+//!   (`MakeFaceuse`) are reached only for an edge or face without a mate, so they
+//!   are always null: the curve is always copied (`SmCurve::Copy`) and the surface
+//!   always copied with `CopyAndAddAnalytics`. Their `Relate` calls record nothing
+//!   observable and are not kept.
+//! - Out-params become return values; on an error the outputs are not returned
+//!   (upstream leaves `pOldRegion` null and `pNewRegion` as `MakeFace` left it).
+//!   `MakeFaceuse`'s optional new-face list is cleared on entry and receives the new
+//!   face on success, as upstream.
+//! - Undefined behaviour upstream (a null mate faceuse, shell, edge, curve, vertex
+//!   use or vertex dereferenced) is [`SolidError::InvalidInput`]; upstream's `NER`
+//!   checks are `SM_ERR_NULL_POINTER`.
+//! - `MakeFaceuse` treats a failed `FindRadialSector` as `SM_ERR`, as upstream,
+//!   except [`SolidError::Unported`] and [`SolidError::InvalidInput`], which
+//!   propagate.
+//! - The infinite region `MakeFaceuse` clears around `MakeFace` is restored before
+//!   `MakeFace`'s error propagates, as upstream.
+//! - **`MergeAddedTopology`** drives the intersector, so it works on handles `O`
+//!   like [`TopologyIntersector`]: the B-rep is read and edited through
+//!   [`MergeBrep`] (an [`IntersectorBrep`] plus the B-rep, face and `SmStitch`
+//!   calls the merge makes, each method naming the function it stands for). Its
+//!   `SmTemporaryChangeValue`s of the intersector tolerance and the B-rep's
+//!   `m_bEditingEnabled` are restored on every exit. The header declares
+//!   `bDoGluing` before the four flags but the definition takes it after them;
+//!   [`MergeAddedOptions::default`] is what the declared defaults pass to the
+//!   definition (`plan/upstream-issues.md`).
+//! - **Ignored statuses.** `MergeAddedTopology` ignores the statuses of the bounding
+//!   boxes, the stitch and intersection calls, `RemoveRelationship` / `Relate`, and
+//!   the region and orientation fix-ups, as upstream, except
+//!   [`SolidError::Unported`] and [`SolidError::InvalidInput`], which propagate. A
+//!   failed call's out-lists and gaps keep the values upstream initialises on entry
+//!   (empty, `0`, `SM_BIG_DOUBLE`); its in/out lists keep their edits; a failed box
+//!   query leaves the previous box, as upstream's reused local.
+//! - Callees not ported yet return [`SolidError::Unported`] at the call site,
+//!   tagged `UNPORTED(<unit>)`: `SmBrep::GetMinEdgeBBoxSize` (`topology.brep_p2`),
+//!   `SmBrep::GetTolerance` (`topology.brep_p1`), `SmBrep::MakeWireEdge`
+//!   (`topology.brep_p3`), `SmBrep::MakeFace` (`topology.brep_p7`) and
+//!   `RemoveRelationship` / `EdgeEdgeIntersect` / `EdgeFaceCoincidence`
+//!   (`boolean.topology_intersector_p2`); the [`MergeBrep`] defaults do the same for
+//!   `SmBrep::Notify` / `IsManifoldSolid` (`topology.brep_p2`), `GetFaces` /
+//!   `GetEdges` / `GetVertices` (`topology.brep_p1`), `SmFace::GetEdges` /
+//!   `GetVertices` / `GetBrep` (`topology.face_p4`), `SmFace::CalculateBoundingBox`
+//!   (`query.face_p1`), `StitchVertexPairs` / `StitchEdgesOfVertices`
+//!   (`heal.stitch_p1`), `SplitEdgesWithVertices` (`heal.stitch_p2`),
+//!   `FindAndSetInfiniteRegion` (`topology.brep_p5`) and `OrientTrimmedSurfaces`
+//!   (`topology.brep_p3`). The code after each stub is ported in full. The ported
+//!   callees on arena B-reps (`SmEdge::GetVertices`, `SmFace::GetFaceuses`,
+//!   `SmFaceuse::GetShell`, `SmBrep::TestClosureSplitRegion`) are required
+//!   [`MergeBrep`] methods.
+//! - The `SM_DEBUG_CODE` / `SM_VALIDATE_TOPOLOGY` blocks are compiled out upstream
+//!   and not ported. `SM_USE_OLDTOL` is the reference build's setting.
+//! - **Recursion.** None.
+
+use crate::boolean::merge::p1::{self, MergeOptions, MergeState, VertexCopy};
+use crate::boolean::topology_intersector::p1::{IntersectorBrep, Relations, TopologyIntersector};
+use crate::curve::curve::p2::Curve;
+use crate::error::{Result, SolidError};
+use crate::geom::context::Context;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::object::{NotifyOperation, ObjectRef};
+use crate::geom::solution_array::SolutionObject;
+use crate::intersect::point_class::{ClassObject, ClassObjectKind};
+use crate::kernel::Kernel;
+use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, PI};
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::p2::Surface;
+use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
+use crate::topology::topology as topo;
+use crate::topology::{
+    edge, loopuse, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, ShellId,
+    VertexId,
+};
+
+const OP: &str = "boolean::merge::p2";
+const OP_EDGE: &str = "boolean::merge::p2::merge_edge";
+const OP_FACEUSE: &str = "boolean::merge::p2::make_faceuse";
+
+/// A dereference of a null pointer upstream (undefined behaviour).
+const fn dangling(operation: &'static str, reason: &'static str) -> SolidError {
+    SolidError::InvalidInput { operation, reason }
+}
+
+fn unavailable<T>(symbol: &'static str, unit: &'static str) -> Result<T> {
+    Err(SolidError::unported(symbol, unit))
+}
+
+/// `SM_REVERSE_ORIENTATION(a)`: `SM_OT_SAME` becomes `SM_OT_OPPOSITE`, anything
+/// else (including `SM_OT_UNKNOWN`) becomes `SM_OT_SAME`.
+const fn reverse_orientation(o: OrientType) -> OrientType {
+    match o {
+        OrientType::Same => OrientType::Opposite,
+        OrientType::Opposite | OrientType::Unknown => OrientType::Same,
+    }
+}
+
+// ---- the constructor ---------------------------------------------------------------
+
+fn min_edge_bbox_size(_brep: &Brep) -> Result<f64> {
+    // UNPORTED(topology.brep_p2): SmBrep::GetMinEdgeBBoxSize
+    unavailable("SmBrep::GetMinEdgeBBoxSize", "topology.brep_p2")
+}
+
+fn brep_tolerance(_brep: &Brep) -> Result<f64> {
+    // UNPORTED(topology.brep_p1): SmBrep::GetTolerance
+    unavailable("SmBrep::GetTolerance", "topology.brep_p1")
+}
+
+impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
+    /// `SmMerge(crContext, pBrep, pOtherBrep, dApproxTol3d, dAngleTolRadians,
+    /// pOptMergeOptions)`: the intersector over both B-reps with the given
+    /// tolerances, the default controls, then the options (a null pointer keeps the
+    /// defaults). A tolerance below `SM_EFF_ZERO` is replaced by
+    /// `min(0.5 * min(brep tolerances), 0.33 * min edge bounding-box size)`; an angle
+    /// tolerance of exactly `0.0` by 20 degrees. `brep` and `other` give each B-rep's
+    /// arena and the handle the intersector refers to it by; `other` may be `None`
+    /// (the stitch entry points) unless the tolerance must be computed.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a computed tolerance without other B-rep
+    /// (upstream dereferences null); [`SolidError::Unported`] from the B-rep queries.
+    pub fn with_breps(
+        brep: (&Brep, O),
+        other: Option<(&Brep, O)>,
+        approx_tol_3d: f64,
+        ang_tol_rad: f64,
+        options: Option<&MergeOptions>,
+    ) -> Result<Self> {
+        let intersector =
+            TopologyIntersector::new(Some(brep.1), other.map(|o| o.1), approx_tol_3d, ang_tol_rad);
+        // m_bManifoldBoolean(TRUE), m_bCookieCutter(FALSE), m_bImprinting(FALSE),
+        // m_bBooleanPostProcess(TRUE), m_bIntersectionLoopClosed(TRUE),
+        // m_bImprintAndClassifyFaces(FALSE), m_bKeepOtherBrep(FALSE), m_lTagID(0)
+        let mut state = Self::new(intersector);
+        state.set_merge_options(options);
+
+        // The user can ask us to calculate a tolerance based on the geometry by
+        // specifying a zero tolerance.
+        if approx_tol_3d < EFF_ZERO {
+            // Get the minimum Edge length.
+            let edge1_size = min_edge_bbox_size(brep.0)?;
+            let (other_brep, _) =
+                other.ok_or(dangling(OP, "computed tolerance without other B-rep"))?;
+            let edge2_size = min_edge_bbox_size(other_brep)?;
+            let edge_size = min2(edge1_size, edge2_size);
+
+            // siWhichTol == 3: 1/2 of Min of two Brep's tols.
+            let brep_tol = 0.5 * min2(brep_tolerance(brep.0)?, brep_tolerance(other_brep)?);
+
+            state
+                .intersector
+                .set_this_approx_tol_3d(min2(brep_tol, edge_size * 0.33));
+        }
+
+        // Use 20 degrees as a default angle tolerance
+        #[allow(clippy::float_cmp)] // upstream's exact `== 0.0`
+        if ang_tol_rad == 0.0 {
+            state.intersector.set_this_ang_tol_rad(20.0 * (PI / 180.0));
+        }
+        Ok(state)
+    }
+}
+
+// ---- copying topology from the other operand -----------------------------------------
+
+/// The notification storage and identities of the topology copied from the other
+/// operand (`Notify(SM_NO_COPY, pCopy, ...)` of vertices, edges and faces). Keys must
+/// be distinct across operands even when their arena ids coincide.
+pub struct TopologyCopy<'a> {
+    /// Records, attributes and vertex identities ([`p1::merge_vertex`]).
+    pub vertices: VertexCopy<'a>,
+    /// Notification identity of each other-operand edge.
+    pub edge_source_key: &'a dyn Fn(EdgeId) -> ObjectRef,
+    /// Notification identity of each primary edge, including freshly created ids.
+    pub edge_destination_key: &'a dyn Fn(EdgeId) -> ObjectRef,
+    /// Notification identity of each other-operand face.
+    pub face_source_key: &'a dyn Fn(FaceId) -> ObjectRef,
+    /// Notification identity of each primary face, including freshly created ids.
+    pub face_destination_key: &'a dyn Fn(FaceId) -> ObjectRef,
+}
+
+impl TopologyCopy<'_> {
+    /// `pSource->Notify(SM_NO_COPY, pCopy, SM_NO_GET_BREP(pCopy),
+    /// SM_NO_GET_BREP(pSource))`: `SM_NO_GET_BREP` is null in the pinned source.
+    fn notify(
+        &mut self,
+        context: Option<&mut Context>,
+        source: ObjectRef,
+        copy: ObjectRef,
+    ) -> Result<()> {
+        topo::notify(
+            self.vertices.records,
+            self.vertices.attributes,
+            context,
+            NotifyOperation::Copy,
+            source,
+            Some(copy),
+            None,
+            None,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // upstream's MakeWireEdge
+fn make_wire_edge(
+    brep: &mut Brep,
+    region: Option<RegionId>,
+    start: VertexId,
+    end: VertexId,
+    curve: Curve,
+    interval: Extent1d,
+    orientation: OrientType,
+) -> Result<EdgeId> {
+    let _ = (brep, region, start, end, curve, interval, orientation);
+    // UNPORTED(topology.brep_p3): SmBrep::MakeWireEdge
+    unavailable("SmBrep::MakeWireEdge", "topology.brep_p3")
+}
+
+/// Merge an edge of the other operand into the primary B-rep (`MergeEdge`). An edge
+/// without a primary mate becomes a new primary wire edge in `region` (`None`: the
+/// infinite region) over a copy of its curve, between the primary mates of its
+/// vertices (merged in as shell vertices when they have none), and is related to it.
+/// The primary edge then gets the larger tolerance and the source edge is notified
+/// of the copy. A null edge use succeeds with no edge, as upstream.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` when a vertex has no primary mate after merging;
+/// [`SolidError::InvalidInput`] for a null edge, curve, vertex use or vertex of the
+/// edge use (upstream dereferences them); those of the curve copy, `Relate` and
+/// [`p1::merge_vertex`]; [`SolidError::Unported`] (module docs).
+#[allow(clippy::too_many_arguments)]
+pub fn merge_edge(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &mut Brep,
+    edgeuse: Option<EdgeuseId>,
+    region: Option<RegionId>,
+    relations: &mut Relations,
+    copy: &mut TopologyCopy<'_>,
+    mut context: Option<&mut Context>,
+) -> Result<Option<EdgeId>> {
+    // The caller knows better whether this is a problem.
+    let Some(edgeuse) = edgeuse else {
+        return Ok(None);
+    };
+
+    // get target edge
+    let other_edge = eu::edge(other, edgeuse)?.ok_or(dangling(OP_EDGE, "edge use without edge"))?;
+
+    // get Brep matching edge (probably NULL)
+    let brep_edge = if let Some(brep_edge) = relations.edges.primary(other_edge) {
+        brep_edge
+    } else {
+        // copy the curve (its Brep mate is always NULL; module docs)
+        let source = other.edge(other_edge)?;
+        let interval = source.interval;
+        let new_curve = source
+            .curve
+            .as_ref()
+            .ok_or(dangling(OP_EDGE, "edge without curve"))?
+            .copy(k)?;
+
+        // get OtherBrep edge->vertices
+        let vu = eu::vertexuse(other, edgeuse)?
+            .ok_or(dangling(OP_EDGE, "edge use without vertex use"))?;
+        let mut v = vertexuse::vertex(other, vu)?;
+        let mut v2 = edge::other_vertex(other, other_edge, v)?;
+
+        // Swap vertices if the edgeuse is oriented opposite to the edge.
+        if eu::orientation(other, edgeuse)? == OrientType::Opposite {
+            core::mem::swap(&mut v, &mut v2);
+        }
+
+        // Get or make matching Brep vertices
+        let mut mates = [None, None];
+        for (slot, v) in mates.iter_mut().zip([v, v2]) {
+            let mut mate = v.and_then(|v| relations.vertices.primary(v));
+            if mate.is_none() {
+                mate = p1::merge_vertex(
+                    brep,
+                    other,
+                    v,
+                    region,
+                    relations,
+                    &mut copy.vertices,
+                    context.as_deref_mut(),
+                )?;
+            }
+            *slot = Some(mate.ok_or(SolidError::null_pointer(OP_EDGE))?);
+        }
+        let [Some(bv), Some(bv2)] = mates else {
+            return Err(SolidError::null_pointer(OP_EDGE));
+        };
+
+        // make the new Brep wire edge
+        let brep_edge =
+            make_wire_edge(brep, region, bv, bv2, new_curve, interval, OrientType::Same)?;
+
+        // mate new edge with input otherBrep edge
+        relations.relate_edges(brep, brep_edge, other, other_edge)?;
+        brep_edge
+    };
+
+    // match tolerances for the mated edges
+    let other_tolerance = other.edge(other_edge)?.tolerance;
+    if other_tolerance > brep.edge(brep_edge)?.tolerance {
+        edge::set_tolerance(brep, brep_edge, other_tolerance, true, true)?;
+    }
+
+    // notify OtherBrepEdge of the copy (so it can propagate attributes as needed)
+    let (source, dest) = (
+        (copy.edge_source_key)(other_edge),
+        (copy.edge_destination_key)(brep_edge),
+    );
+    copy.notify(context, source, dest)?;
+
+    Ok(Some(brep_edge))
+}
+
+/// What [`make_faceuse`] returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MadeFaceuse {
+    /// `pOldRegion`: the primary region receiving the new face (`None` when the face
+    /// already had a mate).
+    pub old_region: Option<RegionId>,
+    /// `pNewRegion`: the region made when the new face splits `old_region`.
+    pub new_region: Option<RegionId>,
+}
+
+fn shell_region_of(b: &Brep, fu: FaceuseId) -> Result<Option<RegionId>> {
+    let shell: ShellId =
+        eu::faceuse_shell(b, fu)?.ok_or(dangling(OP_FACEUSE, "face use without shell"))?;
+    eu::shell_region(b, shell)
+}
+
+fn vertex_of_vertexuse(b: &Brep, vu: Option<crate::topology::VertexuseId>) -> Result<VertexId> {
+    let vu = vu.ok_or(dangling(OP_FACEUSE, "null vertex use"))?;
+    vertexuse::vertex(b, vu)?.ok_or(dangling(OP_FACEUSE, "vertex use without vertex"))
+}
+
+#[allow(clippy::too_many_arguments)] // upstream's MakeFace
+fn make_face(
+    brep: &mut Brep,
+    region: RegionId,
+    edge_loops: &[usize],
+    edgeuses: &[EdgeuseId],
+    loop_vertices: &[VertexId],
+    surface: Surface,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+) -> Result<(Option<RegionId>, Option<ShellId>, FaceId)> {
+    // bVerifyRadialSectors = FALSE, bCalculateTrims = FALSE, cpOptUVCurves = NULL
+    let _ = (
+        brep,
+        region,
+        edge_loops,
+        edgeuses,
+        loop_vertices,
+        surface,
+        uv_domain,
+        orientation,
+    );
+    // UNPORTED(topology.brep_p7): SmBrep::MakeFace
+    unavailable("SmBrep::MakeFace", "topology.brep_p7")
+}
+
+/// The orientation of the primary edge use to look for in the radial sector of
+/// `brep_edge` for the other-operand edge use `edgeuse` (opposite to it relative to
+/// the vertices, since it will end up radial to it).
+fn orientation_to_find(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &mut Brep,
+    edgeuse: EdgeuseId,
+    other_edge: EdgeId,
+    brep_edge: EdgeId,
+    relations: &Relations,
+) -> Result<OrientType> {
+    let v = vertex_of_vertexuse(other, eu::vertexuse(other, edgeuse)?)?;
+    let v2 = edge::other_vertex(other, other_edge, Some(v))?;
+    let prim = eu::primary_edgeuse(brep, brep_edge)?
+        .ok_or(dangling(OP_FACEUSE, "edge without primary edge use"))?;
+    let vb = vertex_of_vertexuse(brep, eu::vertexuse(brep, prim)?)?;
+    let vb2 = edge::other_vertex(brep, brep_edge, Some(vb))?;
+    if Some(v) == v2 {
+        // Here need to do additional work for closed loop stuff
+        let tangent = |k: &Kernel, b: &mut Brep, use_: EdgeuseId, t: f64| -> Result<_> {
+            eu3::normalized_evaluate(k, b, use_, t, false, true, true)?
+                .first_deriv
+                .ok_or(dangling(OP_FACEUSE, "no first derivative"))
+        };
+        let tan1 = tangent(k, other, edgeuse, 0.0)?;
+        // Pointing from the vertex into the curve...
+        let tan2 = -tangent(k, other, edgeuse, 1.0)?;
+        let tan_ref = tangent(k, brep, prim, 0.0)?;
+        let tan1 = tan1.unitize()?;
+        let tan2 = tan2.unitize()?;
+        let tan_ref = tan_ref.unitize()?;
+        let orient = eu::orientation(brep, prim)?;
+        if tan1.dot(tan_ref) > tan2.dot(tan_ref) {
+            Ok(orient)
+        } else {
+            Ok(reverse_orientation(orient))
+        }
+    } else {
+        let vb_rel = relations
+            .vertices
+            .primary(v)
+            .ok_or(SolidError::null_pointer(OP_FACEUSE))?;
+        if vb == vb_rel {
+            eu::orientation(brep, prim)
+        } else if vb2 == Some(vb_rel) {
+            Ok(reverse_orientation(eu::orientation(brep, prim)?))
+        } else {
+            Err(SolidError::sm_err(OP_FACEUSE))
+        }
+    }
+}
+
+/// Make the face of an other-operand face use in the primary B-rep
+/// (`MakeFaceuse`). The face use on the side of the other operand's infinite region
+/// is used. A face that already has a primary mate is only notified of the copy.
+/// Otherwise the containing primary region is `region` or found with
+/// [`p1::find_brep_region_of_other_face`]; every vertex and edge of the face is
+/// merged in ([`p1::merge_vertex`], [`merge_edge`]), the radial sector of each
+/// primary edge chosen, the surface copied and the face made, related and notified.
+/// `new_faces`, when given, is cleared and receives the new face.
+///
+/// # Errors
+///
+/// `SM_ERR` when no region contains the face, a vertex orientation cannot be matched
+/// or no radial sector is found; `SM_ERR_NULL_POINTER` for a vertex without mate;
+/// [`SolidError::InvalidInput`] for missing topology upstream dereferences or a zero
+/// tangent (`Unitize`); those of the merges, evaluations, copies and `Relate`;
+/// [`SolidError::Unported`] (module docs).
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+pub fn make_faceuse(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &mut Brep,
+    faceuse: FaceuseId,
+    region: Option<RegionId>,
+    relations: &mut Relations,
+    copy: &mut TopologyCopy<'_>,
+    mut context: Option<&mut Context>,
+    mut new_faces: Option<&mut Vec<FaceId>>,
+) -> Result<MadeFaceuse> {
+    // init output
+    if let Some(list) = new_faces.as_deref_mut() {
+        list.clear();
+    }
+
+    // If the Face of the input Faceuse bounds the other Brep's infinite region, then
+    // set it up so that the face use is the one on the side of the infinite region.
+    let mut faceuse = faceuse;
+    let mate =
+        eu::faceuse_mate(other, faceuse)?.ok_or(dangling(OP_FACEUSE, "face use without mate"))?;
+    let other_inf = other.infinite_region();
+    if shell_region_of(other, mate)? == other_inf && shell_region_of(other, faceuse)? != other_inf {
+        faceuse = mate;
+    }
+
+    // Check to see if face is already mated to a Brep face
+    let face_to_make =
+        eu::faceuse_face(other, faceuse)?.ok_or(dangling(OP_FACEUSE, "face use without face"))?;
+    if let Some(face) = relations.faces.primary(face_to_make) {
+        // low work - notify of copy to propagate attributes and return
+        let (source, dest) = (
+            (copy.face_source_key)(face_to_make),
+            (copy.face_destination_key)(face),
+        );
+        copy.notify(context, source, dest)?;
+        return Ok(MadeFaceuse::default());
+    }
+
+    // when not given a Brep Region try to find the containing Brep Region
+    let region = match region {
+        Some(r) => Some(r),
+        None => p1::find_brep_region_of_other_face(
+            k,
+            brep,
+            other,
+            faceuse,
+            relations.edges.primary_map(),
+        )?,
+    };
+    // error - unable to classify input OtherBrep faceuse into a Brep region
+    let region = region.ok_or(SolidError::sm_err(OP_FACEUSE))?;
+
+    // Now merge all unrelated input face->vertices into Brep's Region as shell
+    // vertices, and pick up the radial sector edge uses.
+    let mut face_edgeuses = Vec::new();
+    let mut loop_vertices = Vec::new();
+    let mut edge_loops = Vec::new();
+
+    // for every Faceuse->Loopuse
+    for lu in eu::faceuse_loopuses(other, faceuse, false, None)? {
+        // get this loopuse's edgeuses
+        let edgeuses = loopuse::edgeuses(other, lu, None, None)?;
+
+        // load edge counts into sEdgeLoops array
+        let vertex_loop = loopuse::is_vertex_loopuse(other, lu)?;
+        if !vertex_loop {
+            edge_loops.push(edgeuses.len());
+        }
+
+        // for every Loopuse->Vertexuse
+        for (kk, vu) in loopuse::vertexuses(other, lu, None)?
+            .into_iter()
+            .enumerate()
+        {
+            let v = vertex_of_vertexuse(other, vu)?;
+
+            // Merge the Vertex
+            let brep_vertex = p1::merge_vertex(
+                brep,
+                other,
+                Some(v),
+                Some(region),
+                relations,
+                &mut copy.vertices,
+                context.as_deref_mut(),
+            )?;
+
+            // load VertexLoopuses into sLoopVertices
+            if kk == 0 && vertex_loop {
+                loop_vertices.push(brep_vertex.ok_or(SolidError::null_pointer(OP_FACEUSE))?);
+            }
+        }
+
+        // for every Loopuse->Edgeuse
+        for eu_other in edgeuses {
+            let other_edge =
+                eu::edge(other, eu_other)?.ok_or(dangling(OP_FACEUSE, "edge use without edge"))?;
+
+            // merge the edge
+            let brep_edge = merge_edge(
+                k,
+                brep,
+                other,
+                Some(eu_other),
+                Some(region),
+                relations,
+                copy,
+                context.as_deref_mut(),
+            )?
+            .ok_or(dangling(OP_FACEUSE, "merged edge use without edge"))?;
+
+            // Find the orientation of the Edgeuse to look for in the radial sector.
+            let orient =
+                orientation_to_find(k, brep, other, eu_other, other_edge, brep_edge, relations)?;
+
+            // classify Edgeuse->Face against BrepEdge
+            let found = match edge::find_radial_sector_between(
+                k,
+                brep,
+                brep_edge,
+                Some(&mut *other),
+                eu_other,
+                Some(region),
+                orient,
+                None,
+            ) {
+                Ok(sector) => sector.radial_edgeuse,
+                Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => None,
+            };
+            // add the classified radial sector's Edgeuse to the sFaceEdgeuses list
+            face_edgeuses.push(found.ok_or(SolidError::sm_err(OP_FACEUSE))?);
+        }
+    }
+
+    // Copy the surface, when possible as an analytic surface (its Brep mate is always
+    // NULL; module docs)
+    let face_record = other.face(face_to_make)?;
+    let uv_domain = face_record.uv_domain;
+    let new_surface = face_record
+        .surface
+        .as_ref()
+        .ok_or(dangling(OP_FACEUSE, "face without surface"))?
+        .copy_and_add_analytics(k)?;
+
+    // If we have the case of a faceuse bordering an infinite region in the other
+    // brep being merged into the infinite region in this brep, temporarily set Brep's
+    // infinite region to NULL.
+    let brep_inf = brep.infinite_region();
+    let mate =
+        eu::faceuse_mate(other, faceuse)?.ok_or(dangling(OP_FACEUSE, "face use without mate"))?;
+    let saved_infinite_region = if Some(region) == brep_inf
+        && shell_region_of(other, faceuse)? == other_inf
+        && shell_region_of(other, mate)? != other_inf
+    {
+        brep.set_infinite_region_record(None);
+        brep_inf
+    } else {
+        None
+    };
+
+    // make the new Brep Face within the classified Brep region
+    let orientation = other.faceuse(faceuse)?.orientation;
+    let made = make_face(
+        brep,
+        region,
+        &edge_loops,
+        &face_edgeuses,
+        &loop_vertices,
+        new_surface,
+        &uv_domain,
+        orientation,
+    );
+    if saved_infinite_region.is_some() {
+        brep.set_infinite_region_record(saved_infinite_region);
+    }
+    let (new_region, _new_shell, new_face) = made?;
+
+    relations.relate_faces(brep, new_face, other, face_to_make)?;
+    let (source, dest) = (
+        (copy.face_source_key)(face_to_make),
+        (copy.face_destination_key)(new_face),
+    );
+    copy.notify(context, source, dest)?;
+
+    // set output
+    if let Some(list) = new_faces {
+        list.push(new_face);
+    }
+    Ok(MadeFaceuse {
+        old_region: Some(region),
+        new_region,
+    })
+}
+
+// ---- merging added topology ------------------------------------------------------------
+
+/// What [`MergeBrep::stitch_vertex_pairs`] returns (`SmStitch::StitchVertexPairs`,
+/// two-list overload).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StitchedVertices<O> {
+    /// `rProcessedVerts`: the surviving glued vertices (from the first list).
+    pub processed: Vec<O>,
+    /// `rDeletedVerts`: the glued vertices deleted, in step with `processed`.
+    pub deleted: Vec<O>,
+    /// `rdMaxVertexGap`.
+    pub max_vertex_gap: f64,
+    /// `rdMinUnstitchedVertGap`.
+    pub min_unstitched_vert_gap: f64,
+}
+
+impl<O> StitchedVertices<O> {
+    /// The outputs as initialised on entry (what an ignored failure leaves).
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self {
+            processed: Vec::new(),
+            deleted: Vec::new(),
+            max_vertex_gap: 0.0,
+            min_unstitched_vert_gap: BIG_DOUBLE,
+        }
+    }
+}
+
+/// What [`MergeBrep::split_edges_with_vertices`] returns
+/// (`SmStitch::SplitEdgesWithVertices`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SplitEdges<O> {
+    /// `rProcessedVerts`: the vertices that split an edge.
+    pub processed_verts: Vec<O>,
+    /// `rSplitEdges`: the edges that were split.
+    pub split_edges: Vec<O>,
+    /// `rNewEdges`: the edges the splits created (also appended to the edge list).
+    pub new_edges: Vec<O>,
+    /// `rdMaxVertexGap`.
+    pub max_vertex_gap: f64,
+    /// `rdMinUnstitchedVertGap`.
+    pub min_unstitched_vert_gap: f64,
+}
+
+impl<O> SplitEdges<O> {
+    /// The outputs as initialised on entry (what an ignored failure leaves).
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self {
+            processed_verts: Vec::new(),
+            split_edges: Vec::new(),
+            new_edges: Vec::new(),
+            max_vertex_gap: 0.0,
+            min_unstitched_vert_gap: BIG_DOUBLE,
+        }
+    }
+}
+
+/// What [`MergeBrep::stitch_edges_of_vertices`] returns
+/// (`SmStitch::StitchEdgesOfVertices`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StitchedEdges<O> {
+    /// `rGluedEdges`: the edges that survived being glued.
+    pub glued: Vec<O>,
+    /// `rDeletedEdges`: the edges gluing deleted, in step with `glued`.
+    pub deleted: Vec<O>,
+    /// `rdMaxEdgeGap`.
+    pub max_edge_gap: f64,
+    /// `rdMinUnstitchedEdgeGap`.
+    pub min_unstitched_edge_gap: f64,
+}
+
+impl<O> StitchedEdges<O> {
+    /// The outputs as initialised on entry (what an ignored failure leaves; the
+    /// caller's glued and deleted lists start empty).
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self {
+            glued: Vec::new(),
+            deleted: Vec::new(),
+            max_edge_gap: 0.0,
+            min_unstitched_edge_gap: BIG_DOUBLE,
+        }
+    }
+}
+
+/// The `SmStitch` [`MergeState::merge_added_topology`] builds (`SmStitch
+/// sStitcher(sCB, dThisTol)` with a default `SmStitchCallback`) and the members it
+/// sets; the stitch tolerance changes (`SetStitchTol3d`) between the three calls.
+#[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean members
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StitchSettings {
+    /// `m_dStitchTol3d`.
+    pub stitch_tol_3d: f64,
+    /// `m_bMakingManifoldSolid`.
+    pub making_manifold_solid: bool,
+    /// `m_bIgnoreProblems`.
+    pub ignore_problems: bool,
+    /// `m_bDoRegionNesting`.
+    pub do_region_nesting: bool,
+    /// `m_bFastEdgeCompare`.
+    pub fast_edge_compare: bool,
+    /// `m_bValidateResult` (`FALSE`).
+    pub validate_result: bool,
+    /// `m_bSqueezeSmallEdges` (`FALSE`).
+    pub squeeze_small_edges: bool,
+    /// `m_bSplitEdgesWithVertices` (`TRUE`).
+    pub split_edges_with_vertices: bool,
+    /// `m_bRemoveLaminarSlivers` (`FALSE`).
+    pub remove_laminar_slivers: bool,
+}
+
+/// What the merge reads from and does to the B-rep holding the added topology,
+/// beyond what the intersector needs ([`IntersectorBrep`]). Each method names the
+/// upstream function it stands for. Those whose unit is not ported yet default to
+/// [`SolidError::Unported`] (tagged `UNPORTED(<unit>)`); an implementation over
+/// arena B-reps routes them to the ported functions as they land.
+pub trait MergeBrep<O>: IntersectorBrep<O> {
+    /// `SmEdge::GetVertices(rVertices)` (`topology::edge::vertices`, no attribute).
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walk.
+    fn edge_vertices(&self, edge: O) -> Result<Vec<O>>;
+
+    /// `SmFace::GetFaceuses(rpFU1, rpFU2)` (`topology.face_p2`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walk.
+    fn face_faceuses(&self, face: O) -> Result<(Option<O>, Option<O>)>;
+
+    /// `SmFaceuse::GetShell` (`topology::edgeuse::p1::faceuse_shell`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walk.
+    fn faceuse_shell(&self, faceuse: O) -> Result<Option<O>>;
+
+    /// `SmBrep::Notify(eOperation, pBrep, NULL, NULL)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p2` is ported.
+    fn notify_brep(&mut self, k: &mut Kernel, brep: O, operation: NotifyOperation) -> Result<()> {
+        let _ = (k, brep, operation);
+        // UNPORTED(topology.brep_p2): SmBrep::Notify
+        unavailable("SmBrep::Notify", "topology.brep_p2")
+    }
+
+    /// `SmBrep::GetFaces(rFaces)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p1` is ported.
+    fn brep_faces(&self, brep: O) -> Result<Vec<O>> {
+        let _ = brep;
+        // UNPORTED(topology.brep_p1): SmBrep::GetFaces
+        unavailable("SmBrep::GetFaces", "topology.brep_p1")
+    }
+
+    /// `SmBrep::GetEdges(rEdges)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p1` is ported.
+    fn brep_edges(&self, brep: O) -> Result<Vec<O>> {
+        let _ = brep;
+        // UNPORTED(topology.brep_p1): SmBrep::GetEdges
+        unavailable("SmBrep::GetEdges", "topology.brep_p1")
+    }
+
+    /// `SmBrep::GetVertices(rVertices)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p1` is ported.
+    fn brep_vertices(&self, brep: O) -> Result<Vec<O>> {
+        let _ = brep;
+        // UNPORTED(topology.brep_p1): SmBrep::GetVertices
+        unavailable("SmBrep::GetVertices", "topology.brep_p1")
+    }
+
+    /// `SmFace::GetEdges(rEdges)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.face_p4` is ported.
+    fn face_edges(&self, face: O) -> Result<Vec<O>> {
+        let _ = face;
+        // UNPORTED(topology.face_p4): SmFace::GetEdges
+        unavailable("SmFace::GetEdges", "topology.face_p4")
+    }
+
+    /// `SmFace::GetVertices(rVertices)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.face_p4` is ported.
+    fn face_vertices(&self, face: O) -> Result<Vec<O>> {
+        let _ = face;
+        // UNPORTED(topology.face_p4): SmFace::GetVertices
+        unavailable("SmFace::GetVertices", "topology.face_p4")
+    }
+
+    /// `SmFace::GetBrep`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.face_p4` is ported.
+    fn face_brep(&self, face: O) -> Result<Option<O>> {
+        let _ = face;
+        // UNPORTED(topology.face_p4): SmFace::GetBrep
+        unavailable("SmFace::GetBrep", "topology.face_p4")
+    }
+
+    /// `SmFace::CalculateBoundingBox(rBox)` (status ignored by the merge).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `query.face_p1` is ported.
+    fn face_bounding_box(&self, k: &Kernel, face: O) -> Result<Extent3d> {
+        let _ = (k, face);
+        // UNPORTED(query.face_p1): SmFace::CalculateBoundingBox
+        unavailable("SmFace::CalculateBoundingBox", "query.face_p1")
+    }
+
+    /// `SmStitch::StitchVertexPairs(rVerts1, rVerts2, ...)`: glued entries of both
+    /// lists become `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `heal.stitch_p1` is ported.
+    fn stitch_vertex_pairs(
+        &mut self,
+        k: &mut Kernel,
+        stitch: &StitchSettings,
+        list1: &mut [Option<O>],
+        list2: &mut [Option<O>],
+    ) -> Result<StitchedVertices<O>> {
+        let _ = (k, stitch, list1, list2);
+        // UNPORTED(heal.stitch_p1): SmStitch::StitchVertexPairs
+        unavailable("SmStitch::StitchVertexPairs", "heal.stitch_p1")
+    }
+
+    /// `SmStitch::SplitEdgesWithVertices(rVerts, rEdges, ...)`: used vertices become
+    /// `None`, processed edges `None`, and the new edges are appended to `edges`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `heal.stitch_p2` is ported.
+    fn split_edges_with_vertices(
+        &mut self,
+        k: &mut Kernel,
+        stitch: &StitchSettings,
+        verts: &mut [Option<O>],
+        edges: &mut Vec<Option<O>>,
+    ) -> Result<SplitEdges<O>> {
+        let _ = (k, stitch, verts, edges);
+        // UNPORTED(heal.stitch_p2): SmStitch::SplitEdgesWithVertices
+        unavailable("SmStitch::SplitEdgesWithVertices", "heal.stitch_p2")
+    }
+
+    /// `SmStitch::StitchEdgesOfVertices(rVerts, ...)`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `heal.stitch_p1` is ported.
+    fn stitch_edges_of_vertices(
+        &mut self,
+        k: &mut Kernel,
+        stitch: &StitchSettings,
+        verts: &[O],
+    ) -> Result<StitchedEdges<O>> {
+        let _ = (k, stitch, verts);
+        // UNPORTED(heal.stitch_p1): SmStitch::StitchEdgesOfVertices
+        unavailable("SmStitch::StitchEdgesOfVertices", "heal.stitch_p1")
+    }
+
+    /// `SmBrep::TestClosureSplitRegion(bTestClosure, pFaceuse, rpNewShell,
+    /// rpNewRegion)` (`topology::brep::p6::test_closure_split_region`): the new shell
+    /// and region.
+    ///
+    /// # Errors
+    ///
+    /// Those of the region split.
+    fn test_closure_split_region(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        test_closure: bool,
+        faceuse: O,
+    ) -> Result<(Option<O>, Option<O>)>;
+
+    /// `SmBrep::FindAndSetInfiniteRegion()` (default arguments).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p5` is ported.
+    fn find_and_set_infinite_region(&mut self, k: &mut Kernel, brep: O) -> Result<()> {
+        let _ = (k, brep);
+        // UNPORTED(topology.brep_p5): SmBrep::FindAndSetInfiniteRegion
+        unavailable("SmBrep::FindAndSetInfiniteRegion", "topology.brep_p5")
+    }
+
+    /// `SmBrep::IsManifoldSolid`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p2` is ported.
+    fn is_manifold_solid(&self, brep: O) -> Result<bool> {
+        let _ = brep;
+        // UNPORTED(topology.brep_p2): SmBrep::IsManifoldSolid
+        unavailable("SmBrep::IsManifoldSolid", "topology.brep_p2")
+    }
+
+    /// `SmBrep::OrientTrimmedSurfaces(bArg1, rbMaybeNotClosed, bArg3)` (no face
+    /// list): returns `rbMaybeNotClosed`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] until `topology.brep_p3` is ported.
+    fn orient_trimmed_surfaces(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        arg1: bool,
+        arg3: bool,
+    ) -> Result<bool> {
+        let _ = (k, brep, arg1, arg3);
+        // UNPORTED(topology.brep_p3): SmBrep::OrientTrimmedSurfaces
+        unavailable("SmBrep::OrientTrimmedSurfaces", "topology.brep_p3")
+    }
+}
+
+/// `EdgeEdgeIntersect`'s out-params (the shape of `boolean.topology_intersector_p2`).
+struct EdgeEdgeOut<O> {
+    new_edges1: Vec<O>,
+    new_edges2: Vec<O>,
+    new_verts: Vec<O>,
+    max_edge_gap: f64,
+    min_unstitched_edge_gap: f64,
+}
+
+/// `EdgeFaceCoincidence`'s out-params (the shape of `boolean.topology_intersector_p2`).
+struct EdgeFaceCoincidenceOut<O> {
+    imprinted_edges: Vec<O>,
+    processed_faces: Vec<O>,
+    new_faces: Vec<O>,
+    split_faces: Vec<O>,
+    max_edge_gap: f64,
+    this_min_unstitched: f64,
+}
+
+fn remove_relationship<O>(
+    ti: &mut TopologyIntersector<O>,
+    brep_entity: Option<O>,
+    other_entity: Option<O>,
+) -> Result<()> {
+    let _ = (ti, brep_entity, other_entity);
+    // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::RemoveRelationship
+    unavailable(
+        "SmTopologyIntersector::RemoveRelationship",
+        "boolean.topology_intersector_p2",
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // upstream's EdgeEdgeIntersect
+fn edge_edge_intersect<O, B: IntersectorBrep<O>>(
+    ti: &mut TopologyIntersector<O>,
+    k: &Kernel,
+    brep: &mut B,
+    input_edges1: &[Option<O>],
+    input_edges2: &[Option<O>],
+    making_manifold_solid: bool,
+    ignore_problems: bool,
+) -> Result<EdgeEdgeOut<O>> {
+    let _ = (
+        ti,
+        k,
+        brep,
+        input_edges1,
+        input_edges2,
+        making_manifold_solid,
+        ignore_problems,
+    );
+    // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::EdgeEdgeIntersect
+    unavailable(
+        "SmTopologyIntersector::EdgeEdgeIntersect",
+        "boolean.topology_intersector_p2",
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // upstream's EdgeFaceCoincidence
+fn edge_face_coincidence<O, B: IntersectorBrep<O>>(
+    ti: &mut TopologyIntersector<O>,
+    k: &Kernel,
+    brep: &mut B,
+    given_verts: &[Option<O>],
+    excluded_edges: &[Option<O>],
+    ignore_problems: bool,
+    do_region_nesting: bool,
+) -> Result<EdgeFaceCoincidenceOut<O>> {
+    let _ = (
+        ti,
+        k,
+        brep,
+        given_verts,
+        excluded_edges,
+        ignore_problems,
+        do_region_nesting,
+    );
+    // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::EdgeFaceCoincidence
+    unavailable(
+        "SmTopologyIntersector::EdgeFaceCoincidence",
+        "boolean.topology_intersector_p2",
+    )
+}
+
+/// The four flags of [`MergeState::merge_added_topology`], in the order of
+/// upstream's definition.
+///
+/// The header declares `bDoGluing` (unused) *before* the four flags, but the
+/// definition takes it *after* them, so a caller relying on the declared defaults
+/// `(TRUE, FALSE, TRUE, TRUE, TRUE)` passes `bMakingManifoldSolid = TRUE` and
+/// `bFastEdgeCompare = FALSE`. [`Default`] is that effective result (see
+/// `plan/upstream-issues.md`); both upstream callers pass all four explicitly.
+#[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean arguments
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeAddedOptions {
+    /// `m_bMakingManifoldSolid`.
+    pub making_manifold_solid: bool,
+    /// `m_bFastEdgeCompare`.
+    pub fast_edge_compare: bool,
+    /// `m_bDoRegionNesting`.
+    pub do_region_nesting: bool,
+    /// `m_bIgnoreProblems`.
+    pub ignore_problems: bool,
+}
+
+impl Default for MergeAddedOptions {
+    /// The declared defaults as the definition receives them: `(TRUE, FALSE, TRUE,
+    /// TRUE)`.
+    fn default() -> Self {
+        Self {
+            making_manifold_solid: true,
+            fast_edge_compare: false,
+            do_region_nesting: true,
+            ignore_problems: true,
+        }
+    }
+}
+
+/// `MergeAddedFace`'s fixed flags: `(FALSE, TRUE, TRUE, TRUE)`.
+pub const MERGE_ADDED_FACE_OPTIONS: MergeAddedOptions = MergeAddedOptions {
+    making_manifold_solid: false,
+    fast_edge_compare: true,
+    do_region_nesting: true,
+    ignore_problems: true,
+};
+
+/// What [`MergeState::merge_added_topology`] returns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MergedTopology {
+    /// `rnNumEdgesStitched`: the glued and imprinted edges (null entries included).
+    pub num_edges_stitched: usize,
+    /// `rdMaxVertGap`.
+    pub max_vert_gap: f64,
+    /// `rdMaxEdgeGap`.
+    pub max_edge_gap: f64,
+    /// `rdMinUnstitchedVertGap`.
+    pub min_unstitched_vert_gap: f64,
+    /// `rdMinUnstitchedEdgeGap`.
+    pub min_unstitched_edge_gap: f64,
+}
+
+const OP_ADDED: &str = "boolean::merge::p2::merge_added_topology";
+
+/// `SmTArray::FindElement` + `AddUnique`.
+fn add_unique<O: PartialEq>(list: &mut Vec<O>, item: O) {
+    if !list.contains(&item) {
+        list.push(item);
+    }
+}
+
+/// `if (list.FindElement(item, lIdx)) list[lIdx] = NULL;` (the first occurrence).
+fn null_first<O: PartialEq + Copy>(list: &mut [Option<O>], item: O) {
+    if let Some(slot) = list.iter_mut().find(|s| **s == Some(item)) {
+        *slot = None;
+    }
+}
+
+/// A status upstream ignores, except the errors that cannot be ignored here:
+/// unported callees and undefined behaviour upstream.
+fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+fn tolerance_of<O, B: IntersectorBrep<O>>(brep: &B, topo: O) -> Result<f64> {
+    brep.topology_tolerance(topo)
+        .ok_or(dangling(OP_ADDED, "topology handle is unknown"))
+}
+
+/// The other mate of `entity` when it is of `kind` (`SM_CAST_PTR`).
+fn other_mate_of_kind<O: ClassObject + SolutionObject + Ord>(
+    ti: &TopologyIntersector<O>,
+    entity: O,
+    kind: ClassObjectKind,
+) -> Option<O> {
+    ti.other_mate(Some(entity))
+        .filter(|o| o.class_kind() == kind)
+}
+
+impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
+    /// `MergeAddedFace`: [`MergeState::merge_added_topology`] of one face of the
+    /// primary B-rep with its edges and vertices, with
+    /// [`MERGE_ADDED_FACE_OPTIONS`]. `bDoGluing` is unused upstream.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`MergeState::merge_added_topology`] and of the face queries.
+    pub fn merge_added_face<B: MergeBrep<O>>(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut B,
+        face: O,
+    ) -> Result<MergedTopology> {
+        // Wrap up a call to MergeAddedTopology().
+        let faces = [face];
+        let edges = brep.face_edges(face)?;
+        let vertices = brep.face_vertices(face)?;
+        self.merge_added_topology(
+            k,
+            brep,
+            Some(&faces),
+            Some(&edges),
+            Some(&vertices),
+            MERGE_ADDED_FACE_OPTIONS,
+        )
+    }
+
+    /// `MergeAddedTopology`: glue topology just added to the primary B-rep to the
+    /// rest of it, then intersect, insert and merge what crosses. Lists that are
+    /// `None` are gathered from the added faces (edges) or faces and edges
+    /// (vertices). Both lists are culled to each other's loose bounding boxes; then
+    /// coincident vertices are stitched, vertices split edges, coincident edges are
+    /// glued, vertices imprint faces, edges cross edges and faces, edges imprint
+    /// faces, faces cross and coincident faces are glued, re-mating deleted
+    /// topology each time; finally regions are split and nested and a manifold
+    /// result oriented. The intersector's tolerance and the B-rep's editing flag are
+    /// restored on every exit.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`) when an added face,
+    /// edge or vertex is not in the primary B-rep, and where upstream dereferences
+    /// null or indexes past a list; those of the B-rep queries; statuses of the
+    /// stitch, intersection and region calls are ignored as upstream, except
+    /// [`SolidError::Unported`] and [`SolidError::InvalidInput`].
+    pub fn merge_added_topology<B: MergeBrep<O>>(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut B,
+        faces: Option<&[O]>,
+        edges: Option<&[O]>,
+        vertices: Option<&[O]>,
+        options: MergeAddedOptions,
+    ) -> Result<MergedTopology> {
+        let master = self
+            .intersector
+            .primary_brep()
+            .ok_or(dangling(OP_ADDED, "no primary B-rep"))?;
+
+        // We reset our tol in this method. Make sure it ends up where it started.
+        let tol = self.intersector.this_approx_tol_3d();
+        // set Brep to allow modifications
+        let editing = brep.set_editing_enabled(master, true)?;
+        let result = self.merge_added_body(k, brep, master, tol, faces, edges, vertices, options);
+        // ~SmTemporaryChangeValue, in reverse construction order
+        let restored = brep.set_editing_enabled(master, editing);
+        self.intersector.set_this_approx_tol_3d(tol);
+        let out = result?;
+        restored?;
+        Ok(out)
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+    fn merge_added_body<B: MergeBrep<O>>(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut B,
+        master: O,
+        d3d_tol: f64,
+        faces: Option<&[O]>,
+        edges: Option<&[O]>,
+        vertices: Option<&[O]>,
+        options: MergeAddedOptions,
+    ) -> Result<MergedTopology> {
+        brep.notify_brep(k, master, NotifyOperation::PreEdit)?;
+
+        // init some output.
+        let mut out = MergedTopology {
+            num_edges_stitched: 0,
+            max_vert_gap: 0.0,
+            max_edge_gap: 0.0,
+            min_unstitched_vert_gap: BIG_DOUBLE,
+            min_unstitched_edge_gap: BIG_DOUBLE,
+        };
+
+        // Collect vertices, edges, and faces to be merged in.
+        let mut added_faces: Vec<O> = faces.map(<[O]>::to_vec).unwrap_or_default();
+        let added_edges: Vec<O> = if let Some(edges) = edges {
+            edges.to_vec()
+        } else {
+            let mut list = Vec::new();
+            for &f in &added_faces {
+                for e in brep.face_edges(f)? {
+                    add_unique(&mut list, e);
+                }
+            }
+            list
+        };
+        let added_verts: Vec<O> = if let Some(vertices) = vertices {
+            vertices.to_vec()
+        } else {
+            // Collect from both Faces and Edges.
+            let mut list = Vec::new();
+            for &f in &added_faces {
+                for v in brep.face_vertices(f)? {
+                    add_unique(&mut list, v);
+                }
+            }
+            for &e in &added_edges {
+                for v in brep.edge_vertices(e)? {
+                    add_unique(&mut list, v);
+                }
+            }
+            list
+        };
+
+        if added_faces.len() + added_edges.len() + added_verts.len() < 1 {
+            return Ok(out); // Nothing to add in.
+        }
+
+        // Double check that all added topology is in pMasterBrep.
+        for &f in &added_faces {
+            if brep.face_brep(f)? != Some(master) {
+                return Err(SolidError::invalid_input(
+                    OP_ADDED,
+                    "added face not in the B-rep",
+                ));
+            }
+        }
+        for &e in &added_edges {
+            if brep.edge_brep_handle(e)? != Some(master) {
+                return Err(SolidError::invalid_input(
+                    OP_ADDED,
+                    "added edge not in the B-rep",
+                ));
+            }
+        }
+        for &v in &added_verts {
+            if brep.vertex_brep(v)? != Some(master) {
+                return Err(SolidError::invalid_input(
+                    OP_ADDED,
+                    "added vertex not in the B-rep",
+                ));
+            }
+        }
+
+        // Collect vertices, edges, and faces from original Master (before merging),
+        // and remove those in the Added arrays.
+        let mut master_faces = brep.brep_faces(master)?;
+        master_faces.retain(|f| !added_faces.contains(f));
+        let mut master_edges = brep.brep_edges(master)?;
+        master_edges.retain(|e| !added_edges.contains(e));
+        let mut master_verts = brep.brep_vertices(master)?;
+        master_verts.retain(|v| !added_verts.contains(v));
+
+        if master_faces.len() + master_edges.len() + master_verts.len() < 1 {
+            return Ok(out); // Nothing to add to.
+        }
+
+        // Bounding Box checks: approx, just do verts and edges, don't worry about
+        // interiors of Faces. A failed box query leaves the previous box.
+        let mut master_box = Extent3d::default();
+        let mut this_box = Extent3d::default();
+        let mut temp_box = Extent3d::default();
+        for (faces, edges, verts, bx) in [
+            (&master_faces, &master_edges, &master_verts, &mut master_box),
+            (&added_faces, &added_edges, &added_verts, &mut this_box),
+        ] {
+            for &f in faces {
+                if let Some(b) = ignore_soft(brep.face_bounding_box(k, f))? {
+                    temp_box = b;
+                }
+                *bx = bx.union(&temp_box);
+            }
+            for &e in edges {
+                if let Some(b) = ignore_soft(brep.edge_bounding_box(k, e))? {
+                    temp_box = b;
+                }
+                *bx = bx.union(&temp_box);
+            }
+            for &v in verts {
+                bx.add_point(brep.vertex_point(v)?);
+            }
+        }
+
+        // We did cheap (loose) BBox checks, so expand them a bit:
+        this_box.expand_absolute(10.0 * d3d_tol);
+        master_box.expand_absolute(10.0 * d3d_tol);
+
+        if master_box.are_disjoint(&this_box, 0.0) {
+            return Ok(out);
+        }
+
+        // Cull all topology lists to the other's bounding box.
+        let mut bbox = Extent3d::default();
+        let cull_verts = |brep: &B, verts: Vec<O>, bx: &Extent3d| -> Result<Vec<O>> {
+            let mut kept = Vec::new();
+            for v in verts {
+                if bx.contains_point(brep.vertex_point(v)?, 0.0) {
+                    kept.push(v);
+                }
+            }
+            Ok(kept)
+        };
+        let added_verts = cull_verts(brep, added_verts, &master_box)?;
+        let mut added_e = Vec::new();
+        for e in added_edges {
+            if let Some(b) = ignore_soft(brep.edge_bounding_box(k, e))? {
+                bbox = b;
+            }
+            if !master_box.are_disjoint(&bbox, tolerance_of(brep, e)?) {
+                added_e.push(Some(e));
+            }
+        }
+        let mut kept = Vec::new();
+        for f in added_faces {
+            if let Some(b) = ignore_soft(brep.face_bounding_box(k, f))? {
+                bbox = b;
+            }
+            if !master_box.are_disjoint(&bbox, tolerance_of(brep, f)?) {
+                kept.push(f);
+            }
+        }
+        added_faces = kept;
+        let master_verts = cull_verts(brep, master_verts, &this_box)?;
+        let mut master_e = Vec::new();
+        for e in master_edges {
+            if let Some(b) = ignore_soft(brep.edge_bounding_box(k, e))? {
+                bbox = b;
+            }
+            if !this_box.are_disjoint(&bbox, tolerance_of(brep, e)?) {
+                master_e.push(Some(e));
+            }
+        }
+        let mut kept = Vec::new();
+        for f in master_faces {
+            if let Some(b) = ignore_soft(brep.face_bounding_box(k, f))? {
+                bbox = b;
+            }
+            if !this_box.are_disjoint(&bbox, tolerance_of(brep, f)?) {
+                kept.push(f);
+            }
+        }
+        master_faces = kept;
+        let mut master_v: Vec<Option<O>> = master_verts.into_iter().map(Some).collect();
+        let mut added_v: Vec<Option<O>> = added_verts.into_iter().map(Some).collect();
+
+        // ****    Vert-Vert Coinc:    ****
+        // cbiToleranceSetting == 1: the small tolerances are 4x, the big ones 8x.
+        let small_tol = d3d_tol * 4.0;
+        let big_tol = d3d_tol * 8.0;
+        let mut stitch = StitchSettings {
+            stitch_tol_3d: small_tol,
+            making_manifold_solid: options.making_manifold_solid,
+            ignore_problems: options.ignore_problems,
+            do_region_nesting: options.do_region_nesting,
+            fast_edge_compare: options.fast_edge_compare,
+            validate_result: false,
+            squeeze_small_edges: false,
+            split_edges_with_vertices: true,
+            remove_laminar_slivers: false,
+        };
+        let pairs = ignore_soft(brep.stitch_vertex_pairs(k, &stitch, &mut master_v, &mut added_v))?
+            .unwrap_or_else(StitchedVertices::initial);
+        out.max_vert_gap = pairs.max_vertex_gap;
+        out.min_unstitched_vert_gap = pairs.min_unstitched_vert_gap;
+        let mut processed_verts = pairs.processed;
+
+        // A glued New vertex has been deleted: switch its mapping to the vertex (in
+        // Master) that it was glued to.
+        for (ii, &del) in pairs.deleted.iter().enumerate() {
+            if let Some(this_v) =
+                other_mate_of_kind(&self.intersector, del, ClassObjectKind::Vertex)
+            {
+                ignore_soft(remove_relationship(
+                    &mut self.intersector,
+                    Some(del),
+                    Some(this_v),
+                ))?;
+                let survivor = *processed_verts
+                    .get(ii)
+                    .ok_or(dangling(OP_ADDED, "fewer processed than deleted vertices"))?;
+                ignore_soft(
+                    self.intersector
+                        .relate(k, brep, Some(survivor), Some(this_v)),
+                )?;
+            }
+        }
+
+        // ****    Vert-Edge xSect:    ****
+        // First see about This vertices splitting Master edges.
+        stitch.stitch_tol_3d = small_tol;
+        let split =
+            ignore_soft(brep.split_edges_with_vertices(k, &stitch, &mut added_v, &mut master_e))?
+                .unwrap_or_else(SplitEdges::initial);
+        out.max_vert_gap = max2(out.max_vert_gap, split.max_vertex_gap);
+        out.min_unstitched_vert_gap =
+            min2(out.min_unstitched_vert_gap, split.min_unstitched_vert_gap);
+        processed_verts.extend(split.processed_verts);
+
+        // Now see about Master vertices splitting This edges (the new edges are added
+        // to the edge list in the routine).
+        let split =
+            ignore_soft(brep.split_edges_with_vertices(k, &stitch, &mut master_v, &mut added_e))?
+                .unwrap_or_else(SplitEdges::initial);
+        out.max_vert_gap = max2(out.max_vert_gap, split.max_vertex_gap);
+        out.min_unstitched_vert_gap =
+            min2(out.min_unstitched_vert_gap, split.min_unstitched_vert_gap);
+        processed_verts.extend(split.processed_verts);
+
+        // ****    Edge-Edge Coinc:    ****
+        // Corresponding vertices are already glued, so a bigger tol is in order.
+        stitch.stitch_tol_3d = big_tol;
+        let glued = ignore_soft(brep.stitch_edges_of_vertices(k, &stitch, &processed_verts))?
+            .unwrap_or_else(StitchedEdges::initial);
+        out.max_edge_gap = max2(out.max_edge_gap, glued.max_edge_gap);
+        out.min_unstitched_edge_gap =
+            min2(out.min_unstitched_edge_gap, glued.min_unstitched_edge_gap);
+
+        // Re-mate deleted edges, and take deleted and glued edges out of the
+        // Master/Added lists.
+        for (ii, &del) in glued.deleted.iter().enumerate() {
+            let survivor = *glued
+                .glued
+                .get(ii)
+                .ok_or(dangling(OP_ADDED, "fewer glued than deleted edges"))?;
+            if let Some(this_e) = other_mate_of_kind(&self.intersector, del, ClassObjectKind::Edge)
+            {
+                ignore_soft(remove_relationship(
+                    &mut self.intersector,
+                    Some(del),
+                    Some(this_e),
+                ))?;
+                ignore_soft(
+                    self.intersector
+                        .relate(k, brep, Some(survivor), Some(this_e)),
+                )?;
+            }
+            null_first(&mut master_e, del);
+            null_first(&mut added_e, del);
+            null_first(&mut master_e, survivor);
+            null_first(&mut added_e, survivor);
+        }
+        let mut glued_edges: Vec<Option<O>> = glued.glued.into_iter().map(Some).collect();
+
+        // ****    Vertex-Face xSect:    ****
+        let master_f: Vec<Option<O>> = master_faces.iter().copied().map(Some).collect();
+        let added_f: Vec<Option<O>> = added_faces.iter().copied().map(Some).collect();
+        self.intersector.set_this_approx_tol_3d(small_tol);
+        for (verts, faces) in [(&mut added_v, &master_f), (&mut master_v, &added_f)] {
+            let (gap, min_unstitched, processed) =
+                match ignore_soft(self.intersector.vertex_face_intersect(
+                    k,
+                    brep,
+                    verts,
+                    faces,
+                    options.making_manifold_solid,
+                    options.ignore_problems,
+                ))? {
+                    Some(vf) => (
+                        vf.max_vertex_gap,
+                        vf.min_unstitched_vert_gap,
+                        vf.processed_verts,
+                    ),
+                    None => (0.0, BIG_DOUBLE, Vec::new()),
+                };
+            out.max_vert_gap = max2(out.max_vert_gap, gap);
+            out.min_unstitched_vert_gap = min2(out.min_unstitched_vert_gap, min_unstitched);
+            processed_verts.extend(processed);
+        }
+        // Done with the vertex lists (upstream resets them against stale pointers).
+        let _ = (master_v, added_v);
+
+        // ****    Edge-Edge xSect:    ****
+        self.intersector.set_this_approx_tol_3d(small_tol);
+        let ee = ignore_soft(edge_edge_intersect(
+            &mut self.intersector,
+            k,
+            brep,
+            &master_e,
+            &added_e,
+            options.making_manifold_solid,
+            options.ignore_problems,
+        ))?
+        .unwrap_or(EdgeEdgeOut {
+            new_edges1: Vec::new(),
+            new_edges2: Vec::new(),
+            new_verts: Vec::new(),
+            max_edge_gap: 0.0,
+            min_unstitched_edge_gap: BIG_DOUBLE,
+        });
+        out.max_vert_gap = max2(out.max_vert_gap, ee.max_edge_gap);
+        out.min_unstitched_vert_gap = min2(out.min_unstitched_vert_gap, ee.min_unstitched_edge_gap);
+        processed_verts.extend(ee.new_verts);
+        // Must add new (split) edges to sMasterEdges and sAddedEdges.
+        master_e.extend(ee.new_edges1.into_iter().map(Some));
+        added_e.extend(ee.new_edges2.into_iter().map(Some));
+
+        // ****    Edge-Face xSect:    ****
+        self.intersector.set_this_approx_tol_3d(small_tol);
+        // First, Added edges intersecting Master faces.
+        let ef = ignore_soft(self.intersector.edge_face_intersect(
+            k,
+            brep,
+            &added_e,
+            &master_f,
+            options.making_manifold_solid,
+            options.ignore_problems,
+        ))?;
+        let (gap, min_unstitched, new_verts, new_edges) = match ef {
+            Some(ef) => (
+                ef.max_vertex_gap,
+                ef.min_unstitched_vert_gap,
+                ef.new_verts,
+                ef.new_edges,
+            ),
+            None => (0.0, BIG_DOUBLE, Vec::new(), Vec::new()),
+        };
+        out.max_edge_gap = max2(out.max_edge_gap, gap);
+        out.min_unstitched_edge_gap = min2(out.min_unstitched_edge_gap, min_unstitched);
+        processed_verts.extend(new_verts);
+        // Must add new (split) edges to sAddedEdges.
+        added_e.extend(new_edges.into_iter().map(Some));
+
+        // Now, original Master edges intersecting Added faces.
+        let ef = ignore_soft(self.intersector.edge_face_intersect(
+            k,
+            brep,
+            &master_e,
+            &added_f,
+            options.making_manifold_solid,
+            options.ignore_problems,
+        ))?;
+        let (gap, min_unstitched, new_verts, new_edges) = match ef {
+            Some(ef) => (
+                ef.max_vertex_gap,
+                ef.min_unstitched_vert_gap,
+                ef.new_verts,
+                ef.new_edges,
+            ),
+            None => (0.0, BIG_DOUBLE, Vec::new(), Vec::new()),
+        };
+        out.max_edge_gap = max2(out.max_edge_gap, gap);
+        out.min_unstitched_edge_gap = min2(out.min_unstitched_edge_gap, min_unstitched);
+        processed_verts.extend(new_verts);
+        // Must add new (split) edges to sMasterEdges.
+        master_e.extend(new_edges.into_iter().map(Some));
+
+        // Done with the edge lists (upstream resets them against stale pointers).
+        let _ = (master_e, added_e);
+
+        // ****    Edge-Face Coinc:    ****
+        self.intersector.set_this_approx_tol_3d(big_tol);
+        let given: Vec<Option<O>> = processed_verts.iter().copied().map(Some).collect();
+        let efc = ignore_soft(edge_face_coincidence(
+            &mut self.intersector,
+            k,
+            brep,
+            &given,
+            &glued_edges,
+            options.ignore_problems,
+            options.do_region_nesting,
+        ))?
+        .unwrap_or(EdgeFaceCoincidenceOut {
+            imprinted_edges: Vec::new(),
+            processed_faces: Vec::new(),
+            new_faces: Vec::new(),
+            split_faces: Vec::new(),
+            max_edge_gap: 0.0,
+            this_min_unstitched: BIG_DOUBLE,
+        });
+        out.max_edge_gap = max2(out.max_edge_gap, efc.max_edge_gap);
+        out.min_unstitched_edge_gap = min2(out.min_unstitched_edge_gap, efc.this_min_unstitched);
+        // Imprinted edges get added to GluedEdges list.
+        glued_edges.extend(efc.imprinted_edges.into_iter().map(Some));
+        let mut imprinted_faces = efc.processed_faces;
+        // If a face was split, add the new face to sMasterFaces or sAddedFaces.
+        for (ii, split_face) in efc.split_faces.iter().enumerate() {
+            let new_face = *efc
+                .new_faces
+                .get(ii)
+                .ok_or(dangling(OP_ADDED, "fewer new than split faces"))?;
+            if master_faces.contains(split_face) {
+                master_faces.push(new_face);
+            } else if added_faces.contains(split_face) {
+                added_faces.push(new_face);
+            }
+        }
+
+        // ****    Face-Face xSect:    ****
+        self.intersector.set_this_approx_tol_3d(small_tol);
+        let ff = ignore_soft(self.intersector.face_face_intersect(
+            k,
+            brep,
+            &processed_verts,
+            &master_faces,
+            &added_faces,
+            options.ignore_problems,
+            options.do_region_nesting,
+        ))?;
+        let (gap, min_unstitched, mut processed_faces, new_faces, new_edges) = match ff {
+            Some(ff) => (
+                ff.max_gap,
+                ff.min_unstitched,
+                ff.processed_faces,
+                ff.new_faces,
+                ff.new_edges,
+            ),
+            None => (0.0, BIG_DOUBLE, Vec::new(), Vec::new(), Vec::new()),
+        };
+        out.max_edge_gap = max2(out.max_edge_gap, gap);
+        out.min_unstitched_edge_gap = min2(out.min_unstitched_edge_gap, min_unstitched);
+        // Any new intersection edges go into sGluedEdges.
+        glued_edges.extend(new_edges);
+        // Add intersected faces to ImprintedFaces list.
+        for &f in processed_faces.iter().chain(&new_faces) {
+            add_unique(&mut imprinted_faces, f);
+        }
+
+        // ****    Face-Face Coinc:    ****
+        self.intersector.set_this_approx_tol_3d(big_tol);
+        let fc = ignore_soft(self.intersector.face_face_coincidence(
+            k,
+            brep,
+            &glued_edges,
+            &added_faces,
+            options.ignore_problems,
+            options.do_region_nesting,
+        ))?;
+        let (gap, min_unstitched, surviving, deleted) = match fc {
+            Some(fc) => (
+                fc.max_gap,
+                fc.min_unstitched,
+                fc.processed_faces,
+                fc.deleted_faces,
+            ),
+            None => (0.0, BIG_DOUBLE, Vec::new(), Vec::new()),
+        };
+        out.max_edge_gap = max2(out.max_edge_gap, gap);
+        out.min_unstitched_edge_gap = min2(out.min_unstitched_edge_gap, min_unstitched);
+        for &f in &surviving {
+            add_unique(&mut imprinted_faces, f);
+        }
+        // Also remove deleted faces from that list.
+        for f in &deleted {
+            if let Some(i) = imprinted_faces.iter().position(|x| x == f) {
+                imprinted_faces.remove(i);
+            }
+        }
+        // Update mapping: if the deleted and surviving sizes differ, skip the loop
+        // (upstream asserts).
+        let num_deleted = if deleted.len() == surviving.len() {
+            deleted.len()
+        } else {
+            0
+        };
+        for (&del, &survivor) in deleted.iter().zip(&surviving).take(num_deleted) {
+            if let Some(this_f) = other_mate_of_kind(&self.intersector, del, ClassObjectKind::Face)
+            {
+                ignore_soft(remove_relationship(
+                    &mut self.intersector,
+                    Some(del),
+                    Some(this_f),
+                ))?;
+                ignore_soft(
+                    self.intersector
+                        .relate(k, brep, Some(survivor), Some(this_f)),
+                )?;
+            }
+            // Also while we're here, add to ProcessedFace list.
+            add_unique(&mut processed_faces, survivor);
+        }
+
+        // Done with combining topology. Fix up region nesting.
+        for &f in &imprinted_faces {
+            let (fu1, fu2) = brep.face_faceuses(f)?;
+            let fu1 = fu1.ok_or(dangling(OP_ADDED, "face without face use"))?;
+            let fu2 = fu2.ok_or(dangling(OP_ADDED, "face without mate face use"))?;
+            // If they don't already separate two regions:
+            if brep.faceuse_shell(fu1)? == brep.faceuse_shell(fu2)? {
+                ignore_soft(brep.test_closure_split_region(k, master, true, fu1))?;
+            }
+        }
+        ignore_soft(brep.find_and_set_infinite_region(k, master))?;
+
+        // If the resulting Brep is Manifold, orient its faces.
+        if brep.is_manifold_solid(master)? {
+            ignore_soft(brep.orient_trimmed_surfaces(k, master, true, true))?;
+        }
+
+        out.num_edges_stitched = glued_edges.len();
+        brep.notify_brep(k, master, NotifyOperation::PostEdit)?;
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::solution_array::ObjectKind;
+
+    /// A handle: a kind and an index.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    struct H(u8, u32);
+
+    impl ClassObject for H {
+        fn class_kind(&self) -> ClassObjectKind {
+            ClassObjectKind::Other
+        }
+    }
+
+    impl SolutionObject for H {
+        fn kind(&self) -> ObjectKind {
+            ObjectKind::Other
+        }
+    }
+
+    const B: H = H(9, 0);
+    const OTHER: H = H(9, 1);
+
+    #[test]
+    fn reverse_orientation_maps_unknown_to_same_as_the_macro() {
+        assert_eq!(reverse_orientation(OrientType::Same), OrientType::Opposite);
+        assert_eq!(reverse_orientation(OrientType::Opposite), OrientType::Same);
+        assert_eq!(reverse_orientation(OrientType::Unknown), OrientType::Same);
+    }
+
+    #[test]
+    fn merge_added_defaults_follow_the_definition_order() {
+        let d = MergeAddedOptions::default();
+        assert!(d.making_manifold_solid && !d.fast_edge_compare);
+        assert!(d.do_region_nesting && d.ignore_problems);
+        let f = MERGE_ADDED_FACE_OPTIONS;
+        assert!(!f.making_manifold_solid && f.fast_edge_compare);
+        assert!(f.do_region_nesting && f.ignore_problems);
+    }
+
+    #[test]
+    fn constructor_keeps_given_tolerances_and_defaults_the_angle() {
+        let brep = Brep::new();
+        let other = Brep::new();
+        let options = MergeOptions::new(true, false, false, true, true);
+        let m =
+            MergeState::with_breps((&brep, B), Some((&other, OTHER)), 0.25, 0.5, Some(&options))
+                .unwrap();
+        assert_eq!(m.intersector.primary_brep(), Some(B));
+        assert_eq!(m.intersector.other_brep(), Some(OTHER));
+        assert_eq!(
+            m.intersector.this_approx_tol_3d().to_bits(),
+            0.25f64.to_bits()
+        );
+        assert_eq!(m.intersector.this_ang_tol_rad().to_bits(), 0.5f64.to_bits());
+        assert_eq!(m.options, options);
+        assert_eq!(m.tag_id, 0);
+
+        // A zero angle tolerance becomes 20 degrees; a null options pointer keeps the
+        // defaults; the other B-rep may be null (the stitch entry points).
+        let m = MergeState::with_breps((&brep, B), None, EFF_ZERO, 0.0, None).unwrap();
+        assert_eq!(m.intersector.other_brep(), None);
+        assert_eq!(
+            m.intersector.this_ang_tol_rad().to_bits(),
+            (20.0 * (PI / 180.0)).to_bits()
+        );
+        assert_eq!(m.options, MergeOptions::default());
+        // `-0.0 == 0.0`, so a negative zero is replaced too; other angles are kept.
+        let m = MergeState::with_breps((&brep, B), None, 1.0, -0.0, None).unwrap();
+        assert_eq!(
+            m.intersector.this_ang_tol_rad().to_bits(),
+            (20.0 * (PI / 180.0)).to_bits()
+        );
+        let m = MergeState::with_breps((&brep, B), None, 1.0, -1.0, None).unwrap();
+        assert_eq!(
+            m.intersector.this_ang_tol_rad().to_bits(),
+            (-1.0f64).to_bits()
+        );
+    }
+
+    #[test]
+    fn computed_tolerance_waits_on_the_brep_queries() {
+        let brep = Brep::new();
+        for tol in [0.0, -1.0, EFF_ZERO / 2.0] {
+            let e = MergeState::<TopologyIntersector<H>>::with_breps(
+                (&brep, B),
+                Some((&brep, OTHER)),
+                tol,
+                0.0,
+                None,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                e,
+                SolidError::Unported {
+                    upstream: "SmBrep::GetMinEdgeBBoxSize",
+                    unit: "topology.brep_p2"
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn null_edgeuse_merges_nothing() {
+        let mut brep = Brep::new();
+        let mut other = Brep::new();
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::new();
+        let key = |_: VertexId| ObjectRef {
+            key: crate::geom::attribute::ObjectKey(1),
+            type_code: 0,
+        };
+        let edge_key = |_: EdgeId| ObjectRef {
+            key: crate::geom::attribute::ObjectKey(2),
+            type_code: 0,
+        };
+        let face_key = |_: FaceId| ObjectRef {
+            key: crate::geom::attribute::ObjectKey(3),
+            type_code: 0,
+        };
+        let mut copy = TopologyCopy {
+            vertices: VertexCopy {
+                records: &mut records,
+                attributes: &mut attributes,
+                source_key: &key,
+                destination_key: &key,
+            },
+            edge_source_key: &edge_key,
+            edge_destination_key: &edge_key,
+            face_source_key: &face_key,
+            face_destination_key: &face_key,
+        };
+        let r = merge_edge(
+            &Kernel::default(),
+            &mut brep,
+            &mut other,
+            None,
+            None,
+            &mut Relations::default(),
+            &mut copy,
+            None,
+        )
+        .unwrap();
+        assert_eq!(r, None);
+    }
+}

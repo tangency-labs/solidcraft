@@ -5,6 +5,7 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::boolean::merge::p1::VertexCopy;
+use solidcore::boolean::merge::p2::TopologyCopy;
 use solidcore::boolean::merge::p5::process_wires_and_shell_vertices;
 use solidcore::boolean::topology_intersector::p1::Relations;
 use solidcore::geom::a_object::BooleanOperation;
@@ -12,6 +13,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::context::MarkLock;
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
+use solidcore::topology::topology::Topology;
 use solidcore::topology::topology_traverser::{Entity, Marks};
 use solidcore::topology::{edge, vertex, vertexuse, ArenaId, Brep, EdgeId, VertexId, VertexuseId};
 use solidcore_ffi::units::boolean_merge_p5::{self as ffi, Operand, Request};
@@ -22,7 +24,7 @@ pub struct Runner;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Spec {
+pub(crate) enum Spec {
     Empty,
     Vertex { point: [f64; 3] },
     Graph { brep: BrepIn },
@@ -61,7 +63,7 @@ fn err(e: &(impl ToString + ?Sized)) -> HarnessError {
     HarnessError::new(e.to_string())
 }
 
-fn program(s: &Spec) -> Result<(String, Vec<f64>), HarnessError> {
+pub(crate) fn program(s: &Spec) -> Result<(String, Vec<f64>), HarnessError> {
     let mut block = Vec::new();
     let path = match s {
         Spec::Empty => {
@@ -94,7 +96,7 @@ fn program(s: &Spec) -> Result<(String, Vec<f64>), HarnessError> {
     };
     Ok((path, block))
 }
-fn operand(p: &(String, Vec<f64>)) -> Operand<'_> {
+pub(crate) fn operand(p: &(String, Vec<f64>)) -> Operand<'_> {
     Operand {
         path: &p.0,
         block: &p.1,
@@ -112,7 +114,7 @@ fn mapping(i: &Inputs, a: [usize; 10], b: [usize; 10]) -> Vec<i64> {
             .collect()
     })
 }
-fn import(
+pub(crate) fn import(
     f: &solidcore_ffi::units::topology_topology_traverser::Fixture,
 ) -> Result<Brep, HarnessError> {
     let (mut b, _) = shared::import(&f.graph)?;
@@ -144,7 +146,7 @@ fn seed(
 fn id<I: ArenaId>(value: Option<I>) -> i64 {
     value.map_or(-1, |i| i64::from(i.index()))
 }
-fn snapshot(
+pub(crate) fn snapshot(
     k: &Kernel,
     b: &Brep,
     marks: &Marks,
@@ -359,28 +361,49 @@ impl UnitDiff for Runner {
             }
             relations.edges.record(e, oe).map_err(|e| err(&e))?;
         }
+        // A fresh SmTopology record per vertex and edge of both operands, under the
+        // identities the copies are notified with (a copy propagates its flags).
         let mut records = BTreeMap::new();
+        for (base, brep) in [(0, &a), (1_000_000, &b)] {
+            for v in brep.vertices().ids() {
+                records.insert(ObjectKey(base + u64::from(v.index())), Topology::new());
+            }
+            for e in brep.edges().ids() {
+                records.insert(
+                    ObjectKey(2_000_000 + base + u64::from(e.index())),
+                    Topology::new(),
+                );
+            }
+        }
         let mut attributes = AttributeStore::new();
-        let mut copy = VertexCopy {
-            records: &mut records,
-            attributes: &mut attributes,
-            source_key: &|v| ObjectRef {
-                key: ObjectKey(1_000_000 + u64::from(v.index())),
-                type_code: 16021,
-            },
-            destination_key: &|e| match e {
-                solidcore::EntityRef::Vertex(v) => ObjectRef {
+        let mut copy = TopologyCopy {
+            vertices: VertexCopy {
+                records: &mut records,
+                attributes: &mut attributes,
+                source_key: &|v| ObjectRef {
+                    key: ObjectKey(1_000_000 + u64::from(v.index())),
+                    type_code: 16021,
+                },
+                destination_key: &|v| ObjectRef {
                     key: ObjectKey(u64::from(v.index())),
                     type_code: 16021,
                 },
-                solidcore::EntityRef::Vertexuse(v) => ObjectRef {
-                    key: ObjectKey(2_000_000 + u64::from(v.index())),
-                    type_code: 16006,
-                },
-                _ => ObjectRef {
-                    key: ObjectKey(3_000_000),
-                    type_code: 16001,
-                },
+            },
+            edge_source_key: &|e| ObjectRef {
+                key: ObjectKey(3_000_000 + u64::from(e.index())),
+                type_code: 16016,
+            },
+            edge_destination_key: &|e| ObjectRef {
+                key: ObjectKey(2_000_000 + u64::from(e.index())),
+                type_code: 16016,
+            },
+            face_source_key: &|f| ObjectRef {
+                key: ObjectKey(5_000_000 + u64::from(f.index())),
+                type_code: 16002,
+            },
+            face_destination_key: &|f| ObjectRef {
+                key: ObjectKey(4_000_000 + u64::from(f.index())),
+                type_code: 16002,
             },
         };
         let operation =
@@ -465,7 +488,7 @@ impl UnitDiff for Runner {
     }
 }
 
-fn generated_operand(rng: &mut Rng, scale: f64) -> (Value, bool) {
+pub(crate) fn generated_operand(rng: &mut Rng, scale: f64) -> (Value, bool) {
     match rng.below(5) {
         0 => (json!({"kind":"empty"}), false),
         1 => (

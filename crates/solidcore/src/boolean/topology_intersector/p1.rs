@@ -167,7 +167,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::p5::{DropPoint, DropPointOptions};
 use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
-use crate::topology::{vertex, Brep, EdgeId, FaceId, VertexId};
+use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "boolean::topology_intersector::p1";
 const OP_CHECK_SSI: &str = "boolean::topology_intersector::p1::check_if_have_existing_ssi";
@@ -4061,28 +4061,11 @@ impl<I: Ord + Copy> MateMap<I> {
         self.to_primary.get(&other).copied()
     }
 
-    /// Primary-to-other projection, borrowed by the shared merge helpers.
+    /// The other-to-primary direction as a map (the `GetBrepMate` lookups of
+    /// [`find_brep_region_of_other_face`](crate::boolean::merge::p1::find_brep_region_of_other_face)).
     #[must_use]
-    pub fn primary_to_other(&self) -> &BTreeMap<I, I> {
-        &self.to_other
-    }
-
-    /// Other-to-primary projection, borrowed by the shared merge helpers.
-    #[must_use]
-    pub fn other_to_primary(&self) -> &BTreeMap<I, I> {
+    pub const fn primary_map(&self) -> &BTreeMap<I, I> {
         &self.to_primary
-    }
-
-    /// `GetMappedBrepObjects` for this typed class, in other-handle order.
-    #[must_use]
-    pub fn mapped_primary(&self) -> Vec<I> {
-        self.to_primary.values().copied().collect()
-    }
-
-    /// `GetCommonEdges` / `GetCommonVertices`, preserving the supplied B-rep list order.
-    #[must_use]
-    pub fn common(&self, order: impl IntoIterator<Item = I>) -> (Vec<I>, Vec<I>) {
-        common_mates(order, |id| self.other(id))
     }
 
     /// Record an established pair. Conflicting pairs fail before either map changes.
@@ -4106,7 +4089,9 @@ impl<I: Ord + Copy> MateMap<I> {
     }
 }
 
-/// Face, edge and vertex mates shared by the merge stages; every id is operand-local.
+/// Edge, vertex and face mates shared by the merge stages; every id is
+/// operand-local. Curves and surfaces are owned by their edge and face in the arena
+/// model, so they have no mates of their own (see `boolean.merge_p2`).
 #[derive(Debug, Default, Clone)]
 pub struct Relations {
     /// Face mates in both directions; face Relate has no tolerance update.
@@ -4115,94 +4100,70 @@ pub struct Relations {
     pub edges: MateMap<EdgeId>,
     /// Vertex mates in both directions.
     pub vertices: MateMap<VertexId>,
+    /// Face mates in both directions (CO-PORTED by `boolean.merge_p2`).
+    pub faces: MateMap<FaceId>,
 }
 
 impl Relations {
-    /// Move the typed mate store through a generic intersector operation, then
-    /// restore it even when that operation fails. Geometry and proto state stay
-    /// in the same intersector; no second live relationship store is retained.
-    pub(crate) fn with_intersector<O, T>(
+    /// `Relate(pBrepTopo, pOtherTopo)` for two edges ([`TopologyIntersector::relate`]'s
+    /// edge branch on arena ids; CO-PORTED by `boolean.merge_p2`): the conflict checks,
+    /// then (`SM_USE_OLDTOL`) each edge gets the other's tolerance when that is larger
+    /// (`SmEdge::SetTolerance` with its defaults `TRUE, TRUE`), then the pair is stored.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when either edge already has a different mate (nothing changes);
+    /// [`SolidError::NotFound`] for a dangling id; those of `SetTolerance`.
+    pub fn relate_edges(
         &mut self,
-        intersector: &mut TopologyIntersector<O>,
-        encode: impl Fn(crate::EntityRef, bool) -> O,
-        decode: impl Fn(O) -> crate::EntityRef,
-        action: impl FnOnce(&mut TopologyIntersector<O>) -> Result<T>,
-    ) -> Result<T>
-    where
-        O: ClassObject + SolutionObject + Ord,
-    {
-        let mut forward = BTreeMap::new();
-        let mut reverse = BTreeMap::new();
-        macro_rules! transfer {
-            ($field:ident, $variant:ident) => {
-                for (b, o) in std::mem::take(&mut self.$field.to_other) {
-                    let b = encode(crate::EntityRef::$variant(b), false);
-                    let o = encode(crate::EntityRef::$variant(o), true);
-                    forward.insert(b, Some(o));
-                }
-                for (o, b) in std::mem::take(&mut self.$field.to_primary) {
-                    let b = encode(crate::EntityRef::$variant(b), false);
-                    let o = encode(crate::EntityRef::$variant(o), true);
-                    reverse.insert(Some(o), b);
-                }
-            };
+        brep: &mut Brep,
+        brep_edge: EdgeId,
+        other: &mut Brep,
+        other_edge: EdgeId,
+    ) -> Result<()> {
+        // check for conflicting existing mate relationships
+        if self.edges.other(brep_edge).is_some_and(|e| e != other_edge)
+            || self
+                .edges
+                .primary(other_edge)
+                .is_some_and(|e| e != brep_edge)
+        {
+            return Err(SolidError::sm_err(OP_RELATE));
         }
-        transfer!(faces, Face);
-        transfer!(edges, Edge);
-        transfer!(vertices, Vertex);
-        intersector.b_to_o = Some(forward);
-        intersector.o_to_b = Some(reverse);
-        let result = action(intersector);
-        // Preserve both actual projections, including changes made before an
-        // error. All handles admitted here represent the same typed entities.
-        let mut restore_error = None;
-        if let Some(forward) = intersector.b_to_o.take() {
-            for (b, o) in forward {
-                if let Some(o) = o {
-                    match (decode(b), decode(o)) {
-                        (crate::EntityRef::Face(b), crate::EntityRef::Face(o)) => {
-                            self.faces.to_other.insert(b, o);
-                        }
-                        (crate::EntityRef::Edge(b), crate::EntityRef::Edge(o)) => {
-                            self.edges.to_other.insert(b, o);
-                        }
-                        (crate::EntityRef::Vertex(b), crate::EntityRef::Vertex(o)) => {
-                            self.vertices.to_other.insert(b, o);
-                        }
-                        _ => {
-                            restore_error = Some(SolidError::invalid_input(
-                                OP_RELATE,
-                                "mixed typed mate handles",
-                            ));
-                        }
-                    }
-                }
-            }
+
+        // when objects are edges - set object tolerances to max(object1 tol, object2 tol)
+        let tol1 = brep.edge(brep_edge)?.tolerance;
+        let tol2 = other.edge(other_edge)?.tolerance;
+        if tol1 < tol2 {
+            edge::set_tolerance(brep, brep_edge, tol2, true, true)?;
         }
-        if let Some(reverse) = intersector.o_to_b.take() {
-            for (o, b) in reverse {
-                if let Some(o) = o {
-                    match (decode(o), decode(b)) {
-                        (crate::EntityRef::Face(o), crate::EntityRef::Face(b)) => {
-                            self.faces.to_primary.insert(o, b);
-                        }
-                        (crate::EntityRef::Edge(o), crate::EntityRef::Edge(b)) => {
-                            self.edges.to_primary.insert(o, b);
-                        }
-                        (crate::EntityRef::Vertex(o), crate::EntityRef::Vertex(b)) => {
-                            self.vertices.to_primary.insert(o, b);
-                        }
-                        _ => {
-                            restore_error = Some(SolidError::invalid_input(
-                                OP_RELATE,
-                                "mixed typed mate handles",
-                            ));
-                        }
-                    }
-                }
-            }
+        let tol1 = brep.edge(brep_edge)?.tolerance;
+        if tol2 < tol1 {
+            edge::set_tolerance(other, other_edge, tol1, true, true)?;
         }
-        restore_error.map_or(result, Err)
+
+        // add the pair to the Ptr to Ptr map
+        self.edges.record(brep_edge, other_edge)
+    }
+
+    /// `Relate(pBrepTopo, pOtherTopo)` for two faces (CO-PORTED by
+    /// `boolean.merge_p2`): the conflict checks, then the pair is stored. Faces have no
+    /// tolerance branch upstream.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when either face already has a different mate (nothing changes);
+    /// [`SolidError::NotFound`] for a dangling id.
+    pub fn relate_faces(
+        &mut self,
+        brep: &Brep,
+        brep_face: FaceId,
+        other: &Brep,
+        other_face: FaceId,
+    ) -> Result<()> {
+        brep.face(brep_face)?;
+        other.face(other_face)?;
+        self.faces.record(brep_face, other_face)
     }
 
     /// `Relate(pBrepTopo, pOtherTopo)` for two vertices of the concrete [`Brep`]

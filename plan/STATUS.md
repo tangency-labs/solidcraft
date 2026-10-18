@@ -8,30 +8,9 @@ Latest topology integration: `topology.brep_p6` partial (PR #169, after its depe
 
 Latest main integration: `surface.surface_p11` partial (PR #120: 176 ported units, 98 green and 78 partial; `intersect.surface_silhouette` promoted to green).
 
-Latest unit: `surface.surf_of_revolution_p3` partial -> green (difftest runner builds the `SmCone` operand and runs `IntersectWithCone`: 26705 cases, 26705 bit-identical, 0 deferred; 233 ported units, 115 green and 118 partial). Before: `intersect.curve_class_p9` ([PR #151](https://github.com/bherbruck/solidcore/pull/151)) is partial on a standalone official-main base: review validation has 424 differential cases, 225 bit-identical passes, 197 dependency deferrals, 2 native setup rejections and zero failures. It ports edge and trim-boundary intersections with concrete query handle mappings. Pole lookup now matches the native FALSE default; collapsed caches, wider input ranges and positive endpoint classification are covered. Interior partition insertion awaits part 2. No open dependency PR is bundled. The manifest has 195 ported units (108 green, 87 partial); final integration results are recorded in the PR checks.
+Latest unit: `boolean.merge_p2` ([PR #229](https://github.com/tangency-labs/solidcore/pull/229)) is partial: 45 differential cases, 22 bit-identical passes, 23 dependency deferrals, zero failures (`--seeds 400`: 166 passes, 234 deferrals). It ports the `SmMerge` B-rep constructor, `MergeEdge`, `MakeFaceuse`, `MergeAddedFace` and `MergeAddedTopology`, and wires the `MergeEdge` and `SmMerge::SmMerge` back-edges of `boolean.merge_p5` and `boolean.api_brep`; the two-B-rep API booleans now stop at `topology.brep_p2`. Every `MergeAddedTopology` case waits on `SmBrep::Notify` (`topology.brep_p2`). Upstream issues UB-180, UB-181 (`SmApiStitch(pBrep, pFace)` always crashes) and WR-175. The manifest has 207 ported units (113 green, 94 partial).
 
-
-## Port review note (2026-10-18, issue #210)
-
-Carry forward [issue #210](https://github.com/tangency-labs/solidcore/issues/210)
-when extending or reviewing partial ports:
-
-- Stub the missing call and retain the upstream logic after it. A function that stops
-  at its first missing callee does not establish completion of its assigned body.
-- Separate successful operations that change geometry/topology from refusals, empty
-  results, no-ops and guard assertions. `partial`, `max_rel_err=0` and `with_values`
-  alone do not certify the success paths; record the unexercised operations explicitly.
-- Treat B-rep `Notify` integration as a critical dependency for meaningful topology
-  coverage, and coordinate the canonical `Brep` fields and editing state across ports.
-- Review defaults and unreachable tails against upstream before their dependencies
-  land. Merge current main before readiness, wire stale stubs, and rerun affected
-  topology units with expanded seeds when the shared dependencies become available.
-
-These are review/handoff notes from the issue, not a claim that its proposed process
-or reporting changes have already been implemented. For cone follow-up #207, the
-rejection fixtures compare only the native guard (Rust runs on them but its result is
-not compared) and the missing general Cone adapter remains an explicit dependency
-deferral.
+Latest unit: `intersect.curve_class_p9` ([PR #151](https://github.com/bherbruck/solidcore/pull/151)) is partial on a standalone official-main base: review validation has 424 differential cases, 225 bit-identical passes, 197 dependency deferrals, 2 native setup rejections and zero failures. It ports edge and trim-boundary intersections with concrete query handle mappings. Pole lookup now matches the native FALSE default; collapsed caches, wider input ranges and positive endpoint classification are covered. Interior partition insertion awaits part 2. No open dependency PR is bundled. The manifest has 195 ported units (108 green, 87 partial); final integration results are recorded in the PR checks.
 
 
 ## Integration update (2026-10-15, PR #119)
