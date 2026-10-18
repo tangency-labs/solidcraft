@@ -401,3 +401,8 @@ errors (unreadable case, report not writable); verdicts never fail the run.
 * Reports: `reports/difftest/<unit>.json` — sorted keys, no timestamps,
   shortest round-trip floats, non-finite floats as `"NaN"`/`"inf"`; failing
   cases include inputs and up to 20 mismatches.
+* Reference platform: x86-64 Linux (as CI). Upstream converts out-of-range
+  doubles to integers in a few places (UB), and the port reproduces the
+  x86-64 result. On arm64 (macOS or Linux) the C++ saturates instead, so
+  `geom.hash_table` and `heal.heal_data_p1`-`p3` fail there (see
+  `plan/findings.md`, General). Use an x86-64 host for those units.

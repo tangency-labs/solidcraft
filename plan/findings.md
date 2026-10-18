@@ -26,60 +26,46 @@ are also logged, one entry each, in `plan/upstream-issues.md` for the upstream m
 - **difftest report `seeds` field.** It records the `--seeds` CLI value, not the number of
   generated cases a runner actually produced. `nlib.knots` overrides `cases()` to always
   generate at least 1200.
-- **Math libraries differ by platform (2026-10-17).** difftest proves solidcore matches
-  the C++ bit for bit only on Linux x86_64 with glibc. There, Rust's `f64::sin` and the
-  C++ `sin` both call glibc, and so does every other measured function, with one
-  exception: `cbrt` (below). Elsewhere Rust calls a different libm. On 200,000
-  kernel-like inputs per function, against glibc 2.39 x86_64 with FMA,
-  `harness/mathprobe/run.sh` measured (differing results, max ulp). Columns are glibc on
-  arm64 (what the C++ gets there), then Rust on macOS (Apple libm), on
-  `wasm32-unknown-unknown` (Rust's libm) and in a pure-Rust Linux x86_64 binary:
-
-  | fn (solidcore call sites) | glibc arm64 | Rust macOS | Rust wasm32 | Rust Linux x86_64 |
-  |---|---|---|---|---|
-  | `cos` (83) / `sin` (74) | 0 / 0 | 3.4% / 3.2%, 1 | 2.4% / 2.5%, 1 | 0 |
-  | `atan2` (14) | 0 | 0.4%, 1 | 17.1%, 1 | 0 |
-  | `powf` (12) | 0 | 0.2%, 1 | 6.2%, 1 | 0 |
-  | `tan` (9) | 0 | 39.4%, 3 | 2.9%, 1 | 0 |
-  | `sinh` / `cosh` (4 each) | 0 / 0 | 20.7% / 19.1%, 2 | 2.0% / 9.6%, 2 | 0 |
-  | `log10` (3) | 0 | 9.1%, 2 | 9.1%, 2 | 0 |
-  | `acos` (2), `asin`, `atan`, `ln` (1 each) | 0 | 0.02–12.3%, 1 | 1.1–6.2%, 1 | 0 |
-  | `cbrt` (1) | 19.3%, 4 | 47.5%, 3 | 47.5%, 3 | **47.5%, 3** |
-  | `powi` (6) | | (reference) | 0 | |
-
-  **Which `cbrt` Rust gets on Linux depends on link order** (found by PR #225's
-  review, then checked with `nm` and a mixed Rust/C++ binary on Linux x86_64).
-  `compiler_builtins` defines `cbrt` itself, and the call binds to that copy unless
-  libm is linked before it. A pure-Rust binary (the probe, or an application using
-  solidcore) gets `compiler_builtins`' `cbrt` (`nm`: local `t cbrt`; every other
-  function is an undefined glibc import). That copy is identical to the wasm column and
-  1–3 ulp off glibc in 47.5% of cases. A binary that links `-lm` ahead of it, as
-  `solidcore-ffi`'s `build.rs` does (`stdc++`, `m`), imports glibc's `cbrt`
-  (`U cbrt`). Its Rust and C++ sides then agree on all 200,000 inputs and match
-  `libm.so.6`. On macOS, Rust imports `_cbrt` from libSystem (Apple's). The one caller
-  is `smos_CubeRoot` in the cubic solver (`geom/vector3d.rs` `cbrt`, used at
-  `geom/polynomial.rs:155,170-171`; upstream `SmMath.cpp` `sm_cbrt` = `std::cbrt`).
-
-  `sqrt` is correctly rounded everywhere, so it is not measured. Consequences:
-  - The wasm build computes slightly different results than the C++ reference that CI
-    proved parity against, and nothing tests the wasm build's values (CI only runs
-    `cargo check` for wasm). Single-call differences are about 1e-16 relative, far
-    inside difftest's 1e-9, but they can compound in iterative solvers or flip a
-    branch that sits exactly at a tolerance. Whether that ever happens is not
-    measured yet. The next step is to replay the Rust side on wasm against Linux results.
-  - `geom.polynomial`'s difftest is bit-identical (`max_rel_err = 0`) only because the
-    difftest binary links glibc's `cbrt` into both sides. A pure-Rust build of solidcore
-    on Linux x86_64, which is what users run, solves cubics with `compiler_builtins`'
-    `cbrt`. Its roots can then differ from the C++ by an ulp, well within 1e-9, but not
-    bit-identical, and difftest cannot see it. Making the port call glibc's `cbrt`
-    explicitly, or one fixed implementation on both sides, would close that gap.
-  - Running difftest on macOS (once the harness builds there) or on Linux arm64
-    (`cbrt`) shows libm disagreements that are not port bugs. Compare there only
-    against references produced on the same platform.
-  - Options, undecided: document "bit-identical on Linux x86_64 glibc, within a few
-    ulp elsewhere"; route every transcendental through one pure-Rust libm (native and
-    wasm agree, but no longer bit-match the glibc C++); or correctly rounded math on
-    both sides (identical everywhere).
+- **difftest is x86-64-only where upstream converts out-of-range doubles to integers.**
+  Upstream relies on `(ULONG)double` / `(long)double` conversions that are UB for negative,
+  NaN or out-of-range values, and the port reproduces what x86-64 g++ emits for them
+  (`cvttsd2si`: a signed truncation, so `(ULONG)-3.0 = 2^64 - 3`, NaN `= 2^63`). On arm64
+  (AArch64 `fcvtzu` / `fcvtzs`, with GCC 13 or Apple clang) the same C++ saturates:
+  negatives and NaN give `0`, `+inf` gives `ULONG_MAX`. So arm64 hosts disagree with the
+  port wherever such a value is reached; macOS arm64 and Linux arm64 fail with identical
+  counts, while CI (x86-64) passes. Investigated on main `e1ae2640` in an Ubuntu 24.04 arm64
+  container (GCC 13.3), 2026-10-18:
+  - `heal.heal_data_p1` 3 failed, `heal.heal_data_p2` 104 failed, `heal.heal_data_p3`
+    7 failed. With the two Rust conversions temporarily switched to Rust's saturating
+    `as u64` (what `fcvtzu` does), all three units pass with 0 failed and unchanged
+    deferred counts (267 / 441 / 279 passed). Switching only one site at a time: the voxel
+    mapping alone (UB-35, `geom::hash_table::ulong_from_f64`) fixes 0 / 74 / 5 of the
+    failures, the edge-length histogram alone (UB-175,
+    `heal::heal_data::p2::edge_len_histogram_index`) fixes 2 / 26 / 1, and the remaining
+    1 / 4 / 1 cases need both.
+  - Example, `heal.heal_data_p2` fixture `wire_edge_degenerate` (`out.len` cpp 2818, rust
+    2833): `Cache_CoinVertices` sizes a 12x12x12 voxel model over the box of the wire's
+    single vertex, so the box has zero length and `(x - min) / len` is `0 / 0 = NaN` on all
+    three axes. x86-64 maps NaN to `2^63`, which clamps to voxel `(11, 11, 11)`. The point
+    then lies on that voxel's low boundary, and `Add` files 3 neighbour copies (4 point
+    items, 15 more output values in the voxel item dump). arm64 maps NaN to `0`, voxel
+    `(0, 0, 0)` has no lower neighbours, and C++ keeps 1 item.
+  - Example of the histogram: `SM_HISTOGRAM_EDGELEN_INDEX(0.01)` is
+    `(ULONG)floor(log10(0.01)) + 6`. That is bucket 4 on x86-64 (`2^64 - 2 + 6` wraps)
+    and bucket 6 on arm64 (`0 + 6`), so every edge in `[1e-5, 1)` lands in bucket 6
+    (for example `heal.heal_data_p1` `gen0086`: `out[3588]` cpp 0, rust 4).
+  - `geom.hash_table` (status green) fails the same way on arm64: 70-76 of every 100
+    generated cases fail. A run of all 619 cases segfaults in the C++
+    `SmObjsInVoxels::FindCoincidentPairs` (gdb backtrace through `sc_geom_hash_table_floats`),
+    but with the Rust conversion switched to saturating all 619 pass and nothing crashes.
+    The shim's guards were checked only on x86-64, so arm64's voxel choice probably reaches
+    a bucket read they never meant to allow. Not investigated further.
+  - Not a port bug: x86-64 Linux is the reference platform (`plan/upstream-issues.md`,
+    *Build*), and making the port follow the host would make Rust results depend on the
+    platform (wasm32 included). Use x86-64 (CI, or an x86-64 Linux VM/container) for any
+    difftest that reaches these conversions. Other x86-64 emulations of the same kind
+    (the `(long)` of a NaN quotient in `EvaluateBoundingBoxSimple`, under
+    `surface.twist_volume`) will disagree on arm64 in the same way.
 
 ## nlib.knots (green; no disagreements)
 
