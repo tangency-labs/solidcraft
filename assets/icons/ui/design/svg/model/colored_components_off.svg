@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Disable component colors</title>
+  <path d="M9.235 17.706L15.059 20.882L15.059 48.941L9.235 44.926Z" fill="#328bd3"/>
+  <path d="M35.176 9.235L15.059 20.882L15.059 48.941L36.765 35.139Z" fill="#236ead"/>
+  <path d="M29.046 5L35.176 8.176L15.196 19.718L9.066 16.541Z" fill="#b9ddf8"/>
+  <path d="M29.046 5.529L35.176 8.706L35.176 36.235L15.059 49.471L9.235 45.765L9.066 17.071Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9.066 17.6L15.059 20.882L34.647 9.235" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15.059 20.882L15.059 47.067" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32.222 18.595L44.949 25.944L44.949 51.122L32.222 43.774Z" fill="#328bd3"/>
+  <path d="M54.934 20.173L44.949 25.944L44.949 51.122L54.934 45.352Z" fill="#236ead"/>
+  <path d="M42.059 12.412L54.934 20.173L44.949 25.944L32 17.706Z" fill="#b9ddf8"/>
+  <path d="M41.159 11.766L54.934 20.173L54.934 45.352L44.949 51.122L31.164 42.715L31.164 17.536Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32.222 18.595L44.949 25.944L54.934 20.173" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M44.949 25.944L44.949 51.122" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18.299 39.062L31.015 46.411L31.015 59L18.299 51.652Z" fill="#328bd3"/>
+  <path d="M41.921 40.121L31.015 46.411L31.015 59L41.921 52.711Z" fill="#236ead"/>
+  <path d="M29.194 32.773L41.921 40.121L31.015 46.411L18.299 39.062Z" fill="#b9ddf8"/>
+  <path d="M29.194 32.773L41.921 40.121L41.921 52.711L31.015 59L18.299 51.652L18.299 39.062Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18.299 39.062L31.015 46.411L41.921 40.121" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M31.015 46.411L31.015 59" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -48,6 +48,38 @@ source = "#236ead"
 light = "#236ead"
 dark  = "#2976b8"
 
+# Simultaneous component colours for inspection icons; existing workspace ramps stay unchanged.
+
+[roles.component-orange-1]
+source = "#f1d2af"
+light = "#f1d2af"
+dark = "#ba8f6a"
+
+[roles.component-orange-2]
+source = "#c06f00"
+light = "#c06f00"
+dark = "#b86f04"
+
+[roles.component-orange-3]
+source = "#a45000"
+light = "#a45000"
+dark = "#95682d"
+
+[roles.component-yellow-1]
+source = "#e5d99b"
+light = "#e5d99b"
+dark = "#a9985f"
+
+[roles.component-yellow-2]
+source = "#a28200"
+light = "#a28200"
+dark = "#9a8100"
+
+[roles.component-yellow-3]
+source = "#826700"
+light = "#826700"
+dark = "#857100"
+
 [strokes]          # on the 64 grid
 geometry = 2.55
 action = 4.25

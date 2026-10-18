@@ -1341,3 +1341,21 @@ mod browser_rows {
         assert!(h.app.viewport.context_menu.is_none(), "a click outside the menu closes it");
     }
 }
+
+#[test]
+fn component_and_occurrence_menus_cycle_shared_identification_color() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let id = app.run("component.create", json!({"name":"Part"})).unwrap()["component"].as_u64().unwrap();
+    let original = app.session.doc.component_identification_color(id);
+    assert!(app.session.colored_components.is_none());
+    act(&mut app, &Target::Component { id }, "Cycle Component Color");
+    let next = app.session.doc.component_identification_color(id);
+    assert_ne!(original, next);
+    assert!(app.session.colored_components.is_some());
+    assert!(app.dialog.is_none());
+    let occurrence = app.session.doc.occurrence_of(id).unwrap().id;
+    act(&mut app, &Target::Occurrence { path: vec![occurrence] }, "Cycle Component Color");
+    assert_ne!(app.session.doc.component_identification_color(id), next);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.component_identification_color(id), next);
+}
