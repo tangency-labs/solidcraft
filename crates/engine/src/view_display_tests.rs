@@ -189,3 +189,51 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled"));
     assert!(hidden.lines.iter().all(|line| !line.on_top));
 }
+
+#[test]
+fn colored_components_toggle_is_stable_and_does_not_change_the_design() {
+    let mut s = Session::default();
+    let before = serde_json::to_value(&s.doc).unwrap();
+    assert_eq!(component_color(&s, 1), None);
+    assert_eq!(s.execute("inspect.colored_components", &json!({})).unwrap()["enabled"], true);
+    s.colored_components = Some(42);
+    let first = component_color(&s, 1);
+    assert!(first.is_some());
+    assert_ne!(first, component_color(&s, 2));
+    s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
+    assert_eq!(component_color(&s, 1), first);
+    assert!(s.execute("inspect.colored_components", &json!({"enabled": "yes"})).is_err());
+    assert_eq!(component_color(&s, 1), first);
+    assert_eq!(s.execute("inspect.colored_components", &json!({})).unwrap()["enabled"], false);
+    assert_eq!(component_color(&s, 1), None);
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+}
+
+#[test]
+fn colored_components_override_appearances_and_restore_them() {
+    let mut s = Session::default();
+    for (name, x) in [("Left", 0), ("Right", 20)] {
+        s.execute("component.activate", &json!({"component": 0})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.selection.clear();
+    let cam = Camera::default();
+    let original = scene(&s, &cam);
+    s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
+    s.colored_components = Some(42);
+    let colored = scene(&s, &cam);
+    assert_eq!(colored.meshes.len(), 2);
+    assert_ne!(colored.meshes[0].color, colored.meshes[1].color);
+    for (body, mesh) in s.world_state().bodies.iter().zip(&colored.meshes) {
+        let [r, g, b] = component_color(&s, body.component).unwrap();
+        assert_eq!(mesh.color, Rgb(r, g, b));
+        assert!(mesh.face_colors.is_empty());
+    }
+    s.execute("inspect.colored_components", &json!({"enabled": false})).unwrap();
+    let restored = scene(&s, &cam);
+    for (a, b) in original.meshes.iter().zip(restored.meshes) {
+        assert_eq!(a.color, b.color);
+        assert_eq!(a.face_colors, b.face_colors);
+    }
+}

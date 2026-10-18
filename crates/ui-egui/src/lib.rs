@@ -980,6 +980,10 @@ impl SolveApp {
             }
             return;
         }
+        if id == "inspect.colored_components" {
+            drop(self.run(id, serde_json::json!({})));
+            return;
+        }
         if id == "material.properties.validate" {
             self.material_card_review = Some(material_card_review::ReviewWindow::default());
             self.home.open = false;

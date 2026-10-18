@@ -741,6 +741,7 @@
   "cmd.inspect_accessibility": "Accessibility Analysis",
   "cmd.inspect_center_of_mass": "Center of Mass",
   "cmd.inspect_clearance": "Clearance",
+  "cmd.inspect_colored_components": "Colored components",
   "cmd.inspect_compare": "Compare Bodies",
   "cmd.inspect_continuity": "Continuity Analysis",
   "cmd.inspect_curvature_comb": "Curvature Comb Analysis",

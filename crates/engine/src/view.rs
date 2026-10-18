@@ -351,6 +351,16 @@ pub fn sketch_point_visible(sk: &Sketch, i: usize) -> bool {
     sk.points.get(i).is_some_and(|p| SketchPointVisibility::new(sk).takes(p))
 }
 
+/// Stable random inspection colour shared by every body of a component.
+pub fn component_color(s: &Session, component: u64) -> Option<[u8; 3]> {
+    use std::hash::{Hash, Hasher};
+    let seed = s.colored_components?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (seed, component).hash(&mut h);
+    let bits = h.finish().to_le_bytes();
+    Some([80 + bits[0] % 141, 80 + bits[1] % 141, 80 + bits[2] % 141])
+}
+
 /// The scene for a headless render, cut by the session's section.
 pub fn scene(s: &Session, cam: &Camera) -> Scene {
     scene_with_section(s, cam, s.section)
@@ -507,8 +517,14 @@ fn build_scene(
         // The body's appearance (or imported colour) and faces with looks of their own, as in
         // the viewport.
         let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-        let color = if selected { p.body_selected } else { s.doc.body_color(body).map_or(p.body, |[r, g, b]| Rgb(to8(r), to8(g), to8(b))) };
-        let face_colors = if selected {
+        let color = if selected {
+            p.body_selected
+        } else if let Some([r, g, b]) = component_color(s, body.component) {
+            Rgb(r, g, b)
+        } else {
+            s.doc.body_color(body).map_or(p.body, |[r, g, b]| Rgb(to8(r), to8(g), to8(b)))
+        };
+        let face_colors = if selected || s.colored_components.is_some() {
             Vec::new()
         } else {
             s.doc.face_colors(body).into_iter().map(|(f, l)| (f as u32, Rgb(l.color[0], l.color[1], l.color[2]))).collect()
