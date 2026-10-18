@@ -56,6 +56,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    ("android", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 
@@ -304,7 +305,7 @@ mod tests {
 
     #[test]
     fn apps_and_xtask_exempt() {
-        for app in ["solidcraft", "solidcraft-cli", "xtask"] {
+        for app in ["solidcraft", "solidcraft-cli", "solidcraft-android", "xtask"] {
             assert!(check(&[c(app, &[("egui", Normal, false), ("solidcraft-ui-egui", Normal, true)])]).is_empty());
         }
     }

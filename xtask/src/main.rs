@@ -79,6 +79,9 @@ commands:
                   matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
                   ACTION_MATRIX_JOBS overrides still win
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
+  android         cargo check the Android app and its graph for aarch64-linux-android (arm64-v8a);
+                  needs an Android NDK: ANDROID_NDK_ROOT, or one under $ANDROID_HOME/ndk or
+                  ~/Android/Sdk/ndk, and `rustup target add aarch64-linux-android`
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
                   Trunk after release builds of apps/solidcraft-web, or on a built site in DIR
@@ -119,6 +122,7 @@ fn main() -> ExitCode {
         }
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
+        Some("android") => cmd_android(),
         Some("web-offline") => web_offline::run(&root(), rest.first().copied()),
         Some("web-offline-test") => {
             let site = rest.iter().position(|a| *a == "--site").and_then(|i| rest.get(i + 1)).copied();
@@ -387,6 +391,84 @@ fn wasm_check() -> Result<(Command, usize), String> {
         c.args(["-p", p]);
     }
     Ok((c, set.len()))
+}
+
+/// Never break the Android build: `solidcraft-android` and its whole dependency graph (geom
+/// through ui-egui, including the C build scripts such as zstd through crates/io) must build for
+/// `aarch64-linux-android` (arm64-v8a). Like `wasm`, a cross-target compile check — the APK
+/// itself is cargo-apk's, in packaging/android/package.sh for a release.
+fn cmd_android() -> Result<(), String> {
+    let ndk = find_android_ndk()?;
+    let bin = ndk.join("toolchains/llvm/prebuilt").join(ndk_host()).join("bin");
+    // The per-API clang wrapper for apps/solidcraft-android's min_sdk_version (26): it passes
+    // --target and the sysroot itself, which is what the cc crate looks for in a compiler whose
+    // name already contains "android".
+    let (clang, ar) = if cfg!(target_os = "windows") {
+        (bin.join("aarch64-linux-android26-clang.cmd"), bin.join("llvm-ar.exe"))
+    } else {
+        (bin.join("aarch64-linux-android26-clang"), bin.join("llvm-ar"))
+    };
+    for tool in [&clang, &ar] {
+        if !tool.is_file() {
+            return Err(format!("Android NDK: {} not found — is {} a complete NDK?", tool.display(), ndk.display()));
+        }
+    }
+    let mut c = cargo();
+    c.args(["check", "-p", "solidcraft-android", "--target", "aarch64-linux-android", "--profile", "ci"]);
+    c.env("ANDROID_NDK_ROOT", &ndk);
+    // The cc crate reads CC_<target> first (dashes, then underscores) for its C build scripts.
+    c.env("CC_aarch64-linux-android", &clang);
+    c.env("AR_aarch64-linux-android", &ar);
+    run(c, "cargo check -p solidcraft-android --target aarch64-linux-android")?;
+    println!("android: solidcraft-android and its graph build for aarch64-linux-android (arm64-v8a)");
+    Ok(())
+}
+
+/// The Android NDK: `ANDROID_NDK_ROOT` / `ANDROID_NDK_HOME`, else the newest version directory
+/// under `$ANDROID_HOME/ndk` or `~/Android/Sdk/ndk`.
+fn find_android_ndk() -> Result<PathBuf, String> {
+    for var in ["ANDROID_NDK_ROOT", "ANDROID_NDK_HOME"] {
+        if let Ok(v) = std::env::var(var) {
+            let p = PathBuf::from(v);
+            if p.is_dir() {
+                return Ok(p);
+            }
+        }
+    }
+    let mut roots = Vec::new();
+    if let Ok(v) = std::env::var("ANDROID_HOME") {
+        roots.push(PathBuf::from(v).join("ndk"));
+    }
+    if let Ok(v) = std::env::var("HOME") {
+        roots.push(PathBuf::from(v).join("Android/Sdk/ndk"));
+    }
+    let mut best: Option<(Vec<u64>, PathBuf)> = None;
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(&root) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            // Directory names are versions ("29.0.14206865"); compare numerically per segment.
+            let v: Vec<u64> = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().split('.').filter_map(|s| s.parse().ok()).collect();
+            if best.as_ref().is_none_or(|(bv, _)| v > *bv) {
+                best = Some((v, p));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+        .ok_or_else(|| "Android NDK not found: set ANDROID_NDK_ROOT to an NDK (or install one under $ANDROID_HOME/ndk or ~/Android/Sdk/ndk)".into())
+}
+
+/// The NDK's prebuilt toolchain folder for this host.
+fn ndk_host() -> &'static str {
+    match (cfg!(target_os = "windows"), cfg!(target_os = "macos"), cfg!(target_arch = "aarch64")) {
+        (true, _, _) => "windows-x86_64",
+        (false, true, true) => "darwin-arm64",
+        (false, true, false) => "darwin-x86_64",
+        (false, false, _) => "linux-x86_64",
+    }
 }
 
 /// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test

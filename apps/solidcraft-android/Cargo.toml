@@ -1,0 +1,59 @@
+[package]
+name = "solidcraft-android"
+description = "SolidCraft for Android (eframe shell over the shared UI, NativeActivity)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The workspace forbids unsafe; this crate denies it instead so the NativeActivity entry in
+# src/lib.rs can allow it (the Activity glue looks up that exported symbol: no safe API, like
+# the desktop app's platform shims). Keep the rest in sync with [workspace.lints].
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+
+# The Activity loads this cdylib (`android.app.lib_name`); the package holds no Java or Kotlin:
+# Android's NativeActivity enters it at `android_main` in src/lib.rs.
+[lib]
+name = "solidcraft_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+solidcraft-engine = { workspace = true }
+solidcraft-ui-egui = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# No `accesskit`: eframe only offers it with android-game-activity, which would put a Kotlin
+# build in the package (this shell is NativeActivity, Rust only).
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "android-native-activity"] }
+egui = { workspace = true }
+log = { workspace = true }
+# The `AndroidApp` handle for `eframe::NativeOptions::android_app`: winit's re-export of
+# android-activity, so the glue version is the one winit itself uses.
+winit = { version = "0.30", default-features = false }
+
+# cargo-apk reads this into the AndroidManifest and packages the cdylib into the APK.
+[package.metadata.android]
+package = "io.solidcraft"
+build_targets = ["aarch64-linux-android"]
+apk_name = "solidcraft"
+strip = "default"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+
+[package.metadata.android.application]
+label = "SolidCraft"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+orientation = "landscape"
+launch_mode = "singleTop"
+exported = true

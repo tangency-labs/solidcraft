@@ -59,7 +59,7 @@ on:
   workflow_dispatch:
     inputs:
       cross_compile:
-        description: "Also check WebAssembly and RISC-V (before a release)"
+        description: "Also check WebAssembly, Android and RISC-V (before a release)"
         type: boolean
         default: false
 
@@ -1203,3 +1203,27 @@ jobs:
           else
             echo "Nothing failed, but not every job finished: $unfinished. The issue is left as it is."
           fi
+
+  android:
+    name: Compile Android (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Android NDK
+        run: |
+          if [ -z "${ANDROID_NDK_ROOT:-}" ]; then
+            if ! ls "${ANDROID_HOME}"/ndk/* >/dev/null 2>&1; then
+              sdkmanager "ndk;29.0.14206865"
+            fi
+            echo "ANDROID_NDK_ROOT=$(ls -d "${ANDROID_HOME}"/ndk/* | sort -V | tail -n 1)" >> "$GITHUB_ENV"
+          fi
+      - run: cargo xtask android
