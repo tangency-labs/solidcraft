@@ -1325,6 +1325,7 @@
   "ui.ai_http_busy": "het eindpunt is bezet of boven zijn limiet; probeer het later opnieuw",
   "ui.ai_http_key": "het eindpunt weigerde de sleutel: controleer deze in Voorkeuren > AI",
   "ui.ai_http_not_found": "geen eindpunt of model gevonden: controleer de basis-URL en de modelnaam",
+  "ui.ai_http_too_large": "het gesprek is te groot voor dit endpoint; begin een nieuwe chat",
   "ui.ai_key": "API-sleutel",
   "ui.ai_key_hint": "optioneel; bewaard in de sleutelhanger van het systeem",
   "ui.ai_key_needs_https": "Een sleutel wordt alleen via HTTPS of naar deze computer verzonden.",

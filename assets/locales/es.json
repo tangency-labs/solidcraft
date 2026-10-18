@@ -1392,6 +1392,7 @@
   "ui.ai_http_busy": "el servicio está ocupado o ha superado su límite; inténtalo más tarde",
   "ui.ai_http_key": "el servicio ha rechazado la clave: compruébala en Preferencias > IA",
   "ui.ai_http_not_found": "no existe ese servicio o modelo: comprueba la URL base y el nombre del modelo",
+  "ui.ai_http_too_large": "la conversación es demasiado grande para este endpoint; empieza un chat nuevo",
   "ui.ai_key": "Clave de API",
   "ui.ai_key_hint": "opcional; se guarda en el llavero del sistema",
   "ui.ai_key_needs_https": "La clave solo se envía mediante HTTPS o a este ordenador.",

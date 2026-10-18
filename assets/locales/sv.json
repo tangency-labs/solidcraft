@@ -1325,6 +1325,7 @@
   "ui.ai_http_busy": "slutpunkten är upptagen eller över sin gräns; försök igen senare",
   "ui.ai_http_key": "slutpunkten nekade nyckeln: kontrollera den under Inställningar > AI",
   "ui.ai_http_not_found": "ingen sådan slutpunkt eller modell: kontrollera bas-URL:en och modellnamnet",
+  "ui.ai_http_too_large": "konversationen är för stor för den här slutpunkten; starta en ny chatt",
   "ui.ai_key": "API-nyckel",
   "ui.ai_key_hint": "valfritt; lagras i systemets nyckelring",
   "ui.ai_key_needs_https": "En nyckel skickas endast via HTTPS, eller till den här datorn.",

@@ -1325,6 +1325,7 @@
   "ui.ai_http_busy": "端點繁忙或已達上限，請稍後再試",
   "ui.ai_http_key": "端點拒絕了金鑰：請在「偏好設定 > AI」中檢查",
   "ui.ai_http_not_found": "找不到該端點或模型：請檢查基礎 URL 和模型名稱",
+  "ui.ai_http_too_large": "對話對此端點來說過大；請開始新的聊天",
   "ui.ai_key": "API 金鑰",
   "ui.ai_key_hint": "可選；儲存在系統鑰匙圈中",
   "ui.ai_key_needs_https": "金鑰只會透過 HTTPS 傳送，或傳送到本機。",

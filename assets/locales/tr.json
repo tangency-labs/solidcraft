@@ -1381,6 +1381,7 @@
   "ui.ai_http_busy": "uç nokta meşgul veya sınırda; daha sonra tekrar deneyin",
   "ui.ai_http_key": "uç nokta anahtarı reddetti: Ayarlar > AI altında kontrol edin",
   "ui.ai_http_not_found": "Uç nokta veya model bulunamadı: temel URL'yi ve model adını kontrol edin",
+  "ui.ai_http_too_large": "konuşma bu uç nokta için çok büyük; yeni bir sohbet başlatın",
   "ui.ai_key": "API anahtarı",
   "ui.ai_key_hint": "isteğe bağlı; sistem anahtar zincirinde saklanır",
   "ui.ai_key_needs_https": "Anahtar yalnızca HTTPS üzerinden veya bu bilgisayara gönderilir.",

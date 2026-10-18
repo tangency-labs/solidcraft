@@ -1382,6 +1382,7 @@
   "ui.ai_http_busy": "titik akhir sibuk atau telah melebihi had; cuba lagi kemudian",
   "ui.ai_http_key": "kunci ditolak oleh titik akhir: semak dalam Tetapan > AI",
   "ui.ai_http_not_found": "titik akhir atau model tidak ditemui: semak URL asas dan nama model",
+  "ui.ai_http_too_large": "perbualan terlalu besar untuk titik akhir ini; mulakan sembang baharu",
   "ui.ai_key": "Kunci API",
   "ui.ai_key_hint": "tidak wajib; disimpan dalam rantai kunci sistem",
   "ui.ai_key_needs_https": "Kunci hanya dihantar melalui HTTPS, atau ke komputer ini.",

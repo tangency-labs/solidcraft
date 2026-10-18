@@ -1325,6 +1325,7 @@
   "ui.ai_http_busy": "endpointul este ocupat sau și-a depășit limita; încercați mai târziu",
   "ui.ai_http_key": "endpointul a refuzat cheia: verificați-o în Preferințe > AI",
   "ui.ai_http_not_found": "nu există un astfel de endpoint sau model: verificați URL-ul de bază și numele modelului",
+  "ui.ai_http_too_large": "conversația este prea mare pentru acest endpoint; începeți un chat nou",
   "ui.ai_key": "Cheie API",
   "ui.ai_key_hint": "opțional; păstrată în depozitul de chei al sistemului",
   "ui.ai_key_needs_https": "O cheie se trimite doar prin HTTPS sau către acest calculator.",

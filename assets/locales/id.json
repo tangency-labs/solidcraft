@@ -1325,6 +1325,7 @@
   "ui.ai_http_busy": "endpoint sibuk atau melebihi batas; coba lagi nanti",
   "ui.ai_http_key": "endpoint menolak key: periksa di Preferensi > AI",
   "ui.ai_http_not_found": "endpoint atau model tidak ada: periksa URL dasar dan nama model",
+  "ui.ai_http_too_large": "percakapan terlalu besar untuk endpoint ini; mulai obrolan baru",
   "ui.ai_key": "Key API",
   "ui.ai_key_hint": "opsional; disimpan di keychain sistem",
   "ui.ai_key_needs_https": "Key hanya dikirim lewat HTTPS, atau ke komputer ini.",

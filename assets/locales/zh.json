@@ -1730,6 +1730,7 @@
   "ui.ai_http_busy": "端点繁忙或已达上限，请稍后再试",
   "ui.ai_http_key": "端点拒绝了密钥：请在“首选项 > AI”中检查",
   "ui.ai_http_not_found": "找不到该端点或模型：请检查基础 URL 和模型名称",
+  "ui.ai_http_too_large": "对话对此端点来说过大，请开始新的聊天",
   "ui.ai_key": "API 密钥",
   "ui.ai_key_hint": "可选；保存在系统钥匙串中",
   "ui.ai_key_needs_https": "密钥只会通过 HTTPS 发送，或发送到本机。",

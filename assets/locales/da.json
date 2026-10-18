@@ -1382,6 +1382,7 @@
   "ui.ai_http_busy": "endepunktet er optaget eller har nået sin grænse; prøv igen senere",
   "ui.ai_http_key": "endepunktet afviste nøglen: Kontrollér den i Indstillinger > AI",
   "ui.ai_http_not_found": "endepunktet eller modellen findes ikke: Kontrollér basis-URL og modelnavn",
+  "ui.ai_http_too_large": "samtalen er for stor til dette endpoint; start en ny chat",
   "ui.ai_key": "API-nøgle",
   "ui.ai_key_hint": "valgfri; gemmes i systemets nøglering",
   "ui.ai_key_needs_https": "En nøgle sendes kun via HTTPS eller til denne computer.",

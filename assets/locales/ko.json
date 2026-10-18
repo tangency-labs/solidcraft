@@ -1388,6 +1388,7 @@
   "ui.ai_http_busy": "엔드포인트가 바쁘거나 한도에 도달했습니다. 나중에 다시 시도하세요",
   "ui.ai_http_key": "엔드포인트가 키를 거부했습니다. 환경 설정 > AI에서 확인하세요",
   "ui.ai_http_not_found": "엔드포인트나 모델을 찾을 수 없습니다. 기본 URL과 모델 이름을 확인하세요",
+  "ui.ai_http_too_large": "대화가 이 엔드포인트에 비해 너무 큽니다. 새 채팅을 시작하세요",
   "ui.ai_key": "API 키",
   "ui.ai_key_hint": "선택 사항, 시스템 키체인에 저장",
   "ui.ai_key_needs_https": "키는 HTTPS를 통해서만, 또는 이 컴퓨터로만 전송됩니다.",
