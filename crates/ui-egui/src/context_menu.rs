@@ -806,6 +806,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
         v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
+        if doc.links.contains_key(&id) {
+            v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
+        }
         v.push(cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })));
         v.push(
             act("ui.moveOccurrence", "Move/Copy", "move")
@@ -1256,6 +1259,29 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if id_of(&p, "component").is_some() {
                 let _ = app.run("component.activate", p);
             }
+        }
+        "ui.openLinkedDesign" => {
+            let Some(component) = id_of(&p, "component") else { return };
+            let links = match app.session.execute("component.links", &json!({})) {
+                Ok(links) => links,
+                Err(e) => {
+                    app.set_status(e.to_string(), true);
+                    return;
+                }
+            };
+            let Some(link) = links["links"].as_array().and_then(|links| links.iter().find(|link| link["component"] == component)) else {
+                app.set_status("This component is no longer linked to a design", true);
+                return;
+            };
+            let Some(file) = link["file"].as_str() else {
+                app.set_status("The linked design has no file path", true);
+                return;
+            };
+            if link["found"] != true {
+                app.set_status(format!("Linked design not found: {file}"), true);
+                return;
+            }
+            app.open_path_async(file);
         }
         "ui.moveOccurrence" => {
             if let Some(o) = id_of(&p, "occurrence") {

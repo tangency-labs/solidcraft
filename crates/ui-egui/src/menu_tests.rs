@@ -44,6 +44,45 @@ fn act(app: &mut SolveApp, t: &Target, label: &str) {
     context_menu::run_item(app, &item, pos2(0.0, 0.0));
 }
 
+#[test]
+fn linked_component_opens_its_part_in_a_tab_and_reports_a_missing_source() {
+    let mut h = crate::scenario::Harness::new();
+    let part = h.dir.join("part.solidcraft");
+    let assembly = h.dir.join("assembly.solidcraft");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let inserted = h.app.run("component.insert_design", json!({"path": part})).unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    h.app.run("file.save", json!({"path": assembly})).unwrap();
+
+    let linked = Target::Component { id: component };
+    let row = context_menu::items(&h.app, &linked);
+    assert!(row.iter().any(|item| item.label == "Open Linked Design"));
+    let placed = context_menu::items(&h.app, &Target::Occurrence { path: vec![occurrence] });
+    assert!(placed.iter().any(|item| item.label == "Open Linked Design"));
+    assert!(!context_menu::items(&h.app, &Target::Component { id: 0 }).iter().any(|item| item.label == "Open Linked Design"));
+
+    act(&mut h.app, &linked, "Open Linked Design");
+    for _ in 0..600 {
+        if h.app.session.path.as_deref() == part.to_str() {
+            break;
+        }
+        h.frame();
+    }
+    assert_eq!(h.app.session.path.as_deref(), part.to_str());
+    assert_eq!(h.app.docs.count(), 2);
+    crate::documents::switch(&mut h.app, 0);
+    assert_eq!(h.app.session.path.as_deref(), assembly.to_str());
+
+    std::fs::remove_file(&part).unwrap();
+    act(&mut h.app, &linked, "Open Linked Design");
+    assert_eq!(h.app.docs.count(), 2);
+    assert_eq!(h.app.session.path.as_deref(), assembly.to_str());
+    assert!(h.app.status.as_ref().is_some_and(|(message, _, error)| *error && message.contains("Linked design not found")));
+}
+
 fn body(app: &SolveApp) -> String {
     app.session.model.state().bodies[0].name.clone()
 }
