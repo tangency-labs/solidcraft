@@ -134,23 +134,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
     fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > MAX_COORD {
@@ -185,13 +171,6 @@ impl Reader<'_> {
         let v = self.finite()?;
         if u < dom[0] || u > dom[2] || v < dom[1] || v > dom[3] {
             return Err(bad("parameter outside the basis domain"));
-        }
-        Ok(())
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
         }
         Ok(())
     }
@@ -407,7 +386,7 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     if op == Op::ReadDb {
         return Err(bad("ReadDb streams go through read_db"));
     }
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     let ctor = rd.index(1)?;
     if ctor != 1 {
         return Err(bad("surface ops need a curve bounded surface (ctor 1)"));
@@ -591,7 +570,7 @@ fn check_record_curve(c: &RecordCurve, what: &str) -> Result<(), FfiError> {
         f.extend_from_slice(p);
     }
     f.extend_from_slice(&c.knots);
-    let mut rd = Reader { input: &f, at: 0 };
+    let mut rd = Reader::new(&f);
     curve(&mut rd).map_err(|e| bad(format!("{what}: {e}")))?;
     rd.done()
 }
@@ -624,7 +603,7 @@ fn check_record(r: &CbsRecord) -> Result<(), FfiError> {
     }
     f.extend_from_slice(&s.u);
     f.extend_from_slice(&s.v);
-    let mut rd = Reader { input: &f, at: 0 };
+    let mut rd = Reader::new(&f);
     surface(&mut rd)?;
     rd.done()?;
     if r.curves_3d.len() > MAX_CURVES || r.curves_uv.len() > MAX_CURVES {

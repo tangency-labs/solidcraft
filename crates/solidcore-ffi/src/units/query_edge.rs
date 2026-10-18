@@ -97,23 +97,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
     fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > MAX_COORD {
@@ -157,13 +143,6 @@ impl Reader<'_> {
 
     fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
     }
 }
 
@@ -528,7 +507,7 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
 /// failure.
 pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     brep_block(&mut rd, path)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
     let mut plain = block.to_vec();

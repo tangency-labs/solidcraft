@@ -102,13 +102,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!();
 
-impl<'a> Reader<'a> {
+impl Reader<'_> {
     fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
@@ -128,26 +124,6 @@ impl<'a> Reader<'a> {
             return Err(bad(format!("bad index/count/flag {v}")));
         }
         Ok(v as usize)
-    }
-
-    fn slice(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
-        let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
-        let s = self
-            .input
-            .get(self.at..end)
-            .ok_or_else(|| bad("input too short"))?;
-        if s.iter().any(|x| !x.is_finite()) {
-            return Err(bad("non-finite input"));
-        }
-        self.at = end;
-        Ok(s)
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
     }
 }
 
@@ -217,7 +193,7 @@ fn knots(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     match op {
         Op::BVectors => {
             curve(&mut rd)?;

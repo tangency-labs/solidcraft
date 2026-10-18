@@ -82,11 +82,7 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!();
 
 /// Shape of one encoded curve function.
 #[derive(Debug, Clone, Copy)]
@@ -115,24 +111,6 @@ struct SrfShape {
 }
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
-        let v = self.num()?;
-        if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
-            return Err(bad(format!("bad index/count {v}")));
-        }
-        Ok(v as usize)
-    }
-
     fn slice(&mut self, k: usize) -> Result<&[f64], FfiError> {
         let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
         let s = self
@@ -209,13 +187,6 @@ impl Reader<'_> {
         }
         Ok(())
     }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
-    }
 }
 
 /// Domain of one evaluator direction: degree `p`, knots in use `U[0..=m]`, value
@@ -237,7 +208,7 @@ fn eval_domain(p: usize, m: usize, big_n: usize, finite: bool) -> Result<(), Ffi
 }
 
 fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     match op {
         Op::CrvEval => {
             let sh = rd.curve()?;

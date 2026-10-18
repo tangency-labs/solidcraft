@@ -163,11 +163,7 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input, mirroring the shim's reads.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
     fn num(&mut self) -> Result<f64, FfiError> {
@@ -235,7 +231,7 @@ impl Reader<'_> {
 ///
 /// [`FfiError::InvalidArgument`] naming the first problem.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut r = Reader { input, at: 0 };
+    let mut r = Reader::new(input);
     let (oriented, unbend) = if op.is_static() {
         (false, false)
     } else {

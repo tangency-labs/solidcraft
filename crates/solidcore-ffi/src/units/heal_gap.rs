@@ -78,22 +78,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
     fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > MAX_COORD {
@@ -129,13 +116,6 @@ impl Reader<'_> {
 
     fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
     }
 }
 
@@ -387,7 +367,7 @@ fn raw_point(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 fn check(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     match op {
         Op::Gf => {
             function(&mut rd)?;
@@ -496,7 +476,7 @@ pub fn export(path: &str, block: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// failure.
 pub fn topo(path: &str, block: &[f64], args: &[f64]) -> Result<Vec<f64>, FfiError> {
     let ex = export(path, block)?;
-    let mut rd = Reader { input: args, at: 0 };
+    let mut rd = Reader::new(args);
     let kind = rd.index(5)?;
     let counts = vu::counts(&ex);
     let n = match counts {

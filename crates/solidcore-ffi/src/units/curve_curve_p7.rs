@@ -89,73 +89,7 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
-    /// A finite value of magnitude at most [`MAX_COORD`].
-    fn finite(&mut self) -> Result<f64, FfiError> {
-        let v = self.num()?;
-        if !v.is_finite() || v.abs() > MAX_COORD {
-            return Err(bad(format!("value {v} not finite or too large")));
-        }
-        Ok(v)
-    }
-
-    fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
-        Ok([self.finite()?, self.finite()?, self.finite()?])
-    }
-
-    fn nonzero3(&mut self) -> Result<[f64; 3], FfiError> {
-        let v = self.vec3()?;
-        if v.iter().map(|c| c * c).sum::<f64>() < 1e-12 {
-            return Err(bad("zero vector"));
-        }
-        Ok(v)
-    }
-
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
-        let v = self.num()?;
-        if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
-            return Err(bad(format!("bad index/count {v}")));
-        }
-        Ok(v as usize)
-    }
-
-    fn flag(&mut self) -> Result<bool, FfiError> {
-        Ok(self.index(1)? == 1)
-    }
-
-    fn take(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
-        let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
-        let s = self
-            .input
-            .get(self.at..end)
-            .ok_or_else(|| bad("input too short"))?;
-        self.at = end;
-        Ok(s)
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
-    }
-}
+crate::reader::unit_reader!(MAX_COORD);
 
 /// The parameter range of a validated curve block.
 #[derive(Debug, Clone, Copy)]
@@ -454,7 +388,7 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for input [`eval`] rejects.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     validate_op(op, &mut rd)?;
     rd.done()
 }

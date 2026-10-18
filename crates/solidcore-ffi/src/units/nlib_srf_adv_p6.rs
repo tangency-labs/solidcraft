@@ -50,13 +50,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!();
 
-impl<'a> Reader<'a> {
+impl Reader<'_> {
     fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
@@ -78,28 +74,8 @@ impl<'a> Reader<'a> {
         Ok(v as usize)
     }
 
-    fn slice(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
-        let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
-        let s = self
-            .input
-            .get(self.at..end)
-            .ok_or_else(|| bad("input too short"))?;
-        if s.iter().any(|x| !x.is_finite()) {
-            return Err(bad("non-finite input"));
-        }
-        self.at = end;
-        Ok(s)
-    }
-
     fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(0, 1)? == 1)
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
     }
 }
 
@@ -149,7 +125,7 @@ fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 fn validate_sweep(input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     curve(&mut rd)?;
     curve(&mut rd)?;
     rd.slice(3)?;
@@ -171,7 +147,7 @@ fn validate_sweep(input: &[f64]) -> Result<(), FfiError> {
 }
 
 fn validate_fill(input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     let k = rd.index(1, MAX_SIDES - 1)?;
     for _ in 0..=k {
         curve(&mut rd)?;

@@ -151,23 +151,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!(MAX_COORD);
 
-impl<'a> Reader<'a> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
+impl Reader<'_> {
     /// A finite value of magnitude at most `max`.
     fn bounded(&mut self, max: f64) -> Result<f64, FfiError> {
         let v = self.num()?;
@@ -197,15 +183,6 @@ impl<'a> Reader<'a> {
         Ok(v)
     }
 
-    /// An integer in `0..=max`.
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
-        let v = self.num()?;
-        if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
-            return Err(bad(format!("bad index/count {v}")));
-        }
-        Ok(v as usize)
-    }
-
     /// `-1` (`None`) or an object index below `len`.
     fn object(&mut self, len: usize) -> Result<Option<usize>, FfiError> {
         let v = self.num()?;
@@ -216,20 +193,6 @@ impl<'a> Reader<'a> {
             return Err(bad(format!("bad object index {v}")));
         }
         Ok(Some(v as usize))
-    }
-
-    fn flag(&mut self) -> Result<bool, FfiError> {
-        Ok(self.index(1)? == 1)
-    }
-
-    fn take(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
-        let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
-        let s = self
-            .input
-            .get(self.at..end)
-            .ok_or_else(|| bad("input too short"))?;
-        self.at = end;
-        Ok(s)
     }
 }
 
@@ -428,7 +391,7 @@ fn point_class(rd: &mut Reader<'_>, n_obj: usize) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for a malformed script.
 pub fn validate(input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     let n_obj = rd.index(MAX_OBJECTS)?;
     for i in 0..n_obj {
         let k = rd.index(kind::OTHER)?;

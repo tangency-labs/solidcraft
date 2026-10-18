@@ -93,11 +93,7 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!();
 
 /// Shape of one encoded curve (or curve function).
 #[derive(Debug, Clone, Copy)]
@@ -123,33 +119,6 @@ struct SrfShape {
 }
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
-        let v = self
-            .input
-            .get(self.at)
-            .copied()
-            .ok_or_else(|| bad("input too short"))?;
-        self.at += 1;
-        Ok(v)
-    }
-
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
-        let v = self.num()?;
-        if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
-            return Err(bad(format!("bad index/count {v}")));
-        }
-        Ok(v as usize)
-    }
-
-    fn skip(&mut self, k: usize) -> Result<(), FfiError> {
-        let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
-        if end > self.input.len() {
-            return Err(bad("input too short"));
-        }
-        self.at = end;
-        Ok(())
-    }
-
     /// A curve (`width = 4` doubles per control point) or a curve function
     /// (`width = 1`).
     fn curve_like(&mut self, width: usize) -> Result<CrvShape, FfiError> {
@@ -187,13 +156,6 @@ impl Reader<'_> {
         let s = self.index(big_s)?;
         self.skip(4 * (big_n + 1) * (big_m + 1) + (big_r + 1) + (big_s + 1))?;
         Ok(SrfShape { n, m, p, q, r, s })
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
     }
 }
 
@@ -257,7 +219,7 @@ fn check_well_formed(input: &[f64], sh: &CrvShape) -> Result<(), FfiError> {
 }
 
 fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     match op {
         Op::Inspect => {
             rd.curve()?;

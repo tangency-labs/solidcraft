@@ -428,10 +428,7 @@ const MAX_LIST: i64 = 16;
 /// NLib's non-rational weight marker `NL_NOW`.
 const NOW: f64 = -f64::MAX;
 
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!();
 
 fn bad(what: &str) -> FfiError {
     FfiError::InvalidArgument(what.into())
@@ -882,7 +879,7 @@ fn validate_transform(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for a malformed script.
 pub fn validate(input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     match rd.int(0, kind::TRANSFORM)? {
         kind::LIST => validate_list(&mut rd)?,
         kind::PROTO => validate_proto(&mut rd)?,

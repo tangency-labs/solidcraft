@@ -95,13 +95,9 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
-}
+crate::reader::unit_reader!(MAX_COORD);
 
-impl<'a> Reader<'a> {
+impl Reader<'_> {
     fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
@@ -133,23 +129,6 @@ impl<'a> Reader<'a> {
             return Err(bad(format!("bad index/count {v}")));
         }
         Ok(v as usize)
-    }
-
-    fn take(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
-        let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
-        let s = self
-            .input
-            .get(self.at..end)
-            .ok_or_else(|| bad("input too short"))?;
-        self.at = end;
-        Ok(s)
-    }
-
-    fn done(&self) -> Result<(), FfiError> {
-        if self.at != self.input.len() {
-            return Err(bad("trailing input"));
-        }
-        Ok(())
     }
 }
 
@@ -266,7 +245,7 @@ fn arc_tangents_ok(x: [f64; 3], y: [f64; 3], as_: f64, ae: f64, nc: usize) -> Re
 }
 
 fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+    let mut rd = Reader::new(input);
     match op {
         Op::NumCpts => {
             rd.finite()?;
