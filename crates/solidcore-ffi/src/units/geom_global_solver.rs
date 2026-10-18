@@ -13,6 +13,7 @@
 //! validated here; checks that need run-time state (tree shapes, solver tree
 //! counts) are made by the shim (`SC_ERR_ARG`).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -42,10 +43,6 @@ pub const NODE_LEN: usize = 10;
 
 /// Most nodes per tree.
 pub const MAX_TREE_NODES: usize = 256;
-
-fn bad(m: &str) -> FfiError {
-    FfiError::InvalidArgument(m.into())
-}
 
 fn at(s: &[f64], i: usize) -> Result<f64, FfiError> {
     s.get(i).copied().ok_or_else(|| bad("truncated program"))

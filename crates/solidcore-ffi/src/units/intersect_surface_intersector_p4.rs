@@ -51,6 +51,7 @@
 //! start point on a list when there are no curve points (it is appended); `Dpi`/`Dli`
 //! with a point twice or a point on a list (they are linked in place).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -256,10 +257,6 @@ pub struct Program {
     pub points: Vec<Vec<f64>>,
     /// Ops.
     pub ops: Vec<Op>,
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

@@ -27,6 +27,7 @@
 //! `usg` in `1..=4`, `dir` in `1..=2`), an empty parameter list, decreasing knots or
 //! fewer than two knots for `MergeKnots`, and a negative `eps`.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest net index (`n`, `m`) of a surface accepted by [`eval`].
@@ -96,10 +97,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

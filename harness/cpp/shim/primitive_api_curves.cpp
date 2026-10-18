@@ -30,6 +30,8 @@
 
 #include "sc_sm.h"
 
+using sc::flg;
+using sc::put_ivl;
 using sc::put_vec;
 using sc::st;
 
@@ -139,17 +141,6 @@ struct Rd
         return SmVector3d(x, y, z);
     }
 };
-
-double flg(SmBoolean b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_ivl(std::vector<double>& o, const SmExtent1d& e)
-{
-    o.push_back(e.GetMin());
-    o.push_back(e.GetMax());
-}
 
 // type dim knot_type form, the NURB (`has n p m Pw U`), natural interval.
 void put_bspline(std::vector<double>& o, SmBSplineCurve* c)

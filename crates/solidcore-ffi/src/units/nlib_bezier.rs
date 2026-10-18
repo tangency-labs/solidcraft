@@ -26,6 +26,7 @@
 //! (degrees past the `NL_PascalTri` table, index ranges past the output buffers,
 //! too-short control point arrays, out-of-range flags).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest `p + t` / `p + q` accepted where upstream reads `NL_PascalTri[18][18]`.
@@ -103,10 +104,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

@@ -30,6 +30,7 @@
 //! parameters and knots finite, knots non-decreasing, and the interior parameters
 //! of [`approx_knots`] non-decreasing (its band bookkeeping assumes it).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest point / parameter / knot count accepted.
@@ -50,10 +51,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// Point data: kind flag and points.

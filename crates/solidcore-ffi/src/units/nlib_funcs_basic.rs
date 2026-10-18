@@ -21,6 +21,7 @@
 //! derivative orders above [`MAX_DER`], invalid side flags and non-finite knots or
 //! parameters.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest storage index accepted by [`eval`].
@@ -76,10 +77,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

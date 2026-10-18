@@ -27,6 +27,7 @@
 //!   scales the tolerance, is at least that chord). Degree-1 curves take any finite
 //!   tolerance (upstream does not use it).
 
+use crate::validate::{bad, euclid};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -75,10 +76,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!();
 
 impl Reader<'_> {
@@ -98,15 +95,6 @@ struct CurveInfo {
     size: f64,
     range: (f64, f64),
     degree: usize,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == f64::MAX { 0.0 } else { z };
-    if w == -f64::MAX {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// Reads and validates a curve.

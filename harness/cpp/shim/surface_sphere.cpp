@@ -38,6 +38,12 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::put_vec;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/surface_sphere.rs).
@@ -94,23 +100,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 // A sphere block `mode O[3] X[3] Y[3] radius swap inside_out has_dom D[4] has_circle
 // [c[3] x[3] y[3] d0 d1 r]`: mode 0 is SmSphere::CreateCanonical(SmAxis2Placement(O, X, Y),

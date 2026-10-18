@@ -23,6 +23,7 @@
 //! matrix of negative bandwidth or divide by a zero degree), values finite, knots
 //! and the interpolation parameters of [`func_interp`] non-decreasing.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest number of grid rows / columns, parameters or knots accepted.
@@ -41,10 +42,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// A rectangular grid of points with its kind flag.

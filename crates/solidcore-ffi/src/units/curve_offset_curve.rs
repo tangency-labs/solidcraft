@@ -38,6 +38,7 @@
 //! up to [`MAX_DERIVS`], and no `Copy` of an owning offset whose base cannot be copied
 //! (a Hermite curve: upstream then shares and deletes it twice).
 
+use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -55,9 +56,6 @@ pub const MAX_PROBES: usize = 32;
 pub const MAX_REVERSALS: usize = 4;
 /// Most bytes of a database stream.
 pub const MAX_DB_BYTES: usize = 1 << 16;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// One shim operation (see the module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,10 +87,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

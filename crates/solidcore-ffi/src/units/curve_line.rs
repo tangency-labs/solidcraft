@@ -55,6 +55,7 @@
 
 use std::fmt::Write as _;
 
+use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -363,10 +364,6 @@ pub enum Op {
     SetScale(f64),
     /// `SetAnalyticDomain(SmExtent1d(a, b))`.
     SetDomain(f64, f64),
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {
@@ -776,9 +773,6 @@ impl Enc {
         Ok(())
     }
 }
-
-/// `NL_NOW`: the weight of a non-rational control point.
-const NOW: f64 = -f64::MAX;
 
 /// Checks a B-spline is clamped and well formed (what upstream assumes).
 fn validate_bspline(c: &BSplineData) -> Result<(), FfiError> {

@@ -37,6 +37,7 @@
 //! form has_nurb [n p m cpts(x y z w) knots] possible has_curve nk knots na angles ne
 //! exact`.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest magnitude of coordinates, lengths, parameters and tolerances.
@@ -219,10 +220,6 @@ pub enum Op {
         /// Domain ends.
         domain: [f64; 2],
     },
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

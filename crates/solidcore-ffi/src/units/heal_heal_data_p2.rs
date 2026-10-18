@@ -28,6 +28,7 @@
 //! addresses afterwards). The shim itself refuses (`-2`, nothing follows) the steps
 //! whose upstream path reads freed or null pointers or past an array.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 use super::topology_vertexuse as vu;
@@ -71,10 +72,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 struct Reader<'a> {

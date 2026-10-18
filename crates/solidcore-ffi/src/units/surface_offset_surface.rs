@@ -64,6 +64,7 @@
 //! `1e-6`).
 
 use super::surface_surf_of_revolution_p1 as rev;
+use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError, SC_ERR_ARG};
 
 /// Largest control point index.
@@ -81,8 +82,6 @@ pub const MAX_REACH: f64 = 3.0;
 pub const MAX_ORDER: usize = 64;
 /// Largest `WriteToDB` record [`read_db`] passes on.
 pub const MAX_DB_BYTES: usize = 1 << 20;
-
-const NOW: f64 = -f64::MAX;
 
 const OP_SCRIPT: i32 = 0;
 const OP_WRITE_DB: i32 = 1;
@@ -351,10 +350,6 @@ impl Step {
             Step::BaseOffset { .. } => 23,
         })
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn b(x: bool) -> f64 {

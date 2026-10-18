@@ -28,6 +28,7 @@
 //! malformed B-splines (sizes, unclamped or decreasing knots, bad weights), zero or
 //! parallel axes of the analytic curves and planes, zero-length line segments,
 //! edge intervals outside the curve's domain, non-finite or huge values.
+use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -40,9 +41,6 @@ pub const MAX_COORD: f64 = 1e9;
 pub const MAX_ANGLE: f64 = 1080.0;
 /// Largest tolerance.
 pub const MAX_TOL: f64 = 1e6;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,10 +100,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

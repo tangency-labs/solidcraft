@@ -43,6 +43,7 @@
 //! arc length only from the first knot on (upstream reads before it otherwise), and cache
 //! options as in unit `curve.curve_cache`.
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -61,9 +62,6 @@ pub const MAX_PARAMS: usize = 8;
 pub const MAX_SEGMENTS: usize = 64;
 /// Smallest `dMinimumParametricRatio` of the cache.
 pub const MIN_RATIO: f64 = 1e-4;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,10 +111,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// The parameter range of a validated curve block.
@@ -124,15 +118,6 @@ crate::reader::unit_reader!(MAX_COORD);
 struct CurveInfo {
     a: f64,
     b: f64,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`.

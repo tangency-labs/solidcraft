@@ -20,6 +20,7 @@
 //! also with `n > 0` (upstream rejects that before touching the data). Everything else
 //! is rejected before the call.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest value / control point index accepted by [`eval`].
@@ -67,10 +68,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

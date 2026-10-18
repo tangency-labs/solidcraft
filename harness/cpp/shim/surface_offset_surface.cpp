@@ -48,6 +48,12 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_dom;
+using sc::put_ivl;
+using sc::put_vec;
+
 namespace
 {
 // Rejected input or state, never an SMLib numerical result: unwinds to the entry point,
@@ -159,27 +165,6 @@ struct Rd
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-void put_dom(std::vector<double>& o, const SmExtent2d& d)
-{
-    o.push_back(d.GetMin().x);
-    o.push_back(d.GetMin().y);
-    o.push_back(d.GetMax().x);
-    o.push_back(d.GetMax().y);
-}
-
-void put_ivl(std::vector<double>& o, const SmExtent1d& e)
-{
-    o.push_back(e.GetMin());
-    o.push_back(e.GetMax());
-}
 
 // Bases borrowed by an offset remain owned by its caller. Destroy the offset roots
 // before this list, and the list before the context.

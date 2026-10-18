@@ -28,6 +28,7 @@
 //! positive scales, parameters within a few curve lengths of the curve's range,
 //! increasing intervals and positive tolerances.
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -38,9 +39,6 @@ pub const MAX_DEGREE: usize = 9;
 pub const MAX_COORD: f64 = 1e6;
 /// Parameters may lie this many interval lengths outside the curve's range.
 pub const MAX_REL_DIST: f64 = 2.0;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,10 +70,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// The parameter range of a validated curve block.
@@ -83,15 +77,6 @@ crate::reader::unit_reader!(MAX_COORD);
 struct CurveInfo {
     a: f64,
     b: f64,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`.

@@ -42,6 +42,7 @@
 //! independent axes, positive radii and an angular domain inside `[-360, 360]` at most
 //! 360 long.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest derivative order passed (upstream rejects orders above 3 / 4 itself).
@@ -344,10 +345,6 @@ pub enum CurveIn {
 }
 
 const OP_COINCIDENCE: i32 = 20;
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {
     if v.iter().all(|x| x.is_finite()) {

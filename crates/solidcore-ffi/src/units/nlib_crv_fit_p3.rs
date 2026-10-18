@@ -24,6 +24,7 @@
 //! end derivative is estimated from four of them, parameters and knot vectors of
 //! the shape upstream's knot searches rely on.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest point / parameter / knot count accepted.
@@ -42,10 +43,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// An existing output curve for [`end_derivs`]: highest control point index, degree

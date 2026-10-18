@@ -32,6 +32,7 @@
 #include "sc_sm.h"
 
 using sc::Rd;
+using sc::put_mat;
 using sc::put_vec;
 
 namespace
@@ -52,14 +53,6 @@ enum : int32_t
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_mat(std::vector<double>& o, const SmTransform& t)
-{
-    SmTransform& m = (SmTransform&)t;
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            o.push_back(m[i][j]);
-}
 
 // `origin X Y Z`: SmTransform(ctx, origin, X, Y, &Z).
 SmTransform* read_transform(Rd& rd, const SmContext& ctx)

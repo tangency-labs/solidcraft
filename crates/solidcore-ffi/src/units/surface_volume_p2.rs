@@ -55,6 +55,7 @@
 //! (see [`check`]), and `ReadDb` text in a strict token grammar without the reader's
 //! null or uninitialised cases.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Most maps in a volume chain.
@@ -155,10 +156,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// The class of one map of a chain.

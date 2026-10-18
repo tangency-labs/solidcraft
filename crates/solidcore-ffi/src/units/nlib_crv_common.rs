@@ -22,6 +22,7 @@
 //! then on success a curve (`n p m`, `n+1` control points `x y z w`, `m+1` knots) or,
 //! for `CircWeights`, `k+1` and the weights `w[0..=k]`.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest angle magnitude in degrees accepted by [`eval`].
@@ -74,10 +75,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn angles(a: &[f64]) -> Result<(), FfiError> {

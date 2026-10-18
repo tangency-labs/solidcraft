@@ -21,6 +21,7 @@
 //! - `Create`: `surface tol base3d base_uv(B-spline) start_curve start_param start_opposite
 //!   end_curve end_param end_opposite` -> `status [start_tangent end_tangent]`.
 //! - `ReadDb`: `file_type dim version nbytes bytes` -> `status`.
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -35,9 +36,6 @@ pub const MAX_REL_DIST: f64 = 4.0;
 pub const MAX_DB_BYTES: usize = 4096;
 /// Most derivatives asked of `Evaluate`.
 pub const MAX_DERIVS: usize = 3;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// The shim's operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,10 +82,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// A validated curve block: whether it is a B-spline, and its parameter range.
@@ -96,15 +90,6 @@ struct CurveInfo {
     bspline: bool,
     a: f64,
     b: f64,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`: clamped, valid multiplicities, sane values.

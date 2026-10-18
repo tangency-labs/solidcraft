@@ -18,6 +18,7 @@
 //! in `1..=2`, `cont` one of `2, 3, 4, 6` and `depth` in `0..=11`; the normal
 //! derivatives take `u v ufl vfl` with side flags in `1..=2`.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest index (`n`, `m`) accepted by [`eval`].
@@ -54,10 +55,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

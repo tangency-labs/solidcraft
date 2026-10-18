@@ -45,6 +45,7 @@
 
 use std::fmt::Write as _;
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest magnitude of coordinates, lengths, parameters and tolerances.
@@ -327,10 +328,6 @@ pub enum Op {
     },
     /// `SmCircle::IsArc` (circles only).
     IsArc,
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

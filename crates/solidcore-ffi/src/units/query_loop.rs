@@ -28,6 +28,7 @@
 //! written); a vertex loop has no edge uses. The shim itself rejects a point the surface
 //! cannot evaluate (build status `5`).
 
+use crate::validate::bad;
 use crate::FfiError;
 
 /// Largest degree accepted for NURB curves and surfaces.
@@ -209,10 +210,6 @@ pub struct Answer {
     pub edge_param: f64,
     /// `SmOrientType`.
     pub orientation: i32,
-}
-
-fn bad(m: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(m.into())
 }
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Output/input helpers over SM_API value types (SmVector2d/3d, SmExtent2d, SmStatus).
+// Output/input helpers over SM_API value types (SmVector2d/3d, SmExtent1d/2d, SmTransform,
+// SmStatus, SmBoolean).
 //
 // Copied verbatim from the per-shim copies they replace (only `inline` and the
 // `sc` namespace were added), so behaviour is unchanged. A shim that needs a
@@ -11,7 +12,9 @@
 #include <cstdint>
 #include <vector>
 
+#include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmTransform.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 
@@ -26,6 +29,12 @@ inline double st(SmStatus s)
 
 // A bool as an output value: 1 or 0.
 inline double flg(bool b)
+{
+    return b ? 1.0 : 0.0;
+}
+
+// An SmBoolean as an output value: 1 or 0.
+inline double flg(SmBoolean b)
 {
     return b ? 1.0 : 0.0;
 }
@@ -45,6 +54,13 @@ inline void put_uv(std::vector<double>& o, const SmVector2d& v)
     o.push_back(v.y);
 }
 
+// Appends min max.
+inline void put_ivl(std::vector<double>& o, const SmExtent1d& e)
+{
+    o.push_back(e.GetMin());
+    o.push_back(e.GetMax());
+}
+
 // Appends min.x min.y max.x max.y.
 inline void put_dom(std::vector<double>& o, const SmExtent2d& d)
 {
@@ -52,6 +68,15 @@ inline void put_dom(std::vector<double>& o, const SmExtent2d& d)
     o.push_back(d.GetMin().y);
     o.push_back(d.GetMax().x);
     o.push_back(d.GetMax().y);
+}
+
+// Appends the 4x4 matrix row by row.
+inline void put_mat(std::vector<double>& o, const SmTransform& t)
+{
+    SmTransform& m = (SmTransform&)t;
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j)
+            o.push_back(m[i][j]);
 }
 
 // Sequential reader over the input record (validated on the Rust side).

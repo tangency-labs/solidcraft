@@ -46,6 +46,7 @@
 //! evaluated onto itself through two aliases) or with an empty curve list when there is
 //! a through, start or end point (a null dereference); `Next` from a point to itself.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -253,10 +254,6 @@ pub struct Program {
     pub points: Vec<Vec<f64>>,
     /// Ops.
     pub ops: Vec<Op>,
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

@@ -33,6 +33,7 @@
 //! derivative orders `n <= 3` (the shim's array), `SmVolumeParamsType` codes `0..=8`,
 //! and at most [`MAX_NEXT`] next maps.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Most control points per direction.
@@ -88,10 +89,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

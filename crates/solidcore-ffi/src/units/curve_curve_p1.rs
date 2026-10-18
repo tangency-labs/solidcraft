@@ -36,6 +36,7 @@
 //! [`MIN_TOL`]), tessellation tolerances that are zero or at least [`MIN_CHORD`] /
 //! [`MIN_ANGLE`] degrees / [`MIN_DIST`].
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -60,9 +61,6 @@ pub const MIN_CHORD: f64 = 1e-4;
 pub const MIN_ANGLE: f64 = 0.5;
 /// Smallest non-zero maximum segment length of `Bisect`.
 pub const MIN_DIST: f64 = 1e-3;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,10 +104,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// The parameter range of a validated curve block.
@@ -117,15 +111,6 @@ crate::reader::unit_reader!(MAX_COORD);
 struct CurveInfo {
     a: f64,
     b: f64,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`.

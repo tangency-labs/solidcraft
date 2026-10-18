@@ -33,15 +33,13 @@
 //! `IsOnPlane`'s output uninitialised), ordered domains, finite parameters and
 //! derivative orders up to 3.
 
+use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted.
 pub const MAX_INDEX: usize = 256;
 /// Largest NURB degree accepted.
 pub const MAX_DEGREE: usize = 9;
-
-/// `NL_NOW`: the weight of a non-rational control point.
-const NOW: f64 = -f64::MAX;
 
 mod sys {
     extern "C" {
@@ -234,10 +232,6 @@ impl Op {
 }
 
 const OP_ISO_CIRCLES: i32 = 20;
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {
     if v.iter().all(|x| x.is_finite()) {

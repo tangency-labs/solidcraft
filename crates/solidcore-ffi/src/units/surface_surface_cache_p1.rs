@@ -41,6 +41,7 @@
 //! reads the tolerance of an unclassified node's face), continuity arrays no longer than the
 //! knot lists.
 
+use crate::validate::{NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -53,11 +54,6 @@ pub const MAX_COORD: f64 = 1.0e6;
 pub const MAX_NODES: usize = 256;
 /// Number of fake object pointers (faces, user pointers).
 pub const MAX_OBJECTS: i64 = 4096;
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
-
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {

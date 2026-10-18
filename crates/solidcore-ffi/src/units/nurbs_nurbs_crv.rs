@@ -36,6 +36,7 @@
 //! with `U[r] != U[r+1]` and its multiplicity `s`. Indices `k`, `l`, `i` may exceed
 //! their ranges by a little (upstream checks them first).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -132,10 +133,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

@@ -19,6 +19,10 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_ivl;
+
 namespace
 {
 SmExtent2d ext(const double* d) { return SmExtent2d(d[0], d[1], d[2], d[3]); }
@@ -34,12 +38,6 @@ void put_ext(std::vector<double>& o, const SmExtent2d& e)
 {
     put_pt(o, e.GetMin());
     put_pt(o, e.GetMax());
-}
-
-void put_ivl(std::vector<double>& o, const SmExtent1d& e)
-{
-    o.push_back(e.GetMin());
-    o.push_back(e.GetMax());
 }
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }

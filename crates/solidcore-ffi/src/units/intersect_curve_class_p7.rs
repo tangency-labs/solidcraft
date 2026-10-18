@@ -42,6 +42,7 @@
 //! the edge-curve replacement of `sm_SetDoFilletingGeometry`).
 
 use super::intersect_curve_class_p1::{validate_objects, Reader};
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest number of intervals of a classification.
@@ -79,10 +80,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// A classification block.

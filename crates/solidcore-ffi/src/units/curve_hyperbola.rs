@@ -28,6 +28,7 @@
 
 use std::fmt::Write as _;
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest magnitude of coordinates, lengths and tolerances.
@@ -187,10 +188,6 @@ impl Op {
             Op::ReadDb { .. } => 9,
         }
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(v: f64, max: f64, what: &str) -> Result<f64, FfiError> {

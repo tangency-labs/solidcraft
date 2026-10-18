@@ -11,6 +11,7 @@
 //! before any call; the shim additionally rejects the upstream undefined
 //! behaviour paths that need the model state.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -50,10 +51,6 @@ pub fn op_size(op: i64) -> Option<usize> {
         8 | 11 => 0,
         _ => return None,
     })
-}
-
-fn bad(m: &str) -> FfiError {
-    FfiError::InvalidArgument(m.into())
 }
 
 fn int_in(v: f64, lo: f64, hi: f64) -> bool {

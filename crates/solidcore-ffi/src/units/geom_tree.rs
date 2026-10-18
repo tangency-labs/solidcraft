@@ -11,6 +11,7 @@
 //! Both run a small program against an upstream tree; the encodings are
 //! documented in the shim and validated here before any call.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -55,10 +56,6 @@ pub fn spatial_op_size(op: i64) -> Option<usize> {
         8 => 1,
         _ => return None,
     })
-}
-
-fn bad(m: &str) -> FfiError {
-    FfiError::InvalidArgument(m.into())
 }
 
 fn at<T: Copy>(s: &[T], i: usize) -> Result<T, FfiError> {

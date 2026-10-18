@@ -41,16 +41,13 @@
 //! standalone surface), and with more than four curves all UV curves and surfaces
 //! unless the blend is not bilinear.
 
+use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
 pub const MAX_INDEX: usize = 512;
 /// Largest NURB degree accepted by [`eval`].
 pub const MAX_DEGREE: usize = 17;
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
 /// `NL_MAXDER`.
 const MAX_DERIVATIVE: usize = 4;
 /// `SM_SF_POLYNOMIAL`.
@@ -97,10 +94,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

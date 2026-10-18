@@ -58,6 +58,7 @@
 //! the op that handles one (`Repeated`), and per op the restrictions
 //! documented on [`validate_op`].
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -80,11 +81,6 @@ pub const MAX_STRIDE: usize = 16;
 pub const MAX_NEW_DEGREE: usize = 24;
 /// Largest control point / knot count of `ReadDb`.
 pub const MAX_DB_INDEX: usize = 2048;
-
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
 
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,10 +164,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// A validated curve block.
@@ -192,15 +184,6 @@ impl CurveInfo {
             self.knots.first().copied().unwrap_or(0.0),
             self.knots.last().copied().unwrap_or(0.0),
         )
-    }
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
     }
 }
 

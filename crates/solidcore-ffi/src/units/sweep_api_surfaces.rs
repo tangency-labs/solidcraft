@@ -44,17 +44,13 @@
 //! skin profiles; a skin-from-faces degree of 1 to 3 with 1 to 4 positive-radius
 //! circles (no faces crash upstream, `plan/upstream-issues.md` UB-78).
 
+use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`run`].
 pub const MAX_INDEX: usize = 512;
 /// Largest NURB degree accepted by [`run`].
 pub const MAX_DEGREE: usize = 17;
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
-
 mod sys {
     extern "C" {
         pub fn sc_sweep_api_surfaces_run(
@@ -181,10 +177,6 @@ pub enum Call {
         /// Loft degree.
         degree: u64,
     },
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {

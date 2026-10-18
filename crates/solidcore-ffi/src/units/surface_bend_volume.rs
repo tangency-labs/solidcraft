@@ -37,6 +37,7 @@
 //! uninitialised cases).
 
 use crate::units::surface_volume_p2;
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest derivative order the shim's evaluation arrays hold.
@@ -98,10 +99,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

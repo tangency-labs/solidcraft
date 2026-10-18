@@ -51,6 +51,7 @@
 //! surfaces. Predicting that needs the skinning itself, so such inputs are not rejected
 //! (the difftest case `gen0137` is one).
 
+use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -65,11 +66,6 @@ pub const MAX_ARRAY: usize = 32;
 /// Largest `|crX|` entry accepted by [`eval`] (offset surfaces extend their base
 /// surface to reach it).
 pub const MAX_PARAM: f64 = 1.0e6;
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
-
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -108,10 +104,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

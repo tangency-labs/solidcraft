@@ -46,6 +46,7 @@
 //! only streams upstream reads without undefined behaviour (made by `WriteDb`, or
 //! complete hand-written ASCII).
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -62,9 +63,6 @@ pub const MAX_DB_BYTES: usize = 1 << 16;
 pub const MAX_POINTS: usize = 64;
 /// Largest type, id or index value.
 pub const MAX_ID: usize = 100_000;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,10 +116,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// Sequential reader over the input.
@@ -194,15 +188,6 @@ impl<'a> Reader<'a> {
 
 fn len_sq(v: [f64; 3]) -> f64 {
     v.iter().map(|c| c * c).sum::<f64>()
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`.

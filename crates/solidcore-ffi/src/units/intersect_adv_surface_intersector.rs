@@ -44,6 +44,7 @@
 //! directions.
 
 use super::intersect_surface_intersector_p1::{encode_surface, SurfaceIn, POINT_LEN};
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -171,10 +172,6 @@ pub struct Program {
     pub points: Vec<Vec<f64>>,
     /// Ops.
     pub ops: Vec<Op>,
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

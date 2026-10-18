@@ -17,6 +17,7 @@
 //! (indices above the storage, too-short knot vectors for a rescale, set-size indices
 //! past the storage, negative or non-integral counts).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest storage index (`N`, `M`, `R`, `S`) accepted by [`eval`].
@@ -62,10 +63,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

@@ -43,6 +43,7 @@
 
 #include "sc_sm.h"
 
+using sc::flg;
 using sc::put_dom;
 using sc::st;
 #undef private
@@ -123,11 +124,6 @@ struct Out
         o.insert(o.end(), v.begin(), v.end());
     }
 };
-
-double flg(SmBoolean b)
-{
-    return b ? 1.0 : 0.0;
-}
 
 void* fake(int64_t label)
 {

@@ -6,11 +6,8 @@
 //! bound. Methods a unit defines on its `Reader` take precedence over the shared
 //! ones, so a unit with a stricter or looser check keeps it unchanged.
 
+use crate::validate::bad;
 use crate::FfiError;
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
 
 /// Position in a flat input record.
 pub(crate) struct Cursor<'a> {

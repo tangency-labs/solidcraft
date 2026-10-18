@@ -23,6 +23,7 @@
 //! (lengths, at least one polygon point, a positive integral net shape that matches
 //! the point count) so upstream only reads inside the arrays it is given.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest net side accepted by [`eval`].
@@ -101,10 +102,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {

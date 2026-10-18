@@ -29,6 +29,7 @@
 //! - Cross sections and rails have degree at most `MAX_SKIN_DEGREE` (upstream may
 //!   elevate them by one).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest net index (`n`, `m`) of a surface accepted by [`skin`].
@@ -54,10 +55,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

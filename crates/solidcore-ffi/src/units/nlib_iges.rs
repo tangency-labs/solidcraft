@@ -18,6 +18,7 @@
 //! ends `U[0] = U[p] < U[m-p] = U[m]`). Under those preconditions upstream stays in
 //! bounds (the entity routines check them themselves before clamping).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point upper index (`k`, `n`, `m`) accepted.
@@ -40,10 +41,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(name: &str, a: &[f64]) -> Result<(), FfiError> {

@@ -39,6 +39,7 @@
 #include "sc_gw.h"
 
 using sc::Rd;
+using sc::flg;
 using sc::put_vec;
 using sc::read_nurb;
 using sc::st;
@@ -78,11 +79,6 @@ struct Peek : SmBSplineCurve
     static SmKnotType SmBSplineCurve::*kt() { return &Peek::m_eKnotType; }
     static SmBSplineCurveForm SmBSplineCurve::*form() { return &Peek::m_eBSplineCurveForm; }
 };
-
-double flg(SmBoolean b)
-{
-    return b ? 1.0 : 0.0;
-}
 
 // A curve block `has_nurb dim oob [curve]`.
 SmBSplineCurve* read_curve(Rd& rd, const SmContext& ctx)

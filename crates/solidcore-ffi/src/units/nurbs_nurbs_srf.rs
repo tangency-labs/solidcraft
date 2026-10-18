@@ -20,6 +20,7 @@
 //! every number must be finite; flags must be `0`/`1`, directions `1..=3`; a surface
 //! sampling domain must lie inside the knot ranges.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest index (`n`, `m`) accepted by [`eval`].
@@ -71,10 +72,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

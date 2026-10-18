@@ -44,6 +44,7 @@
 //! `SmCurve::GlobalPointSolve` / `GlobalCurveIntersect` / `GlobalCurveSolve` accept for
 //! the curve solvers.
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -64,9 +65,6 @@ pub const MAX_BOXES: usize = 64;
 pub const MAX_TREE_OBJECTS: usize = 16;
 /// `SM_BIG_DOUBLE`.
 pub const BIG_DOUBLE: f64 = 1.0e20;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,10 +155,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
@@ -184,15 +178,6 @@ impl Reader<'_> {
             return Err(bad("box with min > max"));
         }
         Ok(())
-    }
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
     }
 }
 

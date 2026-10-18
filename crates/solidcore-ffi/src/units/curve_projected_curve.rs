@@ -42,6 +42,7 @@
 //! most [`MAX_DB_BYTES`] bytes (well-formed streams are the caller's duty: upstream
 //! trusts the counts it reads).
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -56,9 +57,6 @@ pub const MAX_REL_DIST: f64 = 4.0;
 pub const MAX_DB_BYTES: usize = 1 << 16;
 /// Highest derivative count of `Eval`.
 pub const MAX_DERIVS: usize = 3;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// One shim operation (codes in the shim).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,10 +114,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// The parameter range of a validated block.
@@ -127,15 +121,6 @@ crate::reader::unit_reader!(MAX_COORD);
 struct Range {
     a: f64,
     b: f64,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`.

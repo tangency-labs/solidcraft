@@ -13,6 +13,7 @@
 //! ranges, solution fields) is validated here; checks that need the array's
 //! run-time state are made by the shim (`SC_ERR_ARG`).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -54,10 +55,6 @@ pub const MAX_COUNT: f64 = 64.0;
 
 /// Largest plain index operand (indices the shim checks or upstream bounds).
 const MAX_INDEX: f64 = 1.0e6;
-
-fn bad(m: &str) -> FfiError {
-    FfiError::InvalidArgument(m.into())
-}
 
 fn at(s: &[f64], i: usize) -> Result<f64, FfiError> {
     s.get(i).copied().ok_or_else(|| bad("truncated program"))

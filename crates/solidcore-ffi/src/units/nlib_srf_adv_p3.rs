@@ -29,6 +29,7 @@
 //!   `knotTol >= 0`; without `cmp` the curves must already share degree, control point
 //!   count and knots (upstream copies `cur[0]`'s count from every curve).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest net index (`n`, `m`) of a surface accepted by [`eval`].
@@ -82,10 +83,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

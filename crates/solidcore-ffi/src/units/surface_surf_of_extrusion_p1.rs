@@ -37,6 +37,7 @@
 //! `SM_SO_MAXIMIZE`, `SM_SO_NORMALIZE` (the ones it documents) and generator
 //! intersections with a finite other vector and ordered interval.
 
+use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted.
@@ -45,9 +46,6 @@ pub const MAX_INDEX: usize = 256;
 pub const MAX_DEGREE: usize = 9;
 /// Largest STEP derivative order accepted.
 pub const MAX_ORDER: usize = 7;
-
-/// `NL_NOW`: the weight of a non-rational control point.
-const NOW: f64 = -f64::MAX;
 
 mod sys {
     extern "C" {
@@ -311,10 +309,6 @@ impl Op {
             Op::Generators { .. } => 13,
         }
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 pub(crate) fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {

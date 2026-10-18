@@ -33,6 +33,7 @@
 //! non-zero directions; ellipses with non-zero axes, positive radii and domain ends
 //! within [`MAX_ANGLE`].
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Most control points per volume direction.
@@ -82,10 +83,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

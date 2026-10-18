@@ -33,6 +33,7 @@
 //! B-rep nodes in range and used at most once (`SmMerge::BooleanTrees` indexes the list
 //! unchecked and clears each entry it takes).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest B-rep list accepted by [`run`] (per list for [`Call::Lists`]).
@@ -161,10 +162,6 @@ pub enum Call {
         /// Postfix nodes: `>= 0` a B-rep index, `< 0` an operation.
         tree: Vec<i64>,
     },
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn check_spec(s: &BrepSpec) -> Result<(), FfiError> {

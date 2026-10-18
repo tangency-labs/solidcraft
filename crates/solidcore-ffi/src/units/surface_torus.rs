@@ -27,6 +27,7 @@
 //! inside `[-360, 360]` at most 360 long, generator circles with independent axes and a
 //! positive radius, derivative orders up to 3.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -167,10 +168,6 @@ impl Op {
             Op::Copy => 9,
         }
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {

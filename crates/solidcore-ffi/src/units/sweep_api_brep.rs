@@ -69,6 +69,7 @@
 //!   entries, which `CreateCurveSweep` skips) crashes on `sNurbs[0]` unless the options
 //!   move the profile center to the path.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Most curves in one curve list.
@@ -285,10 +286,6 @@ pub enum Call {
         /// Cap the ends.
         cap: bool,
     },
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {

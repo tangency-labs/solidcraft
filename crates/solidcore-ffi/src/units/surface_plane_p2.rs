@@ -32,6 +32,7 @@
 //! planes with a non-zero normal and ellipses and circles without a zero radius (the
 //! upstream construction crashes).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -271,10 +272,6 @@ pub enum Op {
         /// The stream bytes.
         bytes: Vec<u8>,
     },
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

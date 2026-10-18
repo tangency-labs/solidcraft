@@ -43,6 +43,7 @@
 //! ops that handle one (`Pole`, `Assert`), and per op the restrictions documented on
 //! [`validate_op`].
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -57,11 +58,6 @@ pub const MAX_JOIN_DEGREE: usize = 9;
 pub const MAX_REL_DIST: f64 = 16.0;
 /// Largest number of samples of `Segment`.
 pub const MAX_SAMPLES: usize = 200;
-
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
 
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,10 +109,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 /// A validated curve block.
@@ -154,15 +146,6 @@ impl CurveInfo {
             _ => false,
         };
         far(0, 1) && far(n, n.wrapping_sub(1))
-    }
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
     }
 }
 

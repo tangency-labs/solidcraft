@@ -54,6 +54,7 @@
 //! through a null pointer otherwise), and no line or curve domain check on a chain
 //! with a (default-constructed) unbend volume, which crashes upstream.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Most maps in a volume chain.
@@ -157,10 +158,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

@@ -33,6 +33,7 @@
 #include "sc_sm.h"
 
 using sc::Rd;
+using sc::flg;
 using sc::put_vec;
 using sc::st;
 
@@ -59,11 +60,6 @@ struct Peek : SmBSplineCurve
     static SmKnotType SmBSplineCurve::*kt() { return &Peek::m_eKnotType; }
     static SmBSplineCurveForm SmBSplineCurve::*form() { return &Peek::m_eBSplineCurveForm; }
 };
-
-double flg(SmBoolean b)
-{
-    return b ? 1.0 : 0.0;
-}
 
 SmHyperbola* read_hyperbola(Rd& rd, const SmContext& ctx)
 {

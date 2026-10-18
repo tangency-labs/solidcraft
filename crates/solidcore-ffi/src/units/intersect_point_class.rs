@@ -60,6 +60,7 @@
 //! a member of a stand-in object or of an `SmPoint3d` (see its file comment).
 
 use crate::units::curve_curve_p6::MAX_COORD;
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest pool size.
@@ -73,9 +74,6 @@ pub const MAX_VALUE: f64 = 1e21;
 pub const MAX_INDEX: usize = 64;
 /// Largest degree of a B-spline block.
 pub const MAX_DEGREE: usize = 9;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Object kind codes.
 #[allow(missing_docs)]
@@ -140,10 +138,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!();
 
 impl Reader<'_> {
@@ -182,15 +176,6 @@ impl Reader<'_> {
             return Err(bad(format!("bad object index {v}")));
         }
         Ok(Some(v as usize))
-    }
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
     }
 }
 

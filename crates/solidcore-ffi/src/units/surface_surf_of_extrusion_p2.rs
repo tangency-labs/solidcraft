@@ -40,6 +40,7 @@ use crate::units::surface_surf_of_extrusion_p1::{
     axes, check_knots, check_points, domain, finite, push_surf, Surf,
 };
 use crate::units::topology_brep_data::Sim;
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index of an inline test NURB.
@@ -276,10 +277,6 @@ impl Op {
 
 /// `OP_IS_NURB`.
 const OP_IS_NURB: i32 = 5;
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
 
 fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))

@@ -48,6 +48,7 @@
 //! For upstream test files ([`Request::upstream_file`]) the simulation stops, and
 //! accepts, at the first geometry kind it does not know.
 
+use crate::validate::bad;
 use crate::{check, FfiError, SC_ERR_BUFFER};
 
 mod sys {
@@ -191,10 +192,6 @@ pub fn run(req: &Request) -> Result<Vec<Item>, FfiError> {
             .collect();
     }
     Err(FfiError::Status(SC_ERR_BUFFER))
-}
-
-fn bad(m: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(m.into())
 }
 
 /// `SM_BIG_ULONG`: `SmTArray::SetSize` refuses this size or more.

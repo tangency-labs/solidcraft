@@ -79,6 +79,7 @@
 //! topology walks of `sm_MakeConsistentClassifications` and `sm_ApplyPointSolution` over the
 //! bare stand-in edges, odd-length winding touch lists.
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest pool size.
@@ -98,9 +99,6 @@ pub const MAX_INDEX: usize = 64;
 pub const MAX_SURF_INDEX: usize = 16;
 /// Largest degree.
 pub const MAX_DEGREE: usize = 9;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Object kind codes.
 #[allow(missing_docs)]
@@ -186,10 +184,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 /// Sequential reader over the input (also used by unit `intersect.curve_class_p7`).
 pub(crate) struct Reader<'a> {
     pub(crate) input: &'a [f64],
@@ -269,15 +263,6 @@ impl<'a> Reader<'a> {
             .ok_or_else(|| bad("input too short"))?;
         self.at = end;
         Ok(s)
-    }
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
     }
 }
 

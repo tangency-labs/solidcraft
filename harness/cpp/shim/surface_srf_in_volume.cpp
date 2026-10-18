@@ -39,6 +39,7 @@
 #include "sc_sm.h"
 
 using sc::put_dom;
+using sc::put_mat;
 using sc::put_vec;
 
 namespace
@@ -123,14 +124,6 @@ double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(bool b) { return b ? 1.0 : 0.0; }
 
 // ---- volumes (as the surface.volume_p1 shim) ------------------------------------------
-
-void put_mat(std::vector<double>& o, const SmTransform& t)
-{
-    SmTransform& m = (SmTransform&)t;
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            o.push_back(m[i][j]);
-}
 
 // `origin X Y Z`: SmTransform(ctx, origin, X, Y, &Z).
 SmTransform* read_transform(Rd& rd, const SmContext& ctx)

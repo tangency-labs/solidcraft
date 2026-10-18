@@ -42,6 +42,7 @@
 //! clamped B-splines (at most [`MAX_INDEX`] + 1 control points per direction, degree
 //! at most [`MAX_DEGREE`], positive weights or none) and at most [`MAX_OPS`] ops.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -302,10 +303,6 @@ pub enum Op {
         /// The `SmContinuityType` code (at most `SM_CT_CINFINITY`, 13).
         cont: u8,
     },
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

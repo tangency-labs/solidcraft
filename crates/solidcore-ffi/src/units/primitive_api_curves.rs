@@ -28,6 +28,7 @@
 //! step_interval(2) rx ry inside_out polar_possible nk knots na angles nx exact` then
 //! its B-spline part; rectangle and polygon give `count` then each line.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -155,10 +156,6 @@ pub enum Call {
         /// `SmBSplineCurveForm` code (0 to 6).
         form: u32,
     },
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {

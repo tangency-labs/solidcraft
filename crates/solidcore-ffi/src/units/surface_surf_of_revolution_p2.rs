@@ -25,6 +25,7 @@
 //! and finite non-negative tolerance scales.
 
 use super::surface_surf_of_revolution_p1::{check_surface, push_surf, Surf, SurfaceData};
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -121,10 +122,6 @@ impl Op {
 }
 
 const OP_IS_NURB: i32 = 20;
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {
     if v.iter().all(|x| x.is_finite()) {

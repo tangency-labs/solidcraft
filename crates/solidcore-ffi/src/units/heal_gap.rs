@@ -28,6 +28,7 @@
 //! `1..=MAX_COUNT` (upstream indexes before its arrays for `0`), finite values,
 //! topology selectors inside the B-rep's export.
 
+use crate::validate::{bad, check_knots, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 use super::topology_vertexuse as vu;
@@ -43,8 +44,6 @@ pub const MAX_COORD: f64 = 1.0e12;
 /// Largest array length of `AddUnique` and `GapArray`.
 pub const MAX_ARRAY: usize = 1000;
 
-const NOW: f64 = -f64::MAX;
-const NOZ: f64 = f64::MAX;
 /// `SM_UNDEF_DOUBLE`.
 pub const UNDEF: f64 = 1.23456e-61;
 
@@ -72,10 +71,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);
@@ -117,46 +112,6 @@ impl Reader<'_> {
     fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
     }
-}
-
-/// Checks a clamped knot vector of degree `p`; returns its range.
-fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiError> {
-    let m = knots
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| bad(format!("{what}: no knots")))?;
-    if knots.windows(2).any(|w| w.first() > w.last()) {
-        return Err(bad(format!("{what}: knots not non-decreasing")));
-    }
-    let (Some(&a), Some(&b)) = (knots.first(), knots.last()) else {
-        return Err(bad(format!("{what}: empty knots")));
-    };
-    let short = || bad(format!("{what}: knots too short"));
-    if m < 2 * p + 1 {
-        return Err(short());
-    }
-    let head = knots.get(..=p).ok_or_else(short)?;
-    let tail = knots.get(m - p..).ok_or_else(short)?;
-    let inner = knots.get(p + 1..m - p).ok_or_else(short)?;
-    if a >= b || head.iter().any(|&k| k != a) || tail.iter().any(|&k| k != b) {
-        return Err(bad(format!("{what}: knots not clamped")));
-    }
-    if b - a < 1e-6 * a.abs().max(b.abs()).max(1.0) {
-        return Err(bad(format!("{what}: parameter range too small")));
-    }
-    if inner.iter().any(|&k| k == a || k == b) {
-        return Err(bad(format!("{what}: end multiplicity above degree + 1")));
-    }
-    let mut run = 1;
-    for w in inner.windows(2) {
-        run = if w.first() == w.last() { run + 1 } else { 1 };
-        if run > p {
-            return Err(bad(format!(
-                "{what}: interior multiplicity above the degree"
-            )));
-        }
-    }
-    Ok((a, b))
 }
 
 fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Result<(), FfiError> {

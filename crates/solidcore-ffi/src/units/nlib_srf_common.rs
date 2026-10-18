@@ -24,6 +24,7 @@
 //! every input curve after the call, then on success the surface (`n m p q r s`, the
 //! net row by row as `x y z w`, the u knots, the v knots).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest angle magnitude in degrees accepted by [`eval`].
@@ -71,10 +72,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

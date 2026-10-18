@@ -23,6 +23,7 @@
 //! point array (upstream dereferences the null pointer), labels outside `1..=3`, and
 //! mutations that touch an already deleted object.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -181,10 +182,6 @@ pub struct Section {
     pub ints: bool,
     /// Values.
     pub values: Vec<f64>,
-}
-
-fn bad(m: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(m.into())
 }
 
 fn idx(i: usize, n: usize, what: &str) -> Result<f64, FfiError> {

@@ -40,6 +40,7 @@
 //! sample outside the domain or its clamp does not evaluate (same), `FixCurves` of `3k`
 //! points, `k >= 2` (upstream reads past the array).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -293,10 +294,6 @@ pub enum Op {
         /// `bOptCurveIsOnSurface`.
         on_surface: bool,
     },
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

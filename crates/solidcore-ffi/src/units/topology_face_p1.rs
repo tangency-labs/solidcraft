@@ -33,6 +33,7 @@
 //! values) and `m_bClosedU` / `m_bClosedV` (`SmBoolean`) is passed too.
 
 use super::topology_vertexuse as fixture;
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Shim operations.
@@ -84,10 +85,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn index(v: f64, max: usize, what: &str) -> Result<usize, FfiError> {

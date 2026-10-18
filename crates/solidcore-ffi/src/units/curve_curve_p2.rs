@@ -61,6 +61,7 @@
 //! lengths of the curve's range, derivative counts up to 3, and solver branches that
 //! never reach the (dummy) curve span data.
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -79,9 +80,6 @@ pub const MAX_ARRAY: usize = 1024;
 pub const MAX_DB_BYTES: usize = 1 << 16;
 /// Most tree nodes.
 pub const MAX_NODES: usize = 16;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(missing_docs)]
@@ -194,10 +192,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
@@ -217,15 +211,6 @@ struct CurveInfo {
     bspline: bool,
     a: f64,
     b: f64,
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`.

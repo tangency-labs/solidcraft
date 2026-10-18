@@ -32,6 +32,7 @@
 //! shim does not run (record [[`REJECTED`]]) a `Next` whose start evaluation (status
 //! ignored upstream, which goes on with whatever the evaluator left) fails.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -208,10 +209,6 @@ pub enum Op {
         /// The breakpoints.
         knots: Vec<f64>,
     },
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

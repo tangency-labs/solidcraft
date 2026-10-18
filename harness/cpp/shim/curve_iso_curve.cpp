@@ -31,6 +31,7 @@
 
 #include "sc_sm.h"
 
+using sc::flg;
 using sc::put_vec;
 
 namespace
@@ -97,11 +98,6 @@ struct Rd
 double stv(SmStatus s)
 {
     return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(SmBoolean b)
-{
-    return b ? 1.0 : 0.0;
 }
 
 // Reads `n m p q r s cpts u v` into a surface from sm_AllocateNurbSurface.

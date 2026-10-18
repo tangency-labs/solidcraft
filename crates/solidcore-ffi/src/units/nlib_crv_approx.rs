@@ -37,6 +37,7 @@
 //!   interior multiplicity at most `p`), `MIN_TOL <= tol <= 1` (so every Bezier
 //!   segment gets at least `deg` samples) or `tol == 0` (rejected upstream), `1 <= deg <= MAX_DEGREE`.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index of an input curve.
@@ -89,10 +90,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

@@ -19,6 +19,7 @@
 //! knot in that direction (upstream skips leading copies of it without a bound).
 //! `N_MakeSrfsCompatibleUV` takes `1..=MAX_SURFACES` surfaces.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest index (`n`, `m`) accepted by [`eval`].
@@ -60,10 +61,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

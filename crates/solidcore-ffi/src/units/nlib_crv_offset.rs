@@ -17,6 +17,7 @@
 //! (status `SC_ERR_ARG`) inputs whose sample count is not finite or exceeds
 //! [`MAX_SAMPLES`], which it recomputes exactly as upstream before the call.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted.
@@ -39,10 +40,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

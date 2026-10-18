@@ -28,6 +28,7 @@
 //! minimum segments and a parametric ratio in `[`[`MIN_RATIO`]`, 1]` (which bounds the
 //! number of spans).
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -42,9 +43,6 @@ pub const MAX_REL_DIST: f64 = 2.0;
 pub const MAX_SEGMENTS: usize = 64;
 /// Smallest `dMinimumParametricRatio`.
 pub const MIN_RATIO: f64 = 1e-4;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,20 +80,7 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
-}
 
 /// A B-spline `n p m cpts knots`.
 fn bspline(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {

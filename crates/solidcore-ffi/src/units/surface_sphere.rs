@@ -36,6 +36,7 @@
 //! with non-negative radii (not both zero) and a positive height, derivative orders up
 //! to 3, ordered domains.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -343,10 +344,6 @@ impl Op {
             Op::IsNurb { .. } => 18,
         }
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {

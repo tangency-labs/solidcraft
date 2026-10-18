@@ -12,6 +12,7 @@
 //! `tol` in [`MIN_TOL`]`..=1` (upstream casts `ceil(sqrt(area / tol))` to `NL_INDEX`
 //! unchecked), with coordinates and `|d|` at most [`MAX_COORD`].
 
+use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest net index (`n`, `m`) of a surface accepted by [`eval`].
@@ -22,9 +23,6 @@ pub const MAX_DEGREE: usize = 17;
 pub const MIN_TOL: f64 = 1.0e-10;
 /// Largest coordinate magnitude and offset distance accepted by [`eval`].
 pub const MAX_COORD: f64 = 1.0e4;
-/// Upstream `NL_NOW` (missing weight).
-const NOW: f64 = -f64::MAX;
-
 mod sys {
     extern "C" {
         pub fn sc_nlib_srf_offset_eval(
@@ -35,10 +33,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

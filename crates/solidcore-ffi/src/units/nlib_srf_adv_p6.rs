@@ -16,6 +16,7 @@
 //! - sweep: `deg` in `1..=MAX_SWEEP_DEGREE`, `dir` in `1..=2`, `E > 0`.
 //! - fill: `1 <= k < MAX_SIDES` (upstream rejects `k < 2` before any access), `eps > 0`.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest control point index of a curve.
@@ -44,10 +45,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

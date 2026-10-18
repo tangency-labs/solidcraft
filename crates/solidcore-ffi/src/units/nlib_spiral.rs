@@ -24,6 +24,7 @@
 //! exit path then runs `N_EndNurbs(&SL)` on the uninitialised local stacks, which
 //! crashes the process (`free(): invalid pointer`; see `plan/findings.md`).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest magnitude accepted for heights, radii and tolerances.
@@ -46,10 +47,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 /// Runs `op` on an input the caller has validated.

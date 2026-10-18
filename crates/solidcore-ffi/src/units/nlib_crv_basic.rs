@@ -24,6 +24,7 @@
 //! non-integral counts), loop forever (huge or non-finite conic angles), or hand
 //! `N_CrvsMakeCompatible` a curve that is not a clamped, well-formed B-spline.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest storage index (`N`, `K`, surface `N`, `M`, `R`, `S`) accepted by [`eval`].
@@ -87,10 +88,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

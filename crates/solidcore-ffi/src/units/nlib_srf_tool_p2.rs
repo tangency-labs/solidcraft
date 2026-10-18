@@ -20,6 +20,7 @@
 //! `r - s < n_dir` (`deg`, `n_dir`: degree and highest net index in the direction,
 //! u for the `NL_UVDIR` flag) and `f, l` must be net indices in the other direction.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest index (`n`, `m`) accepted by [`eval`].
@@ -61,10 +62,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!();

@@ -53,6 +53,7 @@
 //! sorted breaks inside the range, approximation tolerances in `[1e-7, 1]`, valid placements and solver operations, and database text that is a
 //! complete record when ASCII (truncated ASCII reads uninitialised variables).
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index of a curve.
@@ -210,10 +211,6 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
     }
-}
-
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 crate::reader::unit_reader!(MAX_COORD);

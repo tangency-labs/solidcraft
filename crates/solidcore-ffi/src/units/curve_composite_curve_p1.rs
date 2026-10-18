@@ -39,6 +39,7 @@
 //! B-splines and lines only (`SmBSplineCurve*`); gaps for a closed composite only with
 //! curves.
 
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index `n`.
@@ -51,9 +52,6 @@ pub const MAX_COORD: f64 = 1e6;
 pub const MAX_SEGMENTS: usize = 8;
 /// Largest type code asked about.
 pub const MAX_TYPE: usize = 100_000;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,10 +119,6 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
-}
-
 crate::reader::unit_reader!(MAX_COORD);
 
 impl Reader<'_> {
@@ -151,15 +145,6 @@ struct CurveInfo {
     /// for a line).
     start: [f64; 3],
     end: [f64; 3],
-}
-
-fn euclid([x, y, z, w]: [f64; 4]) -> [f64; 3] {
-    let z = if z == NOZ { 0.0 } else { z };
-    if w == NOW {
-        [x, y, z]
-    } else {
-        [x / w, y / w, z / w]
-    }
 }
 
 /// A B-spline `n p m cpts knots`: its range and end points.

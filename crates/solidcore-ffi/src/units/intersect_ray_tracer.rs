@@ -32,6 +32,7 @@
 //! [`MAX_OPS`] ops, [`MAX_LEAVES`] leaves, [`MAX_SURFACES`] surfaces and [`MAX_POLAR`] polar
 //! vectors per leaf.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -235,10 +236,6 @@ pub struct Program {
     pub grid: GridIn,
     /// The ops, in order.
     pub ops: Vec<Op>,
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {

@@ -27,6 +27,7 @@
 //! With trees, a surface upstream makes no cache for (a curve-bounded surface without
 //! boundary curves) is a shim error ([`FfiError::Status`]): there is no tree to replace.
 
+use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
 pub use crate::units::intersect_adv_surface_intersector::NodeIn;
@@ -72,10 +73,6 @@ pub struct Case {
     pub ang: Option<f64>,
     /// Hand-built trees of A and (unless B is A) B, replacing the cache trees.
     pub trees: Option<(Vec<NodeIn>, Option<Vec<NodeIn>>)>,
-}
-
-fn bad(msg: &str) -> FfiError {
-    FfiError::InvalidArgument(msg.into())
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {
