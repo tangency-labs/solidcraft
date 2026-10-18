@@ -45,6 +45,9 @@ package = "io.solidcraft"
 build_targets = ["aarch64-linux-android"]
 apk_name = "solidcraft"
 strip = "default"
+# Launcher icons: `cargo xtask app-icons` draws the canonical mipmaps this path holds,
+# and cargo-apk packages them with the SDK's aapt (`aapt package -S`).
+resources = "../../assets/icons/app/android/exports/res"
 
 [package.metadata.android.sdk]
 min_sdk_version = 26
@@ -52,6 +55,7 @@ target_sdk_version = 34
 
 [package.metadata.android.application]
 label = "SolidCraft"
+icon = "@mipmap/ic_launcher"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 
 [package.metadata.android.application.activity]

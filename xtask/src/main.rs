@@ -32,7 +32,7 @@ commands:
   ui-containers   enforce the universal container for all UI hosts
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
-  app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
+  app-icons       regenerate shared app-icon exports for Android, Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
   i18n [--check | --add-missing]

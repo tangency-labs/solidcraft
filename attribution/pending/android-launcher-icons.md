@@ -1,0 +1,5 @@
+| assets/icons/app/android/exports/res/mipmap-hdpi/ic_launcher.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/android/exports/res/mipmap-mdpi/ic_launcher.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/android/exports/res/mipmap-xhdpi/ic_launcher.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/android/exports/res/mipmap-xxhdpi/ic_launcher.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/android/exports/res/mipmap-xxxhdpi/ic_launcher.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |

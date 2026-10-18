@@ -15,6 +15,11 @@ pub fn run(root: &Path) -> Result<(), String> {
         draw(&png, size)?;
         exports.push((png, format!("linux/exports/hicolor/{size}x{size}/apps/io.tangencylabs.solidcraft.png")));
     }
+    for (density, size) in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192)] {
+        let png = stage.join(format!("android-{density}.png"));
+        draw(&png, size)?;
+        exports.push((png, format!("android/exports/res/mipmap-{density}/ic_launcher.png")));
+    }
     let installer = stage.join("solidcraft.ico");
     draw(&installer, 256)?;
     exports.push((installer, "windows/exports/solidcraft.ico".into()));
