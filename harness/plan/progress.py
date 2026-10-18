@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Regenerate plan/PROGRESS.md (a human-readable checklist) from plan/modules.toml.
+"""Regenerate plan/PROGRESS.md from plan/modules.toml and committed difftest reports.
 
 CI (.github/workflows/progress.yml) runs this on main and commits the result; PRs never
 edit plan/PROGRESS.md. Locally:
-    python3 harness/plan/progress.py          # from plan/modules.toml only
+    python3 harness/plan/progress.py          # from the manifest and committed reports
     python3 harness/plan/progress.py --prs    # also mark units with an open "port: <id>" PR
-Output is deterministic (no timestamps), so it only changes when statuses or claims change.
+Output is deterministic (no timestamps); statuses, claims and report counts drive changes.
 
 The counting helpers (`summary`, `is_ready`, `module`, `DONE`) are also imported by the
 GitHub Pages site generator (site/build.py), so both report the same numbers.
@@ -30,6 +30,33 @@ def load_units(text=None):
     if text is None:
         text = (ROOT / "plan/modules.toml").read_text()
     return tomllib.loads(text)["unit"]
+
+
+def load_case_counts(units):
+    """Default-run counts from committed reports; omit units without a report.
+
+    Notes can describe stress runs or contain operation numbers (e.g. "op-0 cases"),
+    so they are not a source for the published case count. Reject invalid reports
+    before replacing the checklist, rather than publishing a misleading number.
+    """
+    counts = {}
+    for u in units:
+        if u["status"] not in DONE:
+            continue
+        path = ROOT / "reports/difftest" / f"{u['id']}.json"
+        if not path.exists():
+            continue
+        try:
+            report = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: invalid difftest report") from exc
+        if not isinstance(report, dict) or report.get("unit") != u["id"]:
+            raise ValueError(f"{path}: report unit must match {u['id']!r}")
+        count = report.get("cases_total")
+        if type(count) is not int or count < 0:
+            raise ValueError(f"{path}: cases_total must be a non-negative integer")
+        counts[u["id"]] = count
+    return counts
 
 
 def module(u):
@@ -69,14 +96,15 @@ def main():
                 u["status"] = "claimed"
                 u["claimed_by"] = f"#{pr['number']} @{pr['author']['login']}" + (" (draft)" if pr["isDraft"] else " (ready for review)")
                 u["claimed_at"] = ""
+    case_counts = load_case_counts(units)
     status = {u["id"]: u["status"] for u in units}
 
     def ready(u):
         return is_ready(u, status)
 
     def cases(u):
-        m = re.search(r"(\d+) cases", u["notes"])
-        return f", {m.group(1)} cases" if m else ""
+        count = case_counts.get(u["id"])
+        return f", {count} cases" if count is not None else ""
 
     def line(u):
         s = u["status"]
@@ -92,7 +120,8 @@ def main():
     out = [
         "# Port progress",
         "",
-        "Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.",
+        "Generated from `plan/modules.toml` and `reports/difftest/*.json` by "
+        "`harness/plan/progress.py`; do not edit by hand.",
         "",
         f"**{count['green'] + count['partial']} / {len(units)} units ported** "
         f"({count['green']} green, {count['partial']} partial), "

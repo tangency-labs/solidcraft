@@ -1,11 +1,16 @@
 name: Progress checklist
 
-# Regenerates plan/PROGRESS.md from plan/modules.toml and open "port: <unit id>" PRs,
-# and commits it to main when it changed. PRs never edit PROGRESS.md themselves.
+# Regenerates plan/PROGRESS.md from plan/modules.toml, committed difftest reports
+# and open "port: <unit id>" PRs, and commits it to main when it changed.
+# PRs never edit PROGRESS.md themselves.
 on:
   push:
     branches: [main]
-    paths: [plan/modules.toml, harness/plan/progress.py]
+    paths:
+      - plan/modules.toml
+      - reports/difftest/*.json
+      - harness/plan/progress.py
+      - harness/plan/test_progress.py
   pull_request_target:
     types: [opened, reopened, closed, edited, ready_for_review, converted_to_draft]
   schedule:
@@ -28,6 +33,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (pinned: this job has contents: write)
         with:
           ref: main
+      - name: Test progress generator
+        run: python3 -m unittest discover -s harness/plan -p 'test_*.py'
       - name: Regenerate
         env:
           GH_TOKEN: ${{ github.token }}
