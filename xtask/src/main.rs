@@ -414,13 +414,38 @@ fn cmd_android() -> Result<(), String> {
         }
     }
     let mut c = cargo();
-    c.args(["check", "-p", "solidcraft-android", "--target", "aarch64-linux-android", "--profile", "ci"]);
+    // Clippy, not check: the shell lives in `cfg(target_os = "android")`, which a host
+    // `cargo clippy --workspace` never compiles, so this is the only clippy it ever sees.
+    c.args([
+        "clippy",
+        "-p",
+        "solidcraft-android",
+        "--target",
+        "aarch64-linux-android",
+        "--profile",
+        "ci",
+        "--",
+        "-D",
+        "warnings",
+        // Clippy 1.99 flags the kernel's `thread_local!` initializers as "can be made const"
+        // on aarch64-linux-android alone — they are already `const { … }`, and the same lines
+        // pass host clippy. A target-only false positive: allow it here, not in the kernel.
+        "-A",
+        "clippy::missing_const_for_thread_local",
+    ]);
     c.env("ANDROID_NDK_ROOT", &ndk);
     // The cc crate reads CC_<target> first (dashes, then underscores) for its C build scripts.
     c.env("CC_aarch64-linux-android", &clang);
     c.env("AR_aarch64-linux-android", &ar);
-    run(c, "cargo check -p solidcraft-android --target aarch64-linux-android")?;
-    println!("android: solidcraft-android and its graph build for aarch64-linux-android (arm64-v8a)");
+    // Captured rather than streamed so the log carries every lint; `-D warnings` fails on them.
+    eprintln!("$ cargo clippy -p solidcraft-android --target aarch64-linux-android -- -D warnings -A clippy::missing_const_for_thread_local");
+    let out = c.output().map_err(|e| format!("cargo clippy -p solidcraft-android: failed to spawn: {e}"))?;
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    if !out.status.success() {
+        return Err(format!("cargo clippy -p solidcraft-android --target aarch64-linux-android: exited with {}", out.status));
+    }
+    println!("android: solidcraft-android and its graph clippy for aarch64-linux-android (arm64-v8a)");
     Ok(())
 }
 
