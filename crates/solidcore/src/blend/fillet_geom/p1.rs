@@ -1076,7 +1076,7 @@ impl FilletGeom {
         let mut off_surfs = [None, None];
         for (slot, i) in off_surfs.iter_mut().zip(0..2usize) {
             if let Some((_, fs)) = solver {
-                *slot = match fs.surfaces.get(i).and_then(Option::as_ref) {
+                *slot = match fs.solver.surface(i)?.map(|slot| &slot.surface) {
                     // SmOffsetSurface::Copy() returns an SmSurface*, not SmOffsetSurface*;
                     // its status is ignored, so a failed copy leaves NULL
                     Some(off_srf) => match offset_surface_copy(k, off_srf) {
@@ -1193,7 +1193,7 @@ impl FilletGeom {
             return Ok(Some(s));
         }
         let fs = solver.ok_or_else(|| SolidError::null_pointer(OP_OFFSET))?;
-        Ok(fs.surfaces.get(rail_index).and_then(Option::as_ref))
+        Ok(fs.solver.surface(rail_index)?.map(|slot| &slot.surface))
     }
 
     /// `SetOffsetSurface(lWhichSrf, pNewOffSrf)`: replaces (deleting) the rail's offset
@@ -2500,7 +2500,7 @@ pub fn find_stepoff_uv(
     stepoff_dist: f64,
 ) -> Result<[Point2; 2]> {
     let mut uvs = [Point2::new(0.0, 0.0); 2];
-    for (slot, edgeuse) in uvs.iter_mut().zip(solver.edgeuses) {
+    for (slot, edgeuse) in uvs.iter_mut().zip(solver.solver.edgeuses) {
         let eu = edgeuse.ok_or_else(|| SolidError::null_pointer(OP_STEPOFF))?;
         let face = edgeuse_face(brep, eu)?.ok_or_else(|| SolidError::null_pointer(OP_STEPOFF))?;
         face2::surface(brep, face)?.ok_or_else(|| SolidError::null_pointer(OP_STEPOFF))?;
@@ -2517,7 +2517,7 @@ pub fn find_stepoff_uv(
         // in upstream's order) is borrowed again after it.
         let surface =
             face2::surface(brep, face)?.ok_or_else(|| SolidError::null_pointer(OP_STEPOFF))?;
-        let tol = solver.approx_tol_3d;
+        let tol = solver.solver.approx_tol_3d;
         // Make the surface think that it is a standalone surface.
         let solutions = surface.global_point_solve::<NoObject>(
             k,
@@ -2894,7 +2894,8 @@ pub fn create_cubic_rail_rail_interpolant(
 ) -> Result<BSplineCurve> {
     const OP: &str = "blend::fillet_geom::p1::create_cubic_rail_rail_interpolant";
     let solver_edgeuse = |fs: &ConstantRadiusAssistedFs, i: usize| {
-        fs.edgeuses
+        fs.solver
+            .edgeuses
             .get(i)
             .copied()
             .flatten()
@@ -3316,11 +3317,11 @@ fn drop_rail_onto_offset_surface(
 ) -> Result<()> {
     let solver = adjust_solver.ok_or_else(|| SolidError::null_pointer(OP_EXAMINE))?;
     // SmFilletSolver::GetSurface(k); NER(pOffsetSurf)
-    let offset_surf = solver
-        .surfaces
-        .get_mut(rail_index)
-        .and_then(Option::as_mut)
-        .ok_or_else(|| SolidError::null_pointer(OP_EXAMINE))?;
+    let offset_surf = &mut solver
+        .solver
+        .surface_mut(rail_index)?
+        .ok_or_else(|| SolidError::null_pointer(OP_EXAMINE))?
+        .surface;
     let orig_offset_dist = offset_surf.offset_distance();
     offset_surf.set_offset_distance(0.0);
 
@@ -4071,7 +4072,14 @@ mod tests {
             "{err:?}"
         );
         // the offset distance was zeroed for the drop and restored
-        assert_eq!(solver.surfaces[0].as_ref().unwrap().offset_distance(), 0.25);
+        assert_eq!(
+            solver.solver.surfaces[0]
+                .as_ref()
+                .unwrap()
+                .surface
+                .offset_distance(),
+            0.25
+        );
         // geometry 0's start row is now geometry 1's end row; its other rows are its own
         let near = |a: Point3, b: Point3| a.distance(b) < 1e-12;
         let s0 = fb.geom(g0).unwrap().fillet_surface().unwrap();
