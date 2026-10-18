@@ -718,6 +718,7 @@ fn add_wire_with_vertices(
         .add_shell_record(Shell {
             faces: Vec::new(),
             region: None,
+            ..Shell::default()
         })
         .map_err(setup)?;
     let [a, b] = if let Some(vertices) = vertices {
@@ -809,6 +810,7 @@ fn face_with_edges(
         .add_shell_record(Shell {
             faces: Vec::new(),
             region: None,
+            ..Shell::default()
         })
         .map_err(setup)?;
     let domain = surface.natural_uv_domain();
@@ -1260,6 +1262,7 @@ fn rust_probe(branch: Probe, tolerance: f64) -> RResult<Output> {
                     .add_shell_record(Shell {
                         faces: Vec::new(),
                         region: None,
+                        ..Shell::default()
                     })
                     .map_err(setup)?;
                 let vertex = original
