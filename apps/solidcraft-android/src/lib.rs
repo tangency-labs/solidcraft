@@ -60,7 +60,11 @@ mod android {
             },
             None => log::error!("Android: no data path; settings, recovery and crash reports will not persist"),
         }
-        let options = eframe::NativeOptions { android_app: Some(app), ..Default::default() };
+        // eframe sizes the egui render pass's depth-stencil attachment from these two, and the
+        // viewport pipelines are built for exactly this format: with the 0/0 defaults wgpu rejects
+        // every draw ("renderpass uses a texture with format None but the pipeline with 'sc_overlay'
+        // uses ... Depth24PlusStencil8").
+        let options = eframe::NativeOptions { depth_buffer: DEPTH_BITS, stencil_buffer: STENCIL_BITS, android_app: Some(app), ..Default::default() };
         let result = eframe::run_native("SolidCraft", options, Box::new(setup));
         if let Err(e) = result {
             log::error!("SolidCraft failed to start: {e}");
