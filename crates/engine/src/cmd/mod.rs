@@ -44,6 +44,7 @@ pub use view_dxf::sketch::exportable as view_dxf_exportable;
 mod component_link;
 mod config;
 mod file;
+mod laser;
 mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -293,6 +294,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(script::COMMANDS.iter());
     v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(laser::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
