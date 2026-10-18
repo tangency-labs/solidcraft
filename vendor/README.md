@@ -329,3 +329,28 @@ SolidCraft changes:
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
+## winit 0.30.13 (Apache-2.0, © the winit contributors, https://github.com/rust-windowing/winit)
+
+A full copy of the release, because the Android input backend is the part this fork changes.
+Changes (all in `src/platform_impl/android/mod.rs`):
+- `HoverMove`/`HoverEnter` (a stylus in the air, or a mouse over the glass with no button down)
+  emit `WindowEvent::CursorMoved` instead of falling through to the untouched pointer branch:
+  the viewport can then show what a tap would pick before it lands.
+- A `static STYLUS_DOWN` records that a pointer with `ToolType::Stylus` is touching the glass, and
+  finger motion events are dropped until the pen lifts (palm rejection). Without it, the palm that
+  rests on the screen while the pen draws arrives as a second finger and the view reads a pinch.
+  `STYLUS_DOWN` is cleared by a stylus `HoverMove`/`HoverEnter`, so a lost `Up` cannot keep it set.
+
+## android-activity 0.6.1 (MIT OR Apache-2.0, © the android-activity contributors, https://github.com/rust-mobile/android-activity)
+
+Changes:
+- `src/native_activity/glue.rs`: `set_nonblocking_callbacks(bool)`, re-exported from `src/lib.rs`
+  and `src/native_activity/mod.rs`. The JVM-thread lifecycle callbacks (`set_input`, `set_window`,
+  `set_activity_state`, `request_save_state`) normally wait on a condition variable for the Rust
+  main thread to pump events. The main thread parks inside the modal SAF picker, so the wait
+  exceeded five seconds and Android killed the app with an ANR. With the flag set, those callbacks
+  hand their state over without waiting; the main thread picks it up when it resumes.
+- `src/native_activity/mod.rs`: `show_soft_input`/`hide_soft_input` call the Activity's own
+  `imeShow`/`imeHide` when it provides them (the launcher's `SolidCraftActivity` hosts a real
+  `EditText`). A bare `NativeActivity` has no editable view, so `showSoftInput` on the decor view
+  never delivers text; Activities that do not opt in keep the stock path.

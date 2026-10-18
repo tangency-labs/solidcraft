@@ -1,0 +1,24 @@
+# License
+
+## GameActivity
+
+The third-party glue code, under the game-activity-csrc/ directory is covered by
+the Apache 2.0 license only:
+
+Apache License, Version 2.0 (LICENSE-APACHE or <http://www.apache.org/licenses/LICENSE-2.0>)
+
+## SDK Documentation
+
+Documentation for APIs that are direct bindings of Android platform APIs are covered
+by the Apache 2.0 license only:
+
+Apache License, Version 2.0 (LICENSE-APACHE or <http://www.apache.org/licenses/LICENSE-2.0>)
+
+## android-activity
+
+All other code is dual-licensed under either
+
+- MIT License (LICENSE-MIT or <http://opensource.org/licenses/MIT>)
+- Apache License, Version 2.0 (LICENSE-APACHE or <http://www.apache.org/licenses/LICENSE-2.0>)
+
+at your option.

@@ -30,12 +30,24 @@ pub trait Clipboard {
 pub struct System;
 
 impl Clipboard for System {
+    #[cfg(not(target_os = "android"))]
     fn files(&mut self) -> Vec<PathBuf> {
         arboard::Clipboard::new().and_then(|mut c| c.get().file_list()).unwrap_or_default()
     }
+    /// Android: arboard has no backend here, and the platform clipboard is not reachable from
+    /// this crate. Text still pastes (egui-winit carries it); files and pictures do not.
+    #[cfg(target_os = "android")]
+    fn files(&mut self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    #[cfg(not(target_os = "android"))]
     fn picture(&mut self) -> Option<Picture> {
         let i = arboard::Clipboard::new().and_then(|mut c| c.get_image()).ok()?;
         Some(Picture { width: i.width, height: i.height, rgba: i.bytes.into_owned() })
+    }
+    #[cfg(target_os = "android")]
+    fn picture(&mut self) -> Option<Picture> {
+        None
     }
 }
 

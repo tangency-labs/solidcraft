@@ -1,0 +1,8 @@
+{
+  "export_libraries": [],
+  "library_name": null,
+  "android": {
+    "export_libraries": ["-landroid", "-llog"],
+    "library_name": null
+  }
+}

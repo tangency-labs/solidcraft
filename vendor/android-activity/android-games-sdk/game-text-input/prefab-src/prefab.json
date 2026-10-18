@@ -1,0 +1,9 @@
+{
+  "name": "game-text-input",
+  "schema_version": 1,
+  "dependencies": [],
+  "version": "0.0.1",
+  "cpp_files": [
+    "src/game-text-input/gametextinput.cpp"
+  ]
+}

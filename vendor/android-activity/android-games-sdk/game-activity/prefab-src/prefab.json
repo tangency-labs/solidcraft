@@ -1,0 +1,13 @@
+{
+  "name": "game-activity",
+  "schema_version": 1,
+  "dependencies": [],
+  "version": "0.0.1",
+  "cpp_files": [
+    "src/common/system_utils.cpp",
+    "src/game-activity/GameActivity.cpp",
+    "src/game-activity/native_app_glue/android_native_app_glue.c",
+    "src/game-activity/GameActivityEvents.cpp",
+    "src/game-text-input/gametextinput.cpp"
+  ]
+}

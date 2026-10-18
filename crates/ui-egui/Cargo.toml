@@ -52,8 +52,10 @@ syn = { workspace = true, features = ["visit"] }
 proc-macro2 = { workspace = true }
 
 # Pictures pasted into the agent chat; already in the tree, with the same features, through
-# egui-winit's clipboard.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# egui-winit's clipboard. arboard has no Android backend (its `platform` module has no android
+# arm, so the crate does not even compile there): the fork gates it out and the clipboard read
+# returns nothing on Android.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
