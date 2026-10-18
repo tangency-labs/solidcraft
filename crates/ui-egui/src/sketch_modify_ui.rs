@@ -32,7 +32,7 @@ use solidcraft_engine::sketch::PatternAlignment;
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
-use crate::selection::{AXES, CURVES, SKETCH_POINTS, SelInput};
+use crate::selection::{AXES, CURVES, PROFILES, SKETCH_POINTS, SelInput};
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::ui_kit;
 use crate::viewport::{Hit, Proj};
@@ -96,7 +96,7 @@ pub enum Mod {
     /// `sketch.move`: how far the picked entities move along the sketch's own axes, how far they
     /// turn about the centre, and whether the originals stay behind. The command already
     /// carries the copy flag, so the Create Copy row needs no engine change.
-    Move { x: String, y: String, angle: String, copy: bool },
+    Move { mode: usize, x: String, y: String, angle: String, copy: bool },
     /// `sketch.pattern.rectangular`: how many instances along the picked direction and how far
     /// apart, then the same along a second picked direction (perpendicular by default).
     PatternRect {
@@ -123,7 +123,7 @@ pub enum Mod {
 
 impl Mod {
     pub fn previews(&self) -> bool {
-        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. })
+        matches!(self, Self::Mirror | Self::Move { .. } | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. })
     }
 
     pub fn title(&self) -> &'static str {
@@ -144,7 +144,11 @@ impl Mod {
         match self {
             Mod::Scale { factor } => Some(("Factor", ValueKind::Unitless, factor)),
             Mod::Offset { distance, .. } => Some(("Distance", ValueKind::Length, distance)),
-            Mod::Move { x, .. } => Some(("X Distance", ValueKind::Length, x)),
+            Mod::Move { mode, x, angle, .. } => match *mode {
+                crate::sketch_move_ui::ROTATE => Some(("Angle", ValueKind::Angle, angle)),
+                crate::sketch_move_ui::POINT_TO_POINT => Some(("X Distance", ValueKind::Length, x)),
+                _ => Some(("X Distance", ValueKind::Length, x)),
+            },
             Mod::Mirror => None,
             Mod::PatternRect { spacing, .. } => Some(("Spacing", ValueKind::Length, spacing)),
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
@@ -154,13 +158,24 @@ impl Mod {
     }
 }
 
+/// Selection inputs for a sketch move type.
+pub(crate) fn move_inputs(mode: usize) -> Vec<SelInput> {
+    let entities = SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true);
+    match mode {
+        crate::sketch_move_ui::POINT_TO_POINT => {
+            vec![entities, SelInput::new("From", SKETCH_POINTS, false), SelInput::new("To", SKETCH_POINTS, false)]
+        }
+        _ => vec![entities, SelInput::new("Center", SKETCH_POINTS, false)],
+    }
+}
+
 fn inputs(k: &Mod) -> Vec<SelInput> {
     match k {
         Mod::Scale { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Base point", SKETCH_POINTS, false)],
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
-        Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Center", SKETCH_POINTS, false)],
+        Mod::Move { mode, .. } => move_inputs(*mode),
         // The direction is optional: `sketch.pattern.rectangular` documents sketch x as its
         // default, the way the engine reads it.
         Mod::PatternRect { .. } => vec![
@@ -192,7 +207,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.scale" => Mod::Scale { factor: "2".into() },
         "sketch.offset" => Mod::Offset { distance: "2 mm".into(), distance2: "2 mm".into(), mode: 0, chain: true, flip: false },
         "sketch.mirror" => Mod::Mirror,
-        "sketch.move" => Mod::Move { x: "0 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false },
+        "sketch.move" => crate::sketch_move_ui::kind(crate::sketch_move_ui::FREE),
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
             spacing: "20 mm".into(),
@@ -375,10 +390,8 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
             });
         }
         Mod::Mirror => {}
-        Mod::Move { x, y, angle, copy } => {
-            enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
-            enter |= number(ui, "Angle", angle);
-            ui_kit::options(ui, "move_options", &mut [("Create Copy", copy)]);
+        Mod::Move { mode, x, y, angle, copy } => {
+            enter |= crate::sketch_move_ui::value_rows(ui, *mode, x, y, angle, copy);
         }
         Mod::PatternRect { count, spacing, count2, spacing2, alignment: a, alignment2, reversed, reversed2 } => {
             for (key, title, count, spacing, align, reverse, quantity, distance, align_label) in [
@@ -438,21 +451,16 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     match k {
         Mod::PatternRect { alignment, reversed, .. } => {
             let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
-            let dir = pattern_dir(app, d)?;
+            let dir = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                Some(sel) => sketch_dir(app, sel)?,
+                None => Vec2::X,
+            };
             Some(plane.dir_to_world(if (*alignment == PatternAlignment::Left) ^ *reversed { -dir } else { dir }))
         }
         // A total angle is a rotation. The viewport draws a straight drag arrow and a rotation
         // handle only for Revolve, through machinery tied to its own extents, so the circular
         // pattern takes the value box alone until that manipulator is made general.
         _ => None,
-    }
-}
-
-/// The rectangular pattern's first direction in the sketch: the picked one, or the sketch's x axis.
-fn pattern_dir(app: &SolveApp, d: &Dialog) -> Option<Vec2> {
-    match d.inputs.get(1).and_then(|i| i.items.first()) {
-        Some(sel) => sketch_dir(app, sel),
-        None => Some(Vec2::X),
     }
 }
 
@@ -466,7 +474,13 @@ pub fn arrow2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         Some(sel) => sketch_dir(app, sel)?,
         None => match d.extra.get("dir2").and_then(|v| serde_json::from_value::<Vec2>(v.clone()).ok()).and_then(Vec2::normalized) {
             Some(kept) => kept,
-            None => pattern_dir(app, d)?.perp(),
+            None => {
+                let first = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                    Some(sel) => sketch_dir(app, sel)?,
+                    None => Vec2::X,
+                };
+                first.perp()
+            }
         },
     };
     Some(plane.dir_to_world(if (*alignment2 == PatternAlignment::Left) ^ *reversed2 { -dir } else { dir }))
@@ -518,15 +532,39 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
     }
 }
 
+/// A profile fill expands to the curves bounding that region (outer loop and any hole loops).
+pub(crate) fn expand_sketch_entity(session: &solidcraft_engine::Session, sel: &Sel) -> Vec<Sel> {
+    match sel {
+        Sel::Profile { sketch, index } => {
+            let Some(active) = session.active_sketch else { return vec![] };
+            if *sketch != active {
+                return vec![];
+            }
+            let world = session.world_state();
+            let Some(ss) = world.sketch(active) else { return vec![] };
+            let Some(profile) = ss.profiles.get(*index) else { return vec![] };
+            profile.curve_ids().into_iter().map(|id| Sel::SketchCurve { id }).collect()
+        }
+        other => vec![other.clone()],
+    }
+}
+
 /// The curves and lone points picked in input `i`, as the engine's `entities` list.
 fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
-    items(inputs, i)
-        .iter()
-        .filter_map(|x| match x {
-            Sel::SketchCurve { id } => Some(id.clone()),
-            _ => point_id(session, x).map(str::to_string),
-        })
-        .collect()
+    let mut out = Vec::new();
+    for sel in items(inputs, i).iter().flat_map(|s| expand_sketch_entity(session, s)) {
+        match &sel {
+            Sel::SketchCurve { id } if !out.contains(id) => out.push(id.clone()),
+            _ => {
+                if let Some(id) = point_id(session, &sel)
+                    && !out.iter().any(|x| x == id)
+                {
+                    out.push(id.to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Sketch curve ids picked in input `i`.
@@ -650,8 +688,16 @@ fn corner_ref(app: &SolveApp, point: &str, flip: bool) -> Result<Value, String> 
 /// A typed total angle as the command wants it, in degrees. A bare number means degrees, as a
 /// typed angle does everywhere else. `sketch.pattern.circular` takes the full turn as 360 and
 /// refuses anything outside that range.
+fn snap_degrees(v: f64) -> f64 {
+    if !v.is_finite() {
+        return v;
+    }
+    let near = (v * 1_000_000.0).round() / 1_000_000.0;
+    if (v - near).abs() < 1e-6 { near } else { v }
+}
+
 fn total_angle(app: &SolveApp, label: &str, text: &str) -> Result<f64, String> {
-    let v = app.session.doc.eval(text.trim(), ValueKind::Angle).map_err(|e| format!("{label}: {e}"))?.to_degrees();
+    let v = snap_degrees(app.session.doc.eval(text.trim(), ValueKind::Angle).map_err(|e| format!("{label}: {e}"))?.to_degrees());
     if !v.is_finite() || v.abs() <= 1e-9 || v.abs() > 360.0 {
         return Err(format!("{label} must be more than 0 and at most 360 degrees"));
     }
@@ -662,6 +708,15 @@ fn total_angle(app: &SolveApp, label: &str, text: &str) -> Result<f64, String> {
 /// `point_id` above takes one `Sel`; this one takes the first pick of an input.
 fn picked_point(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Option<String> {
     items(inputs, i).first().and_then(|sel| point_id(session, sel)).map(str::to_string)
+}
+
+/// The sketch-plane position of a picked sketch point.
+pub(crate) fn sketch_point_pos(session: &solidcraft_engine::Session, sel: &Sel) -> Option<Vec2> {
+    let id = point_id(session, sel)?;
+    let sid = session.active_sketch?;
+    let world = session.world_state();
+    let ss = world.sketch(sid)?;
+    ss.sketch.point(ss.sketch.resolve_point(id)?)
 }
 
 /// The command a sketch modify dialog makes. Scale, Move, and patterns send evaluated
@@ -719,19 +774,33 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.mirror", json!({"entities": entities, "line": line}))
         }
-        Mod::Move { x, y, angle, copy } => {
+        Mod::Move { mode, x, y, angle, copy } => {
             let entities = entity_ids(&app.session, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
             }
-            let dx = value(app, x, ValueKind::Length, "X Distance")?;
-            let dy = value(app, y, ValueKind::Length, "Y Distance")?;
-            let deg = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
+            let (dx, dy, deg) = if *mode == crate::sketch_move_ui::POINT_TO_POINT {
+                let from = items(inputs, 1).first().ok_or("Select the point to move from")?;
+                let to = items(inputs, 2).first().ok_or("Select the point to move to")?;
+                let a = sketch_point_pos(&app.session, from).ok_or("The from point must be a sketch point of this sketch")?;
+                let b = sketch_point_pos(&app.session, to).ok_or("The to point must be a sketch point of this sketch")?;
+                (b.x - a.x, b.y - a.y, 0.0)
+            } else if *mode == crate::sketch_move_ui::ROTATE {
+                (0.0, 0.0, value(app, angle, ValueKind::Angle, "Angle")?.to_degrees())
+            } else {
+                (
+                    value(app, x, ValueKind::Length, "X Distance")?,
+                    value(app, y, ValueKind::Length, "Y Distance")?,
+                    if *mode == crate::sketch_move_ui::TRANSLATE { 0.0 } else { value(app, angle, ValueKind::Angle, "Angle")?.to_degrees() },
+                )
+            };
             if dx.abs() < 1e-9 && dy.abs() < 1e-9 && deg.abs() < 1e-9 {
                 return Err("Type a distance or an angle to move by".into());
             }
             let mut p = json!({"entities": entities, "translate": [dx, dy], "angle": deg, "copy": copy});
-            if let Some(center) = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel)) {
+            if *mode != crate::sketch_move_ui::POINT_TO_POINT
+                && let Some(center) = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel))
+            {
                 p["center"] = json!(center);
             }
             ("sketch.move", p)

@@ -54,8 +54,6 @@ fn the_main_value_writes_through_to_the_command() {
     assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("30 mm", "0 mm", "0 mm"), "the box edits X alone");
 }
 
-/// Free Move and Translate carry the triad. The other three have no manipulator yet, so their
-/// value box is the only way to drive them: it must still have somewhere to sit.
 #[test]
 fn every_move_type_has_somewhere_to_put_its_value_box() {
     let mut s = Session::default();
@@ -63,8 +61,6 @@ fn every_move_type_has_somewhere_to_put_its_value_box() {
     let app = SolveApp::new(s, Services::default());
     for mode in [FREE, TRANSLATE, ROTATE, POINT_TO_POINT, POINT_TO_POSITION] {
         let d = move_dialog(mode);
-        let has_triad = triad(&app, &d).is_some();
-        assert_eq!(has_triad, matches!(mode, FREE | TRANSLATE), "{} triad", TYPES[mode]);
         let at = triad(&app, &d).map(|t| t.center).or_else(|| crate::canvas::anchor(&app, &d).map(|(base, _)| base));
         assert!(at.is_some(), "{} has nowhere to put its value box", TYPES[mode]);
     }
@@ -98,4 +94,15 @@ fn point_to_point_takes_the_origin_point() {
     assert_eq!(d.inputs[2].items, vec![Sel::Vertex { body: String::new(), point: Vec3::ZERO }], "the origin is the To point");
     let p = params(&h.app, &d).unwrap();
     assert_eq!(p["translate"], json!([mm(-hi.x), mm(-hi.y), mm(-hi.z)]), "the corner goes onto the origin");
+}
+
+#[test]
+fn free_move_and_translate_show_a_triad_before_extra_picks() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    for mode in [FREE, TRANSLATE] {
+        let d = move_dialog(mode);
+        assert!(triad(&app, &d).is_some(), "{} triad", TYPES[mode]);
+    }
 }

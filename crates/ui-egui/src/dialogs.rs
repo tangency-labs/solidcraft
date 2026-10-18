@@ -1824,6 +1824,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
         crate::dialogs_move::type_row(d, ui);
         return;
     }
+    if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })) {
+        crate::sketch_move_ui::type_row(d, ui);
+        return;
+    }
     let current = match d.kind {
         Kind::PatternRect { .. } => Some(0),
         Kind::PatternCirc { .. } => Some(1),

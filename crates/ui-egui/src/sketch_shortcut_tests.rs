@@ -113,6 +113,15 @@ fn escape_drops_the_tool_waiting_for_a_sketch() {
 }
 
 #[test]
+fn m_in_a_sketch_starts_sketch_move_not_body_move() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    press(&mut h, "M");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. }))));
+}
+
+#[test]
 fn construction_key_outside_a_sketch_opens_nothing_and_keys_in_a_sketch_keep_it() {
     let mut h = Harness::new();
     press(&mut h, "X");
