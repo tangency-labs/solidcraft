@@ -134,13 +134,24 @@ fn cancelling_theme_preview_restores_viewport_palette_keys() {
 fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() {
     let mut h = crate::scenario::Harness::new();
     h.frames(3);
+    let command = solidcraft_engine::find_command("inspect.colored_components").unwrap();
+    let info = command.info(&h.app.session);
+    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
     let original_key = super::scene_key(&h.app);
     h.step(&json!({"click": {"handle": "panel:SOLID:INSPECT"}})).unwrap();
     h.frames(2);
+    assert!(h.widget("Enable Component Colors").is_some());
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_some());
     assert!(h.app.dialog.is_none());
     assert_ne!(super::scene_key(&h.app), original_key);
-    h.app.start("inspect.colored_components");
+    let info = command.info(&h.app.session);
+    assert_eq!((info.label, info.icon), ("Disable Component Colors", "colored_components_off"));
+    h.step(&json!({"click": {"handle": "panel:SOLID:INSPECT"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Disable Component Colors").is_some());
+    h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_none());
+    let info = command.info(&h.app.session);
+    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
 }

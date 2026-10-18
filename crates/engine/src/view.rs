@@ -351,14 +351,10 @@ pub fn sketch_point_visible(sk: &Sketch, i: usize) -> bool {
     sk.points.get(i).is_some_and(|p| SketchPointVisibility::new(sk).takes(p))
 }
 
-/// Stable random inspection colour shared by every body of a component.
+/// Stable identification colour shared by every body of a component.
 pub fn component_color(s: &Session, component: u64) -> Option<[u8; 3]> {
-    use std::hash::{Hash, Hasher};
-    let seed = s.colored_components?;
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (seed, component).hash(&mut h);
-    let bits = h.finish().to_le_bytes();
-    Some([80 + bits[0] % 141, 80 + bits[1] % 141, 80 + bits[2] % 141])
+    s.colored_components?;
+    Some(s.doc.component_identification_color(component))
 }
 
 /// The scene for a headless render, cut by the session's section.

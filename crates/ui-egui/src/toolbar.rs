@@ -1216,10 +1216,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.rect_filled(br, t.radius_sm, t.hover);
                 }
                 if let Some(c) = shown.first().or(cmds.first()) {
+                    let info = c.info(&app.session);
                     icons::paint_icon(
                         &painter,
                         Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0)),
-                        c.icon,
+                        info.icon,
                         f32::from(t.icon.a()) / 255.0,
                     );
                 }
@@ -1279,12 +1280,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 } else if resp.hovered() && info.enabled {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
                 }
-                let icon = if selected.id == "sketch.finish" { "finish" } else { selected.icon };
+                let icon = if selected.id == "sketch.finish" { "finish" } else { info.icon };
                 let side = if finish { 30.0 } else { 26.0 };
                 let icon_rect =
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
                 icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
-                let tr_label = app.tr_label(selected.label).to_string();
+                let tr_label = app.tr_label(info.label).to_string();
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &tr_label));
                 if ribbon_tooltip(app, resp, selected, info.disabled_reason.as_deref()).clicked() && info.enabled {
                     let id = selected.id;
@@ -1317,7 +1318,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         sketch_menu_rows(app, ui, &variants, &mut menu, &mut toggle);
                     });
                 } else if labels {
-                    let label = app.tr_label(crate::workspace::ribbon_button_label(selected));
+                    let button_label = crate::workspace::ribbon_button_label(selected);
+                    let label = app.tr_label(if button_label == selected.label { info.label } else { button_label });
                     let color = if info.enabled { t.text } else { t.text_dim };
                     let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
                     painter.galley(pos2(whole.center().x, whole.top() + 32.0), galley, t.text);
@@ -1542,8 +1544,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let response = crate::ui_kit::command_menu_button(
                                     ui,
                                     c.id,
-                                    c.label,
-                                    c.icon,
+                                    info.label,
+                                    info.icon,
                                     &crate::keymap::display_for(app, c.id).unwrap_or_default(),
                                     info.enabled,
                                 );
@@ -1568,7 +1570,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let leaves = |p: egui::Pos2| !r.contains(p) || over_popup(p);
         if let (Some(d), Some(p)) = (egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()), pointer) {
             let removing = !d.from_menu && leaves(p);
-            drag_ghost(ui.ctx(), d.id, p, removing);
+            drag_ghost(app, ui.ctx(), d.id, p, removing);
             if ui.input(|i| i.pointer.any_released()) && drop.is_none() {
                 egui::DragAndDrop::clear_payload(ui.ctx());
                 if removing {
@@ -1646,7 +1648,7 @@ const CONSTRAINT_GRID_WIDTH: f32 = 82.0;
 fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft_engine::CommandSpec, disabled: Option<&str>) -> egui::Response {
     response.on_hover_ui(|ui| {
         let t = Tokens::get();
-        let name = app.tr_label(command.label);
+        let name = app.tr_label(command.info(&app.session).label);
         let name_width =
             ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(crate::theme::Tokens::get().font_heading), t.text).size().x;
         let key_width = crate::keymap::display_for(app, command.id)
@@ -1730,7 +1732,7 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
     let font = FontId::proportional(t.font_button);
     cmds.iter()
         .map(|c| {
-            let label = ui.painter().layout_no_wrap(app.tr_label(c.label).to_string(), font.clone(), t.text).size().x;
+            let label = ui.painter().layout_no_wrap(app.tr_label(c.info(&app.session).label).to_string(), font.clone(), t.text).size().x;
             let key = crate::keymap::display_for(app, c.id)
                 .map(|k| ui.painter().layout_no_wrap(k.to_string(), FontId::monospace(t.font_button), t.text).size().x + 24.0)
                 .unwrap_or(0.0);
@@ -1760,12 +1762,12 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     let pr = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(20.0, 20.0));
     let pin = ui.interact(pr, ui.id().with(("dropdown_pin", c.id)), Sense::click());
     let pointer_on = (resp.hovered() || pin.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
-    let label = app.tr_label(c.label).to_string();
+    let label = app.tr_label(info.label).to_string();
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label));
     crate::scenario::publish_handle(&format!("toolbar:{}", c.id), rect.center());
     crate::scenario::publish_handle(&format!("dropdown:{}", c.id), rect.center());
     let hot = info.enabled && (pointer_on || resp.has_focus());
-    let mut row = crate::ui_kit::MenuItem::new(c.id, &label, c.icon);
+    let mut row = crate::ui_kit::MenuItem::new(c.id, &label, info.icon);
     row.enabled = info.enabled;
     row.highlighted = hot;
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
@@ -1894,13 +1896,14 @@ struct ToolbarDrag {
 }
 
 /// The dragged command's icon under the pointer, crossed out when releasing removes it.
-fn drag_ghost(ctx: &egui::Context, id: &str, at: egui::Pos2, removing: bool) {
+fn drag_ghost(app: &SolveApp, ctx: &egui::Context, id: &str, at: egui::Pos2, removing: bool) {
     let t = Tokens::get();
     let Some(c) = solidcraft_engine::find_command(id) else { return };
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("sc_toolbar_drag")));
     let r = Rect::from_center_size(at + vec2(14.0, 16.0), vec2(30.0, 30.0));
     p.rect(r, t.radius_sm, t.toolbar.gamma_multiply(0.92), Stroke::new(1.0, if removing { t.error } else { t.accent }), egui::StrokeKind::Inside);
-    icons::paint_icon(&p, r.shrink(5.0), c.icon, f32::from(t.icon.a()) / 255.0);
+    let info = c.info(&app.session);
+    icons::paint_icon(&p, r.shrink(5.0), info.icon, f32::from(t.icon.a()) / 255.0);
     if removing {
         let s = Stroke::new(2.0, t.error);
         let x = Rect::from_center_size(r.right_top(), vec2(9.0, 9.0));

@@ -1922,6 +1922,9 @@ pub struct SketchPoints {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Component {
     pub id: u64,
+    /// Optional identification colour, separate from normal appearances.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identification_color: Option<[u8; 3]>,
     pub name: String,
     /// Parent component (0 = the root).
     #[serde(default)]

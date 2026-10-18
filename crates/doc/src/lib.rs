@@ -15,6 +15,7 @@ pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
 mod clipboard;
 pub use clipboard::{clone_expression, remap_topology};
+pub mod component_color;
 mod component_removal;
 pub use component_removal::RemovedTree;
 pub mod config;

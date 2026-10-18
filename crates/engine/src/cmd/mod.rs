@@ -211,12 +211,16 @@ impl CommandSpec {
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
+        let (label, icon) = match self.id {
+            "inspect.colored_components" if s.colored_components.is_some() => ("Disable Component Colors", "colored_components_off"),
+            _ => (self.label, self.icon),
+        };
         CommandInfo {
             id: self.id,
-            label: self.label,
+            label,
             tab: self.tab,
             panel: self.panel,
-            icon: self.icon,
+            icon,
             shortcut: self.shortcut,
             params: self.params,
             enabled: e.is_ok(),
