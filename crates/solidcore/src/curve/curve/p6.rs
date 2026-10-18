@@ -51,6 +51,13 @@
 //! - **`ApproximateCurve`** in `DeformToEndPointTargets`: upstream ignores its status
 //!   and dereferences the new curve; a failure is an error here (an approximation
 //!   that is not a B-spline is `InvalidInput`).
+//! - **Curve caches.** Upstream's `DropPoint` reaches `GlobalPointSolve`, which reads
+//!   the cache kept on the curve (`GetOrCreateObjectCache`); a port without one
+//!   rebuilds it for every drop. `GlobalCoincidenceChecker` (four drops per call,
+//!   tripled per split) keeps the two curves' caches for its whole recursion instead
+//!   (`Curve::global_point_solve_cached`), built at the first global solve as
+//!   upstream's; the build is deterministic, so the solutions are those of a fresh
+//!   cache. Other `DropPoint` callers still build one per call.
 //! - **Recursion.** `GlobalCoincidenceChecker` splits closed and half closed curves
 //!   recursively; past [`MAX_COINCIDENCE_DEPTH`] nested splits it fails with
 //!   `InvalidInput` (upstream recurses without bound).
@@ -67,6 +74,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p5::{
     is_point_solution_across_closed_seam_boundary, local_property_analysis,
 };
+use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -506,12 +514,48 @@ impl Curve {
         guess: Option<f64>,
         op: SolverOperation,
     ) -> Result<DroppedPoint> {
+        self.drop_point_cached(
+            k,
+            interval,
+            point,
+            vec_to_inside,
+            dist_tol,
+            guess,
+            op,
+            &mut None,
+        )
+    }
+
+    /// [`Curve::drop_point`] keeping the curve's cache for the global solve in
+    /// `cache` across calls on this unchanged curve (upstream keeps it on the curve;
+    /// see [`Curve::global_point_solve_cached`]). The `SmCrvOnSurf` override keeps its
+    /// own approximation and does not use it.
+    fn drop_point_cached(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        point: Point3,
+        vec_to_inside: Option<Vec3>,
+        dist_tol: f64,
+        guess: Option<f64>,
+        op: SolverOperation,
+        cache: &mut Option<CurveCache<CurveHandle>>,
+    ) -> Result<DroppedPoint> {
         match self.kind() {
             // the SmCrvOnSurf override (its cache update is lost on this copy)
             CurveKind::CrvOnSurf(c) => {
                 c.drop_point_ref(k, interval, point, vec_to_inside, dist_tol, guess, op)
             }
-            _ => self.drop_point_base(k, interval, point, vec_to_inside, dist_tol, guess, op),
+            _ => self.drop_point_base_cached(
+                k,
+                interval,
+                point,
+                vec_to_inside,
+                dist_tol,
+                guess,
+                op,
+                cache,
+            ),
         }
     }
 
@@ -529,6 +573,31 @@ impl Curve {
         dist_tol: f64,
         guess: Option<f64>,
         op: SolverOperation,
+    ) -> Result<DroppedPoint> {
+        self.drop_point_base_cached(
+            k,
+            interval,
+            point,
+            vec_to_inside,
+            dist_tol,
+            guess,
+            op,
+            &mut None,
+        )
+    }
+
+    /// [`Curve::drop_point_base`] with the global solve's curve cache kept in `cache`
+    /// (see [`Curve::drop_point_cached`]).
+    fn drop_point_base_cached(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        point: Point3,
+        vec_to_inside: Option<Vec3>,
+        dist_tol: f64,
+        guess: Option<f64>,
+        op: SolverOperation,
+        cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // init output
         let mut out = DroppedPoint::default();
@@ -600,7 +669,7 @@ impl Curve {
                 handle: Some(CurveHandle(self.natural_interval())),
                 ..GlobalPointSolveOptions::default()
             };
-            let solutions = self.global_point_solve(
+            let solutions = self.global_point_solve_cached(
                 k,
                 interval,
                 op,
@@ -608,6 +677,7 @@ impl Curve {
                 dist_tol,
                 SolutionRequested::Single,
                 &opts,
+                cache,
             )?;
 
             // for every solution
@@ -1265,6 +1335,10 @@ impl Curve {
         snap_to_ends: bool,
         objects: [Option<O>; 2],
     ) -> Result<Coincidence<O>> {
+        // the two curves' caches for the end point drops, built at the first global
+        // solve and kept for the whole split recursion (upstream keeps them on the
+        // curves, which do not change here)
+        let mut caches = [None, None];
         self.global_coincidence_checker_at(
             k,
             interval,
@@ -1274,6 +1348,7 @@ impl Curve {
             snap_to_ends,
             objects,
             0,
+            &mut caches,
         )
     }
 
@@ -1288,6 +1363,7 @@ impl Curve {
         snap_to_ends: bool,
         objects: [Option<O>; 2],
         depth: usize,
+        caches: &mut [Option<CurveCache<CurveHandle>>; 2],
     ) -> Result<Coincidence<O>> {
         if depth > MAX_COINCIDENCE_DEPTH {
             return Err(SolidError::invalid_input(
@@ -1347,6 +1423,7 @@ impl Curve {
                         true,
                         objects,
                         depth + 1,
+                        caches,
                     )?
                     .solutions,
                 );
@@ -1369,6 +1446,7 @@ impl Curve {
                         true,
                         objects,
                         depth + 1,
+                        caches,
                     )?
                     .solutions,
                 );
@@ -1433,7 +1511,8 @@ impl Curve {
         let snap = |v: Vec3| snap_to_ends.then_some(v);
 
         // drop thisCurve StartPoint onto otherCurve snapping to sLinePt1[0]
-        let d = other.drop_point(
+        let [this_cache, other_cache] = caches;
+        let d = other.drop_point_cached(
             k,
             other_interval,
             line_pt1_0,
@@ -1441,13 +1520,14 @@ impl Curve {
             tol,
             None,
             solver_op,
+            other_cache,
         )?;
         if d.success && d.distance < tol {
             drops.push((interval.min(), d.parameter, d.distance));
         }
 
         // drop otherCurve startPoint onto thisCurve
-        let d = self.drop_point(
+        let d = self.drop_point_cached(
             k,
             interval,
             line_pt2_0,
@@ -1455,13 +1535,23 @@ impl Curve {
             tol,
             None,
             solver_op,
+            this_cache,
         )?;
         if d.success && d.distance < tol {
             drops.push((d.parameter, other_interval.min(), d.distance));
         }
 
         // drop otherCurve EndPoint onto thisCurve
-        let d = self.drop_point(k, interval, end2_0, snap(end2_1), tol, None, solver_op)?;
+        let d = self.drop_point_cached(
+            k,
+            interval,
+            end2_0,
+            snap(end2_1),
+            tol,
+            None,
+            solver_op,
+            this_cache,
+        )?;
         if d.success && d.distance < tol {
             let entry = (d.parameter, other_interval.max(), d.distance);
             match drops.last() {
@@ -1480,7 +1570,7 @@ impl Curve {
         }
 
         // drop thisCurve EndPoint onto otherCurve
-        let d = other.drop_point(
+        let d = other.drop_point_cached(
             k,
             other_interval,
             end1_0,
@@ -1488,6 +1578,7 @@ impl Curve {
             tol,
             None,
             solver_op,
+            other_cache,
         )?;
         if d.success && d.distance < tol {
             drops.push((interval.max(), d.parameter, d.distance));

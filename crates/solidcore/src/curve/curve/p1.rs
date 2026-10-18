@@ -14,6 +14,7 @@
 //! | [`Curve::classify_intersecting_range_solution`], [`TangentPoint`] | `SmCurve::ClassifyIntersectingRangeSolution` |
 //! | `CpGlobalSolver::local_solve_branch` ([`GlobalSolve::local_solve`] of [`CpGlobalSolver`]) | `SmCPGlobalSolver::LocalSolve` |
 //! | [`Curve::global_point_solve`], [`GlobalPointSolveOptions`] | `SmCurve::GlobalPointSolve`             |
+//! | `Curve::global_point_solve_cached` (crate)        | `SmCurve::GlobalPointSolve` (caller's cache)     |
 //! | [`Curve::tessellate_by_bisection`]                | `SmCurve::TessellateByBisection`                 |
 //! | [`Curve::tessellate`], [`Curve::tessellate_base`] | `Tessellate` (virtual), `SmCurve::Tessellate`    |
 //!
@@ -71,6 +72,7 @@ use crate::curve::curve::p2::{
 use crate::curve::curve::p3::{eval_n, local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p4::proj_dist;
 use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
+use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::TessellationRequest;
 use crate::error::{ignored, Result, SolidError};
@@ -1530,6 +1532,33 @@ impl Curve {
         requested: SolutionRequested,
         opts: &GlobalPointSolveOptions<'_, O>,
     ) -> Result<SolutionArray<O>> {
+        self.global_point_solve_cached(
+            k, interval, op, test_point, dist_tol, requested, opts, &mut None,
+        )
+    }
+
+    /// [`Curve::global_point_solve`] keeping the curve's cache in `cache` across calls,
+    /// as upstream keeps it on the curve (`GetOrCreateObjectCache`): the cache is built
+    /// where the solve first needs it (with the same errors) and reused by later calls
+    /// given the same slot. The slot must belong to this curve, unchanged since the
+    /// cache was built, and to the same `opts.handle` (the cache names it in its
+    /// solutions); the build is deterministic, so a reused cache holds the same spans,
+    /// tree and analytic replacement as a fresh one.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_point_solve`].
+    pub(crate) fn global_point_solve_cached<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        op: SolverOperation,
+        test_point: Point3,
+        dist_tol: f64,
+        requested: SolutionRequested,
+        opts: &GlobalPointSolveOptions<'_, O>,
+        cache: &mut Option<CurveCache<O>>,
+    ) -> Result<SolutionArray<O>> {
         let target = opts.target_distance;
 
         // Try quick solves when MINIMIZING and INTERSECTING (without using curve cache)
@@ -1554,11 +1583,14 @@ impl Curve {
 
         // get target curve's cache
         let mut solutions: SolutionArray<O> = SolutionArray::new();
-        let mut cache = match make_curve_cache::<O>(k, self, opts.handle) {
-            Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => return Err(SolidError::null_pointer(OP_GLOBAL)),
-        };
+        if cache.is_none() {
+            *cache = Some(match make_curve_cache::<O>(k, self, opts.handle) {
+                Ok(c) => c,
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => return Err(SolidError::null_pointer(OP_GLOBAL)),
+            });
+        }
+        let cache = cache.as_mut().ok_or(SolidError::null_pointer(OP_GLOBAL))?;
 
         // Analytical Curve Optimization
         if op == SolverOperation::Minimize || op == SolverOperation::Intersect {

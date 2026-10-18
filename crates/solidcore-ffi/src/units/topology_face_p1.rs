@@ -166,10 +166,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             flag(*center, "center")?;
             flag(*split, "split")?;
         }
-        (
-            Op::Rect | Op::Flip | Op::RemoveUv | Op::SwapUv | Op::Shrink | Op::Probe,
-            [],
-        ) => {}
+        (Op::Rect | Op::Flip | Op::RemoveUv | Op::SwapUv | Op::Shrink | Op::Probe, []) => {}
         _ => return Err(bad("wrong argument count")),
     }
     raw(op, path, input)

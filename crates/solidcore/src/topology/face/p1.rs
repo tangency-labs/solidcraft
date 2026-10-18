@@ -39,8 +39,7 @@
 //! - **Side-effect free getters** whose result upstream only reads later
 //!   (`GetUpwardLoopuses` of `CalculateUVDomainFromUVTrimCurves`, `GetBrep` and
 //!   `SmTol::GetZoneTol3d` of `MoveSeam`, `GetBrep` of `SplitAtSeam`) are called where
-//!   their result is first used; the unused `sThisDomain` intersection of
-//!   `CalculateUVDomainFromUVTrimCurves` is not computed.
+//!   their result is first used.
 //! - **Pointer identity.** `SetSurface` compares the new surface pointer with the
 //!   current one; a surface passed by value is never the current one, so the "same
 //!   surface" no-op has no counterpart. Without `delete_current` the old surface is
@@ -451,8 +450,10 @@ pub struct UvDomainFromTrim {
 
 /// `CalculateUVDomainFromUVTrimCurves`: makes the face's UV trim curves and returns the
 /// union of their bounding boxes, intersected with the surface's natural domain when
-/// `limit_domain` (the natural domain itself without edge uses). A face without surface,
-/// or whose UV trim curves cannot be made, keeps its UV domain. `want_max_gap` /
+/// `limit_domain` (the natural domain itself without edge uses). A face without surface
+/// keeps its UV domain; one whose UV trim curves cannot be made gets its UV domain
+/// intersected with the surface's natural domain (an `Init` extent when they are
+/// disjoint). `want_max_gap` /
 /// `want_2nd_max_gap` ask for the loop gap outputs (`pOptMaxUVLoopGap`,
 /// `pOpt2ndMaxUVLoopGap`).
 ///
@@ -482,6 +483,13 @@ pub fn calculate_uv_domain_from_uv_trim_curves(
         return Ok(out);
     };
     let surf_domain = surface.natural_uv_domain();
+
+    // limit ThisDomain to XSect(Face->UVDomain, Face->Surface->UVDomain) (a fix for a
+    // common problem); its status is ignored: disjoint domains give an Init()-ed extent
+    out.domain = out
+        .domain
+        .intersect(&surf_domain)
+        .unwrap_or_else(|_| Extent2d::new());
 
     // place a UVTrimCurve on each Face->Edgeuse
     match create_uv_trim_curves(k, b, f) {
