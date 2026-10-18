@@ -213,7 +213,7 @@ const EXACT_CURVES: [i64; 3] = [14033, 14010, 14048];
 /// only as its B-spline part (an analytic `SmBSplineSurface` / `SmBSplineCurve`
 /// subclass): the Rust `Surface` has no kind for it (the unit named, as in
 /// `Surface::read_from_db`), or its exact import needs the B-rep reader
-/// (`SmBrep::ReadFromFile`, unit `topology.brep_p7`).
+/// (`SmBrep::MakeTopologyFromData`, unit `topology.brep_p10`, behind `ReadFromFile`).
 pub(super) fn inexact_geometry(s: &Setup) -> Option<Output> {
     let b = &s.brep;
     let surface_type = eu1::face(b, s.eu)
@@ -232,12 +232,15 @@ pub(super) fn inexact_geometry(s: &Setup) -> Option<Output> {
             15014 => ("surface.sphere", "SmSphere"),
             15015 => ("surface.torus", "SmTorus (no SurfaceKind)"),
             15030 => ("surface.surf_of_extrusion_p2", "SurfaceKind::SurfOfExtrusion"),
-            _ => ("topology.brep_p7", "SmBrep::ReadFromFile"),
+            _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
         };
         return Some(Output::deferred(unit, symbol));
     }
     if curve_type >= 0 && !EXACT_CURVES.contains(&curve_type) {
-        return Some(Output::deferred("topology.brep_p7", "SmBrep::ReadFromFile"));
+        return Some(Output::deferred(
+            "topology.brep_p10",
+            "SmBrep::MakeTopologyFromData",
+        ));
     }
     None
 }

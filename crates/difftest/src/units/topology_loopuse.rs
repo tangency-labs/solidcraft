@@ -822,7 +822,7 @@ fn inexact_geometry(s: &Setup) -> Option<Output> {
                 15014 => ("surface.sphere", "SmSphere"),
                 15015 => ("surface.torus", "SmTorus (no SurfaceKind)"),
                 15030 => ("surface.surf_of_extrusion_p2", "SurfaceKind::SurfOfExtrusion"),
-                _ => ("topology.brep_p7", "SmBrep::ReadFromFile"),
+                _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
             };
             return Some(Output::deferred(unit, symbol));
         }
@@ -835,7 +835,10 @@ fn inexact_geometry(s: &Setup) -> Option<Output> {
         };
         let t = s.types.edge_curve_types.get(e.index() as usize).copied().unwrap_or(-1);
         if t >= 0 && !EXACT_CURVES.contains(&t) {
-            return Some(Output::deferred("topology.brep_p7", "SmBrep::ReadFromFile"));
+            return Some(Output::deferred(
+                "topology.brep_p10",
+                "SmBrep::MakeTopologyFromData",
+            ));
         }
     }
     None

@@ -136,6 +136,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB (type confusion).
 - **Rust port:** Returns `InvalidInput`.
 
+#### UB-164. `SmBrep::MakeTopologyFromData` uses the cross-reference indices of an accepted `.smb` unchecked [PSIRT]
+- **Location:** `source/SMLib/src/SmBrep.cpp:19284`-`20660` `SmBrep::MakeTopologyFromData`, reached from `SmBrep::ReadFromFile` after `SmBrepData::ReadFromFile` succeeds. For example `:20343` indexes `m_vFaces[rFaceuseData.m_lFace]` and dereferences the face it finds; `:20342` indexes `m_vFaceuses` with the shell's `m_lFaceuseStart + kk`, and the non-manifold edge use links (`m_lNextEU`, `m_lMateNextEU`, `:20247`-`:20263`) index `m_vEdgeuses` with file values the same way, as do `m_vSurfaces[rF.m_lSurface]` and `m_vShells[rR.m_lStartShell + jj]`. `SmTArray::operator[]` checks the index only under `SM_DEBUG_CODE` (`SmTArray.h:454`).
+- **What happens:** `SmBrepData::ReadFromFile` checks the stream syntax, not the cross-references between its sections. `MakeTopologyFromData` then indexes the section arrays with the face, faceuse and edge use indices read from the file, without range checks, and follows the pointers it finds there.
+- **Trigger:** An ASCII `.smb` with one index field overwritten so that `SmBrepData::ReadFromFile` still succeeds, e.g. `plane_square.smb` with faceuse 0's face index `0` changed to `9` (the file has one face).
+- **How found:** crash in the C++ reference run (`topology.brep_p7` difftest, guard disabled for the measurement). gdb: SIGSEGV in `SmBrep::MakeTopologyFromData` <- `SmBrep::ReadFromFile`.
+- **Confirmed:** yes. Single-byte overwrites (digits, `-`, `.`) accepted by `SmBrepData::ReadFromFile`, run one per process: 11 of 600 crashed with SIGSEGV (rc=139; 100 streams each of `Endcap`, `Mouse`, `box_with_large_fillet`, `cone`, `disk`, `ellips_ts2`: 2, 1, 2, 4, 1, 1). A batch of 100 such streams per file crashed in 13 of the 15 `pt_TestFiles` (all but `torus`, `vase_rev`).
+- **Severity:** crash/UB (out-of-bounds read, wild pointer dereference).
+- **Rust port:** `MakeTopologyFromData` belongs to `topology.brep_p10` (unported; `p7::read_from_file` defers there). Its port must range-check every cross-reference index and return `InvalidInput`. The `topology.brep_p7` difftest keeps such streams away from the C++ side (`cpp-guard:unvalidated-topology`).
+
 ### NLib: knots and basis functions
 
 #### UB-7. `N_BasisEval` uses an uninitialised span for an unknown side flag
@@ -1363,6 +1372,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (source inspection only; the shim never runs it).
 - **Severity:** crash/UB.
 - **Rust port:** `topology::brep::p1::redistribute_seam_uv_trim_curves` returns `InvalidInput` for an edge with fewer than four edge uses.
+
+#### UB-165. `SmBrep::MakeFaceWithCurves` with `pbOptCrvOnSurf` and no UV curves dereferences a null array
+- **Location:** `source/SMLib/src/SmBrep.cpp:16591-16606` `SmBrep::MakeFaceWithCurves` (the `pbOptCrvOnSurf && *pbOptCrvOnSurf == TRUE` block after `MakeFace`).
+- **What happens:** The UV curve array `cpOptUVCurves` is optional (only one of the 3D and UV arrays must be given), but the curve-on-surface block copies `cpOptUVCurves->GetAt(ii)` for `ii < cpOptUVCurves->GetSize()` without a null check, so a call with 3D curves only and `*pbOptCrvOnSurf == TRUE` dereferences null as soon as `MakeFace` succeeds (even for one empty loop).
+- **Trigger:** `MakeFaceWithCurves(region, {0}, &curves3d, NULL, orients, {}, plane, domain, SM_OT_SAME, .., &TRUE)` (difftest cases `face_curves_cos_no_uv_*` of `topology.brep_p7`).
+- **How found:** crash in the C++ reference run (pre-review fuzz of PR #155).
+- **Confirmed:** yes (SIGSEGV).
+- **Severity:** crash.
+- **Rust port:** `SolidError::InvalidInput`; the difftest shim keeps such calls away from upstream.
 
 ### Healer target management
 

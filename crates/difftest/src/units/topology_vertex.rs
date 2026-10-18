@@ -1541,7 +1541,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             15014 => ("surface.sphere", "SmSphere"),
             15015 => ("surface.torus", "SmTorus (no SurfaceKind)"),
             15030 => ("surface.surf_of_extrusion_p2", "SurfaceKind::SurfOfExtrusion"),
-            _ => ("topology.brep_p7", "SmBrep::ReadFromFile"),
+            _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
         };
         return Ok(Output::deferred(unit, symbol));
     }

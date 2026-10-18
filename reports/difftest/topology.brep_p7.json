@@ -1,0 +1,3030 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631909",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631910",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631911",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631912",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631913",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631914",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631915",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631916",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurve::DeformToEndPointTargets (pOptSurfCrvOnSurf)",
+        "unit": "curve.curve_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631917",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631918",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631919",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=16427438353069631920",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631921",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631922",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631923",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=16427438353069631924",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_Mouse.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#16 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_Mouse.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#17 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#18 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#19 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#20 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#21 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#22 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#23 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#24 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#25 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#26 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_Mouse.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#27 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Mouse.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#28 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Mouse.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#29 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Mouse.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#30 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Mouse.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#31 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_Endcap.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#32 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_Endcap.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#33 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#34 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#35 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#36 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#37 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#38 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#39 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#40 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#41 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#42 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_Endcap.smb_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#43 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Endcap.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#44 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Endcap.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#45 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Endcap.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#46 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_Endcap.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#47 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_box_with_large_fillet.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#48 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_box_with_large_fillet.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#49 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#50 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 33
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#51 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 33
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#52 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 33
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#53 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 33
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#54 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 33
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#55 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#56 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#57 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#58 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_box_with_large_fillet.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#59 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_box_with_large_fillet.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#60 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_box_with_large_fillet.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#61 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_box_with_large_fillet.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#62 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_box_with_large_fillet.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#63 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_cone.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#64 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_cone.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#65 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#66 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#67 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#68 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#69 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#70 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#71 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#72 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#73 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#74 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_cone.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#75 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_cone.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#76 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_cone.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#77 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_cone.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#78 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_cone.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#79 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_disk.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#80 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_disk.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#81 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#82 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#83 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#84 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#85 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#86 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#87 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#88 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#89 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#90 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_disk.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#91 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_disk.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#92 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_disk.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#93 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_disk.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#94 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_disk.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#95 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_ellips_ts2.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#96 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_ellips_ts2.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#97 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#98 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#99 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#100 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#101 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 52
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#102 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 52
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#103 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#104 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#105 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#106 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_ellips_ts2.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#107 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_ellips_ts2.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#108 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_ellips_ts2.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#109 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_ellips_ts2.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#110 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_ellips_ts2.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#111 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_plane_circ.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#112 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_plane_circ.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#113 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#114 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#115 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#116 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#117 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#118 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#119 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#120 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#121 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#122 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_circ.smb_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#123 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_circ.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#124 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_circ.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#125 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_circ.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#126 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_circ.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#127 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_plane_square.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#128 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_plane_square.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#129 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#130 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#131 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#132 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#133 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#134 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#135 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#136 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#137 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#138 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_plane_square.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#139 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_square.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#140 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_square.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#141 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_square.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#142 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_plane_square.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#143 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_sphere.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#144 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_sphere.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#145 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#146 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#147 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#148 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#149 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#150 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#151 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#152 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#153 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#154 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_sphere.smb_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#155 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_sphere.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#156 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_sphere.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#157 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_sphere.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#158 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_sphere.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#159 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_surf_extrude.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#160 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_surf_extrude.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#161 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#162 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#163 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#164 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#165 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#166 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#167 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#168 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#169 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#170 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_extrude.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#171 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_extrude.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#172 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_extrude.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#173 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_extrude.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#174 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_extrude.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#175 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_surf_rev.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#176 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_surf_rev.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#177 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#178 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#179 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#180 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#181 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#182 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#183 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#184 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#185 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#186 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_rev.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#187 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_rev.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#188 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_rev.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#189 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_rev.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#190 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_rev.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#191 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_surf_sphere150.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#192 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_surf_sphere150.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#193 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#194 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#195 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#196 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#197 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#198 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#199 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#200 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#201 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#202 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_surf_sphere150.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#203 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_sphere150.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#204 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_sphere150.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#205 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_sphere150.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#206 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_surf_sphere150.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#207 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_torus.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#208 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_torus.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#209 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#210 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#211 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#212 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#213 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#214 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#215 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#216 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#217 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#218 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_torus.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#219 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_torus.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#220 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_torus.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#221 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_torus.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#222 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_torus.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#223 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_toruswvy.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#224 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_toruswvy.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#225 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#226 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#227 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#228 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#229 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#230 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#231 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#232 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#233 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#234 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_toruswvy.smb_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#235 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_toruswvy.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#236 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_toruswvy.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#237 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_toruswvy.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#238 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_toruswvy.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#239 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_vase_rev.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#240 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
+      "max_rel_err": 0.0,
+      "name": "read_vase_rev.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#241 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#242 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#243 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#244 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#245 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#246 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#247 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#248 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#249 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#250 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "glue_vase_rev.smb_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#251 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_vase_rev.smb_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#252 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_vase_rev.smb_f1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#253 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_vase_rev.smb_f2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#254 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_self_vase_rev.smb_f3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#255 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_plane_square.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#256 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_plane_square.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#257 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_disk.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#258 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_disk.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#259 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_plane_circ.smb_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#260 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SetTolerance",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_plane_circ.smb_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#261 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#262 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#263 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#264 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#265 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf (non-B-spline surface)",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#266 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#267 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#268 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#269 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#270 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_9",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#271 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_10",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#272 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_11",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#273 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_12",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#274 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_13",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#275 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_14",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#276 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_15",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#277 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_16",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#278 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_17",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#279 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_18",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#280 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_19",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#281 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_curves_20",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#282 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_curves_21",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#283 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_curves_22",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#284 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_curves_23",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#285 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "face_curves_24",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#286 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_no_uv_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#287 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeFaceWithCurves",
+        "unit": "cpp-guard:ub-165"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_no_uv_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#288 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::SetTolerance",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_no_uv_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#289 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeFaceWithCurves",
+        "unit": "cpp-guard:ub-165"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_no_uv_1_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#290 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_no_uv_2_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#291 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeFaceWithCurves",
+        "unit": "cpp-guard:ub-165"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_no_uv_2_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#292 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurve::DeformToEndPointTargets (pOptSurfCrvOnSurf)",
+        "unit": "curve.curve_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_curves_cos_open_loop",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#293 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "make_face_tiny_1e-300",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#294 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_small_1e-12",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#295 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_disk.smb_error0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#296 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_disk.smb_error1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#297 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_disk.smb_error2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#298 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_plane_square.smb_error0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#299 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_plane_square.smb_error1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#300 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_plane_square.smb_error2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#301 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_cone.smb_error0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#302 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_cone.smb_error1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#303 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_cone.smb_error2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#304 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_Mouse.smb_error0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#305 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_Mouse.smb_error1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#306 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_Mouse.smb_error2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#307 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "make_face_0_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#308 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "make_face_0_0_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#309 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "make_face_0_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#310 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "make_face_0_1_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:built-in: topology.brep_p7 cases#311 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_1_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#312 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_1_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#313 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_1_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#314 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_1_1_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:built-in: topology.brep_p7 cases#315 (upstream tests/prog_test (pt_TestFiles B-reps))",
+      "values_compared": 0
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 119,
+  "cases_failed": 0,
+  "cases_passed": 197,
+  "cases_total": 316,
+  "deferred_by_unit": {
+    "cpp-guard:ub-165": 3,
+    "curve.crv_on_surf": 1,
+    "curve.curve_p6": 2,
+    "topology.brep_p1": 12,
+    "topology.brep_p10": 30,
+    "topology.brep_p2": 51,
+    "topology.brep_p9": 19,
+    "topology.face_p3": 1
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "topology.brep_p7"
+}
