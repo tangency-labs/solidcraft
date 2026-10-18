@@ -22,7 +22,7 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
-use solidcore::nurbs::math::CPoint;
+use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::topology::database_io::{DatabaseReader, FileType};
@@ -35,9 +35,6 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Minimum number of generated cases per run.
 pub const MIN_GENERATED: usize = 600;
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 /// The runner.
 pub struct Runner;

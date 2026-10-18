@@ -43,6 +43,7 @@ use solidcore::intersect::point_class::{
 use solidcore::kernel::Kernel;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::nurbs::math::{NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
@@ -64,8 +65,6 @@ fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 /// `SM_USE_DEFAULT`.
 const USE_DEFAULT: f64 = 9876543.21;
 /// `SM_BIG_DOUBLE`.

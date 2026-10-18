@@ -42,6 +42,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::math::NOW;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
@@ -61,7 +62,6 @@ fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
-const NOW: f64 = -f64::MAX;
 const UNDEF: f64 = 1.23456e-61;
 
 // ---- inputs -----------------------------------------------------------------------

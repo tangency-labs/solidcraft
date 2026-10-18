@@ -38,6 +38,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BoundingBoxRequest, BoundingBoxes};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::nurbs::math::NOW;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::query::edge as qe;
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -58,8 +59,6 @@ pub struct Runner;
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
-
-const NOW: f64 = -f64::MAX;
 
 /// "Upstream would dereference null" (output of the shim, `InvalidInput` in Rust).
 const NULL_DEREF: i64 = -2;

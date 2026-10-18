@@ -49,7 +49,7 @@ use solidcore::intersect::surface_intersector::p1::{
 };
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
-use solidcore::nurbs::math::CPoint;
+use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
@@ -73,9 +73,6 @@ pub struct Runner;
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
-
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
 
 /// `SM_BIG_DOUBLE`.
 const BIG: f64 = 1.0e20;

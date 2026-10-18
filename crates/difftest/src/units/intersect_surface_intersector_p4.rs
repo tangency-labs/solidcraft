@@ -50,7 +50,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::UNDEF_DOUBLE;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
-use solidcore::nurbs::math::CPoint;
+use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
@@ -67,8 +67,6 @@ pub const MIN_GENERATED: usize = 1500;
 
 /// `intersect.surface_intersector_p4` runner.
 pub struct Runner;
-
-const NOW: f64 = -f64::MAX;
 
 /// No start or end point in the state record.
 const NO_POINT: f64 = -3.0;

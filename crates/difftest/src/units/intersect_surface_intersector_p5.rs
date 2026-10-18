@@ -47,7 +47,7 @@ use solidcore::intersect::adv_surface_intersector::AdvSurfaceIntersector;
 use solidcore::intersect::surface_intersector::p5::do_intersection;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
-use solidcore::nurbs::math::CPoint;
+use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
@@ -72,9 +72,6 @@ pub struct Runner;
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
-
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
 
 /// The surface handle type of the caches (`SmSurface*`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

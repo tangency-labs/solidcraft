@@ -38,7 +38,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::BIG_DOUBLE;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::knots::Side;
-use solidcore::nurbs::math::CPoint;
+use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
@@ -51,9 +51,6 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 400;
-
-/// `NL_NOW`.
-const NOW: f64 = -f64::MAX;
 
 /// `intersect.ray_tracer` runner.
 pub struct Runner;

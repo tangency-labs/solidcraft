@@ -30,7 +30,7 @@ use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
-use solidcore::nurbs::math::{CPoint, NOW};
+use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::primitive::api_curves;
 use solidcore::sweep::api_surfaces as api;
 use solidcore::topology::Brep;
@@ -43,9 +43,6 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 800;
-
-/// `NL_NOZ`.
-const NOZ: f64 = f64::MAX;
 
 /// `sweep.api_surfaces` runner.
 pub struct Runner;

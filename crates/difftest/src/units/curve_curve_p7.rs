@@ -41,6 +41,7 @@ use solidcore::geom::tree::{CurveSpanRef, NodeData, NodeId, Tree};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
+use solidcore::nurbs::math::NOW;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_curve_p7::{self as ffi, Op};
@@ -58,8 +59,6 @@ pub struct Runner;
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
-
-const NOW: f64 = -f64::MAX;
 
 // ---- inputs -----------------------------------------------------------------------
 

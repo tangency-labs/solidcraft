@@ -28,6 +28,7 @@ use solidcore::curve::curve::CurveKind;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::{NotifyOperation, ObjectRef};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::math::NOW;
 use solidcore::surface::surface::p2::DropCurveFail;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::edgeuse::p2 as eu2;
@@ -49,8 +50,6 @@ pub struct Runner;
 const NULL_DEREF: f64 = -2.0;
 /// The shim did not run the op (deferred on the Rust side).
 const NOT_RUN: f64 = -3.0;
-
-const NOW: f64 = -f64::MAX;
 
 /// The UV curve given to `CheckAndSetUVTrimCurve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]

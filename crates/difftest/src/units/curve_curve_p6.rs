@@ -38,6 +38,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BoundingBoxRequest};
 use solidcore::nurbs::b_spline_curve_n_lib::InValueType;
+use solidcore::nurbs::math::{NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_curve_p6::{self as ffi, Op};
@@ -56,8 +57,6 @@ fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 const UNDEF: f64 = 1.23456e-61;
 
 // ---- inputs -----------------------------------------------------------------------

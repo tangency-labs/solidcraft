@@ -24,6 +24,7 @@ use serde_json::Value;
 
 use solidcore::curve::crv_in_volume::{continuity_from_code, CrvInVolume};
 use solidcore::geom::transform::Transform;
+use solidcore::nurbs::math::{NOW, NOZ};
 use solidcore::surface::volume::{Volume, VolumeKind};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::curve::hermite_curve::HermiteCurve;
@@ -51,9 +52,6 @@ pub struct Runner;
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
-
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
 
 // ---- inputs -----------------------------------------------------------------------
 
