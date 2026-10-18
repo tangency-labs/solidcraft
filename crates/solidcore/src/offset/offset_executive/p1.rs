@@ -678,7 +678,7 @@ impl OffsetExecutive {
     ///
     /// On the non-merge path the B-rep is taken and relations are cleared *before*
     /// stitching, as upstream. A deferred stitch therefore leaves `offset_brep()` empty.
-    pub fn piecewise_merge(&mut self, _kernel: &Kernel, original: &Brep) -> Result<Brep> {
+    pub fn piecewise_merge(&mut self, kernel: &Kernel, original: &mut Brep) -> Result<Brep> {
         if !self.merge_results {
             self.clear_relations();
             let _result = required(self.offset_brep.take())?;
@@ -730,6 +730,7 @@ impl OffsetExecutive {
                     if edge::is_manifold(original, edge_id)? {
                         let primary = required(eu::primary_edgeuse(original, edge_id)?)?;
                         if eu2::is_tangent_sector(
+                            kernel,
                             original,
                             primary,
                             self.tangency_tol_degrees(),
@@ -775,7 +776,7 @@ impl OffsetExecutive {
     pub fn build_offset_of_faceuse(
         &mut self,
         kernel: &Kernel,
-        original: &Brep,
+        original: &mut Brep,
         faceuse: Option<FaceuseId>,
         offset_surface: &mut Option<Surface>,
     ) -> Result<()> {
@@ -799,14 +800,9 @@ impl OffsetExecutive {
         }
         let faceuse = original.faceuse(faceuse)?;
         let face_id = required(faceuse.face)?;
-        let mut curves = face::create_curves_from_face(
-            kernel,
-            original,
-            face_id,
-            faceuse.orientation,
-            false,
-            true,
-        )?;
+        let orientation = faceuse.orientation;
+        let mut curves =
+            face::create_curves_from_face(kernel, original, face_id, orientation, false, true)?;
         let offset_domain = offset_surface.natural_uv_domain();
         let face_domain = original.face(face_id)?.uv_domain;
         if face_domain.is_contained_by(&offset_domain, EFF_ZERO)
@@ -1939,14 +1935,14 @@ mod tests {
     #[test]
     fn merge_clears_all_relations_and_preserves_upstream_transfer_order() {
         let kernel = Kernel::default();
-        let original = Brep::new();
+        let mut original = Brep::new();
         for solid in [false, true] {
             let mut executive = executive();
             executive.set_offset_brep(Brep::new());
             executive.set_create_offset_solid(solid);
             executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
             assert_dependency(
-                executive.piecewise_merge(&kernel, &original),
+                executive.piecewise_merge(&kernel, &mut original),
                 if solid {
                     "SmStitch::StitchIntoShell"
                 } else {
@@ -1962,7 +1958,7 @@ mod tests {
         executive.set_offset_brep(Brep::new());
         executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
         assert_dependency(
-            executive.piecewise_merge(&kernel, &original),
+            executive.piecewise_merge(&kernel, &mut original),
             "SmBrep::ShrinkGeometry",
             "topology.brep_p4",
         );
@@ -2028,15 +2024,15 @@ mod tests {
         let (_, faceuse) = add_face(&mut original, plane(0.0));
         // NER(pFU) precedes the null-surface no-op.
         assert!(executive
-            .build_offset_of_faceuse(&kernel, &original, None, &mut None)
+            .build_offset_of_faceuse(&kernel, &mut original, None, &mut None)
             .is_err());
         executive
-            .build_offset_of_faceuse(&kernel, &original, Some(faceuse), &mut None)
+            .build_offset_of_faceuse(&kernel, &mut original, Some(faceuse), &mut None)
             .unwrap();
         executive.set_offset_brep(Brep::new());
         let mut offset = Some(plane(1.0));
         assert_dependency(
-            executive.build_offset_of_faceuse(&kernel, &original, Some(faceuse), &mut offset),
+            executive.build_offset_of_faceuse(&kernel, &mut original, Some(faceuse), &mut offset),
             "SmBrep::MakeFaceWithCurves",
             "topology.brep_p7",
         );
@@ -2049,14 +2045,14 @@ mod tests {
         ));
         let mut offset = Some(smaller.clone());
         assert_dependency(
-            executive.build_offset_of_faceuse(&kernel, &original, Some(faceuse), &mut offset),
+            executive.build_offset_of_faceuse(&kernel, &mut original, Some(faceuse), &mut offset),
             "SmBrep::CreatePlanarFaceWith3DCurves",
             "topology.brep_p8",
         );
         executive.set_operation(OffsetOperation::LocalOperation);
         let mut offset = Some(smaller);
         assert_dependency(
-            executive.build_offset_of_faceuse(&kernel, &original, Some(faceuse), &mut offset),
+            executive.build_offset_of_faceuse(&kernel, &mut original, Some(faceuse), &mut offset),
             "SmBrep::MakeFaceWithCurves",
             "topology.brep_p7",
         );
@@ -2071,10 +2067,12 @@ mod tests {
         original.face_mut(face).unwrap().uv_domain = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
         executive.set_offset_brep(Brep::new());
         let mut offset = Some(plane(1.0));
+        // Since topology.edgeuse_p3 (#117) builds the UV trim curve, the face prefix
+        // reaches the plane's DropCurve before the domain boolean.
         assert_dependency(
-            executive.build_offset_of_faceuse(&kernel, &original, faceuse, &mut offset),
-            "SmEdgeuse::NormalizedEvaluate",
-            "topology.edgeuse_p3",
+            executive.build_offset_of_faceuse(&kernel, &mut original, faceuse, &mut offset),
+            "SmSurface::DropCurve",
+            "intersect.surface_drop_lib_p3",
         );
     }
 

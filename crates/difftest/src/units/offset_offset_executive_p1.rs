@@ -1301,9 +1301,9 @@ fn rust_probe(branch: Probe, tolerance: f64) -> RResult<Output> {
             } else {
                 None
             };
-            executive.build_offset_of_faceuse(&kernel, &original, faceuse, &mut None)
+            executive.build_offset_of_faceuse(&kernel, &mut original, faceuse, &mut None)
         }
-        Probe::PiecewiseEmpty => executive.piecewise_merge(&kernel, &original).map(|_| {
+        Probe::PiecewiseEmpty => executive.piecewise_merge(&kernel, &mut original).map(|_| {
             counts = [0, 0, 0, 1];
         }),
         Probe::MapPlane => {
