@@ -55,8 +55,15 @@ fn linked_component_opens_its_part_in_a_tab_and_reports_a_missing_source() {
     let inserted = h.app.run("component.insert_design", json!({"path": part})).unwrap();
     let component = inserted["component"].as_u64().unwrap();
     let occurrence = inserted["occurrence"].as_u64().unwrap();
+    let other_part = h.dir.join("other-part.solidcraft");
+    let mut other_source = Session::default();
+    other_source.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    other_source.execute("file.save", &json!({"path": other_part})).unwrap();
+    let other = h.app.run("component.insert_design", json!({"path": other_part})).unwrap();
+    let other_component = other["component"].as_u64().unwrap();
     h.app.run("file.save", json!({"path": assembly})).unwrap();
 
+    h.app.tree.picked_components = vec![component, other_component];
     let linked = Target::Component { id: component };
     let row = context_menu::items(&h.app, &linked);
     assert!(row.iter().any(|item| item.label == "Open Linked Design"));
