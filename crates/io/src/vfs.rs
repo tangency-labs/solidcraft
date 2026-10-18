@@ -46,6 +46,10 @@ mod imp {
     pub fn exists(path: &str) -> bool {
         check(path).is_ok() && std::path::Path::new(path).exists()
     }
+    /// Whether the path names a regular file the caller may access.
+    pub fn is_file(path: &str) -> bool {
+        check(path).is_ok() && std::path::Path::new(path).is_file()
+    }
     pub fn remove(path: &str) -> Result<()> {
         check(path)?;
         std::fs::remove_file(path)
@@ -95,6 +99,10 @@ mod imp {
     }
     pub fn exists(path: &str) -> bool {
         FILES.with(|f| f.borrow().contains_key(path))
+    }
+    /// Every entry in browser storage is a regular file.
+    pub fn is_file(path: &str) -> bool {
+        exists(path)
     }
     pub fn remove(path: &str) -> Result<()> {
         FILES.with(|f| f.borrow_mut().remove(path)).map(|_| ()).ok_or_else(|| missing(path))
@@ -451,9 +459,12 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let p = dir.join("a.txt").to_string_lossy().to_string();
         assert!(!super::exists(&p));
+        assert!(!super::is_file(&p));
+        assert!(!super::is_file(&dir.to_string_lossy()));
         assert!(super::read(&p, 16).is_err());
         super::write(&p, b"hello").unwrap();
         assert!(super::exists(&p));
+        assert!(super::is_file(&p));
         assert_eq!(super::len(&p).unwrap(), 5);
         assert_eq!(super::read_to_string(&p, 16).unwrap(), "hello");
         // The cap is the caller's, not the file's.
@@ -461,6 +472,7 @@ mod tests {
         assert_eq!(super::read(&p, 5).unwrap(), b"hello");
         super::remove(&p).unwrap();
         assert!(!super::exists(&p));
+        assert!(!super::is_file(&p));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

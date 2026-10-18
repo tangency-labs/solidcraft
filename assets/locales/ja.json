@@ -2894,6 +2894,7 @@
   "ui.one_side": "片側",
   "ui.open": "開く",
   "ui.open_ends_tip": "どこにも接していない",
+  "ui.open_linked_design": "リンクされたデザインを開く",
   "ui.open_preferences": "環境設定を開く",
   "ui.open_recent": "最近使った項目を開く",
   "ui.operation": "操作",
