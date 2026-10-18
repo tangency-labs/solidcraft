@@ -167,6 +167,7 @@ pub mod manufacture_inspection;
 pub mod manufacture_modify;
 pub mod manufacture_multiaxis;
 pub mod manufacture_part_handling;
+pub mod manufacture_post;
 pub mod manufacture_setup;
 pub mod manufacture_tools;
 pub mod manufacture_turning;
