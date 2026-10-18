@@ -209,7 +209,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             let mut brep = Brep::new();
             let a = brep.add_vertex(p3([0.0; 3])).map_err(|e| harness(&e))?;
-            let b = brep.add_vertex(p3([1.0, 0.0, 0.0])).map_err(|e| harness(&e))?;
+            let b = brep
+                .add_vertex(p3([1.0, 0.0, 0.0]))
+                .map_err(|e| harness(&e))?;
             let edges: Vec<EdgeId> = (0..*n_edges)
                 .map(|_| brep.add_edge(a, b))
                 .collect::<Result<_, _>>()
@@ -232,16 +234,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(e) => Ok(rust_err(&e)),
             }
         }
-        Inputs::Edge { pnt, .. } => match tools::find_edge(&Brep::new(), p3(*pnt)) {
+        Inputs::Edge { file, pnt } => match tools::find_edge(&file_brep(file)?, p3(*pnt)) {
             Ok(Some(m)) => Ok(status_only(0)
                 .int("index", index_i64(m.index)?)
                 .scalar("param", m.parameter)),
             Ok(None) => Ok(status_only(SM_ERR)),
             Err(e) => Ok(rust_err(&e)),
         },
-        Inputs::Face { pnt, .. } => match tools::find_face(
+        Inputs::Face { file, pnt } => match tools::find_face(
             &solidcore::kernel::Kernel::default(),
-            &Brep::new(),
+            &file_brep(file)?,
             solidcore::topology::BrepId::from_index(0),
             p3(*pnt),
             &solidcore::topology::brep_cache::arena_identity,
@@ -252,6 +254,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             Err(e) => Ok(rust_err(&e)),
         },
     }
+}
+
+/// The file's B-rep on the Rust side (`SmBrep::ReadFromFile` in the shim), imported
+/// through the `topology.brep_p1` export so its edge and face lists are in upstream's
+/// list order (`FindEdge` / `FindFace` report indices into them).
+fn file_brep(file: &str) -> Result<Brep, HarnessError> {
+    crate::units::topology_brep_p1::import_file(file, false)
 }
 
 /// Upstream `SM_ERR`.

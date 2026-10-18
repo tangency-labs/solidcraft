@@ -375,12 +375,8 @@ fn point_in_solid(target: &Brep, point: Point3, tolerance: f64) -> Result<bool> 
         .is_some_and(|(class, material)| class == PointClassType::Region && material))
 }
 
-fn brep_vertices(_brep: &Brep) -> Result<Vec<VertexId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetVertices
-    Err(SolidError::unported(
-        "SmBrep::GetVertices",
-        "topology.brep_p1",
-    ))
+fn brep_vertices(brep: &Brep) -> Result<Vec<VertexId>> {
+    crate::topology::brep::p1::vertices(brep, None)
 }
 
 fn count_contained_samples(
@@ -490,13 +486,11 @@ pub fn brep_distance<O: SolutionObject>(
     Ok(brep_relationship(k, objects, a, b)?.distance)
 }
 
-fn brep_edges(_brep: &Brep) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetEdges
-    Err(SolidError::unported("SmBrep::GetEdges", "topology.brep_p1"))
+fn brep_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
+    crate::topology::brep::p1::edges(brep, None)
 }
-fn brep_faces(_brep: &Brep) -> Result<Vec<FaceId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetFaces
-    Err(SolidError::unported("SmBrep::GetFaces", "topology.brep_p1"))
+fn brep_faces(brep: &Brep) -> Result<Vec<FaceId>> {
+    crate::topology::brep::p1::faces(brep, None)
 }
 
 /// Exact B-rep edge list (`SmApiGetEdges`). Empty lists return `SM_ERR`.

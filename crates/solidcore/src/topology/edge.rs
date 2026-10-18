@@ -209,13 +209,8 @@ fn brep_notify(operation: NotifyOperation) -> Result<()> {
 }
 
 /// `SmBrep::GetInfiniteRegion` (unit `topology.brep_p1`).
-fn infinite_region(b: &Brep) -> Result<Option<RegionId>> {
-    let _ = b;
-    // UNPORTED(topology.brep_p1): SmBrep::GetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::GetInfiniteRegion",
-        "topology.brep_p1",
-    ))
+fn infinite_region(b: &Brep) -> Option<RegionId> {
+    b.infinite_region()
 }
 
 /// `SmVertex::SetTolerance(tol)` (default arguments; unit `topology.vertex`).
@@ -2385,7 +2380,7 @@ pub fn blend_edgeuse(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<Option<Edgeu
         let shell = eu1::shell(b, eu0_r)?.ok_or_else(|| null("GetBlendEdgeuse: no shell"))?;
         let shell_b = eu1::shell_brep(b, shell)?
             .ok_or_else(|| null("GetBlendEdgeuse: shell without B-rep"))?;
-        let infinite = infinite_region(shell_b)?;
+        let infinite = infinite_region(shell_b);
 
         // get edgeuse for interior region
         if eu1::shell_region(b, shell)? == infinite {

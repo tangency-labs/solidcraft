@@ -26,7 +26,7 @@ use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep_cache::BrepCache;
 use solidcore::topology::brep_cache::{arena_identity, CacheObject, CacheSource};
-use solidcore::topology::{Brep, BrepId, FaceuseId};
+use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, VertexId};
 use solidcore::{Result, SolidError};
 use solidcore_ffi::units::query_api_queries as ffi;
 
@@ -290,6 +290,23 @@ fn imported(k: &Kernel, a: &[f64; 22], export_op: i32) -> std::result::Result<Br
         .get(3)
         .copied()
         .ok_or_else(|| HarnessError::new("missing face count"))?;
+    // the B-rep's face, edge and vertex lists in their list order follow the metadata
+    let (n_e, n_v) = (
+        counts
+            .get(7)
+            .copied()
+            .ok_or_else(|| HarnessError::new("missing edge count"))?,
+        counts
+            .get(9)
+            .copied()
+            .ok_or_else(|| HarnessError::new("missing vertex count"))?,
+    );
+    let lists_len = 3 + count + n_e + n_v;
+    let lists_at = raw
+        .len()
+        .checked_sub(lists_len)
+        .ok_or_else(|| HarnessError::new("missing list orders"))?;
+    let (raw, lists) = raw.split_at(lists_at);
     let tail = count
         .checked_mul(2)
         .ok_or_else(|| HarnessError::new("face metadata overflow"))?;
@@ -299,6 +316,32 @@ fn imported(k: &Kernel, a: &[f64; 22], export_op: i32) -> std::result::Result<Br
         .ok_or_else(|| HarnessError::new("missing face metadata"))?;
     let (graph, metadata) = raw.split_at(split);
     let (mut b, types) = crate::units::topology_edgeuse_p1::import_with_types(graph)?;
+    {
+        let mut at = 0usize;
+        let mut read_list = |expect: usize| -> std::result::Result<Vec<u32>, HarnessError> {
+            let n = lists.get(at).copied().unwrap_or(-1.0);
+            if n < 0.0 || n as usize != expect {
+                return Err(HarnessError::new("list order length mismatch"));
+            }
+            let v: Vec<u32> = lists
+                .get(at + 1..at + 1 + expect)
+                .ok_or_else(|| HarnessError::new("short list order"))?
+                .iter()
+                .map(|&i| i as u32)
+                .collect();
+            at += 1 + expect;
+            Ok(v)
+        };
+        let fl = read_list(count)?;
+        let el = read_list(n_e)?;
+        let vl = read_list(n_v)?;
+        b.set_face_list(fl.into_iter().map(FaceId::from_index).collect())
+            .map_err(|e| HarnessError::new(format!("face list: {e}")))?;
+        b.set_edge_list(el.into_iter().map(EdgeId::from_index).collect())
+            .map_err(|e| HarnessError::new(format!("edge list: {e}")))?;
+        b.set_vertex_list(vl.into_iter().map(VertexId::from_index).collect())
+            .map_err(|e| HarnessError::new(format!("vertex list: {e}")))?;
+    }
     let faces: Vec<_> = b.faces().ids().collect();
     let (metadata, remainder) = metadata.as_chunks::<2>();
     if !remainder.is_empty() {
@@ -638,12 +681,7 @@ fn topology(k: &Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>>
             objects.build(k)?;
             closest(
                 &mut o,
-                api::face_closest_point(
-                    k,
-                    &objects,
-                    (BrepId::from_index(0), face),
-                    point,
-                )?,
+                api::face_closest_point(k, &objects, (BrepId::from_index(0), face), point)?,
             );
         }
         21 => cclosest(

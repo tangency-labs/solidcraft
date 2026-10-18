@@ -108,14 +108,16 @@ use crate::math::{
 use crate::surface::volume::Volume;
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
-// UNPORTED(topology.brep_p1): SmTol::GetModelSizeEstimate(const SmBrep&),
+// UNPORTED(geom.tol): SmTol::GetModelSizeEstimate(const SmBrep&),
 // SmTol::SetModelSizeEstimate(SmBrep&, double), SmTol::GetZoneTol3d(const SmBrep*),
 // SmTol::GetApproxTol3d(const SmBrep*), SmTol::CalcFaceZoneTol3d(SmBrep*),
 // SmTol::CalcEdgeZoneTol3d(.., SmBrep*, ..), SmTol::CalcVertexZoneTol3d(.., SmBrep*, ..)
-// need SmBrep::GetTolerance / SmBrep::SetThisModelSizeEstimate; and
-// SmTol::GetScaledZero(const SmBrep&) needs SmBrep::CalculateBoundingBox.
+// can now be written over `topology::Brep` (`Brep::tolerance`,
+// `Brep::this_model_size_estimate`, `Brep::set_this_model_size_estimate`, unit
+// topology.brep_p1); SmTol::GetScaledZero(const SmBrep&) needs SmBrep::CalculateBoundingBox
+// (query.brep).
 // UNPORTED(topology.vertex), UNPORTED(topology.edge), UNPORTED(topology.face_p2),
-// UNPORTED(topology.edgeuse_p1), UNPORTED(topology.brep_p1): SmTol::GetZoneTol3d(const
+// UNPORTED(topology.edgeuse_p1): SmTol::GetZoneTol3d(const
 // SmObject*), SmTol::GetZoneTol3d(const SmBrepData*), SmTol::GetApproxTol3d(const
 // SmObject*), SmTol::GetXSectTol3d(const SmObject*, const SmObject*, ..),
 // SmTol::GetZoneTol3d_ForXSectResult(const SmObject*, const SmObject*),
@@ -124,7 +126,8 @@ use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 // virtual GetTolerance: the base is topology::topology::Topology::tolerance, the
 // overrides belong to SmVertex, SmEdge, SmFace, SmEdgeuse), SmSurface/SmCurve
 // (GetFace/GetEdge), SmBrep, SmBrepData and SmCurveClassification; those classes have
-// no Rust object type yet.
+// no Rust object type yet (the SmBrep arm itself, SmBrep::GetTolerance, is
+// `Brep::tolerance`).
 // UNPORTED(curve.curve_p2): SmTol::IsDegenerate(const SmCurve*, SmExtent1d, ..),
 // SmTol::MapTo1d(SmTol3d&, double, const SmCurve&) and SmTol::GetScaledZero(const
 // SmCurve&) need SmCurve::IsDegenerate / Evaluate / GetNaturalInterval /

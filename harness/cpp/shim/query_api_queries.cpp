@@ -272,6 +272,22 @@ SC_EXPORT int32_t sc_query_api_queries_eval(int32_t op, const double* a, int64_t
                 o.push_back(g.find(2, face->GetUpwardFaceuse()));
                 o.push_back(face->GetRectangularTrim());
             }
+            // The B-rep's face, edge and vertex lists in their list order (SmApiGetFaces /
+            // GetEdges report indices into them), as traversal indices: n then n entries.
+            {
+                SmTArray<SmFace*> fs;
+                b.brep->GetFaces(fs);
+                o.push_back((double)fs.GetSize());
+                for (ULONG i = 0; i < fs.GetSize(); ++i) o.push_back(g.find(3, fs[i]));
+                SmTArray<SmEdge*> es;
+                b.brep->GetEdges(es);
+                o.push_back((double)es.GetSize());
+                for (ULONG i = 0; i < es.GetSize(); ++i) o.push_back(g.find(7, es[i]));
+                SmTArray<SmVertex*> vs;
+                b.brep->GetVertices(vs);
+                o.push_back((double)vs.GetSize());
+                for (ULONG i = 0; i < vs.GetSize(); ++i) o.push_back(g.find(9, vs[i]));
+            }
         }
         else
         {

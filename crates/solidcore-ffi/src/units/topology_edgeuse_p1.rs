@@ -341,7 +341,7 @@ pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError
 
 /// The surface and parameter domain of a face block (`2`, `6`, and `5` with a face):
 /// whether the surface is a B-spline surface (not a plane).
-fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result<bool, FfiError> {
+pub(crate) fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result<bool, FfiError> {
         let dom = surface(rd)?;
         let d = rd.finites(4)?;
         let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))

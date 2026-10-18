@@ -410,7 +410,7 @@ impl OffsetExecutive {
     /// owner chains return [`SolidError::Unsupported`] rather than omitting geometry.
     /// Cache and solver errors propagate before any result-face removal. Ordinary
     /// evaluation statuses are ignored, but an unported evaluator still defers.
-    /// Result edges currently use arena order, not upstream linked-list order.
+    /// Result edges are visited in upstream edge list order (`SmBrep::GetEdges`).
     pub fn remove_excess_faces(
         &self,
         kernel: &Kernel,
@@ -423,11 +423,8 @@ impl OffsetExecutive {
         let min_distance = self.offset_distance * 0.95;
         let mut delete_faces = Vec::new();
         let mut original_cache = None;
-        // UNPORTED(topology.brep_p1): SmBrep::GetEdges
-        // This arena-order adapter does not reproduce m_pEdgeListHead->GetAll order.
-        // Nonempty queries still defer at NormalizedEvaluate; wire the ordered
-        // traversal before completing that path or claiming deletion-order parity.
-        for (id, _) in result.edges().iter() {
+        // SmBrep::GetEdges (unit topology.brep_p1): the m_pEdgeListHead list order
+        for id in crate::topology::brep::p1::edges(result, None)? {
             let primary = required(eu::primary_edgeuse(result, id)?)?;
             // Upstream ignores the evaluation status and keeps the initialized point.
             // An unported evaluator must still propagate instead of supplying a fake point.
@@ -470,6 +467,10 @@ impl OffsetExecutive {
         };
         // Continuation cpp:2819–2823: CreateFaceFromSurface, then append closing face.
         // Actual call arguments: ruled blend (0), same direction (1), no options.
+        // The static upstream call pairs an edge use of the original B-rep with one of
+        // the offset B-rep; topology.brep_p1's port (topology::brep::p1::
+        // create_edge_edge_blend) takes both edge uses in one B-rep, and this method has
+        // no original B-rep: the cross-B-rep form is topology.brep_p1's own unported part.
         // UNPORTED(topology.brep_p1): SmBrep::CreateEdgeEdgeBlend
         Err(SolidError::unported(
             "SmBrep::CreateEdgeEdgeBlend",

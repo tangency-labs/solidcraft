@@ -4362,16 +4362,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e0_blend",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#162",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -4638,16 +4634,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e2_blend",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#196",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -4834,16 +4826,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e5_blend",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#220",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5030,16 +5018,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e9_blend",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#244",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5424,16 +5408,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rb_e0_blend",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#292",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14549,13 +14529,12 @@
     }
   ],
   "cases_both_errored": 186,
-  "cases_deferred": 16,
+  "cases_deferred": 11,
   "cases_failed": 0,
-  "cases_passed": 1771,
+  "cases_passed": 1776,
   "cases_total": 1787,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 6,
-    "topology.brep_p1": 5,
     "topology.brep_p2": 5
   },
   "max_rel_err": 0.0,

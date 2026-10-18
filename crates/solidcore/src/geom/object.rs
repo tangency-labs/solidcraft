@@ -392,11 +392,12 @@ impl Shape {
         // Compute the union of all of the extents of the input objects; the first
         // upstream call of each list needs an unported topology query.
         if !breps.is_empty() {
-            // UNPORTED(topology.brep_p1): SmBrep::GetInfiniteRegion (then
-            // SmBrep::CalculateBoundingBox, SmBrep::GetVertices / GetEdges / GetFaces)
+            // UNPORTED(query.brep): SmBrep::CalculateBoundingBox (the B-rep keys here
+            // name no Brep; SmBrep::GetInfiniteRegion / GetVertices / GetEdges / GetFaces
+            // are ported in topology::brep::p1)
             return Err(SolidError::Unported {
-                upstream: "SmBrep::GetInfiniteRegion",
-                unit: "topology.brep_p1",
+                upstream: "SmBrep::CalculateBoundingBox",
+                unit: "query.brep",
             });
         }
         if !faces.is_empty() {
@@ -661,7 +662,7 @@ mod tests {
         };
         assert_eq!(
             unit(Shape::new(&[b], &[(b, FaceId::from_index(0))], &[], &[])),
-            "topology.brep_p1"
+            "query.brep"
         );
         assert_eq!(
             unit(Shape::new(&[], &[(b, FaceId::from_index(0))], &[], &[])),

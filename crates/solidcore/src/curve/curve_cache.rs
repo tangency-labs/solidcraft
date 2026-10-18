@@ -60,8 +60,9 @@
 //!   `SmVector3d`), except [`SolidError::Unported`], which is always propagated.
 //! - **Tolerance.** `SmTol::GetApproxTol3d(const SmObject*)` of the curve is the
 //!   system value for a curve without owner; a curve with an owner needs its edge's
-//!   tolerance (`SmTol::GetZoneTol3d(const SmObject*)`, unit `topology.brep_p1`) and
-//!   returns [`SolidError::Unported`].
+//!   tolerance (`SmTol::GetZoneTol3d(const SmObject*)`; `topology::edge::tolerance` is
+//!   ported but needs the owning `Brep`, which the cache does not hold) and returns
+//!   [`SolidError::Unported`].
 //! - **Co-port.** `SmFindCurveDistanceExtremaEFO::Evaluate` (unit `curve.curve_p4`,
 //!   called by every tessellation) is ported here as the [`EvalFunction`]
 //!   implementation of [`FindCurveDistanceExtrema`].
@@ -1074,10 +1075,13 @@ fn curve_ref<O: Copy + PartialEq>(tree: &Tree<O>, id: NodeId) -> Result<CurveSpa
 /// without owner.
 fn curve_approx_tol_3d(k: &Kernel, curve: &Curve) -> Result<f64> {
     if curve.owner().is_some() {
-        // UNPORTED(topology.brep_p1): SmTol::GetZoneTol3d(const SmObject*)
+        // UNPORTED(curve.curve_cache): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
+        // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
+        // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
+        // receives the owning B-rep
         return Err(SolidError::Unported {
             upstream: "SmTol::GetZoneTol3d(const SmObject*)",
-            unit: "topology.brep_p1",
+            unit: "curve.curve_cache",
         });
     }
     Ok(approx_tol_3d(k, SmallTopoType::NormalSize))

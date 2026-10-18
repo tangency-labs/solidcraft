@@ -223,8 +223,12 @@ pub(crate) fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessErr
                 m as f64,
                 b.p as f64,
                 b.q as f64,
-                (b.u.len() - 1) as f64,
-                (b.v.len() - 1) as f64,
+                b.u.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("empty u knots"))? as f64,
+                b.v.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("empty v knots"))? as f64,
             ]);
             for row in &b.net {
                 for p in row {

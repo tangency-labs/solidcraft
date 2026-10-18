@@ -43,7 +43,9 @@ use solidcore::heal::heal_data::p2::{
 use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
 use solidcore::topology::topology_traverser::Marks;
-use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId};
+use solidcore::topology::{
+    Brep, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, VertexId, VertexuseId,
+};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::heal_heal_data_p2 as ffi;
 use solidcore_ffi::units::topology_vertexuse::counts;
@@ -1113,6 +1115,12 @@ fn restore(b: &mut Brep, extra: &[f64], c: [usize; 10]) -> Result<(), HarnessErr
         r.vertex_edge_gap = eg;
         r.vertex_face_gap = fg;
     }
+    // the infinite region (`SmBrep::m_pInfiniteRegion`; `Fix_InfiniteRegion` walks the
+    // region list from it)
+    let inf = next()?;
+    if inf >= 0.0 {
+        b.set_infinite_region(Some(RegionId::from_index(inf as u32)));
+    }
     if at != extra.len() {
         return Err(harness("extras: trailing data"));
     }
@@ -1265,7 +1273,7 @@ fn rust_heal(
                 h.cache_face_props_gaps(&k, &mut b, HealerOpType::CacheFacepropsGaps)
             }
             Step::FixTolSizes => h
-                .fix_tol_sizes(&k, &mut b, HealerOpType::FixTolsizes)
+                .fix_tol_sizes(&mut k, &mut b, HealerOpType::FixTolsizes)
                 .map(|()| false),
             Step::CacheCoinVertices => {
                 h.cache_coin_vertices(&k, &b, HealerOpType::CacheCoinVertices)

@@ -1889,8 +1889,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for that computation (`SmBrep::GetTolerance`,
-    /// unit `topology.brep_p1`).
+    /// [`SolidError::Unported`] for that computation (`SmBrep::GetMinEdgeBBoxSize`,
+    /// unit `topology.brep_p2`).
     pub fn new(
         brep1: O,
         brep2: O,
@@ -1902,10 +1902,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let _ = override_tol;
         let tol = ti_approx_tol_3d;
         if tol < EFF_ZERO {
-            // UNPORTED(topology.brep_p1): SmBrep::GetTolerance
+            // UNPORTED(topology.brep_p2): SmBrep::GetMinEdgeBBoxSize (the preceding
+            // SmBrep::GetTolerance calls are ported as Brep::tolerance, but the manager
+            // holds opaque B-rep handles, so wiring also needs the Breps in scope)
             return Err(SolidError::unported(
-                "SmBrep::GetTolerance",
-                "topology.brep_p1",
+                "SmBrep::GetMinEdgeBBoxSize",
+                "topology.brep_p2",
             ));
         }
         Ok(Self {

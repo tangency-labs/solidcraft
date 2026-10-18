@@ -1483,8 +1483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_box_with_large_fillet_p0",
@@ -1507,8 +1507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_box_with_large_fillet_p1",
@@ -1531,8 +1531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_box_with_large_fillet_p2",
@@ -1555,8 +1555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_box_with_large_fillet_p3",
@@ -1643,8 +1643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_circ_p0",
@@ -1667,8 +1667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_circ_p1",
@@ -1691,8 +1691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_circ_p2",
@@ -1715,8 +1715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_circ_p3",
@@ -1899,8 +1899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_Mouse_p0",
@@ -1923,8 +1923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_Mouse_p1",
@@ -1947,8 +1947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_Mouse_p2",
@@ -1971,8 +1971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_Mouse_p3",
@@ -2107,8 +2107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_cone_p0",
@@ -2131,8 +2131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_cone_p1",
@@ -2155,8 +2155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_cone_p2",
@@ -2179,8 +2179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_cone_p3",
@@ -2267,8 +2267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_sphere_p0",
@@ -2291,8 +2291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_sphere_p1",
@@ -2315,8 +2315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_sphere_p2",
@@ -2339,8 +2339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_sphere_p3",
@@ -2475,8 +2475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_disk_p0",
@@ -2499,8 +2499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_disk_p1",
@@ -2523,8 +2523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_disk_p2",
@@ -2547,8 +2547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_disk_p3",
@@ -2731,8 +2731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_square_p0",
@@ -2755,8 +2755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_square_p1",
@@ -2779,8 +2779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_square_p2",
@@ -2803,8 +2803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_plane_square_p3",
@@ -2939,8 +2939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_torus_p0",
@@ -2963,8 +2963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_torus_p1",
@@ -2987,8 +2987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_torus_p2",
@@ -3011,8 +3011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetEdges",
-        "unit": "topology.brep_p1"
+        "symbol": "SmCurve::DropPoint",
+        "unit": "curve.curve_p6"
       },
       "max_rel_err": 0.0,
       "name": "edge_torus_p3",
@@ -7841,8 +7841,8 @@
   "cases_total": 913,
   "deferred_by_unit": {
     "curve.curve_p2": 68,
-    "query.brep": 32,
-    "topology.brep_p1": 32
+    "curve.curve_p6": 32,
+    "query.brep": 32
   },
   "max_rel_err": 0.0,
   "pass": true,

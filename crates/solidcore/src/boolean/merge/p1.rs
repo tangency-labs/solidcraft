@@ -22,8 +22,9 @@
 //! `boolean.topology_intersector_p1`). Mate maps and notification records are
 //! borrowed explicitly; edge/vertex mate storage is co-ported in
 //! `boolean::topology_intersector::p1` and shared mutably with `merge_p5`. B-rep
-//! edge/shell traversal waits for `topology.brep_p1`; arena allocation order does
-//! not substitute for native owning-list order. Region propagation takes refs and
+//! edge/shell traversal uses `topology::brep::p1` (`GetEdges`, `GetShells`; the
+//! latter still stops at `SmRegion::GetShells`, unit `topology.shell`).
+//! Region propagation takes refs and
 //! their `IsVoid` results and source-list callback handles, because arena regions
 //! do not yet carry shell state.
 //! Missing topology mutations and point classification return
@@ -355,19 +356,18 @@ pub struct CleanupRelations {
     pub mates: Relations,
 }
 
-fn brep_edges(_brep: &Brep) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetEdges
-    unavailable("SmBrep::GetEdges", "topology.brep_p1")
+fn brep_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
+    crate::topology::brep::p1::edges(brep, None)
 }
 
-fn brep_vertices(_brep: &Brep) -> Result<Vec<VertexId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetVertices
-    unavailable("SmBrep::GetVertices", "topology.brep_p1")
+/// `SmBrep::GetVertices` (ported in `topology::brep::p1`: the vertex list in list order).
+fn brep_vertices(brep: &Brep) -> Result<Vec<VertexId>> {
+    crate::topology::brep::p1::vertices(brep, None)
 }
 
-fn brep_shells(_brep: &Brep) -> Result<Vec<ShellId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetShells
-    unavailable("SmBrep::GetShells", "topology.brep_p1")
+/// `SmBrep::GetShells` (ported in `topology::brep::p1`; `&mut Kernel` for its mark lock).
+fn brep_shells(k: &mut Kernel, brep: &Brep) -> Result<Vec<ShellId>> {
+    crate::topology::brep::p1::shells(k, brep, None)
 }
 
 fn set_face_tolerance(_brep: &mut Brep, _face: FaceId, _tolerance: f64) -> Result<()> {
@@ -470,7 +470,7 @@ pub fn boolean_post_process(
     }
     // Combine a wire shell with a faceuse shell when the B-rep has just those two
     // and they share a mated vertex.
-    let shells = brep_shells(brep)?;
+    let shells = brep_shells(k, brep)?;
     if let [shell0, shell1] = shells[..] {
         let mut wire_shell = None;
         let mut face_shell = None;
@@ -607,14 +607,8 @@ mod tests {
             vertices: vec![VertexId::from_index(u32::MAX)],
             ..CleanupRelations::default()
         };
-        let error = boolean_post_process(&mut Kernel::default(), &mut b, &r, false).unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Unported {
-                upstream: "SmBrep::GetShells",
-                ..
-            }
-        ));
+        // the stale ids are skipped and a B-rep without regions has no shells to count
+        boolean_post_process(&mut Kernel::default(), &mut b, &r, false).unwrap();
     }
 
     #[test]

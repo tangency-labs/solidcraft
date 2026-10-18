@@ -2419,10 +2419,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             // when no classified neighbor was found - cast a ray
             if found_class == NodeClass::Unknown {
                 let src_zone_tol_3d = if curr_fields.face.is_some() {
-                    // UNPORTED(topology.brep_p1): SmTol::GetZoneTol3d(const SmObject*)
+                    // UNPORTED(surface.surface_cache_p1): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
+                    // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
+                    // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
+                    // receives the owning B-rep
                     return Err(SolidError::unported(
                         "SmTol::GetZoneTol3d(const SmObject*)",
-                        "topology.brep_p1",
+                        "surface.surface_cache_p1",
                     ));
                 } else {
                     zone_tol_3d(k, SmallTopoType::NormalSize)

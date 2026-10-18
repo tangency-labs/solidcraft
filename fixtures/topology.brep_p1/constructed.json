@@ -1,0 +1,11176 @@
+{
+ "cases": [
+  {
+   "name": "find_side_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "p": [
+     0.5,
+     1,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "p": [
+     0.5,
+     -1,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "p": [
+     0.5,
+     1,
+     0
+    ],
+    "dir": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "p": [
+     1.5,
+     3,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "find_side_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "p": [
+     1.5,
+     -3,
+     0.2
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "find_side_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "p": [
+     -1,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "p": [
+     0.5,
+     1e-07,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "p": [
+     0.5,
+     1e-05,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "find_side_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_side",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "p": [
+     1.5,
+     0.5,
+     0
+    ],
+    "dir": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "wire_line_lists_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 0
+   }
+  },
+  {
+   "name": "wire_line_lists_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 1
+   }
+  },
+  {
+   "name": "wire_line_lists_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 2
+   }
+  },
+  {
+   "name": "wire_line_lists_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 3
+   }
+  },
+  {
+   "name": "wire_line_lists_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 4
+   }
+  },
+  {
+   "name": "wire_line_lists_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 5
+   }
+  },
+  {
+   "name": "wire_line_lists_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 6
+   }
+  },
+  {
+   "name": "wire_line_lists_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 7
+   }
+  },
+  {
+   "name": "wire_line_lists_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 8
+   }
+  },
+  {
+   "name": "wire_line_lists_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lists",
+    "which": 9
+   }
+  },
+  {
+   "name": "wire_line_query",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "ty": 16021,
+    "index": 0
+   }
+  },
+  {
+   "name": "wire_line_set_est",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_size",
+    "kind": 0,
+    "value": 0.02
+   }
+  },
+  {
+   "name": "wire_line_reset_inf_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 1,
+    "reset": 0,
+    "flag": 1
+   }
+  },
+  {
+   "name": "wire_line_void_flags",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 2,
+    "reset": 0,
+    "flag": 0
+   }
+  },
+  {
+   "name": "wire_line_degenerate_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "degenerate",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "wire_line_degenerate_huge",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "degenerate",
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "wire_line_vote",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "vote",
+    "regions": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "wire_line_reflect_eu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "reflect_eu",
+    "edge": 0
+   }
+  },
+  {
+   "name": "wire_line_reflect_shell_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "reflect_shell",
+    "face": 0
+   }
+  },
+  {
+   "name": "wire_line_rm_loop_vu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "rm_loop_vu",
+    "vu": 0
+   }
+  },
+  {
+   "name": "wire_line_rm_loop_vu_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "rm_loop_vu",
+    "vu": 1
+   }
+  },
+  {
+   "name": "wire_line_mark_loops_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "mark_loops",
+    "loop": 0,
+    "level": 0
+   }
+  },
+  {
+   "name": "wire_line_swap_face_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "swap_face_uv",
+    "face": 0,
+    "mark": 1,
+    "premark": true
+   }
+  },
+  {
+   "name": "wire_line_check_uv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "check_uv",
+    "eu": 0
+   }
+  },
+  {
+   "name": "wire_line_check_uv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "check_uv",
+    "eu": 1
+   }
+  },
+  {
+   "name": "wire_line_lock_box",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "lock_box"
+   }
+  },
+  {
+   "name": "wire_line_add_attrs",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "add_attrs",
+    "target": [
+     16021,
+     0
+    ],
+    "ids": [
+     1,
+     2
+    ],
+    "indexed": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "wire_line_find_sector",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "p": [
+     0.5,
+     0.5,
+     2.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "wire_line_find_sector_global",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": null,
+    "p": [
+     0.2,
+     0.3,
+     -1.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "wire_line_update_ivls_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "update_ivls",
+    "vertex": 0
+   }
+  },
+  {
+   "name": "wire_line_update_ivls_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "update_ivls",
+    "vertex": 1
+   }
+  },
+  {
+   "name": "wire_line_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 1,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "wire_line_brep_intersect",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "brep_intersect",
+    "tol": 0.0001,
+    "ang": 20.0,
+    "want_points": false
+   }
+  },
+  {
+   "name": "wire_line_edge_edge_blend_ruled",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 1,
+    "dir": 0
+   }
+  },
+  {
+   "name": "wire_line_edge_edge_blend_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "wire_line_parallel_proj",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "parallel_proj",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "dist": null,
+    "tol": 0.0001,
+    "ang": null,
+    "want_3d": true,
+    "want_uv": true,
+    "want_faces": true
+   }
+  },
+  {
+   "name": "wire_line_corner_blend_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "corner_blend",
+    "eus": [
+     0
+    ],
+    "tangent": null,
+    "tol": 0.0001,
+    "ang": 0.01
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 1
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 2
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 3
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 4
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 5
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 6
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 7
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 8
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lists_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lists",
+    "which": 9
+   }
+  },
+  {
+   "name": "wire_cubic_sub_query",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "query",
+    "ty": 16021,
+    "index": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_set_est",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "set_size",
+    "kind": 0,
+    "value": 0.02
+   }
+  },
+  {
+   "name": "wire_cubic_sub_reset_inf_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 1,
+    "reset": 0,
+    "flag": 1
+   }
+  },
+  {
+   "name": "wire_cubic_sub_void_flags",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 2,
+    "reset": 0,
+    "flag": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_degenerate_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "degenerate",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "wire_cubic_sub_degenerate_huge",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "degenerate",
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_vote",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "vote",
+    "regions": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "wire_cubic_sub_reflect_eu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "reflect_eu",
+    "edge": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_reflect_shell_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "reflect_shell",
+    "face": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_rm_loop_vu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "rm_loop_vu",
+    "vu": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_rm_loop_vu_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "rm_loop_vu",
+    "vu": 1
+   }
+  },
+  {
+   "name": "wire_cubic_sub_mark_loops_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "mark_loops",
+    "loop": 0,
+    "level": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_swap_face_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "swap_face_uv",
+    "face": 0,
+    "mark": 1,
+    "premark": true
+   }
+  },
+  {
+   "name": "wire_cubic_sub_check_uv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "check_uv",
+    "eu": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_check_uv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "check_uv",
+    "eu": 1
+   }
+  },
+  {
+   "name": "wire_cubic_sub_lock_box",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "lock_box"
+   }
+  },
+  {
+   "name": "wire_cubic_sub_add_attrs",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "add_attrs",
+    "target": [
+     16021,
+     0
+    ],
+    "ids": [
+     1,
+     2
+    ],
+    "indexed": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "wire_cubic_sub_find_sector",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "p": [
+     0.5,
+     0.5,
+     2.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "wire_cubic_sub_find_sector_global",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": null,
+    "p": [
+     0.2,
+     0.3,
+     -1.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "wire_cubic_sub_update_ivls_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "update_ivls",
+    "vertex": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_update_ivls_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "update_ivls",
+    "vertex": 1
+   }
+  },
+  {
+   "name": "wire_cubic_sub_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 1,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "wire_cubic_sub_brep_intersect",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "brep_intersect",
+    "tol": 0.0001,
+    "ang": 20.0,
+    "want_points": false
+   }
+  },
+  {
+   "name": "wire_cubic_sub_edge_edge_blend_ruled",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 1,
+    "dir": 0
+   }
+  },
+  {
+   "name": "wire_cubic_sub_edge_edge_blend_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "wire_cubic_sub_parallel_proj",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "parallel_proj",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "dist": null,
+    "tol": 0.0001,
+    "ang": null,
+    "want_3d": true,
+    "want_uv": true,
+    "want_faces": true
+   }
+  },
+  {
+   "name": "wire_cubic_sub_corner_blend_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "corner_blend",
+    "eus": [
+     0
+    ],
+    "tangent": null,
+    "tol": 0.0001,
+    "ang": 0.01
+   }
+  },
+  {
+   "name": "face_plane_lists_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 0
+   }
+  },
+  {
+   "name": "face_plane_lists_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 1
+   }
+  },
+  {
+   "name": "face_plane_lists_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 2
+   }
+  },
+  {
+   "name": "face_plane_lists_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 3
+   }
+  },
+  {
+   "name": "face_plane_lists_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 4
+   }
+  },
+  {
+   "name": "face_plane_lists_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 5
+   }
+  },
+  {
+   "name": "face_plane_lists_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 6
+   }
+  },
+  {
+   "name": "face_plane_lists_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 7
+   }
+  },
+  {
+   "name": "face_plane_lists_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 8
+   }
+  },
+  {
+   "name": "face_plane_lists_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 9
+   }
+  },
+  {
+   "name": "face_plane_query",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "query",
+    "ty": 16021,
+    "index": 0
+   }
+  },
+  {
+   "name": "face_plane_set_est",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_size",
+    "kind": 0,
+    "value": 0.02
+   }
+  },
+  {
+   "name": "face_plane_reset_inf_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 1,
+    "reset": 0,
+    "flag": 1
+   }
+  },
+  {
+   "name": "face_plane_void_flags",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 2,
+    "reset": 0,
+    "flag": 0
+   }
+  },
+  {
+   "name": "face_plane_degenerate_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "degenerate",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "face_plane_degenerate_huge",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "degenerate",
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "face_plane_vote",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "vote",
+    "regions": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_plane_reflect_eu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "reflect_eu",
+    "edge": 0
+   }
+  },
+  {
+   "name": "face_plane_reflect_shell_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "reflect_shell",
+    "face": 0
+   }
+  },
+  {
+   "name": "face_plane_rm_loop_vu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "rm_loop_vu",
+    "vu": 0
+   }
+  },
+  {
+   "name": "face_plane_rm_loop_vu_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "rm_loop_vu",
+    "vu": 1
+   }
+  },
+  {
+   "name": "face_plane_mark_loops_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "mark_loops",
+    "loop": 0,
+    "level": 0
+   }
+  },
+  {
+   "name": "face_plane_swap_face_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "swap_face_uv",
+    "face": 0,
+    "mark": 1,
+    "premark": true
+   }
+  },
+  {
+   "name": "face_plane_check_uv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "check_uv",
+    "eu": 0
+   }
+  },
+  {
+   "name": "face_plane_check_uv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "check_uv",
+    "eu": 1
+   }
+  },
+  {
+   "name": "face_plane_lock_box",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "lock_box"
+   }
+  },
+  {
+   "name": "face_plane_add_attrs",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "add_attrs",
+    "target": [
+     16021,
+     0
+    ],
+    "ids": [
+     1,
+     2
+    ],
+    "indexed": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_plane_find_sector",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "p": [
+     0.5,
+     0.5,
+     2.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_plane_find_sector_global",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": null,
+    "p": [
+     0.2,
+     0.3,
+     -1.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_plane_update_ivls_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "update_ivls",
+    "vertex": 0
+   }
+  },
+  {
+   "name": "face_plane_update_ivls_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "update_ivls",
+    "vertex": 1
+   }
+  },
+  {
+   "name": "face_plane_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 1,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "face_plane_brep_intersect",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "brep_intersect",
+    "tol": 0.0001,
+    "ang": 20.0,
+    "want_points": false
+   }
+  },
+  {
+   "name": "face_plane_edge_edge_blend_ruled",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 1,
+    "dir": 0
+   }
+  },
+  {
+   "name": "face_plane_edge_edge_blend_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "face_plane_parallel_proj",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "parallel_proj",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "dist": null,
+    "tol": 0.0001,
+    "ang": null,
+    "want_3d": true,
+    "want_uv": true,
+    "want_faces": true
+   }
+  },
+  {
+   "name": "face_plane_corner_blend_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "corner_blend",
+    "eus": [
+     0
+    ],
+    "tangent": null,
+    "tol": 0.0001,
+    "ang": 0.01
+   }
+  },
+  {
+   "name": "face_bspline_lists_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 0
+   }
+  },
+  {
+   "name": "face_bspline_lists_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 1
+   }
+  },
+  {
+   "name": "face_bspline_lists_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 2
+   }
+  },
+  {
+   "name": "face_bspline_lists_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 3
+   }
+  },
+  {
+   "name": "face_bspline_lists_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 4
+   }
+  },
+  {
+   "name": "face_bspline_lists_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 5
+   }
+  },
+  {
+   "name": "face_bspline_lists_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 6
+   }
+  },
+  {
+   "name": "face_bspline_lists_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 7
+   }
+  },
+  {
+   "name": "face_bspline_lists_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 8
+   }
+  },
+  {
+   "name": "face_bspline_lists_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lists",
+    "which": 9
+   }
+  },
+  {
+   "name": "face_bspline_query",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "query",
+    "ty": 16021,
+    "index": 0
+   }
+  },
+  {
+   "name": "face_bspline_set_est",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "set_size",
+    "kind": 0,
+    "value": 0.02
+   }
+  },
+  {
+   "name": "face_bspline_reset_inf_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 1,
+    "reset": 0,
+    "flag": 1
+   }
+  },
+  {
+   "name": "face_bspline_void_flags",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 2,
+    "reset": 0,
+    "flag": 0
+   }
+  },
+  {
+   "name": "face_bspline_degenerate_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "degenerate",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "face_bspline_degenerate_huge",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "degenerate",
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "face_bspline_vote",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "vote",
+    "regions": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_reflect_eu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "reflect_eu",
+    "edge": 0
+   }
+  },
+  {
+   "name": "face_bspline_reflect_shell_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "reflect_shell",
+    "face": 0
+   }
+  },
+  {
+   "name": "face_bspline_rm_loop_vu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "rm_loop_vu",
+    "vu": 0
+   }
+  },
+  {
+   "name": "face_bspline_rm_loop_vu_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "rm_loop_vu",
+    "vu": 1
+   }
+  },
+  {
+   "name": "face_bspline_mark_loops_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "mark_loops",
+    "loop": 0,
+    "level": 0
+   }
+  },
+  {
+   "name": "face_bspline_swap_face_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "swap_face_uv",
+    "face": 0,
+    "mark": 1,
+    "premark": true
+   }
+  },
+  {
+   "name": "face_bspline_check_uv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "check_uv",
+    "eu": 0
+   }
+  },
+  {
+   "name": "face_bspline_check_uv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "check_uv",
+    "eu": 1
+   }
+  },
+  {
+   "name": "face_bspline_lock_box",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "lock_box"
+   }
+  },
+  {
+   "name": "face_bspline_add_attrs",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "add_attrs",
+    "target": [
+     16021,
+     0
+    ],
+    "ids": [
+     1,
+     2
+    ],
+    "indexed": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_find_sector",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "p": [
+     0.5,
+     0.5,
+     2.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_find_sector_global",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": null,
+    "p": [
+     0.2,
+     0.3,
+     -1.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_update_ivls_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "update_ivls",
+    "vertex": 0
+   }
+  },
+  {
+   "name": "face_bspline_update_ivls_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "update_ivls",
+    "vertex": 1
+   }
+  },
+  {
+   "name": "face_bspline_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 1,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "face_bspline_brep_intersect",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "brep_intersect",
+    "tol": 0.0001,
+    "ang": 20.0,
+    "want_points": false
+   }
+  },
+  {
+   "name": "face_bspline_edge_edge_blend_ruled",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 1,
+    "dir": 0
+   }
+  },
+  {
+   "name": "face_bspline_edge_edge_blend_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "face_bspline_parallel_proj",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "parallel_proj",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "dist": null,
+    "tol": 0.0001,
+    "ang": null,
+    "want_3d": true,
+    "want_uv": true,
+    "want_faces": true
+   }
+  },
+  {
+   "name": "face_bspline_corner_blend_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "corner_blend",
+    "eus": [
+     0
+    ],
+    "tangent": null,
+    "tol": 0.0001,
+    "ang": 0.01
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 1
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 2
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 3
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 4
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 5
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 6
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 7
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 8
+   }
+  },
+  {
+   "name": "face_bspline_sub_lists_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lists",
+    "which": 9
+   }
+  },
+  {
+   "name": "face_bspline_sub_query",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "query",
+    "ty": 16021,
+    "index": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_set_est",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "set_size",
+    "kind": 0,
+    "value": 0.02
+   }
+  },
+  {
+   "name": "face_bspline_sub_reset_inf_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 1,
+    "reset": 0,
+    "flag": 1
+   }
+  },
+  {
+   "name": "face_bspline_sub_void_flags",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 2,
+    "reset": 0,
+    "flag": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_degenerate_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "degenerate",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "face_bspline_sub_degenerate_huge",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "degenerate",
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "face_bspline_sub_vote",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "vote",
+    "regions": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_sub_reflect_eu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "reflect_eu",
+    "edge": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_reflect_shell_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "reflect_shell",
+    "face": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_rm_loop_vu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "rm_loop_vu",
+    "vu": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_rm_loop_vu_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "rm_loop_vu",
+    "vu": 1
+   }
+  },
+  {
+   "name": "face_bspline_sub_mark_loops_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "mark_loops",
+    "loop": 0,
+    "level": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_swap_face_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "swap_face_uv",
+    "face": 0,
+    "mark": 1,
+    "premark": true
+   }
+  },
+  {
+   "name": "face_bspline_sub_check_uv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "check_uv",
+    "eu": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_check_uv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "check_uv",
+    "eu": 1
+   }
+  },
+  {
+   "name": "face_bspline_sub_lock_box",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "lock_box"
+   }
+  },
+  {
+   "name": "face_bspline_sub_add_attrs",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "add_attrs",
+    "target": [
+     16021,
+     0
+    ],
+    "ids": [
+     1,
+     2
+    ],
+    "indexed": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_sub_find_sector",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "p": [
+     0.5,
+     0.5,
+     2.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_sub_find_sector_global",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": null,
+    "p": [
+     0.2,
+     0.3,
+     -1.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bspline_sub_update_ivls_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "update_ivls",
+    "vertex": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_update_ivls_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "update_ivls",
+    "vertex": 1
+   }
+  },
+  {
+   "name": "face_bspline_sub_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 1,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "face_bspline_sub_brep_intersect",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "brep_intersect",
+    "tol": 0.0001,
+    "ang": 20.0,
+    "want_points": false
+   }
+  },
+  {
+   "name": "face_bspline_sub_edge_edge_blend_ruled",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 1,
+    "dir": 0
+   }
+  },
+  {
+   "name": "face_bspline_sub_edge_edge_blend_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "face_bspline_sub_parallel_proj",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "parallel_proj",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "dist": null,
+    "tol": 0.0001,
+    "ang": null,
+    "want_3d": true,
+    "want_uv": true,
+    "want_faces": true
+   }
+  },
+  {
+   "name": "face_bspline_sub_corner_blend_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "corner_blend",
+    "eus": [
+     0
+    ],
+    "tangent": null,
+    "tol": 0.0001,
+    "ang": 0.01
+   }
+  },
+  {
+   "name": "network_lists_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 0
+   }
+  },
+  {
+   "name": "network_lists_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 1
+   }
+  },
+  {
+   "name": "network_lists_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 2
+   }
+  },
+  {
+   "name": "network_lists_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 3
+   }
+  },
+  {
+   "name": "network_lists_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 4
+   }
+  },
+  {
+   "name": "network_lists_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 5
+   }
+  },
+  {
+   "name": "network_lists_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 6
+   }
+  },
+  {
+   "name": "network_lists_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 7
+   }
+  },
+  {
+   "name": "network_lists_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 8
+   }
+  },
+  {
+   "name": "network_lists_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lists",
+    "which": 9
+   }
+  },
+  {
+   "name": "network_query",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "ty": 16021,
+    "index": 0
+   }
+  },
+  {
+   "name": "network_set_est",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_size",
+    "kind": 0,
+    "value": 0.02
+   }
+  },
+  {
+   "name": "network_reset_inf_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 1,
+    "reset": 0,
+    "flag": 1
+   }
+  },
+  {
+   "name": "network_void_flags",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_inf",
+    "set": -2,
+    "mode": 2,
+    "reset": 0,
+    "flag": 0
+   }
+  },
+  {
+   "name": "network_degenerate_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "degenerate",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "network_degenerate_huge",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "degenerate",
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "network_vote",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "vote",
+    "regions": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "network_reflect_eu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reflect_eu",
+    "edge": 0
+   }
+  },
+  {
+   "name": "network_reflect_shell_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reflect_shell",
+    "face": 0
+   }
+  },
+  {
+   "name": "network_rm_loop_vu_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "rm_loop_vu",
+    "vu": 0
+   }
+  },
+  {
+   "name": "network_rm_loop_vu_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "rm_loop_vu",
+    "vu": 1
+   }
+  },
+  {
+   "name": "network_mark_loops_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "mark_loops",
+    "loop": 0,
+    "level": 0
+   }
+  },
+  {
+   "name": "network_swap_face_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "swap_face_uv",
+    "face": 0,
+    "mark": 1,
+    "premark": true
+   }
+  },
+  {
+   "name": "network_check_uv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "check_uv",
+    "eu": 0
+   }
+  },
+  {
+   "name": "network_check_uv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "check_uv",
+    "eu": 1
+   }
+  },
+  {
+   "name": "network_lock_box",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "lock_box"
+   }
+  },
+  {
+   "name": "network_add_attrs",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_attrs",
+    "target": [
+     16021,
+     0
+    ],
+    "ids": [
+     1,
+     2
+    ],
+    "indexed": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "network_find_sector",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "p": [
+     0.5,
+     0.5,
+     2.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "network_find_sector_global",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "find_sector",
+    "face": 0,
+    "guess": null,
+    "p": [
+     0.2,
+     0.3,
+     -1.0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "network_update_ivls_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "update_ivls",
+    "vertex": 0
+   }
+  },
+  {
+   "name": "network_update_ivls_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "update_ivls",
+    "vertex": 1
+   }
+  },
+  {
+   "name": "network_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 1,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "network_brep_intersect",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "brep_intersect",
+    "tol": 0.0001,
+    "ang": 20.0,
+    "want_points": false
+   }
+  },
+  {
+   "name": "network_edge_edge_blend_ruled",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 1,
+    "dir": 0
+   }
+  },
+  {
+   "name": "network_edge_edge_blend_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "edge_edge_blend",
+    "flag": 0,
+    "eu1": 0,
+    "eu2": 0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "network_parallel_proj",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "parallel_proj",
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "dist": null,
+    "tol": 0.0001,
+    "ang": null,
+    "want_3d": true,
+    "want_uv": true,
+    "want_faces": true
+   }
+  },
+  {
+   "name": "network_corner_blend_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "corner_blend",
+    "eus": [
+     0
+    ],
+    "tangent": null,
+    "tol": 0.0001,
+    "ang": 0.01
+   }
+  },
+  {
+   "name": "wire_line_split_uv_orient_unknown",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 0,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "wire_cubic_sub_split_uv_orient_unknown",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.2,
+     "t1": 0.9
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 0,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "face_plane_split_uv_orient_unknown",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 0,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "face_bspline_split_uv_orient_unknown",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 0,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "face_bspline_sub_split_uv_orient_unknown",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0.2,
+      0.1,
+      0.8,
+      0.9
+     ]
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 0,
+    "for_tess": false
+   }
+  },
+  {
+   "name": "network_split_uv_orient_unknown",
+   "upstream_ref": "TestFiles/pt_TestFiles/constructed (SmBrep::ReadFromFile)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "split_uv",
+    "eu_orig": 0,
+    "eu_new": 1,
+    "p": [
+     0.5,
+     0,
+     0
+    ],
+    "t": 0.5,
+    "scaled_zero": 1e-06,
+    "orient": 0,
+    "for_tess": false
+   }
+  }
+ ]
+}

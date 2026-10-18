@@ -83,8 +83,7 @@
 //!   `IntersectInsertRelate` (unit `boolean.topology_intersector_p2`); until that is
 //!   ported it is set with [`TopologyIntersector::set_proto_topology_manager`].
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
-//!   each tagged `UNPORTED(<unit>)`: `SmBrep::GetEdges` / `GetVertices`
-//!   (`topology.brep_p1`), `SmBrep::MakeVertexLoop` / `MakeVertexSplitEdge`
+//!   each tagged `UNPORTED(<unit>)`: `SmBrep::MakeVertexLoop` / `MakeVertexSplitEdge`
 //!   (`topology.brep_p9`), `GlueVertices` / `MakeEdgeInFace` (`topology.brep_p5`),
 //!   `GlueEdgesGeneral` (`topology.brep_p7`), `DeleteFace` (`topology.brep_p3`),
 //!   `SmFace::GetVertices` / `GetEdges` / `GetBrep` (`topology.face_p4`),
@@ -336,24 +335,23 @@ pub trait IntersectorBrep<O>: ProtoBrep<O> {
     /// The adapter the topology solver reads the B-reps' cache trees and geometry
     /// through (`SmTopologySolver::BrepPointSolve` / `BrepCurveSolve`).
     fn topology_objects(&self) -> &dyn TopologyObjects<O>;
+    /// The edges of `brep` in its list order (`SmBrep::GetEdges(rEdges)`, unit
+    /// `topology.brep_p1`: `topology::brep::p1::edges` on the B-rep behind the handle).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an unknown B-rep.
+    fn brep_edges(&self, brep: O) -> Result<Vec<O>>;
+    /// The vertices of `brep` in its list order (`SmBrep::GetVertices(rVertices)`, unit
+    /// `topology.brep_p1`: `topology::brep::p1::vertices`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an unknown B-rep.
+    fn brep_vertices(&self, brep: O) -> Result<Vec<O>>;
 }
 
 // ---- unported callees -----------------------------------------------------------------------
-
-/// `SmBrep::GetEdges(rEdges)`.
-fn brep_edges<O>(_brep: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetEdges
-    Err(SolidError::unported("SmBrep::GetEdges", "topology.brep_p1"))
-}
-
-/// `SmBrep::GetVertices(rVertices)`.
-fn brep_vertices<O>(_brep: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetVertices
-    Err(SolidError::unported(
-        "SmBrep::GetVertices",
-        "topology.brep_p1",
-    ))
-}
 
 /// `SmBrep::MakeVertexLoop(pFace, crPoint, rpNewLoop, rpNewVertex)`: the new loop and
 /// vertex.
@@ -1136,11 +1134,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for `SmBrep::GetEdges`; [`SolidError::InvalidInput`]
-    /// without a B-rep.
-    pub fn common_edges(&self) -> Result<(Vec<O>, Vec<O>)> {
+    /// [`SolidError::InvalidInput`] without a B-rep; those of
+    /// [`IntersectorBrep::brep_edges`].
+    pub fn common_edges(&self, geometry: &impl IntersectorBrep<O>) -> Result<(Vec<O>, Vec<O>)> {
         let brep = self.brep.ok_or(dangling("no B-rep"))?;
-        let edges = brep_edges(brep)?;
+        let edges = geometry.brep_edges(brep)?;
         let mut out = (Vec::new(), Vec::new());
         for edge in edges {
             if let Some(o_edge) = self.other_mate(Some(edge)) {
@@ -1156,11 +1154,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for `SmBrep::GetVertices`; [`SolidError::InvalidInput`]
-    /// without a B-rep.
-    pub fn common_vertices(&self) -> Result<(Vec<O>, Vec<O>)> {
+    /// [`SolidError::InvalidInput`] without a B-rep; those of
+    /// [`IntersectorBrep::brep_vertices`].
+    pub fn common_vertices(&self, geometry: &impl IntersectorBrep<O>) -> Result<(Vec<O>, Vec<O>)> {
         let brep = self.brep.ok_or(dangling("no B-rep"))?;
-        let vertices = brep_vertices(brep)?;
+        let vertices = geometry.brep_vertices(brep)?;
         let mut out = (Vec::new(), Vec::new());
         for vertex in vertices {
             if let Some(o_vertex) = self.other_mate(Some(vertex)) {
@@ -2950,8 +2948,7 @@ pub fn find_first_lowest_dimension_sol<O: SolutionObject>(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] for `SmBrep::GetVertices` (`topology.brep_p1`) and the
-/// callees of the solver and manager; `SER` of a failing point solve or
+/// [`SolidError::Unported`] for the callees of the solver and manager; `SER` of a failing point solve or
 /// classification load; [`SolidError::InvalidInput`] for null handles upstream
 /// dereferences.
 pub fn intersect_shell_vertices<O: ClassObject + SolutionObject + Ord>(
@@ -2962,7 +2959,7 @@ pub fn intersect_shell_vertices<O: ClassObject + SolutionObject + Ord>(
     swap_order: bool,
     mgr: &mut ProtoTopologyManager<O>,
 ) -> Result<()> {
-    let vertex_list = brep_vertices(brep1)?;
+    let vertex_list = geometry.brep_vertices(brep1)?;
 
     for vertex in vertex_list {
         // Only shell vertices:
@@ -3042,9 +3039,8 @@ pub fn intersect_shell_vertices<O: ClassObject + SolutionObject + Ord>(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when a `Homogenize` fails; [`SolidError::Unported`] for
-/// `SmBrep::GetEdges` (`topology.brep_p1`), the `SmCurveClassification`
-/// constructor (`intersect.curve_class_p4`), `InsertTopologyIntersections`
+/// `SM_ERR` when a `Homogenize` fails; [`SolidError::Unported`] for the
+/// `SmCurveClassification` constructor (`intersect.curve_class_p4`), `InsertTopologyIntersections`
 /// (`intersect.curve_class_p5`), `Homogenize` (`intersect.curve_class_p6`) and the
 /// callees of the solver and manager; [`SolidError::InvalidInput`] for null handles
 /// upstream dereferences.
@@ -3058,7 +3054,7 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
     ti_approx_tol_3d: f64,
     mgr: &mut ProtoTopologyManager<O>,
 ) -> Result<()> {
-    let edge_list = brep_edges(brep1)?;
+    let edge_list = geometry.brep_edges(brep1)?;
 
     for edge in edge_list {
         let mut process_this = geometry.edge_is_wire(edge)?;

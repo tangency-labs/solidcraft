@@ -4452,7 +4452,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0473",
@@ -4752,7 +4752,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0510",
@@ -5708,7 +5708,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0629",
@@ -6160,7 +6160,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0685",
@@ -6580,7 +6580,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0737",
@@ -6992,7 +6992,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0788",
@@ -7068,7 +7068,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0797",
@@ -7160,7 +7160,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen0808",
@@ -10052,7 +10052,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1169",
@@ -10104,7 +10104,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1175",
@@ -12476,7 +12476,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1471",
@@ -12968,7 +12968,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1532",
@@ -13532,7 +13532,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1602",
@@ -14056,7 +14056,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1667",
@@ -15036,7 +15036,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen1789",
@@ -17440,7 +17440,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2089",
@@ -17820,7 +17820,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2136",
@@ -18424,7 +18424,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2211",
@@ -19060,7 +19060,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2290",
@@ -20136,7 +20136,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2424",
@@ -21692,7 +21692,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2618",
@@ -22040,7 +22040,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2661",
@@ -23020,7 +23020,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2783",
@@ -23048,7 +23048,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2786",
@@ -23596,7 +23596,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2854",
@@ -24464,7 +24464,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "topology.brep_p1"
+        "unit": "geom.solution_array"
       },
       "max_rel_err": 0.0,
       "name": "gen2962",
@@ -24776,7 +24776,7 @@
   "cases_passed": 3057,
   "cases_total": 3083,
   "deferred_by_unit": {
-    "topology.brep_p1": 26
+    "geom.solution_array": 26
   },
   "max_rel_err": 0.0,
   "pass": true,

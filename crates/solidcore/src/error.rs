@@ -50,7 +50,7 @@ pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
 }
 
 /// A reference to one topological entity, used as error context.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntityRef {
     /// A whole B-rep.
     Brep(BrepId),

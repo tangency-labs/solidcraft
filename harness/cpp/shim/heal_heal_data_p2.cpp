@@ -258,6 +258,9 @@ void run_export(Rd& rd, const char* path, std::vector<double>& o, bool lists)
     {
         put_vertex_lists(g, o);
         put_cached_gaps(g, o);
+        // the infinite region (SmBrep::m_pInfiniteRegion), which the shared graph export
+        // does not carry; Fix_InfiniteRegion walks the region list from it
+        o.push_back((double)g.find(0, brep->GetInfiniteRegion()));
     }
     else
         export_graph(brep, g, o);
