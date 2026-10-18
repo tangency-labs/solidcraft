@@ -154,7 +154,7 @@ use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 // SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of SmLineSegClassification /
 // SmPolyPointClassification / SmLineSegInterval: those classes have no Rust type (their
 // constructors are outside the in-scope call graph).
-// UNPORTED(blend.fillet_solver_p1): SmTol::GetAngTolRad(const SmFilletSolver*);
+// SmTol::GetAngTolRad(const SmFilletSolver*) is blend::fillet_solver::p1::tol_ang_tol_rad.
 // UNPORTED(blend.fillet_corner_p1): the SmFilletCorner branch of GetApproxTol3d(SmObject*);
 // the other GetApproxTol3d / GetAngTolRad overloads of algorithm objects (SmHCR,
 // SmPolyIntersector, SmSurfaceIntersector, SmSurfaceTracer, SmTopologyIntersector,

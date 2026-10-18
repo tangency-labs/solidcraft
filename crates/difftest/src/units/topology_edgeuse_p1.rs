@@ -97,14 +97,14 @@ pub(crate) struct CrvIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BssIn {
     #[serde(default)]
-    oob: bool,
+    pub(crate) oob: bool,
     #[serde(default)]
-    form: u8,
-    net: Vec<Vec<[f64; 4]>>,
-    p: usize,
-    q: usize,
-    u: Vec<f64>,
-    v: Vec<f64>,
+    pub(crate) form: u8,
+    pub(crate) net: Vec<Vec<[f64; 4]>>,
+    pub(crate) p: usize,
+    pub(crate) q: usize,
+    pub(crate) u: Vec<f64>,
+    pub(crate) v: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +214,9 @@ pub(crate) fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessErr
                 .ok_or_else(|| harness("empty net row"))?;
             if b.net.iter().any(|r| r.len() != m + 1) {
                 return Err(harness("ragged net"));
+            }
+            if b.u.is_empty() || b.v.is_empty() {
+                return Err(harness("empty knot vector"));
             }
             v.extend([
                 0.0,
@@ -1526,7 +1529,7 @@ pub(crate) fn bspline_of(c: &CrvIn) -> Result<BSplineCurve, HarnessError> {
     Ok(BSplineCurve::from_nurb(cur, c.dim, false))
 }
 
-fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
+pub(crate) fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
     match s {
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(
             Vec3::from_array(*o),
