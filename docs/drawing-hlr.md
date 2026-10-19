@@ -107,14 +107,17 @@ item's index, so the drawing is identical, bit for bit, for any number of thread
 pieces in the same order and the same statistics apart from the phase timings.
 
 - **Thread count.** With `Options::threads` at 0 (the default) a phase uses up to one worker
-  per core, but at most one per 16 curves, 4 grid rows or 256 crossings, so a small view
-  stays on the calling thread. 1 runs everything on the calling thread; a larger number caps
-  the workers. The browser build always runs on the calling thread.
+  per core, but at most one per distinct silhouette tracing, 16 curves, 4 grid rows or 256
+  crossings, so the per-curve phases of a small view stay on the calling thread. 1 runs
+  everything on the calling thread; a larger number caps the workers. The browser build
+  always runs on the calling thread.
 - **Shared silhouettes.** Silhouettes depend on the body and the direction of sight in its
   own frame, not on its position, so placements that share both (repeated parts turned
   alike) share one tracing. This speeds up the browser build too.
-- **Cancellation.** `cancel` is polled before every item and inside long items (every 1024
-  rays, every 65 536 crossing candidates), on whichever thread runs them.
+- **Cancellation.** `cancel` is polled before every item, on whichever thread runs it, and
+  inside long items: between the face sets of a silhouette tracing, at every sampling pass,
+  every 4096 chords cut at left-out faces, every 1024 rays, every 65 536 crossing candidates
+  and every 65 536 coverage checks. The longest uninterrupted step is one surface's tracing.
 - **Errors.** The first error, cancellation included, stops the other workers and is the one
   returned. When two different failures coincide on different threads (a cancellation while
   a budget is exceeded), the error returned may differ from a run on one thread; a successful
@@ -245,7 +248,9 @@ and intervals:
   and curve budgets pass at the serial run's counts and fail one below them on 1 and 4
   threads; cancellation asked only from worker threads ends a parallel run, and a failing or
   panicking item ends the work with its error; scenes over `MAX_ITEMS` placements and trim
-  sample counts out of range are refused;
+  sample counts out of range are refused; sampling one long spline and tracing a body's
+  silhouettes ask for cancellation inside the item; spline points and part hulls come from
+  their own knot spans;
 - torus ray roots for thin, large and nearly tangent cases, and torus silhouettes near
   the axis direction.
 

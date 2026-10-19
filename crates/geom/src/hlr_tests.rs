@@ -3001,3 +3001,105 @@ fn scenes_and_trims_beyond_the_shared_limits_are_refused() {
     assert_eq!(Options::default().max_tracks, crate::section::MAX_ITEMS);
     assert_eq!(MAX_ITEMS, crate::brep::MAX_ITEMS);
 }
+
+/// A disc bounded by one closed cubic spline through `n` control points on a wavy circle of
+/// radius `r`: `n - 3` knot spans, never taken for a circle.
+fn wavy_disc(r: f64, n: usize) -> Brep {
+    let tau = std::f64::consts::TAU;
+    let points: Vec<[f64; 3]> = (0..n)
+        .map(|i| {
+            let a = tau * (i % (n - 1)) as f64 / (n - 1) as f64;
+            let rho = r * (1. + 0.01 * (7. * a).sin());
+            [rho * a.cos(), rho * a.sin(), 0.]
+        })
+        .collect();
+    let spans = n - 3;
+    let knots: Vec<f64> = (0..n + 4).map(|i| (i.saturating_sub(3).min(spans)) as f64 / spans as f64).collect();
+    Brep {
+        version: crate::brep::VERSION,
+        shells: vec![Shell {
+            vertices: vec![points[0]],
+            edges: vec![Edge { vertices: [0, 0], curve: Curve::Spline { knots, points } }],
+            faces: vec![Face {
+                loops: vec![vec![uses(0, true)]],
+                surface: Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] },
+                forward: true,
+            }],
+        }],
+    }
+}
+
+/// The track of a placement's first edge, unsampled.
+fn first_edge_track(def: &Prepared) -> Track<'_> {
+    let e = &def.edges[0];
+    Track {
+        placement: 0,
+        curve: &e.curve,
+        range: e.curve.domain(),
+        source: Source::Edge { edge: 0, tangent: false },
+        acc: e.acc,
+        own: e.faces.clone(),
+        own_eps: 1e-6,
+        samples: Vec::new(),
+        sags: Vec::new(),
+        splits: Vec::new(),
+    }
+}
+
+#[test]
+fn long_items_poll_cancellation_inside_them() {
+    let o = Options::default();
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    // Sampling one long spline is one item: it asks again at every refinement pass.
+    let defs = [prepare(&wavy_disc(50., 1000), &o).unwrap()];
+    let scene = [identity(0, [0.; 3])];
+    let track = first_edge_track(&defs[0]);
+    let polls = AtomicUsize::new(0);
+    let counting = || {
+        polls.fetch_add(1, Ordering::Relaxed);
+        false
+    };
+    let ctx = context(&defs, &scene, &view, &o, &counting).unwrap();
+    let (samples, _) = screen_samples(&track, &ctx).unwrap();
+    assert!(samples.len() > 1000 && polls.load(Ordering::Relaxed) >= 2, "{} samples, {polls:?} polls", samples.len());
+    let ctx = context(&defs, &scene, &view, &o, &|| true).unwrap();
+    assert!(matches!(screen_samples(&track, &ctx), Err(HlrError::Cancelled)));
+    // Tracing a body's silhouettes is one item: it asks again before each surface.
+    let (a, b) = (torus(5., 1.5), torus(9., 1.));
+    let two = prepare(&Brep { version: crate::brep::VERSION, shells: vec![a.shells[0].clone(), b.shells[0].clone()] }, &o).unwrap();
+    let ctx = context(&[], &[], &view, &o, &never).unwrap();
+    assert_eq!(body_silhouettes(&two, view.d, &o, &ctx).unwrap().len(), 2);
+    let polls = AtomicUsize::new(0);
+    let second = || polls.fetch_add(1, Ordering::Relaxed) >= 1;
+    let ctx = context(&[], &[], &view, &o, &second).unwrap();
+    assert!(matches!(body_silhouettes(&two, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+}
+
+#[test]
+fn spline_points_and_hulls_come_from_their_own_knot_spans() {
+    // Uniform knots, and repeated inner knots with an end span of their own.
+    let wavy = wavy_disc(50., 300);
+    let Curve::Spline { knots, points } = &wavy.shells[0].edges[0].curve else { panic!("a spline edge") };
+    let repeated = Curve::Spline {
+        knots: vec![0., 0., 0., 0., 0.2, 0.2, 0.5, 0.5, 0.5, 0.8, 1., 1., 1., 1.],
+        points: (0..10).map(|i| [i as f64, ((i * 7) % 5) as f64, (i % 3) as f64]).collect(),
+    };
+    for curve in [Curve::Spline { knots: knots.clone(), points: points.clone() }, repeated] {
+        let (c, _) = C3::new(&curve).unwrap();
+        let C3::Spline { degree, knots, pieces, .. } = &c else { panic!("a spline") };
+        let [t0, t1] = c.domain();
+        let ts = knots.iter().copied().chain((0..=997).map(|i| t0 + (t1 - t0) * i as f64 / 997.)).filter(|t| *t >= t0 && *t <= t1);
+        for t in ts {
+            // The point from the Bézier piece holding t, against de Boor's.
+            let (span, ctrl) = pieces.iter().find(|(s, _)| s[0] <= t && t <= s[1]).unwrap();
+            let h: Vec<crate::bspline::HPoint> = ctrl.iter().map(|q| crate::bspline::HPoint { x: q[0], y: q[1], z: q[2], w: q[3] }).collect();
+            let q = crate::bspline::bezier_point(&h, (t - span[0]) / (span[1] - span[0])).project().unwrap();
+            assert!(q.dist(c.at(t)) < 1e-9, "t = {t}: {q:?} against {:?}", c.at(t));
+        }
+        // A part's hull holds the control points of exactly the pieces it overlaps.
+        for (a, b) in [(t0, t1), (t0 + 0.3 * (t1 - t0), t0 + 0.31 * (t1 - t0)), (t0 + 0.5 * (t1 - t0), t1)] {
+            let overlapping = pieces.iter().filter(|(s, _)| s[0] < b && s[1] > a).count();
+            assert_eq!(c.hull([a, b]).map_or(0, |h| h.len()), overlapping * (degree + 1), "part {a}..{b}");
+        }
+    }
+}

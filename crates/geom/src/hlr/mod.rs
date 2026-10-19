@@ -781,7 +781,7 @@ pub fn hidden_lines(
     let curves = AtomicUsize::new(edge_tracks);
     let traced = ctx.map(&uses, 1, |&((body, x, y, z), placements)| {
         let Some(def) = defs.get(body) else { return Ok(None) };
-        let sets = body_silhouettes(def, Vec3::new(f64::from_bits(x), f64::from_bits(y), f64::from_bits(z)), opts);
+        let sets = body_silhouettes(def, Vec3::new(f64::from_bits(x), f64::from_bits(y), f64::from_bits(z)), opts, &ctx)?;
         let n = sets.iter().flat_map(|(_, _, sils)| sils).fold(0usize, |n, s| n.saturating_add(s.ranges.len())).saturating_mul(placements);
         if curves.fetch_add(n, Ordering::Relaxed).saturating_add(n) > opts.max_tracks {
             return Err(HlrError::Budget("curve"));
@@ -865,12 +865,10 @@ pub fn hidden_lines(
     }
     stats.tracks = tracks.len();
     // 2. Screen samples.
-    let sampled = ctx.map(&tracks, 16, |t| Ok(scene.get(t.placement).map(|p| screen_samples(t, p, view, scale))))?;
-    for (t, s) in tracks.iter_mut().zip(sampled) {
-        if let Some((samples, sags)) = s {
-            t.samples = samples;
-            t.sags = sags;
-        }
+    let sampled = ctx.map(&tracks, 16, |t| screen_samples(t, &ctx))?;
+    for (t, (samples, sags)) in tracks.iter_mut().zip(sampled) {
+        t.samples = samples;
+        t.sags = sags;
     }
     stats.phase_ms[0] = clock.lap();
     // 3. Crossings between projected curves (and each curve with itself).
@@ -881,7 +879,7 @@ pub fn hidden_lines(
     let shadows = ShadowIndex::new(shadow_boxes(defs, scene, view, &unsupported))?;
     if !shadows.list.is_empty() {
         let checks = AtomicUsize::new(0);
-        let cuts = ctx.map(&tracks, 16, |t| shadow_cuts(t, scene, view, &shadows, &checks))?;
+        let cuts = ctx.map(&tracks, 16, |t| shadow_cuts(t, &ctx, &shadows, &checks))?;
         for (t, c) in tracks.iter_mut().zip(cuts) {
             t.splits.extend(c);
         }
@@ -923,8 +921,9 @@ pub fn hidden_lines(
 
 /// A body's silhouettes seen along `dl` (the direction of sight in its own frame), per set of
 /// supported curved faces on one surface: the set's first face, its largest face and the
-/// traced curves.
-fn body_silhouettes(def: &Prepared, dl: Vec3, opts: &Options) -> Vec<(usize, f64, Vec<silhouette::Sil>)> {
+/// traced curves. Cancellation is polled before each set (one torus takes a few tenths of a
+/// second).
+fn body_silhouettes(def: &Prepared, dl: Vec3, opts: &Options, ctx: &Ctx) -> Result<Vec<(usize, f64, Vec<silhouette::Sil>)>, HlrError> {
     let supported = |f: &FaceData| !(f.freeform && !opts.freeform) && f.trim.unsupported.is_none();
     // Faces on one surface (a sphere in two halves, say) share their silhouettes, keyed by
     // the set's first face: one curve along their seams, not one per face.
@@ -943,6 +942,9 @@ fn body_silhouettes(def: &Prepared, dl: Vec3, opts: &Options) -> Vec<(usize, f64
     }
     let mut out = Vec::with_capacity(sets.len());
     for (fi, members) in sets {
+        if ctx.cancelled() {
+            return Err(HlrError::Cancelled);
+        }
         let Some(f) = def.faces.get(fi) else { continue };
         let parts: Vec<(&S3, &Trim)> = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (&m.surface, &m.trim)).collect();
         let size = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (m.hi - m.lo).len()).fold(0., f64::max);
@@ -950,12 +952,15 @@ fn body_silhouettes(def: &Prepared, dl: Vec3, opts: &Options) -> Vec<(usize, f64
         silhouette::silhouettes(&parts, f.analytic, dl, &mut sils);
         out.push((fi, size, sils));
     }
-    out
+    Ok(out)
 }
 
 /// A track's screen samples and, per chord between them, the distance of the exact projected
-/// curve from it.
-fn screen_samples(t: &Track, p: &Placement, view: &View, scale: f64) -> (Vec<(f64, [f64; 2])>, Vec<f64>) {
+/// curve from it (none when the track's placement is missing). Cancellation is polled at every
+/// refinement pass.
+fn screen_samples(t: &Track, ctx: &Ctx) -> Result<(Vec<(f64, [f64; 2])>, Vec<f64>), HlrError> {
+    let (view, scale) = (&ctx.view, ctx.scale);
+    let Some(p) = ctx.scene.get(t.placement) else { return Ok((Vec::new(), Vec::new())) };
     let c = t.c3();
     let mut ts: Vec<f64> = c.breaks().into_iter().filter(|x| *x > t.range[0] && *x < t.range[1]).collect();
     ts.push(t.range[0]);
@@ -981,6 +986,9 @@ fn screen_samples(t: &Track, p: &Placement, view: &View, scale: f64) -> (Vec<(f6
     if !matches!(c, C3::Line { .. } | C3::Polyline(_)) {
         let target = 1e-7 * scale.max(1.);
         for _ in 0..12 {
+            if ctx.cancelled() {
+                return Err(HlrError::Cancelled);
+            }
             let mut next = Vec::with_capacity(samples.len() * 2);
             let mut split = false;
             for w in samples.windows(2) {
@@ -1012,6 +1020,9 @@ fn screen_samples(t: &Track, p: &Placement, view: &View, scale: f64) -> (Vec<(f6
         CurveAccuracy::Bounded { max_deviation_mm: tol } => tol,
         _ => 0.,
     };
+    if ctx.cancelled() {
+        return Err(HlrError::Cancelled);
+    }
     let sags = samples
         .windows(2)
         .map(|w| {
@@ -1031,17 +1042,22 @@ fn screen_samples(t: &Track, p: &Placement, view: &View, scale: f64) -> (Vec<(f6
                 }
         })
         .collect();
-    (samples, sags)
+    Ok((samples, sags))
 }
 
 /// Where a track's curve crosses the sides of left-out faces' screen boxes, and the ends of the
 /// chords whose curve enters a box that the chord misses. `checks` counts the candidate boxes
 /// over all tracks, whichever thread looked: the shadow budget is for the whole call.
-fn shadow_cuts(t: &Track, scene: &[Placement], view: &View, shadows: &ShadowIndex, checks: &AtomicUsize) -> Result<Vec<f64>, HlrError> {
-    let Some(pl) = scene.get(t.placement) else { return Ok(Vec::new()) };
+/// Cancellation is polled every 4096 chords.
+fn shadow_cuts(t: &Track, ctx: &Ctx, shadows: &ShadowIndex, checks: &AtomicUsize) -> Result<Vec<f64>, HlrError> {
+    let view = &ctx.view;
+    let Some(pl) = ctx.scene.get(t.placement) else { return Ok(Vec::new()) };
     let mut near = Vec::new();
     let mut cuts = Vec::new();
-    for w in t.samples.windows(2) {
+    for (i, w) in t.samples.windows(2).enumerate() {
+        if i % 4096 == 4095 && ctx.cancelled() {
+            return Err(HlrError::Cancelled);
+        }
         let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
         // The curve's own screen box between the two samples: it can reach past the chord,
         // across it or along it (a view along an arc's plane folds it back on itself).
@@ -1804,9 +1820,16 @@ fn cover(lines: &mut [Line], tol: f64, step: f64, ctx: &Ctx) -> Result<(), HlrEr
             // chord's ends and middle yet leave gaps between them). Points between the exact
             // ones lie on the chord, up to the piece's sag from its curve.
             let mut covered = !p.points.is_empty();
-            let mut checks = 0usize;
+            let (mut checks, mut polled) = (0usize, 0usize);
             for w in p.points.windows(2) {
                 let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
+                // A long piece makes many checks: poll between its chords.
+                if checks - polled >= 65536 {
+                    polled = checks;
+                    if ctx.cancelled() {
+                        return Err(HlrError::Cancelled);
+                    }
+                }
                 let k = ((a[0] - b[0]).hypot(a[1] - b[1]) / step).ceil().clamp(1., 1e6) as usize;
                 covered = covered
                     && (0..=k).all(|j| {
