@@ -2111,7 +2111,25 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         let cap = crate::guard("curve blend end", || match tangent {
             Some(side) => tangent_cap(fit, g, *side, both, fit_tolerance),
             None => end_cap(fit, g, &at, both, round, fit_tolerance),
-        })?;
+        });
+        let cap = match (cap, tangent) {
+            // The end face is an earlier round of the other kind ending flush with a wall's end
+            // ([`crate::merge_corner`]): refused as such, whichever round came first.
+            (Err(e), Some(side)) if round => {
+                let (top, other) = if *side == 1 { (side1.get(ke), side2.get(ke)) } else { (side2.get(ke), side1.get(ke)) };
+                let mixed = crate::guard("curve blend end", || {
+                    Ok(match (top.and_then(|i| faces.get(*i)), other.and_then(|i| faces.get(*i)), verts.get(*k)) {
+                        (Some(t), Some(x), Some(v)) => crate::merge_corner::mixed_end(&faces, v, t, x, g, fit_tolerance),
+                        _ => None,
+                    })
+                })
+                .ok()
+                .flatten()
+                .is_some_and(|m| m.earlier_adds == convex);
+                return Err(if mixed { too_large(crate::blend::MIXED_END) } else { e });
+            }
+            (cap, _) => cap?,
+        };
         caps.push((*k, ke, cap.0, cap.1, cap.2));
     }
     // Both ends of one edge cut back: the contacts must keep a piece between them.

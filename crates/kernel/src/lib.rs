@@ -90,6 +90,7 @@ mod loft_region_tests;
 mod loopblend;
 mod matchsurf;
 mod measure;
+mod merge_corner;
 mod mesh_convert;
 mod meshbody;
 #[cfg(test)]

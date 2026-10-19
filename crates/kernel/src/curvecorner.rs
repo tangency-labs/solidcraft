@@ -800,11 +800,26 @@ pub(crate) fn corner_blend_style(solid: &Solid, ids: &[mt::EdgeID], size: f64, r
         touched.insert(e.front().id(), e.front().clone());
         touched.insert(e.back().id(), e.back().clone());
     }
-    for vid in touched.keys() {
+    // In a fixed order (by position): the work, the result and the refusal (the first vertex
+    // refused) don't depend on hashing.
+    let mut order_v: Vec<(&mt::VertexID, &mt::Vertex)> = touched.iter().collect();
+    order_v.sort_by(|a, b| {
+        let (p, q) = (vtx(a.1), vtx(b.1));
+        p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(p.z.total_cmp(&q.z))
+    });
+    // The edges at a vertex in a fixed order too: by their middles.
+    let by_middle = |ids: &HashSet<mt::EdgeID>| -> Vec<mt::EdgeID> {
+        let mut list: Vec<(mt::EdgeID, Vec3)> =
+            ids.iter().map(|id| (*id, edges.get(id).and_then(crate::blend::edge_mid).unwrap_or_default())).collect();
+        list.sort_by(|(_, p), (_, q)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(p.z.total_cmp(&q.z)));
+        list.into_iter().map(|(id, _)| id).collect()
+    };
+    for (vid, v) in order_v.iter().copied() {
         let (eids, fids) = at_vertex.get(vid).ok_or_else(|| fail("vertex"))?;
         if eids.len() != 3 || fids.len() != 3 {
             return Err(unsupported("blends ending where more than three edges meet"));
         }
+        let eids = by_middle(eids);
         let chosen: Vec<&mt::EdgeID> = eids.iter().filter(|id| sides.contains_key(id)).collect();
         if chosen.len() >= 2 && chosen.iter().any(|id| sides.get(*id).is_none_or(|s| s.2 > 0.0)) {
             return Err(unsupported("concave blends meeting at a corner"));
@@ -815,7 +830,6 @@ pub(crate) fn corner_blend_style(solid: &Solid, ids: &[mt::EdgeID], size: f64, r
         // A blended edge running on smoothly into one that isn't: the blend follows it there
         // (a chain round the corner, blended elsewhere), unless it is an earlier round's arc of
         // this radius, which the blend ends in. Round a smaller one the ball can't.
-        let v = touched.get(vid).ok_or_else(|| fail("vertex"))?;
         let leaves = |e: &mt::Edge| {
             use mt::BoundedCurve;
             let c = e.curve();
@@ -859,13 +873,7 @@ pub(crate) fn corner_blend_style(solid: &Solid, ids: &[mt::EdgeID], size: f64, r
         let mut consumed: HashSet<mt::EdgeID> = HashSet::new();
         // Vertices a blend takes in (an earlier round's corner past the end of its edge).
         let mut gone: HashMap<mt::VertexID, mt::Vertex> = HashMap::new();
-        // In a fixed order (by position): the work and the result don't depend on hashing.
-        let mut order_v: Vec<(&mt::VertexID, &mt::Vertex)> = touched.iter().collect();
-        order_v.sort_by(|a, b| {
-            let (p, q) = (vtx(a.1), vtx(b.1));
-            p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(p.z.total_cmp(&q.z))
-        });
-        for (vid, vert) in order_v {
+        for (vid, vert) in order_v.iter().copied() {
             let v = vtx(vert);
             let (eids, _) = at_vertex.get(vid).ok_or_else(|| fail("vertex"))?;
             let mut chosen: Vec<mt::EdgeID> = eids.iter().filter(|id| sides.contains_key(id)).copied().collect();

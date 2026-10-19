@@ -6,7 +6,7 @@ use mt::{BoundedCurve, ParametricCurve, ParametricSurface, ParametricSurface3D, 
 use super::*;
 use crate::blend::plane_normal;
 use crate::issue_851_tests::planned_volume;
-use crate::{Body, BoolOp, boolean, cylinder, fillet};
+use crate::{Body, BoolOp, boolean, box_solid, cylinder, fillet};
 
 #[test]
 fn issue_1303_chamfer_open_rim_after_end_chamfer() {
@@ -986,4 +986,83 @@ fn round_the_foot_of_a_wall_over_drafted_plate_sides() {
             assert!(planned_volume(&result) > planned_volume(&body), "draft {degrees} r {r}");
         }
     }
+}
+
+/// [`wall_on_a_plate`] with the plate's three outer corners rounded 3, and points on the lines of
+/// the plate's outer top edge from one end of the wall to the other.
+fn plate_with_round_corners() -> (Body, Vec<Vec3>) {
+    let outline =
+        [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
+    let body = fillet(&wall_on_a_plate(), &outline[1..4].iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect::<Vec<_>>(), 3.0).unwrap();
+    (body, outline.windows(2).map(|w| (w[0] + w[1]) * 0.5 + Vec3::new(0.0, 0.0, 2.0)).collect())
+}
+
+/// The number of edges in the smooth chain through the edge of `body` nearest `p`.
+fn chain_at(body: &Body, p: Vec3) -> usize {
+    let all = Body::unique_edges(&body.solid);
+    let (i, _) = body.nearest_edge(p, 1e-3).unwrap().unwrap();
+    crate::blend::smooth_chain(&body.solid, &all[i]).unwrap().len()
+}
+
+#[test]
+fn a_chain_ends_at_the_end_of_an_earlier_round_of_the_other_kind() {
+    // Each round's end runs on smoothly from the other round's edge: the plate's top edge into the
+    // end of the round at the wall's foot (up the plate's side and on up the wall's end), the foot
+    // into the end of the round along the plate's edge (down the wall's face and on down the
+    // plate's side). The rolling ball does not run on there: the chains end where they meet the
+    // earlier round, as they did before it.
+    let (body, outline) = plate_with_round_corners();
+    let foot = Vec3::new(10.0, 2.0, 2.0);
+    // The foot: its two lines and the wall corner's round. The plate's edge: four lines and the
+    // three corners' rounds.
+    assert_eq!(chain_at(&body, foot), 3);
+    assert_eq!(chain_at(&body, outline[0]), 7);
+    for r in [0.5, 1.0] {
+        let footed = round_the_foot(&body, r).unwrap();
+        assert_eq!(chain_at(&footed, outline[0]), 7, "r {r}");
+        let edged = fillet(&body, &outline, r).unwrap();
+        assert_eq!(chain_at(&edged, foot), 3, "r {r}");
+    }
+}
+
+#[test]
+fn a_chain_runs_on_into_an_earlier_round_of_its_own_kind() {
+    // Untouched bodies keep their chains: the wall's foot, and a box's top loop round its rounded
+    // corners. A top edge of a box runs on over the end of an earlier round along the next top edge
+    // (both take material away) and down the box's corner.
+    let foot = Vec3::new(10.0, 2.0, 2.0);
+    assert_eq!(chain_at(&wall_on_a_plate(), foot), 3);
+    let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 8.0, 6.0)).unwrap();
+    let corners = [Vec3::new(0.0, 0.0, 3.0), Vec3::new(10.0, 0.0, 3.0), Vec3::new(10.0, 8.0, 3.0), Vec3::new(0.0, 8.0, 3.0)];
+    assert_eq!(chain_at(&fillet(&block, &corners, 1.0).unwrap(), Vec3::new(5.0, 0.0, 6.0)), 8);
+    let edged = fillet(&block, &[Vec3::new(5.0, 0.0, 6.0)], 1.0).unwrap();
+    assert_eq!(chain_at(&edged, Vec3::new(0.0, 4.0, 6.0)), 3);
+}
+
+#[test]
+fn rounds_meeting_at_the_wall_ends_are_refused_alike_in_any_order() {
+    // The round at the wall's foot (adding material) and the round along the plate's top edge
+    // (taking it away) meet at both ends of the wall. Each alone is built; together, one after the
+    // other either way round, in one fillet or each at its own radius, they are refused, and
+    // always with the same refusal.
+    let (body, outline) = plate_with_round_corners();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    let both: Vec<Vec3> = foot.iter().chain(&outline).copied().collect();
+    let expected = KernelError::TooLarge(crate::blend::MIXED_END.into());
+    for (ra, rb) in [(0.5, 0.5), (1.0, 1.0), (1.0, 0.5), (0.5, 1.0)] {
+        let footed = round_the_foot(&body, ra).unwrap();
+        let edged = fillet(&body, &outline, rb).unwrap();
+        assert_eq!(fillet(&footed, &outline, rb).unwrap_err(), expected, "foot {ra} then edge {rb}");
+        assert_eq!(round_the_foot(&edged, ra).unwrap_err(), expected, "edge {rb} then foot {ra}");
+        let radii: Vec<f64> = foot.iter().map(|_| ra).chain(outline.iter().map(|_| rb)).collect();
+        assert_eq!(crate::fillet_each(&body, &both, &radii).unwrap_err(), expected, "each, foot {ra} edge {rb}");
+        if ra == rb {
+            assert_eq!(fillet(&body, &both, ra).unwrap_err(), expected, "together {ra}");
+        }
+    }
+    // No smaller radius gets round it: the search for one gives up at once.
+    let footed = round_the_foot(&body, 0.5).unwrap();
+    assert!(crate::fillet_max(&footed, &outline, 0.5).is_none());
+    assert!(crate::fillet_max_each(&footed, &outline, 0.5).is_none());
 }
