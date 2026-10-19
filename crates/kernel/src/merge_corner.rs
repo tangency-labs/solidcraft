@@ -20,7 +20,7 @@ use solidcraft_geom::Vec3;
 use truck_modeling as mt;
 
 use crate::blend::{plane_normal, unsupported};
-use crate::body::from_p3;
+use crate::body::{from_p3, p3};
 use crate::curveblend::project;
 use crate::{KernelError, Result, guard};
 
@@ -87,6 +87,16 @@ pub(crate) struct Zone {
     pub(crate) q_s: Vec3,
     /// Whether the patch's own normal (`∂X/∂t × ∂X/∂τ`) points out of the solid.
     pub(crate) faces_out: bool,
+}
+
+/// The band as a B-rep face, and its edges by where they lie: `Γ_A` from `P*` to `q_W`, `L`'s piece
+/// from `q_W` down to `q_S`, and `Γ_B` from `P*` to `q_S`, whichever way the face's loop runs them.
+#[derive(Clone, Debug)]
+pub(crate) struct Band {
+    pub(crate) face: mt::Face,
+    pub(crate) gamma_a: mt::Edge,
+    pub(crate) on_l: mt::Edge,
+    pub(crate) gamma_b: mt::Edge,
 }
 
 /// The band as a face: its surface with the normal out of the solid, and its boundary from `P*`,
@@ -311,7 +321,11 @@ impl Zone {
     }
 
     /// The patch `X(t, τ)` over `t ∈ [0, 1]`, `τ ∈ [0, R/2]`, of degree (4, 1): the band is the part
-    /// `τ ≤ τ_B(t)`. Its numerator is `N_A(t) + τ·(1 + t²)·d̃(t)` over the weight `1 + t²`.
+    /// `τ ≤ τ_B(t)`. Its numerator is `N_A(t) + τ·(1 + t²)·d̃(t)` over the weight `1 + t²`. As a
+    /// surface its parameters are `(t, σ)`, `σ = τ/R ∈ [0, 1/2]`, the trim `σ ≤ t/(1 + t²)`: free of
+    /// the part's size like `t`, so the trim's corner at `P*` is 45° in the parameters at any scale
+    /// (in `τ` it narrows to `atan R`, which a mesher working in the parameters cannot follow on a
+    /// small part).
     pub(crate) fn patch(&self) -> Result<mt::NurbsSurface<mt::Vector4>> {
         let [a0, a1, a2, a3] = self.power_a();
         let along = self.lambda / self.c();
@@ -322,24 +336,30 @@ impl Zone {
         let far: Vec<mt::Vector4> = near.iter().zip(&d).map(|(a, d)| *a + *d * top).collect();
         let ctrl: Vec<Vec<mt::Vector4>> = bernstein(&near).into_iter().zip(bernstein(&far)).map(|(a, b)| vec![a, b]).collect();
         guard("merge corner patch", || {
-            let knots = (mt::KnotVec::bezier_knot(4), mt::KnotVec::from(vec![0.0, 0.0, top, top]));
+            let knots = (mt::KnotVec::bezier_knot(4), mt::KnotVec::from(vec![0.0, 0.0, 0.5, 0.5]));
             let surface = mt::BSplineSurface::try_new(knots, ctrl).map_err(|e| KernelError::Failed(format!("merge corner patch: {e}")))?;
             Ok(mt::NurbsSurface::new(surface))
         })
     }
 
+    /// The patch with its normal out of the solid: as it is when it faces out, with its
+    /// parameters swapped (`(σ, t)`) otherwise.
+    pub(crate) fn outward_patch(&self) -> Result<mt::NurbsSurface<mt::Vector4>> {
+        let mut surface = self.patch()?;
+        if !self.faces_out {
+            guard("merge corner patch", || {
+                surface.swap_axes();
+                Ok(())
+            })?;
+        }
+        Ok(surface)
+    }
+
     /// The band as a face: `Γ_A` from `P*` to `q_W`, `L` down to `q_S`, `Γ_B` back to `P*` when the
     /// patch faces out; the other way round on the patch with its parameters swapped otherwise.
     pub(crate) fn trimmed(&self) -> Result<Trimmed> {
-        let (a, b, patch) = (self.curve_a()?, self.curve_b()?, self.patch()?);
-        let line = |from: Vec3, to: Vec3| {
-            guard("merge corner line", || {
-                let curve = mt::BSplineCurve::try_new(mt::KnotVec::bezier_knot(1), vec![h(from, 1.0), h(to, 1.0)])
-                    .map_err(|e| KernelError::Failed(format!("merge corner line: {e}")))?;
-                Ok(mt::NurbsCurve::new(curve))
-            })
-        };
-        let (along_l, back_l) = (line(self.q_w, self.q_s)?, line(self.q_s, self.q_w)?);
+        let (a, b, surface) = (self.curve_a()?, self.curve_b()?, self.outward_patch()?);
+        let (along_l, back_l) = (segment(self.q_w, self.q_s)?, segment(self.q_s, self.q_w)?);
         guard("merge corner face", || {
             let back = |c: &mt::NurbsCurve<mt::Vector4>| {
                 let mut c = c.clone();
@@ -347,14 +367,52 @@ impl Zone {
                 c
             };
             if self.faces_out {
-                Ok(Trimmed { edges: [a.clone(), along_l, back(&b)], surface: patch, corners: [self.p_star, self.q_w, self.q_s] })
+                Ok(Trimmed { edges: [a.clone(), along_l, back(&b)], surface, corners: [self.p_star, self.q_w, self.q_s] })
             } else {
-                let mut surface = patch;
-                surface.swap_axes();
                 Ok(Trimmed { edges: [b.clone(), back_l, back(&a)], surface, corners: [self.p_star, self.q_s, self.q_w] })
             }
         })
     }
+
+    /// The band as a B-rep face on the vertices `p_star`, `q_w` and `q_s` (each within `tolerance`
+    /// of its point), its normal out of the solid: new edges `Γ_A`, `L`'s piece and `Γ_B` on the
+    /// exact curves, which the faces beside the band take as they are or turned round.
+    pub(crate) fn band(&self, p_star: &mt::Vertex, q_w: &mt::Vertex, q_s: &mt::Vertex, tolerance: f64) -> Result<Band> {
+        if !(tolerance.is_finite() && tolerance >= 0.0) {
+            return Err(KernelError::Invalid("merge corner: tolerance not finite".into()));
+        }
+        let placed = [(p_star, self.p_star), (q_w, self.q_w), (q_s, self.q_s)];
+        if placed.iter().any(|(v, at)| !(from_p3(v.point()).dist(*at) <= tolerance)) {
+            return Err(KernelError::Failed("merge corner: a corner of the band is not where the band needs it".into()));
+        }
+        let (a, b, surface) = (self.curve_a()?, self.curve_b()?, self.outward_patch()?);
+        let l = mt::Curve::Line(mt::Line(p3(self.q_w), p3(self.q_s)));
+        let faces_out = self.faces_out;
+        guard("merge corner band", || {
+            let edge = |from: &mt::Vertex, to: &mt::Vertex, c: mt::Curve| {
+                mt::Edge::try_new(from, to, c).map_err(|e| KernelError::Failed(format!("merge corner band: {e}")))
+            };
+            let (gamma_a, on_l, gamma_b) =
+                (edge(p_star, q_w, mt::Curve::NurbsCurve(a))?, edge(q_w, q_s, l)?, edge(p_star, q_s, mt::Curve::NurbsCurve(b))?);
+            let wire: mt::Wire = if faces_out {
+                vec![gamma_a.clone(), on_l.clone(), gamma_b.inverse()].into()
+            } else {
+                vec![gamma_b.clone(), on_l.inverse(), gamma_a.inverse()].into()
+            };
+            let face = mt::Face::try_new(vec![wire], mt::Surface::NurbsSurface(surface))
+                .map_err(|e| KernelError::Failed(format!("merge corner band: {e}")))?;
+            Ok(Band { face, gamma_a, on_l, gamma_b })
+        })
+    }
+}
+
+/// The straight edge from `from` to `to`, as a degree-1 NURBS.
+fn segment(from: Vec3, to: Vec3) -> Result<mt::NurbsCurve<mt::Vector4>> {
+    guard("merge corner line", || {
+        let curve = mt::BSplineCurve::try_new(mt::KnotVec::bezier_knot(1), vec![h(from, 1.0), h(to, 1.0)])
+            .map_err(|e| KernelError::Failed(format!("merge corner line: {e}")))?;
+        Ok(mt::NurbsCurve::new(curve))
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
