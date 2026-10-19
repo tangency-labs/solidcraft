@@ -15,7 +15,7 @@
 //! points, short lists and operations other than union / intersection / difference /
 //! merge for `SmApiMergeBreps`, which must leave the list untouched). Cases that pass
 //! validation reach `SmMerge` and are deferred on the Rust side (`boolean.merge_p2`,
-//! `boolean.merge_p3`). Every run has at least [`MIN_GENERATED`] generated cases.
+//! `topology.brep_p2`, `topology.brep_p3`). Every run has at least [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -266,7 +266,7 @@ fn unexpected_success() -> Result<Output, HarnessError> {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let two = |r: solidcore::Result<()>| match r {
         Ok(()) => unexpected_success(),
         Err(e) => Ok(err_output(&e)),
@@ -298,7 +298,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             operation,
         } => {
             let mut v = breps(list.len());
-            match api::merge_breps(&k, &mut v, op(*operation)?) {
+            match api::merge_breps(&mut k, &mut v, op(*operation)?) {
                 Ok(_) => unexpected_success(),
                 Err(e) if e.is_unported() => Ok(err_output(&e)),
                 Err(e) => {
@@ -315,7 +315,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             breps2,
             operation,
         } => two(api::boolean_lists(
-            &k,
+            &mut k,
             &breps(breps1.len()),
             &[],
             &breps(breps2.len()),
@@ -324,9 +324,20 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         )
         .map(|_| ())),
         Inputs::Trees { breps: list, tree } => {
-            let mut v = breps(list.len());
-            let mut t = tree.clone();
-            two(api::boolean_trees(&k, &mut v, &mut t))
+            let mut v = breps(list.len()).into_iter().map(Some).collect();
+            match api::boolean_trees(&mut k, &mut v, tree) {
+                Ok(()) if v.is_empty() => {
+                    Ok(Output::new().int("status", 0).ints("record", vec![0]))
+                }
+                // The output record requires IsManifoldSolid for each resulting
+                // operand. Stand-ins are never inspected for a fake shape value.
+                // UNPORTED(topology.brep_p2): SmBrep::IsManifoldSolid
+                Ok(()) => Ok(Output::deferred(
+                    "topology.brep_p2",
+                    "SmBrep::IsManifoldSolid",
+                )),
+                Err(error) => Ok(err_output(&error)),
+            }
         }
     }
 }

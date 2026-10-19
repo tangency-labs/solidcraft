@@ -9538,30 +9538,105 @@ Difftest (`fixtures/heal.stitch_p1/constructed.json`: the SM_API_test box tests,
   valgrind with `harness/valgrind/ub11.supp` gives 0 errors on the simple, unify, select and split
   samples.
 
-## heal.stitch_p2 (`SmStitch.cpp` part 2: `DoStitching`, `StitchIntoSolid`, `StitchIntoShell`, one-list `StitchVertexPairs`, `SplitEdgesWithVertices`; PR #205, 2026-10-17; partial, no disagreements)
+## boolean.merge_p4 — current coverage and kernel adapter (PR #243)
 
-- **Co-port with `heal.stitch_p1` (#196).** p1 owns the `Stitch` struct, the callback and
-  the `SM_API` entry points; p2 adds `impl Stitch` members in `heal::stitch::p2` and wired
-  p1's three `UNPORTED(heal.stitch_p2)` API stubs (`SmApiStitchIntoSolid`,
-  `SmApiStitchIntoShell`, `SmApiStitchAdvanced`). The harness is p2's own (same B-rep
-  blocks and export as p1's, copied, so fixtures are interchangeable).
-- **Mostly deferred by design.** `DoStitching` starts with `SmBrep::Notify`
-  (`topology.brep_p2`), so every `DoStitching` case, every `StitchIntoShell` case with a
-  positive tolerance and the three API entry points defer there; `StitchIntoSolid` defers
-  at `SmBrep::CalculateBoundingBox` (`query.brep`). Neither has a passing case. When
-  those land, `DoStitching` runs into `GlueVertices` / `FindAndSetInfiniteRegion`
-  (`topology.brep_p5`), `SqueezeEdge` / `DeleteFace` (`topology.brep_p3`),
-  `GlueEdgesGeneral` (`topology.brep_p7`), `MakeVertexSplitEdge` (`topology.brep_p9`)
-  and `SmFace::IsLamina` / `IsDegenerate` / `Notify` (`topology.face_p3`); the runner
-  already emits the full outputs and the B-rep digest after the op.
-- **What the passes cover.** One-list `StitchVertexPairs`: the sorting, coincidence scan,
-  gap bookkeeping, `SelectTopologyToKeep` and the manifold / squeeze skips (the glue is
-  deferred). `SplitEdgesWithVertices`: the per-vertex `sm_TestAndSplitEdge` drops, far and
-  close-to-boundary outcomes (an interior split defers at `MakeVertexSplitEdge`).
-  `StitchIntoShell`: only the path where the doubling loop never runs (`max_tol <= 0`).
-- **Guards.** `-3` (upstream never returns): `StitchIntoShell` when `max_tol / 100`
-  underflows to zero (HANG-33, confirmed by a C++ run), `StitchIntoSolid` from a zero
-  or negative B-rep tolerance (HANG-24; a non-finite diagonal ends or skips the loop).
-  The FFI refuses a vertex repeated in the one-list `StitchVertexPairs` list (UB-178).
-  Upstream defects kept by the port: WR-186 (`DoStitching`'s sticky candidate flags),
-  WR-187 (a cancelled squeeze reported as done), UB-197 (stale edge after a failed glue with `m_bIgnoreProblems`).
+`SmMerge::ManifoldBoolean` calls `SmTopologyIntersector::CloseIntersectionLoop`
+at `source/SMLib/src/SmMerge.cpp:2958`, defined at
+`source/SMLib/src/SmTopologyIntersector.cpp:6108-6354`. `units.json` omits its
+assignment and lists it as unused despite the live call. Per overseer direction,
+its proposed owner is `boolean.topology_intersector_p2` (#203); the overseer will
+co-port it there. The complete retry/cleanup tail follows the stub. COORD requires
+#203 to recheck this label when landing/going green so it cannot remain a stub
+against a green owner without that co-port.
+
+**No success path is compared yet.** Every non-null Rust operand pair stops at
+merge_p1's `SmBrep::CalculateBoundingBox` prerequisite (`query.brep`) before
+mutation. Matches cover null-operand errors only, across all eleven operation
+codes. Status is now data, so those matches compare doing-Boolean/editing flags,
+intersection/component counts and surviving operand graphs as well. Error records
+and success records use the same snapshot path. Native post-state imports are
+used only on the C++ side; the Rust side serializes its own arenas. Shared p10
+serialization compares exact integer topology and geometry samples under 1e-9
+relative tolerance, plus gap initialization and UV fields. No absolute floors.
+These error-state values do not certify the classification/copy/delete/region tail;
+its evidence remains source review. There are zero compared Boolean successes for
+every operation.
+
+**The concrete kernel adapter implements all sixteen required methods.**
+KernelManifoldIntersector owns the existing merge_p1::MergeState<Relations>, one
+notification-record store and no private AttributeStore. Relations is the sole
+face/edge/vertex mate store. Read-only projections feed merge_p1's coincidence and
+region helpers; its typed common-list accessor shares the generic intersector's
+existing list algorithm, and mapped lists retain deterministic other-handle order.
+The adapter calls all four ported merge_p1 stages and merge_p5 wire processing.
+The p5 API is factored around one unchanged collection phase plus vertex copies;
+its paired entry uses each operand's actual mark context and source-context copy
+notifications. The existing single-kernel API remains available.
+
+Object keys use a caller-reserved 28-bit namespace, operand/class tags and arena
+ids. Source-list callback handles resolve to the current lists in caller attributes;
+region propagation resolves actual regions and owner B-rep identities, with no
+copied flags. Surface subsets use canonical B-rep-cache owner identities, including
+shared owners; topology-deleted state is retained by this adapter for editing calls.
+The runner now uses this concrete adapter and its MergeState options. Focused kernel
+tests exercise ported fast paths and distinct-context wiring. They do not change the
+full-operation coverage: no differential case compares past the null checks while
+query.brep blocks the initial temporary-transform prerequisite.
+
+Remaining direct p4 UNPORTED calls and owner statuses (current main: all todo):
+
+| Owner | Callees |
+| --- | --- |
+| boolean.topology_intersector_p2 | IntersectInsertRelate, RemoveRelationship, FixGaps, DeleteFaces; proposed CloseIntersectionLoop owner as above |
+| boolean.merge_p2 | MakeFaceuse |
+| query.brep | Point3DClassify; pre-existing merge_p1 CalculateBoundingBox prerequisite |
+| topology.brep_p2 | IsSheet, IsOrientedSheet, DeleteStaleCaches |
+| topology.brep_p3 | component SmBrep constructor, including its infinite region |
+| topology.brep_p5 | FindAndSetInfiniteRegion, inverse-scope Transform |
+| topology.brep_p9 | OrientSheetSurfaces |
+
+All stub signatures retain upstream arguments/defaults and the caller tail.
+Point3DClassify receives the full PointClassification out-record; PC_REGION and
+region casts remain in the caller. CopyFaces is wired to brep_p7 with native
+merge defaults. No incoming UNPORTED(boolean.merge_p4) sites. Only shared Relations
+face storage and map accessors were extended; no dependency algorithm is co-ported.
+The inverse token encloses the complete operation and restores surviving operands
+through the same kernels/intersector/attributes environment. Editing flags are
+restored even if mark release fails. Split-region handles are captured before
+mutation, including aliasing children, with native old-region selection.
+The shim frees unowned planes on constructor rejection and exports all components.
+The FFI's supported coordinate/dimension domain is bounded at 1e100 via the shared
+reader. Current operand families avoid closed edges; adding closed-wire/circle
+kinds requires rechecking the registered UB-175 path.
+
+Ready verification on sc-builder-5 after merging latest main 154853c7 (a
+progress-only refresh): fmt/include rustfmt, both workspace checks, clippy x2,
+all 1414 kernel tests (eight adapter tests), wasm, p4 difftest, fuzz 2000 and
+perturb passed. The three requested mutants each fail their intended assertion:
+swapped coincidence maps, the wrong region-lookup map, and IsVoid != 0. Every
+mutant was restored; the restored file is byte-identical to its baseline.
+Production code is unchanged from the CLEAN-reviewed 0ceda887.
+
+The touched-unit difftests, coordinate-bound/error-post-state regressions, full
+214-unit green gate and 405-case Valgrind sample below were verified at 0ceda887
+with the same production code. The p4/fuzz/perturb summaries were rerun after
+these test changes and are identical.
+
+```text
+PARTIAL boolean.merge_p4 cases=311 passed=30 failed=0 deferred=278 max_rel_err=0e0 with_values=30 no_values=0 rejected=3 blocked_by=query.brep(278)
+PARTIAL boolean.merge_p1 cases=248 passed=203 failed=0 deferred=45 max_rel_err=0e0 with_values=203 no_values=0 blocked_by=boolean.topology_intersector_p3(4),intersect.surface_drop_lib_p3(18),query.brep(14),topology.brep_p9(3),topology.face_p2(6)
+PARTIAL boolean.merge_p5 cases=140 passed=108 failed=0 deferred=32 max_rel_err=0e0 with_values=108 no_values=0 blocked_by=query.brep(32)
+PARTIAL boolean.topology_intersector_p1 cases=827 passed=690 failed=0 deferred=137 max_rel_err=0e0 with_values=687 no_values=3 blocked_by=query.brep(16),query.face_p1(7),topology.brep_p2(21),topology.face_p2(82),topology.face_p4(11)
+PARTIAL topology.brep_p10 cases=1404 passed=839 failed=0 deferred=565 max_rel_err=0e0 with_values=839 no_values=0 blocked_by=surface.cone_p1(41),surface.sphere(328),surface.surf_of_extrusion_p2(10),surface.surface_p2(96),topology.brep_p2(19),topology.brep_p5(8),topology.face_p2(63)
+FUZZ-PASS boolean.merge_p4 cases=2000 rejected=203 malformed=866 ran=931 differs=0 crashes=0 panics=0 timeouts=0
+SENSITIVE boolean.merge_p4 perturbed=30 detected=30 unperturbed=0 deferred=278 rejected=3 (perturb mode: every perturbed case must FAIL)
+green-par: 214 units, failed=0
+```
+
+All 30 completed p4 comparisons are null-error records with values. No differential
+case compares past the null checks, and Boolean successes remain zero for all
+operations; cases_both_errored=0 is status-as-data encoding. The 405-case/110-seed
+full-leak Valgrind sample matched its baseline byte-for-byte: 0 errors and
+0 definitely/indirectly/possibly lost bytes (544 reachable Rust runtime bytes).
+Every reported partial in the full green gate matches plan status; no plan-green
+unit deferred.

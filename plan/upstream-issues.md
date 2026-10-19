@@ -3104,3 +3104,30 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes for the release build: the sweep-only boundary solve returns U `158.85355268828013`; the assertion conflict and sentinel initialization were confirmed by source inspection. Debug builds were not run.
 - **Severity:** docs / debug assertion.
 - **Rust port:** Matches release C++ rather than enforcing the assertion; derivative orders remain bounded to 3.
+
+#### UB-188. `BooleanTrees` trusts executed leaf indices and binary operand pointers
+
+- **Unit:** `boolean.merge_p3` (PR #245).
+- **Location:** `source/SMLib/src/SmMerge.cpp:1850-1888`, `SmMerge::BooleanTrees`.
+- **Trigger:** an executed nonnegative leaf outside `rBreps` indexes the array unchecked. An executed binary node dereferences its popped primary operand for `GetContext()` and both operands during the zero-tolerance merge constructor; null input slots can arise from repeated leaf indices. A repeated leaf that is never dereferenced by a later binary node is a defined null output and is accepted by the new guard.
+- **How found:** source audit while implementing the postfix evaluator and its FFI guard. No crashing program was executed.
+- **Confirmed: no.** No C++ reproduction was run; the source contains unchecked indexing and null dereferences.
+- **Guard:** the `boolean_merge_p3` FFI and shim simulate reachable leaf consumption and binary stack/null state before building native objects. They preserve safe underflow errors, unknown-operation errors, repeated leaves with no dereference, and unreachable invalid leaves after a definite early error. The Rust evaluator bounds leaf indexing, keeps null slots, and returns `InvalidInput` at an attempted binary null dereference. No exploit fixture is included.
+
+#### WR-196. `BooleanLists` slices derived surfaces into base `SmSurface` objects
+
+- **Unit:** `boolean.merge_p3` (PR #245).
+- **Location:** `source/SMLib/src/SmMerge.cpp`, `SmMerge::BooleanLists`, both input surface-copy loops and the final output surface-copy loop; `source/SMLib/src/SmSurface.cpp:731` (base copy constructor), `source/SMLib/inc/SmSurface.h:1096` (base natural domain).
+- **Trigger:** a nonempty surface list without a preceding B-rep list. The function uses `new (*pContext) SmSurface(*pOrig)` rather than virtual `Copy`. This creates a concrete base object, discards the derived geometry, returns the base's zero natural domain, and makes the subsequent `IsKindOf(SmPlane_TYPE)` false. The intended planar dispatch therefore cannot be selected by these copied derived inputs. The output loop also constructs base-only copies.
+- **How found:** source audit against the base constructor, base `GetNaturalUVDomain`, and the `SM_COMMON` virtual type methods while porting the list branches.
+- **Confirmed: no.** No C++ reproduction was run; this entry records the source-level slicing behavior and the mismatch with the function's stated planar intent.
+- **Rust handling:** the current `SurfaceKind` has no base-only variant. `boolean::merge::p3::copy_base_surface` defers that missing constructor branch specifically to the partial `surface.surface_p1` owner. It does not silently preserve derived geometry by invoking virtual `Surface::copy`; all subsequent list logic remains ported.
+
+#### UB-190. Piecewise imprinting deletes an operand needed by later surfaces
+
+- **Unit:** `boolean.merge_p3` (PR #245).
+- **Location:** `source/SMLib/src/SmMerge.cpp:3103-3110`, `SmMerge::ManifoldBoolean` imprint early return; contrast the normal `SM_BO_PARTIAL_MERGE` retention at `:5056-5062` and `PiecewiseMerge`'s per-surface reuse of `pOtherBrep`.
+- **Trigger:** `PiecewiseMerge` with `SmMergeOptions::m_bImprinting = TRUE` and `m_bKeepOtherBrep = FALSE`, with multiple other surfaces. The first partial merge deletes the original other B-rep. A later surface reassigns its saved pointer and reaches `SmTemporaryBrepTransform` / `CalculateBoundingBox` on freed memory. The early return omits the normal exit's partial-merge exception. Upstream's own piecewise callers do not supply imprinting options.
+- **How found:** source comparison following the overseer's independent diagnostic of `upstream_piecewise_boxes_2` and `_3`, on two 10×10×10 boxes offset by 5 in X. This author did not debug or replay the crashing inputs.
+- **Confirmed:** the separate diagnostic on `sc-builder-4` at `8df5981c` observed SIGSEGV and the original other B-rep's destruction during the first `ManifoldBoolean(SM_BO_PARTIAL_MERGE)` call. The next surface used that freed B-rep. This entry records the source-level lifetime defect; the provided diagnostic is archived in the swarm status directory.
+- **Guard:** before native construction, the FFI and shim refuse family 4 when the other operand is a box (six surfaces), an options pointer is present, imprinting (`mask & 2`) is on, and keep-other (`mask & 16`) is off. A shell-vertex other operand has no surfaces and never enters the per-surface loop (`SmMerge.cpp:394-407,441,772-778`), so it stays accepted, including when the primary is a box. All other families, non-imprinting options, null options, and imprinting with keep-other remain accepted. The two original fixtures assert this specific refusal without executing C++; `mask | 16` variants keep the imprinting branch exercised. No kernel result is fabricated and no Rust dependency deferral is used to label the refusal.

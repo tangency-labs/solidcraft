@@ -33,6 +33,7 @@
 //! | [`TopologyIntersector::relate`]                        | `Relate`                                             |
 //! | [`TopologyIntersector::fixup_end_point_class_mates`]   | `FixupEndPointClassMates`                            |
 //! | [`TopologyIntersector::fixup_mid_point_class_mates`]   | `FixupMidPointClassMates`                            |
+//! | [`TopologyIntersector::clear_relationships`] | mate maps `RemoveAll` (inline call sites) |
 //! | [`TopologyIntersector::set_subset`]                    | `SetSubset`                                          |
 //! | [`check_interior_edge`]                                | `sm_CheckInteriorEdge`                               |
 //! | [`test_and_split_two_edges`]                           | `sm_TestAndSplitTwoEdges`                            |
@@ -50,7 +51,7 @@
 //! | [`TopologyIntersector::subset`]                        | `GetSubset`                                          |
 //! | [`TopologyIntersector::this_ang_tol_rad`], [`TopologyIntersector::set_this_ang_tol_rad`] | `GetThisAngTolRad`, `SetThisAngTolRad` |
 //! | [`IntersectorBrep`]                                    | what the intersector reads from and writes to its two `SmBrep`s |
-//! | [`MateMap`], [`Relations`]                             | `m_pBToO`, `m_pOToB` (edge/vertex subset over [`Brep`] ids; CO-PORTED by `boolean.merge_p1`) |
+//! | [`MateMap`], [`Relations`]                             | `m_pBToO`, `m_pOToB` (face/edge/vertex subset over [`Brep`] ids; shared by `boolean.merge_p1/p4/p5`) |
 //! | [`MateMap::other`], [`MateMap::primary`]               | `GetOtherMate`, `GetBrepMate` over [`Brep`] ids       |
 //! | [`Relations::relate_vertices`]                         | `Relate` of two vertices over [`Brep`] ids            |
 //!
@@ -160,7 +161,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::p5::{DropPoint, DropPointOptions};
 use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
-use crate::topology::{vertex, Brep, EdgeId, VertexId};
+use crate::topology::{vertex, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "boolean::topology_intersector::p1";
 const OP_CHECK_SSI: &str = "boolean::topology_intersector::p1::check_if_have_existing_ssi";
@@ -1350,14 +1351,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     pub fn common_edges(&self, geometry: &impl IntersectorBrep<O>) -> Result<(Vec<O>, Vec<O>)> {
         let brep = self.brep.ok_or(dangling("no B-rep"))?;
         let edges = geometry.brep_edges(brep)?;
-        let mut out = (Vec::new(), Vec::new());
-        for edge in edges {
-            if let Some(o_edge) = self.other_mate(Some(edge)) {
-                out.0.push(edge);
-                out.1.push(o_edge);
-            }
-        }
-        Ok(out)
+        Ok(common_mates(edges, |edge| self.other_mate(Some(edge))))
     }
 
     /// `GetCommonVertices(rVertices, rOtherVertices)`: every B-rep vertex with an other
@@ -1370,14 +1364,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     pub fn common_vertices(&self, geometry: &impl IntersectorBrep<O>) -> Result<(Vec<O>, Vec<O>)> {
         let brep = self.brep.ok_or(dangling("no B-rep"))?;
         let vertices = geometry.brep_vertices(brep)?;
-        let mut out = (Vec::new(), Vec::new());
-        for vertex in vertices {
-            if let Some(o_vertex) = self.other_mate(Some(vertex)) {
-                out.0.push(vertex);
-                out.1.push(o_vertex);
-            }
-        }
-        Ok(out)
+        Ok(common_mates(vertices, |vertex| {
+            self.other_mate(Some(vertex))
+        }))
     }
 
     /// `Relate(pBrepTopo, pOtherTopo)`: mates the two objects. Vertices and edges
@@ -1544,20 +1533,22 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// to intersect (a surface per face, a curve per edge, a vertex per vertex),
     /// replacing any previous subset; an empty list clears it. Always `SM_SUCCESS`.
     pub fn set_subset(&mut self, subset_geometry: &[O]) {
-        // clear out any old Subset SmMapPtrToPtr object
-        self.subset = None;
+        set_subset_objects(&mut self.subset, subset_geometry);
+    }
 
-        // size the new array
-        if !subset_geometry.is_empty() {
-            self.subset = Some(BTreeSet::new());
-        }
-
-        // for every Object in the subset make a subset entry
-        if let Some(set) = &mut self.subset {
-            for &obj in subset_geometry {
-                set.insert(obj);
-            }
-        }
+    /// Clears both canonical mate maps (`m_pBToO->RemoveAll`,
+    /// `m_pOToB->RemoveAll`) without replacing the intersector or its controls.
+    /// The operand constructor must have created both maps first.
+    pub fn clear_relationships(&mut self) -> Result<()> {
+        self.b_to_o
+            .as_mut()
+            .ok_or(dangling("no mate maps"))?
+            .clear();
+        self.o_to_b
+            .as_mut()
+            .ok_or(dangling("no mate maps"))?
+            .clear();
+        Ok(())
     }
 
     /// `GetSubset`: the subset, if one was set.
@@ -3991,6 +3982,41 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
 
 // ---- mate storage of the merge stages (co-ported by boolean.merge_p1, PR #163) -----------
 
+// The same SetSubset operation for generic handles and the concrete merge adapter.
+pub(crate) fn set_subset_objects<O: Copy + Ord>(
+    subset: &mut Option<BTreeSet<O>>,
+    subset_geometry: &[O],
+) {
+    // clear out any old Subset SmMapPtrToPtr object
+    *subset = None;
+
+    // size the new array
+    if !subset_geometry.is_empty() {
+        *subset = Some(BTreeSet::new());
+    }
+
+    // for every Object in the subset make a subset entry
+    if let Some(set) = subset {
+        for &obj in subset_geometry {
+            set.insert(obj);
+        }
+    }
+}
+
+fn common_mates<I: Copy>(
+    order: impl IntoIterator<Item = I>,
+    mate: impl Fn(I) -> Option<I>,
+) -> (Vec<I>, Vec<I>) {
+    let mut out = (Vec::new(), Vec::new());
+    for id in order {
+        if let Some(other) = mate(id) {
+            out.0.push(id);
+            out.1.push(other);
+        }
+    }
+    out
+}
+
 /// The same mate relationship viewed in both operand directions: the `m_pBToO` /
 /// `m_pOToB` pair over one kind of operand-local [`Brep`] arena id, as the merge
 /// stages hold it.
@@ -4020,6 +4046,30 @@ impl<I: Ord + Copy> MateMap<I> {
         self.to_primary.get(&other).copied()
     }
 
+    /// Primary-to-other projection, borrowed by the shared merge helpers.
+    #[must_use]
+    pub fn primary_to_other(&self) -> &BTreeMap<I, I> {
+        &self.to_other
+    }
+
+    /// Other-to-primary projection, borrowed by the shared merge helpers.
+    #[must_use]
+    pub fn other_to_primary(&self) -> &BTreeMap<I, I> {
+        &self.to_primary
+    }
+
+    /// `GetMappedBrepObjects` for this typed class, in other-handle order.
+    #[must_use]
+    pub fn mapped_primary(&self) -> Vec<I> {
+        self.to_primary.values().copied().collect()
+    }
+
+    /// `GetCommonEdges` / `GetCommonVertices`, preserving the supplied B-rep list order.
+    #[must_use]
+    pub fn common(&self, order: impl IntoIterator<Item = I>) -> (Vec<I>, Vec<I>) {
+        common_mates(order, |id| self.other(id))
+    }
+
     /// Record an established pair. Conflicting pairs fail before either map changes.
     /// New geometry is related with [`Relations::relate_vertices`] (`Relate`, with its
     /// tolerance updates) instead.
@@ -4041,9 +4091,11 @@ impl<I: Ord + Copy> MateMap<I> {
     }
 }
 
-/// Edge and vertex mates shared by the merge stages; every id is operand-local.
+/// Face, edge and vertex mates shared by the merge stages; every id is operand-local.
 #[derive(Debug, Default, Clone)]
 pub struct Relations {
+    /// Face mates in both directions; face Relate has no tolerance update.
+    pub faces: MateMap<FaceId>,
     /// Edge mates in both directions.
     pub edges: MateMap<EdgeId>,
     /// Vertex mates in both directions.
@@ -4157,6 +4209,12 @@ mod tests {
             .mapped_brep_objects(ClassObjectKind::Edge)
             .unwrap()
             .is_empty());
+        ti.set_subset(&[F0]);
+        ti.clear_relationships().unwrap();
+        assert_eq!(ti.other_mate(Some(F0)), None);
+        assert_eq!(ti.this_mate(Some(F1)), None);
+        assert_eq!(ti.primary_brep(), Some(H(9, 0)));
+        assert!(ti.subset().unwrap().contains(&F0));
     }
 
     #[test]

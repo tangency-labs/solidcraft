@@ -1,0 +1,7684 @@
+{
+  "cases": [
+    {
+      "name": "op0-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op0-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 0,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op1-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op2-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 2,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op3-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 3,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op4-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 4,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op5-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 5,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op6-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 6,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op7-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 7,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op8-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 8,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op9-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": false,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 9,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-kind0-contexts0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind0-contexts1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind1-contexts0",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind1-contexts1",
+      "inputs": {
+        "primary": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind2-contexts0",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind2-contexts1",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind3-contexts0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": false,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "op10-kind3-contexts1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          3,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "operation": 10,
+        "distinct_contexts": true,
+        "caller_lock": false
+      }
+    },
+    {
+      "name": "null-primary-op0",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 0
+      }
+    },
+    {
+      "name": "null-primary-op1",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 1
+      }
+    },
+    {
+      "name": "null-primary-op2",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 2
+      }
+    },
+    {
+      "name": "null-primary-op3",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 3
+      }
+    },
+    {
+      "name": "null-primary-op4",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 4
+      }
+    },
+    {
+      "name": "null-primary-op5",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 5
+      }
+    },
+    {
+      "name": "null-primary-op6",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 6
+      }
+    },
+    {
+      "name": "null-primary-op7",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 7
+      }
+    },
+    {
+      "name": "null-primary-op8",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 8
+      }
+    },
+    {
+      "name": "null-primary-op9",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 9
+      }
+    },
+    {
+      "name": "null-primary-op10",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 10
+      }
+    },
+    {
+      "name": "null-other-op0",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 0
+      }
+    },
+    {
+      "name": "null-other-op1",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 1
+      }
+    },
+    {
+      "name": "null-other-op2",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 2
+      }
+    },
+    {
+      "name": "null-other-op3",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 3
+      }
+    },
+    {
+      "name": "null-other-op4",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 4
+      }
+    },
+    {
+      "name": "null-other-op5",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 5
+      }
+    },
+    {
+      "name": "null-other-op6",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 6
+      }
+    },
+    {
+      "name": "null-other-op7",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 7
+      }
+    },
+    {
+      "name": "null-other-op8",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 8
+      }
+    },
+    {
+      "name": "null-other-op9",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 9
+      }
+    },
+    {
+      "name": "null-other-op10",
+      "inputs": {
+        "primary": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 10
+      }
+    },
+    {
+      "name": "op0-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 0,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op0-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op0-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op0-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op0-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op0-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 0,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op1-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 1,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op1-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op1-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op1-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op1-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op1-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 1,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op2-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 2,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op2-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op2-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op2-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op2-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op2-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 2,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op3-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 3,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op3-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op3-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op3-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op3-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op3-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 3,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op4-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 4,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op4-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op4-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op4-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op4-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op4-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 4,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op5-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 5,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op5-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op5-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op5-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op5-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op5-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 5,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op6-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 6,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op6-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op6-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op6-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op6-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op6-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 6,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op7-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 7,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op7-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op7-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op7-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op7-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op7-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 7,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op8-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 8,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op8-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op8-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op8-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op8-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op8-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 8,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op9-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 9,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op9-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op9-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op9-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op9-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op9-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 9,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op10-same-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-reverse-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-cross-wire",
+      "inputs": {
+        "primary": [
+          2,
+          -1,
+          0,
+          0,
+          2,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          -1,
+          0,
+          0,
+          2,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-touch-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-half-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          5e-10,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-at-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          1e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-twice-tol-gap",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          2,
+          0,
+          2e-09,
+          0,
+          1,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-overlap-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-equal-sheets",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-tiny-wire",
+      "inputs": {
+        "primary": [
+          2,
+          0,
+          0,
+          0,
+          1e-12,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          1e-12,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-far-translation",
+      "inputs": {
+        "primary": [
+          2,
+          100000000.0,
+          -100000000.0,
+          100000000.0,
+          1,
+          0,
+          0
+        ],
+        "other": [
+          1,
+          100000000.5,
+          -100000000.0,
+          100000000.0,
+          0,
+          0,
+          0
+        ],
+        "operation": 10,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "op10-option0",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op10-option1",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "flags": [
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op10-option2",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "flags": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op10-option3",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "flags": [
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "op10-option4",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "other": [
+          3,
+          0.5,
+          0.5,
+          0,
+          1,
+          1,
+          0
+        ],
+        "operation": 10,
+        "flags": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "manifold": false,
+        "distinct_contexts": true
+      }
+    },
+    {
+      "name": "plane-domain-constructor-rejection",
+      "inputs": {
+        "primary": [
+          3,
+          0,
+          0,
+          0,
+          2000000,
+          1,
+          0
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "operation": 0
+      }
+    }
+  ]
+}

@@ -269,21 +269,53 @@ fn set_field(d: &mut BrepData, field: i64, index: i64, value: i64) -> Result<(),
     // an index past the array is a no-op
     match field {
         0 => d.faces.get_mut(i).into_iter().for_each(|r| r.surface = u),
-        1 => d.faces.get_mut(i).into_iter().for_each(|r| r.start_loop = u),
+        1 => d
+            .faces
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.start_loop = u),
         2 => d.loops.get_mut(i).into_iter().for_each(|r| r.start_eu = u),
         3 => d.loops.get_mut(i).into_iter().for_each(|r| r.vertex = u),
         4 => d.edgeuses.get_mut(i).into_iter().for_each(|r| r.edge = u),
         5 => d.edgeuses.get_mut(i).into_iter().for_each(|r| r.loop_ = u),
-        6 => d.edgeuses.get_mut(i).into_iter().for_each(|r| r.next_eu = value),
+        6 => d
+            .edgeuses
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.next_eu = value),
         7 => d.edges.get_mut(i).into_iter().for_each(|r| r.curve = u),
-        8 => d.edges.get_mut(i).into_iter().for_each(|r| r.prim_eu = value),
-        9 => d.shells.get_mut(i).into_iter().for_each(|r| r.shell_type = u),
-        10 => d.regions.get_mut(i).into_iter().for_each(|r| r.start_shell = u),
-        11 => d.edgeuses.get_mut(i).into_iter().for_each(|r| r.uv_curve = u),
-        12 => d.edgeuses.get_mut(i).into_iter().for_each(|r| r.eu_type = u),
+        8 => d
+            .edges
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.prim_eu = value),
+        9 => d
+            .shells
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.shell_type = u),
+        10 => d
+            .regions
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.start_shell = u),
+        11 => d
+            .edgeuses
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.uv_curve = u),
+        12 => d
+            .edgeuses
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.eu_type = u),
         13 => d.loops.get_mut(i).into_iter().for_each(|r| r.num_eu = u),
         14 => d.faceuses.get_mut(i).into_iter().for_each(|r| r.face = u),
-        15 => d.edges.get_mut(i).into_iter().for_each(|r| r.start_vertex = u),
+        15 => d
+            .edges
+            .get_mut(i)
+            .into_iter()
+            .for_each(|r| r.start_vertex = u),
         _ => return Err(harness("bad set field")),
     }
     Ok(())
@@ -293,7 +325,9 @@ fn apply_patches(d: &mut BrepData, patches: &[PatchIn]) -> Result<(), HarnessErr
     for p in patches {
         match *p {
             PatchIn::ZoneTol(v) => d.zone_tol_3d = v,
-            PatchIn::Manifold(v) => d.manifold = i32::try_from(v).map_err(|_| harness("manifold"))?,
+            PatchIn::Manifold(v) => {
+                d.manifold = i32::try_from(v).map_err(|_| harness("manifold"))?;
+            }
             PatchIn::Healer(v) => d.set_healer_version(v as u64),
             PatchIn::Borrowed(v) => d.is_geom_borrowed = v,
             PatchIn::Stamp(base) => {
@@ -962,6 +996,63 @@ fn export(
     Ok(())
 }
 
+/// Shared post-state snapshot: topology in traversal order, sampled geometry,
+/// and lazy-cache initialization/UV fields not used by the p10 operation runner.
+pub(crate) fn snapshot(b: &Brep) -> Result<Output, HarnessError> {
+    let g = Graph::walk(b).map_err(|e| harness(e.to_string()))?;
+    let mut items = Vec::new();
+    export(b, &g, &BTreeMap::new(), &mut items).map_err(|e| harness(e.to_string()))?;
+    let mut output = to_output(&items).int("validate_only", i64::from(b.validate_only()));
+    // This caller uses the normal relative comparison, not p10's bit audit.
+    output.ints.remove("dbl_bits");
+    output.values.insert(
+        "dbls".into(),
+        items
+            .iter()
+            .filter_map(|x| match x {
+                Item::Dbl(v) => Some(*v),
+                Item::Int(_) => None,
+            })
+            .collect(),
+    );
+    let mut flags = Vec::new();
+    let mut uv = Vec::new();
+    let mut links = Vec::new();
+    for id in &g.faceuses.items {
+        let f = b.faceuse(*id).map_err(|e| harness(e.to_string()))?;
+        let (next, last) = f.sibling_links.unwrap_or((None, None));
+        links.extend([
+            g.faceuses.find(next, FaceuseId::index),
+            g.faceuses.find(last, FaceuseId::index),
+        ]);
+    }
+    for id in &g.edgeuses.items {
+        let e = b.edgeuse(*id).map_err(|e| harness(e.to_string()))?;
+        flags.extend([
+            i64::from(e.drop_curve_fail.is_some()),
+            e.drop_curve_fail
+                .as_ref()
+                .map_or(0, |f| i64::from(f.fail_status)),
+            i64::from(e.drop_curve_fail.as_ref().is_some_and(|f| f.brep.is_some())),
+            i64::from(e.max_edge_face_gap.is_init()),
+            i64::from(e.edge_ccw_edge_gap.is_init()),
+        ]);
+    }
+    for id in &g.vertexuses.items {
+        let v = b.vertexuse(*id).map_err(|e| harness(e.to_string()))?;
+        flags.extend([
+            i64::from(v.vertex_face_gap.is_init()),
+            i64::from(v.vertex_edge_gap.is_init()),
+        ]);
+        uv.extend([v.uv_point.x, v.uv_point.y]);
+    }
+    output = output
+        .ints("gap_initialized", flags)
+        .ints("faceuse_links", links)
+        .values("uv", uv);
+    Ok(output)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.brep_p10"
@@ -1030,12 +1121,18 @@ fn is_part_file(p: &std::path::Path) -> bool {
 
 fn gen_patch(rng: &mut Rng) -> PatchIn {
     match rng.below(10) {
-        0 => PatchIn::ZoneTol(*rng.choose(&[0.0, -1.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-2, 1.0, 1e3]).unwrap_or(&0.0)),
+        0 => PatchIn::ZoneTol(
+            *rng.choose(&[0.0, -1.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-2, 1.0, 1e3])
+                .unwrap_or(&0.0),
+        ),
         1 => PatchIn::Manifold(*rng.choose(&[0, 1, 2]).unwrap_or(&0)),
         2 => PatchIn::Healer(*rng.choose(&[0, 9, 10, 11]).unwrap_or(&10)),
         3 => PatchIn::Borrowed(true),
         4 => PatchIn::Stamp(rng.below(1 << 20)),
-        5 => PatchIn::Scale(*rng.choose(&[1e-6, 1e-3, 0.5, 2.0, 1e3, 1e6, -1.0]).unwrap_or(&1.0)),
+        5 => PatchIn::Scale(
+            *rng.choose(&[1e-6, 1e-3, 0.5, 2.0, 1e3, 1e6, -1.0])
+                .unwrap_or(&1.0),
+        ),
         6 => PatchIn::DropUv(rng.range_i64(1, 5)),
         7 => PatchIn::Set {
             field: rng.range_i64(0, 15),

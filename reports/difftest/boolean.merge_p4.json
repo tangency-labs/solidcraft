@@ -1,0 +1,3646 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-primary-kind0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#0",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-other-kind0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#1",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-primary-kind1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#2",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-other-kind1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#3",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-primary-kind2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#4",
+      "values_compared": 33
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-other-kind2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#5",
+      "values_compared": 33
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-primary-kind3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#6",
+      "values_compared": 149
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-error-surviving-other-kind3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/error_state.json#7",
+      "values_compared": 149
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#0",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#1",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#2",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#3",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#4",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#5",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#6",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#7",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#8",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#9",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#10",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#11",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#12",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#13",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#14",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#15",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#16",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#17",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#18",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#19",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#20",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#21",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#22",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#23",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#24",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#25",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#26",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#27",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#28",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#29",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#30",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#31",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#32",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#33",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#34",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#35",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#36",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#37",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#38",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#39",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#40",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#41",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#42",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#43",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#44",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#45",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#46",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#47",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#48",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#49",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#50",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#51",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#52",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#53",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#54",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#55",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#56",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#57",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#58",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#59",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#60",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#61",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#62",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#63",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#64",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#65",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#66",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#67",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#68",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#69",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#70",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#71",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#72",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#73",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#74",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#75",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#76",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#77",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#78",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#79",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind0-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#80",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind0-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#81",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind1-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#82",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind1-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#83",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind2-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#84",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind2-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#85",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind3-contexts0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#86",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-kind3-contexts1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#87",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#88",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#89",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#90",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#91",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#92",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#93",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#94",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#95",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#96",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#97",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-primary-op10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#98",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#99",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#100",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#101",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#102",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#103",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#104",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#105",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#106",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#107",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#108",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null-other-op10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#109",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#110",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#111",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#112",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#113",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#114",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#115",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#116",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#117",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#118",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#119",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#120",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#121",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#122",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#123",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#124",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op0-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#125",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#126",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#127",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#128",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#129",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#130",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#131",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#132",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#133",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#134",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#135",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#136",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#137",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#138",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#139",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#140",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op1-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#141",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#142",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#143",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#144",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#145",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#146",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#147",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#148",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#149",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#150",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#151",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#152",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#153",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#154",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#155",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#156",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op2-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#157",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#158",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#159",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#160",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#161",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#162",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#163",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#164",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#165",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#166",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#167",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#168",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#169",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#170",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#171",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#172",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op3-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#173",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#174",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#175",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#176",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#177",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#178",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#179",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#180",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#181",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#182",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#183",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#184",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#185",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#186",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#187",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#188",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op4-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#189",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#190",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#191",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#192",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#193",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#194",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#195",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#196",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#197",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#198",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#199",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#200",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#201",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#202",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#203",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#204",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op5-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#205",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#206",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#207",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#208",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#209",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#210",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#211",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#212",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#213",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#214",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#215",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#216",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#217",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#218",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#219",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#220",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op6-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#221",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#222",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#223",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#224",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#225",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#226",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#227",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#228",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#229",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#230",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#231",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#232",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#233",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#234",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#235",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#236",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op7-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#237",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#238",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#239",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#240",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#241",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#242",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#243",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#244",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#245",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#246",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#247",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#248",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#249",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#250",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#251",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#252",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op8-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#253",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#254",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#255",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#256",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#257",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#258",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#259",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#260",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#261",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#262",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#263",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#264",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#265",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#266",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#267",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#268",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op9-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#269",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-same-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#270",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-reverse-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#271",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-cross-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#272",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-touch-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#273",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-half-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#274",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-at-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#275",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-twice-tol-gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#276",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-overlap-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#277",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-equal-sheets",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#278",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-tiny-wire",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#279",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-far-translation",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#280",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-option0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#281",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-option1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#282",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-option2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#283",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-option3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#284",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "op10-option4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#285",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "operation": 0,
+        "other": [-1, 0, 0, 0, 0, 0, 0],
+        "primary": [3, 0, 0, 0, 2000000, 1, 0]
+      },
+      "max_rel_err": 0.0,
+      "name": "plane-domain-constructor-rejection",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native primitive constructor",
+      "source": "fixture:fixtures/boolean.merge_p4/manifold.json#286",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173454",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173455",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173456",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173457",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173458",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173459",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173460",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173461",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "caller_lock": true,
+        "distinct_contexts": true,
+        "flags": [true, true, true, false, false],
+        "manifold": false,
+        "operation": 3,
+        "other": [3.0, -1097154.0389498891, -1291107.4020567166, 1652082.0769459251, 1066639.6313583273, 1889531.1030699569, 1511311.8567386372],
+        "primary": [3.0, -492217.24768014275, -974359.731532743, -774285.612056616, 1200198.3801588735, 1024448.0372159476, 1383968.4573387017]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native primitive constructor",
+      "source": "generated:seed=5645100167085173462",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173463",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173464",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173465",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173466",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "caller_lock": true,
+        "distinct_contexts": false,
+        "flags": [false, false, true, false, true],
+        "manifold": true,
+        "operation": 7,
+        "other": [3.0, 351594.8636454758, 1219415.9551651399, -465092.4365582147, 644442.8958037824, 1242370.4841254135, 1742535.3227861177],
+        "primary": [0.0, 1665983.9473723266, -251009.49071100098, 1311596.9967997489, 1551608.3503889504, 1061744.1756125337, 1464119.332762388]
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native primitive constructor",
+      "source": "generated:seed=5645100167085173467",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173468",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645100167085173469",
+      "values_compared": 0
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 278,
+  "cases_failed": 0,
+  "cases_passed": 30,
+  "cases_rejected": 3,
+  "cases_total": 311,
+  "deferred_by_unit": {
+    "query.brep": 278
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "boolean.merge_p4"
+}

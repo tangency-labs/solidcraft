@@ -30,8 +30,8 @@
 //! operand data with positive box dimensions and a nonzero sphere radius (a failing
 //! constructor is `SC_ERR_ARG`); operation codes of `SmBooleanOperationType` (0 to 10);
 //! at most [`MAX_LIST`] B-reps per list and [`MAX_TREE`] tree nodes in -64..=64; tree
-//! B-rep nodes in range and used at most once (`SmMerge::BooleanTrees` indexes the list
-//! unchecked and clears each entry it takes).
+//! executed B-rep nodes in range and binary operands non-null (`SmMerge::BooleanTrees`
+//! indexes unchecked and clears each leaf slot). Safe repeated leaves remain accepted.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -293,19 +293,7 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             if tree.len() > MAX_TREE {
                 return Err(bad("tree too long"));
             }
-            let mut used = vec![false; breps.len()];
-            for &node in tree {
-                if !(-64..=64).contains(&node) {
-                    return Err(bad("tree node out of -64..=64"));
-                }
-                if let Ok(i) = usize::try_from(node) {
-                    match used.get_mut(i) {
-                        Some(u) if !*u => *u = true,
-                        Some(_) => return Err(bad("tree uses a B-rep twice")),
-                        None => return Err(bad("tree B-rep index out of range")),
-                    }
-                }
-            }
+            super::boolean_merge_p3::validate_tree_nodes(breps.len(), tree)?;
             o.push(9.0);
             push_list(&mut o, breps, 2 * MAX_LIST)?;
             o.push(tree.len() as f64);
@@ -338,4 +326,24 @@ pub fn run(call: &Call) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trees_accept_defined_null_slots_and_guard_only_reachable_dereferences() {
+        let shape = BrepSpec::Box {
+            origin: [0.0; 3],
+            size: [1.0; 3],
+        };
+        let program = |tree| Call::Trees {
+            breps: vec![shape, shape],
+            tree,
+        };
+        assert!(encode(&program(vec![0, 0])).is_ok());
+        assert!(encode(&program(vec![0, 0, -1])).is_err());
+        assert!(encode(&program(vec![-1, 64])).is_ok());
+    }
 }

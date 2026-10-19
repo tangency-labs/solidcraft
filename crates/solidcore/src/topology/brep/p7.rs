@@ -57,9 +57,9 @@
 //!   a failed `GetEnds` keeps the previous end point. A failed `CopyAndAddAnalytics` is
 //!   [`SolidError::InvalidInput`] (upstream then dereferences the null copy), as is
 //!   `pbOptCrvOnSurf` without UV curves (upstream loops over a null array).
-//! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
-//!   (`topology.brep_p1`); `SmBrep::Notify`, `SetTolerance`, `sm_CheckAndFixUVTrimCurves`,
-//!   `RebuildUVTrimCurves` (`topology.brep_p2`); `MakeWireEdge`, `MakeWireEdgeVertex`
+//! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::Notify`,
+//!   `SetTolerance`, `sm_CheckAndFixUVTrimCurves`, `RebuildUVTrimCurves`
+//!   (`topology.brep_p2`); `MakeWireEdge`, `MakeWireEdgeVertex`
 //!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `MakeShellVertexTopology`
 //!   (`topology.brep_p2`, reached through `topology.brep_p9`'s `MakeShellVertex`);
 //!   `SmFace::GetBrep`, `GetEdges`
@@ -75,6 +75,8 @@
 //!   `MakeFaceTopology` and `TestClosureSplitRegion(faceuse)` call `topology.brep_p6`'s;
 //!   `MakeTopologyFromData` and `TestClosureSplitRegion(edge)` call
 //!   `topology.brep_p10`'s (`ReadFromFile` takes that unit's [`TopologyEnv`]).
+//!   `GetInfiniteRegion` is the inline read [`Brep::infinite_region`], and the glue's
+//!   removal of an emptied region walks `topology.brep_p1`'s region list.
 //!   That `MakeFaceTopology` names the face for its surface's owner before the face
 //!   exists, so it gets the key `this_face` gives the next face id (arenas only append);
 //!   it builds the face on a copy of the surface, which `MakeFace` then replaces with
@@ -104,6 +106,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::InValueType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::brep::p1;
 use crate::topology::brep::p10::{self, MakeTopologyOptions, TopologyEnv};
 use crate::topology::brep::p6;
 use crate::topology::brep_data::BrepData;
@@ -123,25 +126,30 @@ fn null(reason: &'static str) -> SolidError {
 /// `SM_ZONE_TOL_3D / 10.0`: the default point tolerance of the surface degeneracy tests.
 const DEGENERATE_TOL_3D: f64 = crate::geom::tol::ZONE_TOL_3D / 10.0;
 
+/// `SmBrep::Remove(region)` (the inline `SmOwningTopology::Remove`): takes `region` off
+/// the B-rep's region list (`topology.brep_p1`'s [`p1::regions`] order); removing the
+/// list head passes the head to the next region, or `NULL` when the list empties.
+///
+/// # Errors
+///
+/// `SM_ERR` when `region` is not on the list.
+fn brep_remove_region(b: &mut Brep, region: RegionId) -> Result<()> {
+    let list = p1::regions(b, None)?;
+    if !list.contains(&region) {
+        return Err(SolidError::sm_err(OP));
+    }
+    let head = list.first().copied();
+    let new_head = if head == Some(region) {
+        list.get(1).copied()
+    } else {
+        head
+    };
+    b.region_mut(region)?.in_brep = false;
+    b.set_region_list_head(new_head);
+    Ok(())
+}
+
 // ---- unported callees ---------------------------------------------------------------------
-
-/// `GetInfiniteRegion()` (and the raw `m_pInfiniteRegion`).
-fn infinite_region(_b: &Brep) -> Result<RegionId> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::GetInfiniteRegion",
-        "topology.brep_p1",
-    ))
-}
-
-/// `m_pInfiniteRegion = SM_CAST_PTR(SmRegion, m_pList)` after a region was removed.
-fn reset_infinite_region(_b: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p1): SmBrep::SetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::SetInfiniteRegion",
-        "topology.brep_p1",
-    ))
-}
 
 /// `SmBrep::Notify(op, data1, data2, data3)` (`None` for a null datum or for the B-rep,
 /// which has no identity here).
@@ -185,7 +193,7 @@ fn rebuild_uv_trim_curves(_k: &Kernel, _b: &mut Brep) -> Result<()> {
 /// `MakeWireEdge(region, start, end, curve, ivl, orient, rpNewEdge)`.
 fn make_wire_edge(
     _b: &mut Brep,
-    _region: RegionId,
+    _region: Option<RegionId>,
     _start: VertexId,
     _end: VertexId,
     _curve: Curve,
@@ -202,7 +210,7 @@ fn make_wire_edge(
 /// `MakeWireEdgeVertex(region, start, curve, ivl, orient, endPt, rpNewEdge, rpEndVertex)`.
 fn make_wire_edge_vertex(
     _b: &mut Brep,
-    _region: RegionId,
+    _region: Option<RegionId>,
     _start: VertexId,
     _curve: Curve,
     _ivl: Extent1d,
@@ -246,11 +254,11 @@ fn test_closure_split_region_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Re
 /// `MakeShellVertex(region, point, rpNewShell, rpNewVertex)`.
 fn make_shell_vertex(
     b: &mut Brep,
-    region: RegionId,
+    region: Option<RegionId>,
     point: Point3,
     env: &mut ed::NotifyEnv<'_>,
 ) -> Result<(ShellId, VertexId)> {
-    super::p9::make_shell_vertex(b, Some(region), point, env)
+    super::p9::make_shell_vertex(b, region, point, env)
 }
 
 /// `MakeTopologyFromData(pBrepData, sAttributes, bMakeUVTrimCurves, bAddAnalytics,
@@ -418,12 +426,13 @@ fn edge_remove(b: &mut Brep, e: EdgeId, eu: EdgeuseId) -> Result<()> {
 /// Merges `del_shell` into `keep_shell` and drops the empty region (the shell-merging
 /// tails of `GlueEdgesGeneral`).
 fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellId) -> Result<()> {
-    let inf = infinite_region(b)?;
+    // m_pInfiniteRegion (NULL when unset; pointer equality, NULL == NULL)
+    let inf = b.infinite_region();
     let keep_region = eu1::shell_region(b, keep)?;
     let del_region = eu1::shell_region(b, del)?;
-    if keep_region == Some(inf) {
+    if keep_region == inf {
         // ok.
-    } else if del_region == Some(inf)
+    } else if del_region == inf
         // pKeepShell->IsInnerShell(bIsInner): swap when it succeeds with TRUE (asked
         // only when neither region is the infinite one)
         || ignored(b.shell(keep)?.is_inner_shell(k, b))? == Some(true)
@@ -438,9 +447,20 @@ fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellI
     // pReg->Remove(pDelShell), then pReg->GetSize()
     crate::topology::shell::region_remove_shell(b, reg, del)?;
     if b.region(reg)?.shells.is_empty() {
-        b.region_mut(reg)?.in_brep = false;
-        reset_infinite_region(b)?;
+        remove_emptied_region(b, reg)?;
     }
+    Ok(())
+}
+
+/// The tail of the shell merge once `reg` lost its last shell: `this->Remove(pReg)`
+/// (status ignored), then `m_pInfiniteRegion = m_pList`.
+fn remove_emptied_region(b: &mut Brep, reg: RegionId) -> Result<()> {
+    ignore_status(brep_remove_region(b, reg))?;
+    // make sure infinite region points where it should: the first region of the list
+    // (a stored head of None starts at the first region on the list; it is not an
+    // empty list)
+    let head = p1::regions(b, None)?.first().copied();
+    b.set_infinite_region(head);
     Ok(())
 }
 
@@ -518,8 +538,8 @@ pub struct NewFace {
 /// # Errors
 ///
 /// `SM_ERR_NULL_POINTER` without surface; those of the topology build;
-/// [`SolidError::Unported`] (`GetInfiniteRegion`; `SmFace::SetTolerance`, which
-/// `MakeFaceTopology` reaches first).
+/// [`SolidError::Unported`] (`SmFace::SetTolerance`, which `MakeFaceTopology` reaches
+/// first).
 #[allow(clippy::too_many_arguments)]
 pub fn make_face(
     _k: &Kernel,
@@ -537,10 +557,8 @@ pub fn make_face(
     let Some(mut surface) = surface else {
         return Err(SolidError::null_pointer(OP));
     };
-    let region = match region {
-        Some(r) => r,
-        None => infinite_region(b)?,
-    };
+    // GetInfiniteRegion() (an inline field read; NULL when unset)
+    let region = region.or(b.infinite_region());
 
     // get preexisting surface owner
     let old_owner = surface.owner();
@@ -555,7 +573,7 @@ pub fn make_face(
         orientation,
         this_face(next_face).key,
         &p6::FaceTopologyOptions {
-            region: Some(region),
+            region,
             edge_loops: loops,
             edgeuses,
             loop_vertices,
@@ -668,10 +686,8 @@ pub fn make_face_with_curves(
     if loops.is_empty() {
         return Err(SolidError::invalid_input(OP, "no loops"));
     }
-    let region = match region {
-        Some(r) => r,
-        None => infinite_region(b)?,
-    };
+    // GetInfiniteRegion() (an inline field read; NULL when unset)
+    let region = region.or(b.infinite_region());
     // (the surface tests return flags upstream: a failed test is "no")
     if ignored(surface.is_degenerate_curve(EFF_ZERO_DEG, None, DEGENERATE_TOL_3D))?.unwrap_or(false)
     {
@@ -988,7 +1004,7 @@ pub fn make_face_with_curves(
     let made = make_face(
         k,
         b,
-        Some(region),
+        region,
         &sorted_loops,
         &face_edgeuses,
         &loop_vertices,
@@ -1370,8 +1386,9 @@ pub fn copy_faces(
     brep_set_tolerance(dest, src.tolerance(), true, true)?;
     let mut new_faces = Vec::new();
     let mut all_ok = true;
-    // (upstream reads the destination's infinite region before both branches)
-    let inf = infinite_region(dest)?;
+    // (upstream reads the destination's infinite region before both branches; an
+    // inline field read, NULL when unset)
+    let inf = dest.infinite_region();
 
     if use_merge {
         // (the merge object is made before the face loop; MakeFaceuse's status is
@@ -1417,7 +1434,7 @@ pub fn copy_faces(
         match make_face_with_curves(
             k,
             dest,
-            Some(inf),
+            inf,
             input,
             s2,
             &dom,
@@ -1558,6 +1575,46 @@ mod tests {
         }
     }
 
+    fn on_list() -> Region {
+        Region {
+            in_brep: true,
+            ..Region::default()
+        }
+    }
+
+    #[test]
+    fn emptied_region_resets_the_infinite_region_to_the_list_head() {
+        // the region is not on the list (Remove fails, ignored): the head stays, and a
+        // stored head of None is the first region on the list
+        let mut b = Brep::new();
+        let r0 = b.add_region_record(on_list()).unwrap();
+        let r1 = b.add_region_record(Region::default()).unwrap();
+        assert_eq!(b.region_list_head(), None);
+        remove_emptied_region(&mut b, r1).unwrap();
+        assert_eq!(b.infinite_region(), Some(r0));
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r0]);
+
+        // removing the head passes it on; removing the last region empties the list
+        let mut b = Brep::new();
+        let r0 = b.add_region_record(on_list()).unwrap();
+        let r1 = b.add_region_record(on_list()).unwrap();
+        b.set_infinite_region(Some(r0));
+        remove_emptied_region(&mut b, r0).unwrap();
+        assert_eq!(b.infinite_region(), Some(r1));
+        assert_eq!(b.region_list_head(), Some(r1));
+        remove_emptied_region(&mut b, r1).unwrap();
+        assert_eq!(b.infinite_region(), None);
+        assert!(p1::regions(&b, None).unwrap().is_empty());
+
+        // removing a region behind the head keeps the head
+        let mut b = Brep::new();
+        let r0 = b.add_region_record(on_list()).unwrap();
+        let r1 = b.add_region_record(on_list()).unwrap();
+        remove_emptied_region(&mut b, r1).unwrap();
+        assert_eq!(b.infinite_region(), Some(r0));
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r0]);
+    }
+
     fn face_ref(f: FaceId) -> ObjectRef {
         ObjectRef {
             type_code: fp2::TYPE,
@@ -1660,6 +1717,35 @@ mod tests {
             &opts,
             &face_ref,
         );
+        // no infinite region: MakeFaceTopology's NULL region
+        assert!(matches!(
+            e,
+            Err(SolidError::Upstream {
+                code: crate::error::SM_ERR_NULL_POINTER,
+                ..
+            })
+        ));
+        let inf = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        b.set_infinite_region_record(Some(inf));
+        let e = make_face(
+            &k,
+            &mut b,
+            None,
+            &[],
+            &[],
+            &[],
+            Some(plane()),
+            &dom(),
+            OrientType::Same,
+            &opts,
+            &face_ref,
+        );
+        // the infinite region: MakeFaceTopology reaches SmFace::SetTolerance (unported)
         assert!(e.unwrap_err().is_unported());
     }
 
@@ -1714,7 +1800,9 @@ mod tests {
             run(&mut b, input, Some(r)),
             Err(SolidError::InvalidInput { .. })
         ));
-        // the infinite region is unported
+        // a NULL region is the infinite region: a degenerate curve only reaches
+        // unported topology
+        b.set_infinite_region_record(Some(r));
         let input = FaceCurvesInput {
             loops: vec![1],
             curves_3d: Some(vec![None]),

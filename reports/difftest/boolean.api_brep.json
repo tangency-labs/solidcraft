@@ -3,6 +3,34 @@
   "cases": [
     {
       "max_rel_err": 0.0,
+      "name": "merge_p3_empty_forest",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/merge_p3-trees.json#0",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::IsManifoldSolid",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_p3_defined_null_leaf_result",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/merge_p3-trees.json#1",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_p3_unreachable_bad_leaf",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/merge_p3-trees.json#2",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "boolean_extract_separate_rejected",
       "outcome": "pass",
       "pass": true,
@@ -259,8 +287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_union",
@@ -271,8 +299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_intersection",
@@ -283,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_difference",
@@ -295,8 +323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_merge",
@@ -307,8 +335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_three_union",
@@ -319,8 +347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_three_difference",
@@ -379,8 +407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "lists_op0",
@@ -391,8 +419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "lists_op1",
@@ -403,8 +431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "lists_op2",
@@ -415,8 +443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "lists_op3",
@@ -427,8 +455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "lists_op4",
@@ -438,21 +466,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "lists_empty",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#40 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "trees_union",
@@ -463,8 +487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "trees_two_trees",
@@ -474,14 +498,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "trees_not_binary",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#43 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1068)",
       "values_compared": 0
     },
@@ -518,14 +538,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13617184360224744902",
       "values_compared": 0
     },
@@ -563,8 +579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0007",
@@ -575,8 +591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -734,14 +750,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0025",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13617184360224744924",
       "values_compared": 0
     },
@@ -783,8 +795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0030",
@@ -803,8 +815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -875,8 +887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0038",
@@ -919,8 +931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -1075,8 +1087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0058",
@@ -1127,8 +1139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0063",
@@ -1155,8 +1167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0066",
@@ -1231,8 +1243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0074",
@@ -1251,8 +1263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -1263,8 +1275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0077",
@@ -1487,8 +1499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -1507,8 +1519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0103",
@@ -1539,8 +1551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0106",
@@ -1575,8 +1587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0110",
@@ -1623,8 +1635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0115",
@@ -1651,8 +1663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0118",
@@ -1686,14 +1698,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0122",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13617184360224745021",
       "values_compared": 0
     },
@@ -1723,8 +1731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0126",
@@ -1735,8 +1743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0127",
@@ -1747,8 +1755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0128",
@@ -1779,8 +1787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0131",
@@ -1819,8 +1827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0135",
@@ -1831,8 +1839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0136",
@@ -1883,8 +1891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0142",
@@ -1931,8 +1939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -2143,8 +2151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0169",
@@ -2291,8 +2299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0185",
@@ -2303,8 +2311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0186",
@@ -2347,8 +2355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -2395,8 +2403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0196",
@@ -2427,8 +2435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0199",
@@ -2459,8 +2467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0202",
@@ -2510,14 +2518,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0208",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13617184360224745107",
       "values_compared": 0
     },
@@ -2543,8 +2547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0211",
@@ -2579,8 +2583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0215",
@@ -2623,8 +2627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0219",
@@ -2671,8 +2675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::merge_breps",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0223",
@@ -2683,8 +2687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0224",
@@ -2703,8 +2707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0226",
@@ -2722,14 +2726,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0228",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13617184360224745127",
       "values_compared": 0
     },
@@ -2791,8 +2791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanTrees",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0235",
@@ -2803,8 +2803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::BooleanLists",
-        "unit": "boolean.merge_p3"
+        "symbol": "SmBrep::SmBrep(copy)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0236",
@@ -2843,13 +2843,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 142,
+  "cases_deferred": 136,
   "cases_failed": 0,
-  "cases_passed": 142,
-  "cases_total": 284,
+  "cases_passed": 151,
+  "cases_total": 287,
   "deferred_by_unit": {
-    "boolean.merge_p2": 81,
-    "boolean.merge_p3": 61
+    "boolean.merge_p2": 114,
+    "topology.brep_p2": 1,
+    "topology.brep_p3": 21
   },
   "max_rel_err": 0.0,
   "pass": true,
