@@ -4249,7 +4249,7 @@ version = "0.29.0"
 
 [[package]]
 name = "solidcraft-cam"
-version = "0.21.0-rc.2"
+version = "0.23.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4286,6 +4286,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcraft-cam",
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4305,6 +4306,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "solidcraft-cam",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",

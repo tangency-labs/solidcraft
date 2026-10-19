@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use solidcraft_cam::{Cut, Feeds, Heights, Operation, Post, Program, Side, Tool, ToolKind, contour, emit, pocket, readback};
 use solidcraft_doc::cam::{
-    CamOperation, CamSetup, CamSettings, MAX_OPS, MAX_SETUPS, MAX_TOOLS, PolygonRegion, StockBox, default_contour_params, default_cut,
+    CamOperation, CamSettings, CamSetup, MAX_OPS, MAX_SETUPS, MAX_TOOLS, PolygonRegion, StockBox, default_contour_params, default_cut,
     default_pocket_params,
 };
 
@@ -17,9 +17,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         "number (1…9999); kind?: flat_endmill|ball_endmill|drill (default flat_endmill); diameter (mm); flute_length (mm); \
          description?; flutes?; spindle_rpm?; feed?; plunge_feed?; stepdown?; stepover?; delete?: bool",
     ),
-    CommandSpec::new("cam.setup", "CAM Setup", setup_cmd).at("MANUFACTURE", "SETUP").icon("setup").params(
-        "name; work_offset?: 1…6 (G54…G59, default 1); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
-    ),
+    CommandSpec::new("cam.setup", "CAM Setup", setup_cmd)
+        .at("MANUFACTURE", "SETUP")
+        .icon("setup")
+        .params("name; work_offset?: 1…6 (G54…G59, default 1); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool"),
     CommandSpec::new("cam.contour", "2D Contour", contour_cmd).at("MANUFACTURE", "MILLING").icon("contour").params(
         "setup; name; tool (number); outer: [[x,y],…] (or regions: [{outer, holes?}]); holes?: [[[x,y],…]]; \
          side?: outside|inside|on (default outside); climb?: bool (default true); stock_to_leave?; tolerance?; \
@@ -31,10 +32,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          climb?; stock_to_leave?; tolerance?; ramp_angle?: deg; clearance?; retract?; top?; bottom; stepdown?; \
          feed?; plunge_feed?; spindle_rpm?; coolant?; cut?",
     ),
-    CommandSpec::new("cam.delete_op", "Delete CAM Operation", delete_op)
-        .at("MANUFACTURE", "MILLING")
-        .icon("delete")
-        .params("setup; name"),
+    CommandSpec::new("cam.delete_op", "Delete CAM Operation", delete_op).at("MANUFACTURE", "MILLING").icon("delete").params("setup; name"),
     CommandSpec::new("cam.post", "Post Process", post_cmd).icon("post").noundo().params(
         "setup; post?: rs274 | name of a saved post (default rs274); program?: name (default the setup's); \
          verify?: bool (default true: read the G-code back and check it against the toolpaths) → \
@@ -45,7 +43,10 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn tool_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "cam.tool";
-    let number = num(p, "number").filter(|n| *n >= 1.0 && *n <= 9999.0 && n.fract() == 0.0).map(|n| n as u32).ok_or_else(|| bad(cmd, "`number` must be an integer 1…9999"))?;
+    let number = num(p, "number")
+        .filter(|n| *n >= 1.0 && *n <= 9999.0 && n.fract() == 0.0)
+        .map(|n| n as u32)
+        .ok_or_else(|| bad(cmd, "`number` must be an integer 1…9999"))?;
     if bool_(p, "delete").unwrap_or(false) {
         let doc = s.doc_mut();
         let before = doc.cam.tools.len();
@@ -155,7 +156,8 @@ fn pocket_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 fn op_cmd(s: &mut Session, p: &Value, cmd: &str, is_contour: bool) -> Result<Value> {
     let setup_name = str_(p, "setup").map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "`setup` is required"))?.to_string();
     let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
-    let tool_n = num(p, "tool").filter(|n| *n >= 1.0 && n.fract() == 0.0).map(|n| n as u32).ok_or_else(|| bad(cmd, "`tool` must be a tool number"))?;
+    let tool_n =
+        num(p, "tool").filter(|n| *n >= 1.0 && n.fract() == 0.0).map(|n| n as u32).ok_or_else(|| bad(cmd, "`tool` must be a tool number"))?;
     let tool = s.doc.cam.tool(tool_n).cloned().ok_or_else(|| bad(cmd, format!("no tool {tool_n} (cam.tool first)")))?;
     let regions = regions_param(cmd, p)?;
     let cut = cut_param(cmd, p, &tool)?;
@@ -418,7 +420,11 @@ mod tests {
     #[test]
     fn contour_and_pocket_post_to_verified_gcode() {
         let mut s = Session::default();
-        run(&mut s, "cam.tool", json!({"number": 1, "diameter": 6, "flute_length": 20, "spindle_rpm": 8000, "feed": 600, "plunge_feed": 200, "stepdown": 3}));
+        run(
+            &mut s,
+            "cam.tool",
+            json!({"number": 1, "diameter": 6, "flute_length": 20, "spindle_rpm": 8000, "feed": 600, "plunge_feed": 200, "stepdown": 3}),
+        );
         run(&mut s, "cam.setup", json!({"name": "Top", "work_offset": 1, "stock": {"min": [0, 0, -10], "max": [40, 30, 0]}}));
         run(
             &mut s,
