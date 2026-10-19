@@ -103,7 +103,11 @@ fn main() {
     for f in &shims {
         println!("cargo:rerun-if-changed={}", f.display());
     }
-    for h in sorted_files(&shim_dir, "h") {
+    // headers and the `.inc` files a shim includes (not compiled on their own)
+    for h in sorted_files(&shim_dir, "h")
+        .into_iter()
+        .chain(sorted_files(&shim_dir, "inc"))
+    {
         println!("cargo:rerun-if-changed={}", h.display());
     }
     if !shims.is_empty() {

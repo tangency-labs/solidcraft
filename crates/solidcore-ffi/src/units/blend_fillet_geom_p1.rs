@@ -261,12 +261,12 @@ fn bad(msg: impl Into<String>) -> FfiError {
 /// Sequential reader over the input: the shared [`crate::reader::Cursor`] plus this
 /// op's magnitude bound. `unit_reader!` takes a fixed bound, and this unit's bound
 /// depends on the op, so the newtype is spelled out here.
-struct Reader<'a> {
-    cursor: crate::reader::Cursor<'a>,
+pub(crate) struct Reader<'a> {
+    pub(crate) cursor: crate::reader::Cursor<'a>,
     /// The magnitude bound of this op's values: [`MAX_MAGNITUDE`] for the ops reaching
     /// HANG-29, [`MAX_SOLVER_MAGNITUDE`] for the global-solver ops (HANG-20), infinite
     /// otherwise.
-    bound: f64,
+    pub(crate) bound: f64,
 }
 
 impl<'a> core::ops::Deref for Reader<'a> {
@@ -283,7 +283,7 @@ impl core::ops::DerefMut for Reader<'_> {
 }
 
 impl Reader<'_> {
-    fn finite(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > self.bound {
             return Err(bad("non-finite or oversized value"));
@@ -292,7 +292,7 @@ impl Reader<'_> {
     }
 
     /// Exactly `marker` (`NL_NOZ` / `NL_NOW`), or a finite (bounded) value.
-    fn marker_or_finite(&mut self, marker: f64) -> Result<f64, FfiError> {
+    pub(crate) fn marker_or_finite(&mut self, marker: f64) -> Result<f64, FfiError> {
         let v = self.num()?;
         if v == marker {
             return Ok(v);
@@ -303,12 +303,12 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
+    pub(crate) fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
         (0..k).map(|_| self.finite()).collect()
     }
 
     /// An integer in `-1..max` as `None` / `Some`.
-    fn opt_index(&mut self, len: usize) -> Result<Option<usize>, FfiError> {
+    pub(crate) fn opt_index(&mut self, len: usize) -> Result<Option<usize>, FfiError> {
         let v = self.num()?;
         if v == -1.0 {
             return Ok(None);
@@ -422,7 +422,7 @@ fn curve(rd: &mut Reader<'_>, want_dim: usize, what: &str) -> Result<(), FfiErro
 }
 
 /// Reads and validates a surface `n m p q r s cpts u v`.
-fn surface(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+pub(crate) fn surface(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let n = rd.index(MAX_INDEX)?;
     let m = rd.index(MAX_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;
@@ -529,35 +529,35 @@ fn validate_geometry(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 /// What the block declares, for validating the op's arguments.
-struct Block {
-    nt: usize,
-    nf: usize,
-    nfb: usize,
+pub(crate) struct Block {
+    pub(crate) nt: usize,
+    pub(crate) nf: usize,
+    pub(crate) nfb: usize,
     /// Per vertex: the classification object kind (`pc_kind`).
-    pc_kinds: Vec<usize>,
+    pub(crate) pc_kinds: Vec<usize>,
     /// Per edge: whether it has a curve.
-    edge_curves: Vec<bool>,
+    pub(crate) edge_curves: Vec<bool>,
     /// Per edge: its two vertices.
-    edge_vertices: Vec<[usize; 2]>,
+    pub(crate) edge_vertices: Vec<[usize; 2]>,
     /// Per geometry: whether it has a surface.
-    geom_surfaces: Vec<bool>,
+    pub(crate) geom_surfaces: Vec<bool>,
     /// Per geometry: whether both rails are set.
-    geom_rails: Vec<bool>,
+    pub(crate) geom_rails: Vec<bool>,
 }
 
 impl Block {
-    fn nv(&self) -> usize {
+    pub(crate) fn nv(&self) -> usize {
         self.pc_kinds.len()
     }
-    fn ne(&self) -> usize {
+    pub(crate) fn ne(&self) -> usize {
         self.edge_curves.len()
     }
-    fn ng(&self) -> usize {
+    pub(crate) fn ng(&self) -> usize {
         self.geom_surfaces.len()
     }
 }
 
-fn validate_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
+pub(crate) fn validate_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
     let nt = rd.index(MAX_LIST)?;
     for _ in 0..nt {
         curve(rd, 3, "target curve")?;

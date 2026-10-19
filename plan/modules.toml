@@ -3525,10 +3525,10 @@ soft_depends_on = ["blend.fillet_executive_p1", "boolean.merge_p1", "boolean.top
 est_lines = 2074
 layer = 60
 tests = ["SM_API_test:TestSmFilletPreview", "SM_API_test:TestSmSurfaceSurfaceFillet", "SM_API_test:TestSmCircularFillet", "SM_API_test:TestSmChamferFillet", "SM_API_test:TestSmFilletEdges", "SM_API_test:TestSmFilletEdgesPerEdge"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "8 fns; largest: sm_CreateUVCurve, SmFilletGeom::MakeFaceBrep, SmFilletGeom::InsertIntersectionTopology, SmFilletVertex::CalcRailIntExtendedEdgeuse; cycle back-edges (call into later units; stub or co-port): blend.fillet_geom_p2(4), blend.fillet_geom_p6(4); unit-SCC #22 (220 units); 31 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 350 cases (50 fixture, 300 generated), 320 pass, 0 failed, 30 deferred (blend.fillet_geom_p6 30: JoinTwoFilletVertsByCurves in MakeFaceBrep, SmFilletEdge::CalcBlendingRail, GetRailIndexOfVertexuse); sm_CreateUVCurve compared fully (bit-identical); sm_SrfSrfIntersection (blend.fillet_geom_p2) stubs in the vertex calculators and the plane branch of sm_CreateUVCurve are not reached by the shim's models; InsertIntersectionTopology unit tests only (needs the fillet executive, blend.fillet_executive_p1). Built on PR #147 (blend.fillet_geom_p1) and PR #192 (blend.fillet_solver_p1). Was: 8 fns; largest: sm_CreateUVCurve, SmFilletGeom::MakeFaceBrep, SmFilletGeom::InsertIntersectionTopology, SmFilletVertex::CalcRailIntExtendedEdgeuse; cycle back-edges (call into later units; stub or co-port): blend.fillet_geom_p2(4), blend.fillet_geom_p6(4); unit-SCC #22 (220 units); 31 upstream test entry points reach this unit"
 
 [[unit]]
 id = "blend.fillet_geom_p6"

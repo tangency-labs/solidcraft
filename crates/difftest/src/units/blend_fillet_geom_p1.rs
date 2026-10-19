@@ -86,12 +86,12 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 
 /// An inline curve: dimension, control points as stored (`[x, y, z, w]`), degree, knots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Crv {
+pub(crate) struct Crv {
     #[serde(default = "three")]
-    dim: u64,
-    cpts: Vec<[f64; 4]>,
-    p: usize,
-    u: Vec<f64>,
+    pub(crate) dim: u64,
+    pub(crate) cpts: Vec<[f64; 4]>,
+    pub(crate) p: usize,
+    pub(crate) u: Vec<f64>,
 }
 
 fn three() -> u64 {
@@ -100,41 +100,41 @@ fn three() -> u64 {
 
 /// An inline surface: control net as stored (`[x, y, z, w]`, rows in u), degrees, knots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Srf {
-    net: Vec<Vec<[f64; 4]>>,
-    p: usize,
-    q: usize,
-    u: Vec<f64>,
-    v: Vec<f64>,
+pub(crate) struct Srf {
+    pub(crate) net: Vec<Vec<[f64; 4]>>,
+    pub(crate) p: usize,
+    pub(crate) q: usize,
+    pub(crate) u: Vec<f64>,
+    pub(crate) v: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct VertexIn {
-    point: [f64; 3],
+pub(crate) struct VertexIn {
+    pub(crate) point: [f64; 3],
     #[serde(default)]
-    vtype: i64,
+    pub(crate) vtype: i64,
     #[serde(default)]
-    status: i64,
+    pub(crate) status: i64,
     #[serde(default = "minus_one")]
-    corner: i64,
+    pub(crate) corner: i64,
     #[serde(default = "pc_unknown")]
-    pc_class: i64,
+    pub(crate) pc_class: i64,
     /// `0` none, `1` the start/end (`pc_sub`) vertex of target wire edge `pc_index`, `2`
     /// its primary edge use, `3` target face `pc_index`.
     #[serde(default)]
-    pc_kind: i64,
+    pub(crate) pc_kind: i64,
     #[serde(default = "minus_one")]
-    pc_index: i64,
+    pub(crate) pc_index: i64,
     #[serde(default)]
-    pc_sub: i64,
+    pub(crate) pc_sub: i64,
     #[serde(default = "minus_one")]
-    pc_face: i64,
+    pub(crate) pc_face: i64,
     #[serde(default)]
-    t_param: f64,
+    pub(crate) t_param: f64,
     #[serde(default)]
-    uv: [f64; 2],
+    pub(crate) uv: [f64; 2],
     #[serde(default = "no_mates")]
-    mates: [i64; 2],
+    pub(crate) mates: [i64; 2],
 }
 
 fn minus_one() -> i64 {
@@ -150,32 +150,32 @@ fn no_mates() -> [i64; 2] {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct EuIn {
+pub(crate) struct EuIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    uv_curve: Option<Crv>,
+    pub(crate) uv_curve: Option<Crv>,
     #[serde(default = "minus_one")]
-    geom: i64,
+    pub(crate) geom: i64,
     #[serde(default)]
-    vu_uv: [f64; 2],
+    pub(crate) vu_uv: [f64; 2],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct EdgeIn {
-    vs: usize,
-    ve: usize,
+pub(crate) struct EdgeIn {
+    pub(crate) vs: usize,
+    pub(crate) ve: usize,
     #[serde(default = "edge_unknown")]
-    etype: i64,
+    pub(crate) etype: i64,
     #[serde(default)]
-    status: i64,
+    pub(crate) status: i64,
     #[serde(default = "minus_one")]
-    corner: i64,
+    pub(crate) corner: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    curve: Option<Crv>,
+    pub(crate) curve: Option<Crv>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    interval: Option<[f64; 2]>,
+    pub(crate) interval: Option<[f64; 2]>,
     #[serde(default = "no_mates")]
-    fbe: [i64; 2],
-    eus: [EuIn; 2],
+    pub(crate) fbe: [i64; 2],
+    pub(crate) eus: [EuIn; 2],
 }
 
 fn edge_unknown() -> i64 {
@@ -183,31 +183,31 @@ fn edge_unknown() -> i64 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct GeomIn {
+pub(crate) struct GeomIn {
     #[serde(default)]
-    gtype: i64,
+    pub(crate) gtype: i64,
     #[serde(default)]
-    status: i64,
+    pub(crate) status: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    center: Option<Crv>,
+    pub(crate) center: Option<Crv>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    surface: Option<Srf>,
+    pub(crate) surface: Option<Srf>,
     #[serde(default = "no_mates")]
-    rails: [i64; 2],
+    pub(crate) rails: [i64; 2],
     #[serde(default)]
-    other1: Vec<usize>,
+    pub(crate) other1: Vec<usize>,
     #[serde(default)]
-    other2: Vec<usize>,
+    pub(crate) other2: Vec<usize>,
     #[serde(default)]
-    sides: Vec<[usize; 2]>,
+    pub(crate) sides: Vec<[usize; 2]>,
 }
 
 /// A fillet B-rep wire edge: its curve and the edge tolerance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct FbEdgeIn {
-    curve: Crv,
+pub(crate) struct FbEdgeIn {
+    pub(crate) curve: Crv,
     #[serde(default = "zone_tol")]
-    tol: f64,
+    pub(crate) tol: f64,
 }
 
 fn zone_tol() -> f64 {
@@ -215,19 +215,19 @@ fn zone_tol() -> f64 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Model {
+pub(crate) struct Model {
     #[serde(default)]
-    targets: Vec<Crv>,
+    pub(crate) targets: Vec<Crv>,
     #[serde(default)]
-    faces: Vec<Srf>,
+    pub(crate) faces: Vec<Srf>,
     #[serde(default)]
-    fillet_brep: Vec<FbEdgeIn>,
+    pub(crate) fillet_brep: Vec<FbEdgeIn>,
     #[serde(default)]
-    vertices: Vec<VertexIn>,
+    pub(crate) vertices: Vec<VertexIn>,
     #[serde(default)]
-    geoms: Vec<GeomIn>,
+    pub(crate) geoms: Vec<GeomIn>,
     #[serde(default)]
-    edges: Vec<EdgeIn>,
+    pub(crate) edges: Vec<EdgeIn>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,7 +374,7 @@ struct CaseInputs {
 /// `SmPlane` and `SmSurfOfRevolution`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum AnalyticSrf {
+pub(crate) enum AnalyticSrf {
     /// `SmPlane(O, X, Y, UVScale, UVDomain)`, then `MakeNurb` when `make_nurb`.
     Plane {
         origin: [f64; 3],
@@ -519,7 +519,7 @@ fn shape(s: &Srf) -> Result<(usize, usize), HarnessError> {
 
 // ---- C++ side: flattening ----------------------------------------------------------------
 
-fn push_srf(o: &mut Vec<f64>, s: &Srf) -> Result<(), HarnessError> {
+pub(crate) fn push_srf(o: &mut Vec<f64>, s: &Srf) -> Result<(), HarnessError> {
     let (n, m) = shape(s)?;
     o.extend(
         [
@@ -542,7 +542,7 @@ fn push_srf(o: &mut Vec<f64>, s: &Srf) -> Result<(), HarnessError> {
     Ok(())
 }
 
-fn push_crv(o: &mut Vec<f64>, c: &Crv) {
+pub(crate) fn push_crv(o: &mut Vec<f64>, c: &Crv) {
     let n = c.cpts.len().saturating_sub(1);
     o.extend([
         c.dim as f64,
@@ -563,7 +563,7 @@ fn push_opt_crv(o: &mut Vec<f64>, c: Option<&Crv>) {
     }
 }
 
-fn push_model(o: &mut Vec<f64>, m: &Model) -> Result<(), HarnessError> {
+pub(crate) fn push_model(o: &mut Vec<f64>, m: &Model) -> Result<(), HarnessError> {
     o.push(m.targets.len() as f64);
     for c in &m.targets {
         push_crv(o, c);
@@ -1115,7 +1115,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 
 // ---- Rust side: building geometry -------------------------------------------------------
 
-fn curve_of(c: &Crv) -> Result<BSplineCurve, HarnessError> {
+pub(crate) fn curve_of(c: &Crv) -> Result<BSplineCurve, HarnessError> {
     // the FFI's count rule (`solidcore_ffi` `curve`), as for surfaces in `surface_of`
     let n = c.cpts.len().wrapping_sub(1);
     if c.cpts.is_empty()
@@ -1134,7 +1134,7 @@ fn curve_of(c: &Crv) -> Result<BSplineCurve, HarnessError> {
     Ok(BSplineCurve::from_nurb(cur, c.dim, false))
 }
 
-fn surface_of(s: &Srf) -> Result<Surface, HarnessError> {
+pub(crate) fn surface_of(s: &Srf) -> Result<Surface, HarnessError> {
     // the FFI's count rule (`solidcore_ffi` `surface`): the C++ refuses anything else,
     // and `srf_basic::Surface::new` checks only the shapes, so an inconsistent degree
     // must not reach the library (a fuzzed `q = i64::MAX` overflowed its index loops)
@@ -1170,7 +1170,7 @@ fn uv(p: [f64; 2]) -> Point2 {
 }
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
@@ -1178,7 +1178,7 @@ fn status(e: &SolidError) -> f64 {
     }
 }
 
-fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
+pub(crate) fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     let bs = match c.map(Curve::kind) {
         Some(CurveKind::BSpline(bs)) => Some(bs),
         _ => None,
@@ -1200,7 +1200,7 @@ fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
-fn dump_bcurve(o: &mut Vec<f64>, c: Option<&BSplineCurve>) {
+pub(crate) fn dump_bcurve(o: &mut Vec<f64>, c: Option<&BSplineCurve>) {
     let Some(cur) = c.and_then(BSplineCurve::gw_nurb) else {
         o.push(0.0);
         return;
@@ -1268,7 +1268,7 @@ fn orient_code(o: OrientType) -> f64 {
 /// The shim's `EvaluateMateAnalytic` surface: the plane (its NURB made when asked) or
 /// the canonical surface of revolution of a line (`SmLine` with its NURB made, that
 /// status ignored as the shim's `GetOrCreateGwNurbPointer`).
-fn analytic_surface(k: &Kernel, s: &AnalyticSrf) -> solidcore::Result<Surface> {
+pub(crate) fn analytic_surface(k: &Kernel, s: &AnalyticSrf) -> solidcore::Result<Surface> {
     Ok(match s {
         AnalyticSrf::Plane {
             origin,
@@ -1386,18 +1386,18 @@ fn link_uses(
 }
 
 /// The Rust-side model.
-struct RustModel {
-    k: Kernel,
-    target: Brep,
-    target_edges: Vec<EdgeId>,
-    target_faces: Vec<FaceId>,
-    fillet: Brep,
-    fillet_edges: Vec<EdgeId>,
-    fb: FilletBrep,
+pub(crate) struct RustModel {
+    pub(crate) k: Kernel,
+    pub(crate) target: Brep,
+    pub(crate) target_edges: Vec<EdgeId>,
+    pub(crate) target_faces: Vec<FaceId>,
+    pub(crate) fillet: Brep,
+    pub(crate) fillet_edges: Vec<EdgeId>,
+    pub(crate) fb: FilletBrep,
 }
 
 impl RustModel {
-    fn build(m: &Model) -> Result<Self, HarnessError> {
+    pub(crate) fn build(m: &Model) -> Result<Self, HarnessError> {
         let h = |e: SolidError| harness(e.to_string());
         let k = Kernel::default();
         let mut target = Brep::new();
@@ -1596,18 +1596,18 @@ impl RustModel {
     }
 
     /// Live vertices in creation order.
-    fn vertices(&self) -> Vec<VertexId> {
+    pub(crate) fn vertices(&self) -> Vec<VertexId> {
         self.fb.fillet_vertices().map(|(id, _)| id).collect()
     }
 
-    fn vertex(&self, i: usize) -> Result<VertexId, HarnessError> {
+    pub(crate) fn vertex(&self, i: usize) -> Result<VertexId, HarnessError> {
         self.vertices()
             .get(i)
             .copied()
             .ok_or_else(|| harness("vertex index"))
     }
 
-    fn edge(&self, i: usize) -> Result<EdgeId, HarnessError> {
+    pub(crate) fn edge(&self, i: usize) -> Result<EdgeId, HarnessError> {
         self.fb
             .edge_list()
             .get(i)
@@ -1615,7 +1615,7 @@ impl RustModel {
             .ok_or_else(|| harness("edge index"))
     }
 
-    fn edgeuse(&self, e: usize, which: usize) -> Result<EdgeuseId, HarnessError> {
+    pub(crate) fn edgeuse(&self, e: usize, which: usize) -> Result<EdgeuseId, HarnessError> {
         let e = self.edge(e)?;
         self.fb
             .brep()
@@ -1627,7 +1627,7 @@ impl RustModel {
             .ok_or_else(|| harness("edge use index"))
     }
 
-    fn geom(&self, i: usize) -> Result<FilletGeomId, HarnessError> {
+    pub(crate) fn geom(&self, i: usize) -> Result<FilletGeomId, HarnessError> {
         if i < self.fb.geoms().len() {
             Ok(FilletGeomId(i as u32))
         } else {
@@ -1635,23 +1635,23 @@ impl RustModel {
         }
     }
 
-    fn vertex_index(&self, v: Option<VertexId>) -> f64 {
+    pub(crate) fn vertex_index(&self, v: Option<VertexId>) -> f64 {
         v.and_then(|v| self.vertices().iter().position(|&x| x == v))
             .map_or(-1.0, |i| i as f64)
     }
 
-    fn edge_index(&self, e: Option<EdgeId>) -> f64 {
+    pub(crate) fn edge_index(&self, e: Option<EdgeId>) -> f64 {
         e.and_then(|e| self.fb.edge_list().iter().position(|&x| x == e))
             .map_or(-1.0, |i| i as f64)
     }
 
-    fn fillet_edge_index(&self, e: Option<EdgeId>) -> f64 {
+    pub(crate) fn fillet_edge_index(&self, e: Option<EdgeId>) -> f64 {
         e.and_then(|e| self.fillet_edges.iter().position(|&x| x == e))
             .map_or(-1.0, |i| i as f64)
     }
 
     /// `(edge, 0/1)` of an edge use, or `(-1, -1)`.
-    fn put_eu(&self, o: &mut Vec<f64>, eu: Option<EdgeuseId>) {
+    pub(crate) fn put_eu(&self, o: &mut Vec<f64>, eu: Option<EdgeuseId>) {
         if let Some(eu) = eu {
             for (i, &e) in self.fb.edge_list().iter().enumerate() {
                 if let Ok(edge) = self.fb.brep().edge(e) {
@@ -1665,7 +1665,7 @@ impl RustModel {
         o.extend([-1.0, -1.0]);
     }
 
-    fn put_vu(&self, o: &mut Vec<f64>, vu: Option<VertexuseId>) {
+    pub(crate) fn put_vu(&self, o: &mut Vec<f64>, vu: Option<VertexuseId>) {
         if let Some(vu) = vu {
             for (i, &e) in self.fb.edge_list().iter().enumerate() {
                 if let Ok(edge) = self.fb.brep().edge(e) {
@@ -1681,7 +1681,7 @@ impl RustModel {
         o.extend([-1.0, -1.0]);
     }
 
-    fn put_pc_object(&self, o: &mut Vec<f64>, obj: Option<EntityRef>) {
+    pub(crate) fn put_pc_object(&self, o: &mut Vec<f64>, obj: Option<EntityRef>) {
         match obj {
             Some(EntityRef::Vertex(v)) => {
                 for (i, &e) in self.target_edges.iter().enumerate() {
@@ -1726,7 +1726,7 @@ impl RustModel {
         }
     }
 
-    fn face_index(&self, f: Option<EntityRef>) -> f64 {
+    pub(crate) fn face_index(&self, f: Option<EntityRef>) -> f64 {
         match f {
             Some(EntityRef::Face(f)) => self
                 .target_faces
@@ -1737,12 +1737,12 @@ impl RustModel {
         }
     }
 
-    fn corner_index(c: Option<FilletCornerId>) -> f64 {
+    pub(crate) fn corner_index(c: Option<FilletCornerId>) -> f64 {
         c.map_or(-1.0, |c| f64::from(c.0))
     }
 
     /// The export (mirrors the shim's).
-    fn put(&self, o: &mut Vec<f64>) -> Result<(), HarnessError> {
+    pub(crate) fn put(&self, o: &mut Vec<f64>) -> Result<(), HarnessError> {
         let h = |e: SolidError| harness(e.to_string());
         let b = self.fb.brep();
         let vs = self.vertices();
@@ -2377,7 +2377,7 @@ fn knots(n: usize, p: usize, rng: &mut Rng) -> Vec<f64> {
 
 /// A random open surface patch: degrees 1..=3, a few control points, scale `scale`,
 /// occasionally rational.
-fn gen_surface(rng: &mut Rng, scale: f64) -> Srf {
+pub(crate) fn gen_surface(rng: &mut Rng, scale: f64) -> Srf {
     let p = 1 + rng.below(3) as usize;
     let q = 1 + rng.below(3) as usize;
     let n = p + rng.below(3) as usize;
@@ -2406,7 +2406,7 @@ fn gen_surface(rng: &mut Rng, scale: f64) -> Srf {
 
 /// A closed-in-u (cylinder-like) quadratic B-spline surface of radius `r` and height `h`:
 /// a full circle from 9 control points with weights.
-fn gen_cylinder(rng: &mut Rng, r: f64, h: f64) -> Srf {
+pub(crate) fn gen_cylinder(rng: &mut Rng, r: f64, h: f64) -> Srf {
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let circle: [([f64; 2], f64); 9] = [
         ([1.0, 0.0], 1.0),
@@ -2440,7 +2440,7 @@ fn gen_cylinder(rng: &mut Rng, r: f64, h: f64) -> Srf {
     }
 }
 
-fn gen_curve(rng: &mut Rng, dim: u64, scale: f64) -> Crv {
+pub(crate) fn gen_curve(rng: &mut Rng, dim: u64, scale: f64) -> Crv {
     let p = 1 + rng.below(3) as usize;
     let n = p + rng.below(3) as usize;
     let rational = rng.chance(0.15);
@@ -2487,7 +2487,7 @@ fn surface_domain(s: &Srf) -> (f64, f64) {
     )
 }
 
-fn scale_of(rng: &mut Rng) -> f64 {
+pub(crate) fn scale_of(rng: &mut Rng) -> f64 {
     *rng.choose(&[1.0, 1.0, 1.0, 1e-3, 1e3, 1e-6, 1e6, 0.1, 10.0])
         .unwrap_or(&1.0)
 }
@@ -2872,7 +2872,7 @@ fn gen_geometry(rng: &mut Rng, kind: u64) -> Inputs {
 }
 
 /// A random pseudo-B-rep model with 2..5 vertices, 0..3 geometries and 1..4 edges.
-fn gen_model(rng: &mut Rng) -> Model {
+pub(crate) fn gen_model(rng: &mut Rng) -> Model {
     let scale = scale_of(rng);
     let nt = rng.below(3) as usize;
     let targets = (0..nt)

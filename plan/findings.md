@@ -9146,3 +9146,42 @@ Both are fuzz "differs" notes (no crash, no panic); the unit's cases and `--pert
    against `cos(pi/2 - tol) = 6.1e-17`; the C++ result is "tangent", the Rust one is not. Both dot products are below `1e-12` (the
    committed fixture `rollover_sphere_tight`, `tol = 1e-12`, passes), so the flag flips only on rounding noise around zero (presumably the
    sphere's evaluation of the normal or binormal); not investigated further.
+
+## blend.fillet_geom_p4 (`SmFilletGeom.cpp` part 4: `sm_CreateUVCurve`, the fillet-surface intersection vertex calculators, `GetRailIndexOfVertex`, `MakeFaceBrep`, `InsertIntersectionTopology`, `CalcBlendingGeom`; PR #252, 2026-10-19; partial)
+
+- **Built on open PRs.** The fillet object model (`FilletBrep`, `FilletGeom`, ...) is
+  `blend.fillet_geom_p1` (PR #147) and the solver is `blend.fillet_solver_p1` (PR #192);
+  both are merged into the branch (with #242's reconciliation commit `ec075471`), so this
+  PR lands after them. The difftest runner reuses p1's model block on both sides: the
+  shim is `harness/cpp/shim/blend_fillet_geom_p4_static.inc`, included at the end of
+  `blend_fillet_geom_p1.cpp` (the only translation unit compiling upstream
+  `SmFilletGeom.cpp`, whose statics it calls), and p1's runner/FFI helpers are
+  `pub(crate)`.
+- **What compares.** `sm_CreateUVCurve` fully (seam pair with and without a cut corner,
+  iso lines, both-on-seam pairs, degenerate-edge drops, the minimise fallback, the
+  vertex-use branch, B-spline / real `SmPlane` / real `SmSurfOfRevolution` surfaces,
+  1e-6..1e6 scales): bit-identical. The vertex calculators, `MakeFaceBrep` and
+  `CalcBlendingGeom` compare up to their first unported callee
+  (`sm_SrfSrfIntersection`, `JoinTwoFilletVertsByCurves`, `CalcBlendingRail`);
+  `GetRailIndexOfVertex` only for a NULL vertex (`GetRailIndexOfVertexuse` is p6's);
+  `InsertIntersectionTopology` has unit tests only (it needs a real
+  `SmFilletExecutive`). The block's fillet corners are opaque tags, so the shim refuses
+  runs that would call into a corner (and solver/rail dereferences the block cannot
+  satisfy); see the FFI module docs.
+- **Disagreement outside this unit (fuzz, `--fuzz 30000`, 2 notes).**
+  `SmSurface::GlobalPointSolve(SM_SO_INTERSECT)` on a real `SmPlane` *without* its NURB
+  (`MakeNurb` not called) whose origin is very far from the test point (origin
+  `x = 1e50..1e300`, UV scales ~1e-3..1e-6, test point near the global origin) returns
+  `SM_ERR` (1001) from `SmSurfPtGlobalSolver::Solve` (`surface.surface_point_solve_p2`,
+  reached after `SmPlane::DropPointFast` finds nothing within tolerance), while the Rust
+  solve returns `Ok` with no solutions; `sm_CreateUVCurve` then goes on (minimise drop,
+  both points clamp to the same corner) and fails at `CreateLineSegment` with
+  `SM_ERR_INVALID_INPUT` (1007). Inputs: `uv_curve` on plane `origin (1e50,
+  -4.04e-05, -9.60e-04)`, `x_axis (1, 0.2307, 0)`, `y_axis (0.1478, 1, -0.1387)`,
+  `uv_scale (1.687e-3, 1.262e-3)`, domain `[-0.327, 0.358] x [-0.610, -0]`, no NURB,
+  points `(6.39e-4, -8.65e-4, -8.53e-4)`, `(6.48e-4, -5.48e-4, -8.98e-4)`, tol `1e-11`.
+  The same plane with origin `1e10`, or with its NURB made, agrees. The bounding box
+  (and so the `1e-9 * size` drop tolerance `1.0217e-12`) is identical on both sides
+  (checked under gdb), so the difference is inside the surface point solver's handling
+  of an un-NURBed plane at that magnitude. Not fixed here (green unit
+  `surface.surface_point_solve_p2`); the generator's planes stay within `1e6`.
