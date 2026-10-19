@@ -34,8 +34,10 @@ pub(crate) fn too_large(msg: &str) -> KernelError {
 }
 
 /// A round running into the end of an earlier round of the other kind where it ends flush with a
-/// wall's end ([`crate::merge_corner::mixed_end`]): no other route builds it, so this refusal is
-/// reported over any other ([`decisive`]). Shown as not supported yet, as every size refusal is.
+/// wall's end ([`crate::merge_corner::mixed_end`]), where the two cannot merge (the band between
+/// them needs more straight edge than there is, or the round has no one radius): no other route
+/// builds it, so this refusal, followed by why, is reported over any other ([`decisive`]). Shown as
+/// not supported yet, as every size refusal is.
 pub(crate) const MIXED_END: &str = "a round meeting the end of an earlier round of the other kind";
 
 /// Whether a refusal says what no other route gets round: it outranks every other refusal.

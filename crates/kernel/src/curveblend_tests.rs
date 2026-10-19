@@ -932,7 +932,8 @@ fn foot_round_added(r: f64) -> f64 {
 /// line along (12, 8) meeting y = 2) and 2 s at the other (along (8, 16) meeting x = 20).
 fn edge_round_removed(r: f64) -> f64 {
     let rounded = 3.0;
-    let outline = [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
+    let outline =
+        [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
     let dir = |a: Vec3, b: Vec3| (b - a).normalized().unwrap();
     // Each corner's turn and the setback of its round along both lines.
     let corners: Vec<(f64, f64)> = (1..4)
@@ -1101,7 +1102,7 @@ fn assert_merged(body: &Body, ends: &[WallEnd], (ra, rb): (f64, f64), tol: f64, 
 }
 
 /// The edge of `body` from `a` to `b` (either way), and the two faces it joins.
-fn edge_between<'a>(body: &'a Body, a: Vec3, b: Vec3, tol: f64) -> (mt::Edge, Vec<&'a mt::Face>) {
+fn edge_between(body: &Body, a: Vec3, b: Vec3, tol: f64) -> (mt::Edge, Vec<&mt::Face>) {
     let at = |v: &mt::Vertex, p: Vec3| from_p3(v.point()).dist(p) < tol;
     let edges: Vec<mt::Edge> = Body::unique_edges(&body.solid)
         .into_iter()
@@ -1159,7 +1160,20 @@ fn plane_face_area(body: &Body, n: Vec3, at: Vec3) -> f64 {
 /// `∫ f` over `[a, b]` by Simpson's rule on `n` (even) spans.
 fn simpson(a: f64, b: f64, n: usize, f: impl Fn(f64) -> f64) -> f64 {
     let h = (b - a) / n as f64;
-    (0..=n).map(|i| f(a + h * i as f64) * if i == 0 || i == n { 1.0 } else if i % 2 == 1 { 4.0 } else { 2.0 }).sum::<f64>() * h / 3.0
+    (0..=n)
+        .map(|i| {
+            f(a + h * i as f64)
+                * if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                }
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
 }
 
 /// The volume the merge corner of the rounds `ra` (adding material, on the wall) and `rb` (taking
@@ -1186,7 +1200,11 @@ fn merge_correction(theta: f64, ra: f64, rb: f64) -> f64 {
         let (dx, dy) = (r - w, r);
         let (len, phi) = (dx.hypot(dy), dy.atan2(dx));
         let alpha = (r / len).clamp(-1.0, 1.0).acos();
-        let n = [phi + alpha, phi - alpha].map(|a| (a.cos(), a.sin())).into_iter().max_by(|x, y| x.0.hypot(x.1 - 1.0).total_cmp(&y.0.hypot(y.1 - 1.0))).unwrap();
+        let n = [phi + alpha, phi - alpha]
+            .map(|a| (a.cos(), a.sin()))
+            .into_iter()
+            .max_by(|x, y| x.0.hypot(x.1 - 1.0).total_cmp(&y.0.hypot(y.1 - 1.0)))
+            .unwrap();
         let (a, b) = ((ra - ra * n.0, ra - ra * n.1), (w - rb + rb * n.0, -rb + rb * n.1));
         let merged = under_a(0.0, a.0) + 0.5 * (a.1 + b.1) * (b.0 - a.0) + under_b(w, b.0, w);
         let alone = under_a(0.0, ra.min(w)) + under_b(w, (w - rb).max(0.0), w);
@@ -1226,8 +1244,16 @@ fn rounds_meeting_at_the_wall_ends_merge_alike_in_any_order() {
     // The faces at each end: the wall's end, its face and the plate's side (outward normal and a
     // point inside each).
     let ends = [
-        [(-Vec3::X, Vec3::new(0.0, 1.0, 1.0)), (Vec3::Y, Vec3::new(10.0, 2.0, 5.0)), (Vec3::new(-2.0, 3.0, 0.0) / 13f64.sqrt(), Vec3::new(6.0, 6.0, 1.0))],
-        [(-Vec3::Y, Vec3::new(19.0, -20.0, 1.0)), (Vec3::X, Vec3::new(20.0, -10.0, 5.0)), (Vec3::new(2.0, -1.0, 0.0) / 5f64.sqrt(), Vec3::new(24.0, -12.0, 1.0))],
+        [
+            (-Vec3::X, Vec3::new(0.0, 1.0, 1.0)),
+            (Vec3::Y, Vec3::new(10.0, 2.0, 5.0)),
+            (Vec3::new(-2.0, 3.0, 0.0) / 13f64.sqrt(), Vec3::new(6.0, 6.0, 1.0)),
+        ],
+        [
+            (-Vec3::Y, Vec3::new(19.0, -20.0, 1.0)),
+            (Vec3::X, Vec3::new(20.0, -10.0, 5.0)),
+            (Vec3::new(2.0, -1.0, 0.0) / 5f64.sqrt(), Vec3::new(24.0, -12.0, 1.0)),
+        ],
     ];
     let area = |b: &Body, (n, at): (Vec3, Vec3)| plane_face_area(b, n, at);
     for (ra, rb) in [(1.0, 0.5), (0.5, 1.0), (0.5, 0.5), (1.0, 1.0)] {
@@ -1325,12 +1351,29 @@ fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
     for k in [0.01, 100.0] {
         let origin = Vec3::new(37.0, -52.0, 13.0) * k;
         let at = |p: Vec3| origin + p * k;
-        let plate = prism_at(origin, &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)].map(|(x, y)| (x * k, y * k)), 0.0, 2.0 * k);
-        let wall = prism_at(origin, &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)].map(|(x, y)| (x * k, y * k)), 2.0 * k, 6.0 * k);
+        let plate = prism_at(
+            origin,
+            &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)]
+                .map(|(x, y)| (x * k, y * k)),
+            0.0,
+            2.0 * k,
+        );
+        let wall = prism_at(
+            origin,
+            &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)].map(|(x, y)| (x * k, y * k)),
+            2.0 * k,
+            6.0 * k,
+        );
         let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
         body = fillet(&body, &[at(Vec3::new(20.0, 2.0, 4.0))], k).unwrap();
         body = fillet(&body, &[Vec3::new(12.0, 10.0, 1.0), Vec3::new(28.0, 10.0, 1.0), Vec3::new(28.0, -4.0, 1.0)].map(at), 3.0 * k).unwrap();
-        let outline = [Vec3::new(0.0, 2.0, 2.0), Vec3::new(12.0, 10.0, 2.0), Vec3::new(28.0, 10.0, 2.0), Vec3::new(28.0, -4.0, 2.0), Vec3::new(20.0, -20.0, 2.0)];
+        let outline = [
+            Vec3::new(0.0, 2.0, 2.0),
+            Vec3::new(12.0, 10.0, 2.0),
+            Vec3::new(28.0, 10.0, 2.0),
+            Vec3::new(28.0, -4.0, 2.0),
+            Vec3::new(20.0, -20.0, 2.0),
+        ];
         let picks: Vec<Vec3> = outline.windows(2).map(|w| at((w[0] + w[1]) * 0.5)).collect();
         let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)].map(at);
         let footed = fillet(&body, &foot, ra * k).unwrap();
@@ -1338,7 +1381,9 @@ fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
         let ends = wall_ends().map(|(v, w, m, tan)| (at(v), w, m, tan));
         let tol = 1e-6 * k;
         let mut volumes = Vec::new();
-        for (how, result) in [("foot then edge", fillet(&footed, &picks, rb * k).unwrap()), ("edge then foot", fillet(&edged, &foot, ra * k).unwrap())] {
+        for (how, result) in
+            [("foot then edge", fillet(&footed, &picks, rb * k).unwrap()), ("edge then foot", fillet(&edged, &foot, ra * k).unwrap())]
+        {
             let how = format!("{how} at {k}x");
             assert_merged(&result, &ends, (ra * k, rb * k), tol, &how);
             for end in ends {
@@ -1360,12 +1405,23 @@ fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
 /// rounded 5 and its ends flush with the plate's sides, the plate's three outer corners rounded 10;
 /// with points on the wall's foot and on the plate's top edge from one end of the wall to the other.
 fn bracket() -> (Body, [Vec3; 2], Vec<Vec3>) {
-    let plate = prism_at(Vec3::ZERO, &[(0.0, 0.0), (90.0, 0.0), (90.0, -100.0), (100.0, -100.0), (140.0, -20.0), (140.0, 50.0), (60.0, 50.0), (0.0, 10.0)], 0.0, 10.0);
+    let plate = prism_at(
+        Vec3::ZERO,
+        &[(0.0, 0.0), (90.0, 0.0), (90.0, -100.0), (100.0, -100.0), (140.0, -20.0), (140.0, 50.0), (60.0, 50.0), (0.0, 10.0)],
+        0.0,
+        10.0,
+    );
     let wall = prism_at(Vec3::ZERO, &[(0.0, 0.0), (90.0, 0.0), (90.0, -100.0), (100.0, -100.0), (100.0, 10.0), (0.0, 10.0)], 10.0, 30.0);
     let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
     body = fillet(&body, &[Vec3::new(100.0, 10.0, 20.0)], 5.0).unwrap();
     body = fillet(&body, &[Vec3::new(60.0, 50.0, 5.0), Vec3::new(140.0, 50.0, 5.0), Vec3::new(140.0, -20.0, 5.0)], 10.0).unwrap();
-    let outline = [Vec3::new(0.0, 10.0, 10.0), Vec3::new(60.0, 50.0, 10.0), Vec3::new(140.0, 50.0, 10.0), Vec3::new(140.0, -20.0, 10.0), Vec3::new(100.0, -100.0, 10.0)];
+    let outline = [
+        Vec3::new(0.0, 10.0, 10.0),
+        Vec3::new(60.0, 50.0, 10.0),
+        Vec3::new(140.0, 50.0, 10.0),
+        Vec3::new(140.0, -20.0, 10.0),
+        Vec3::new(100.0, -100.0, 10.0),
+    ];
     (body, [Vec3::new(50.0, 10.0, 10.0), Vec3::new(100.0, -50.0, 10.0)], outline.windows(2).map(|w| (w[0] + w[1]) * 0.5).collect())
 }
 
@@ -1401,13 +1457,19 @@ fn rounds_meeting_at_a_wall_end_are_refused_where_the_band_does_not_fit() {
     // The band of a foot round 1 and an edge round 0.5 needs 2.55 of it (and 2.40 along the
     // wall): built. With a foot round of 1.5 it needs 3.46, and the side has 3.34 before its
     // corner's round: refused, saying so, either way round.
-    let plate = prism_at(Vec3::ZERO, &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (6.0, 10.0), (3.0, 4.0), (0.0, 2.0)], 0.0, 2.0);
+    let plate = prism_at(
+        Vec3::ZERO,
+        &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (6.0, 10.0), (3.0, 4.0), (0.0, 2.0)],
+        0.0,
+        2.0,
+    );
     let wall = prism_at(Vec3::ZERO, &[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)], 2.0, 6.0);
     let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
     body = fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap();
     body = fillet(&body, &[Vec3::new(3.0, 4.0, 1.0)], 1.0).unwrap();
     body = fillet(&body, &[Vec3::new(6.0, 10.0, 1.0), Vec3::new(28.0, 10.0, 1.0), Vec3::new(28.0, -4.0, 1.0)], 3.0).unwrap();
-    let outline = [Vec3::new(2.55, 3.7, 2.0), Vec3::new(4.5, 7.0, 2.0), Vec3::new(17.0, 10.0, 2.0), Vec3::new(28.0, 3.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
+    let outline =
+        [Vec3::new(2.55, 3.7, 2.0), Vec3::new(4.5, 7.0, 2.0), Vec3::new(17.0, 10.0, 2.0), Vec3::new(28.0, 3.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
     let fits = fillet(&round_the_foot(&body, 1.0).unwrap(), &outline, 0.5).unwrap();
     assert_merged(&fits, &wall_ends(), (1.0, 0.5), 1e-6, "foot 1 then edge 0.5");
     let footed = round_the_foot(&body, 1.5).unwrap();

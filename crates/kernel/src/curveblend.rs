@@ -1295,7 +1295,8 @@ fn merge_end(
 ) -> Result<Option<MergeEnd>> {
     let ke = if k == 0 { 0 } else { chain.len().saturating_sub(1) };
     let (top, other) = if side == 1 { (side1.get(ke), side2.get(ke)) } else { (side2.get(ke), side1.get(ke)) };
-    let (Some(t), Some(x), Some(v), Some(g), Some(terminal)) = (top.and_then(|i| faces.get(*i)), other.and_then(|i| faces.get(*i)), verts.get(k), faces.get(fi), chain.get(ke))
+    let (Some(t), Some(x), Some(v), Some(g), Some(terminal)) =
+        (top.and_then(|i| faces.get(*i)), other.and_then(|i| faces.get(*i)), verts.get(k), faces.get(fi), chain.get(ke))
     else {
         return Ok(None);
     };
@@ -1325,7 +1326,9 @@ fn merge_cap(fit: &Fit, m: &MergeEnd, tolerance: f64) -> Result<(f64, f64, mt::C
     let on_contact = |row: usize, q: Vec3| -> Option<f64> {
         let curve = fit.contacts.get(row)?;
         let (a, b) = curve.range_tuple();
-        let hint = (0..=64).map(|i| a + (b - a) * f64::from(i) / 64.0).min_by(|x, y| from_p3(curve.subs(*x)).dist(q).total_cmp(&from_p3(curve.subs(*y)).dist(q)))?;
+        let hint = (0..=64)
+            .map(|i| a + (b - a) * f64::from(i) / 64.0)
+            .min_by(|x, y| from_p3(curve.subs(*x)).dist(q).total_cmp(&from_p3(curve.subs(*y)).dist(q)))?;
         let t = curve.search_nearest_parameter(p3(q), hint, 100)?;
         (inside(t) && from_p3(curve.subs(t)).dist(q) <= tolerance).then_some(t)
     };

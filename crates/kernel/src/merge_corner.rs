@@ -15,6 +15,10 @@
 //! `mixed_end` recognises such an end on the body an earlier round left: the later round's chain
 //! ends at the earlier round `g`, tangent to `T` along a straight contact, whose end runs on the
 //! face beside the chain to the vertex where it meets its other face and the end face holding `L`.
+//! [`MixedEnd::plan`] places the band there, or refuses it where it does not fit; the rolling ball
+//! (`crate::curveblend`) then runs the later round on to the section through `L`, ends it on its
+//! edge of the band, and re-trims the earlier round, `T`, the face beside the chain and `E` round
+//! the band, whichever round came first.
 
 use solidcraft_geom::Vec3;
 use truck_modeling as mt;
@@ -376,7 +380,8 @@ impl Zone {
 
     /// The band as a B-rep face on the vertices `p_star`, `q_w` and `q_s` (each within `tolerance`
     /// of its point), its normal out of the solid: new edges `Γ_A`, `L`'s piece and `Γ_B` on the
-    /// exact curves, which the faces beside the band take as they are or turned round.
+    /// exact curves, which the faces beside the band take as they are or turned round. Its surface
+    /// is the outward patch with its parameters stretched by `ρ*/c` ([`in_proportion`]).
     pub(crate) fn band(&self, p_star: &mt::Vertex, q_w: &mt::Vertex, q_s: &mt::Vertex, tolerance: f64) -> Result<Band> {
         if !(tolerance.is_finite() && tolerance >= 0.0) {
             return Err(KernelError::Invalid("merge corner: tolerance not finite".into()));
@@ -421,7 +426,8 @@ fn in_proportion(surface: mt::NurbsSurface<mt::Vector4>, by: f64) -> Result<mt::
         let (mut uk, mut vk) = bs.knot_vecs().clone();
         uk.transform(by, 0.0);
         vk.transform(by, 0.0);
-        let bs = mt::BSplineSurface::try_new((uk, vk), bs.control_points().clone()).map_err(|e| KernelError::Failed(format!("merge corner patch: {e}")))?;
+        let bs = mt::BSplineSurface::try_new((uk, vk), bs.control_points().clone())
+            .map_err(|e| KernelError::Failed(format!("merge corner patch: {e}")))?;
         Ok(mt::NurbsSurface::new(bs))
     })
 }
