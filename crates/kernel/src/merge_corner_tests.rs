@@ -3,7 +3,7 @@
 //! solve of the tangent in each section.
 
 use super::*;
-use truck_modeling::{ParametricCurve, ParametricSurface3D};
+use truck_modeling::{BoundedCurve, ParametricCurve, ParametricSurface3D, SearchParameter};
 
 use crate::body::from_p3;
 
@@ -138,9 +138,9 @@ fn the_nurbs_are_the_closed_form() {
             assert!(from_p3(cb.subs(t)).dist(z.gamma_b(t)) <= tol(&z), "{z:?} {t}");
             for j in 0..=10 {
                 let tau = z.r() / 2.0 * j as f64 / 10.0;
-                assert!(from_p3(patch.subs(t, tau)).dist(z.point(t, tau)) <= tol(&z), "{z:?} {t} {tau}");
+                assert!(from_p3(patch.subs(t, tau / z.r())).dist(z.point(t, tau)) <= tol(&z), "{z:?} {t} {tau}");
             }
-            assert!(from_p3(patch.subs(t, z.tau_b(t))).dist(z.gamma_b(t)) <= tol(&z), "{z:?} {t}");
+            assert!(from_p3(patch.subs(t, z.tau_b(t) / z.r())).dist(z.gamma_b(t)) <= tol(&z), "{z:?} {t}");
         }
         // Degrees 3 and (4, 1), weights 1 + t² elevated: all positive.
         assert_eq!(ca.control_points().len(), 4);
@@ -166,7 +166,7 @@ fn the_band_runs_from_p_star_to_the_line_of_the_wall_end() {
         assert!(from_p3(ca.subs(0.0)).dist(z.p_star) <= e && from_p3(cb.subs(0.0)).dist(z.p_star) <= e);
         assert!(from_p3(ca.subs(1.0)).dist(z.q_w) <= e && from_p3(cb.subs(1.0)).dist(z.q_s) <= e);
         assert!(from_p3(patch.subs(0.0, 0.0)).dist(z.p_star) <= e);
-        assert!(from_p3(patch.subs(1.0, 0.0)).dist(z.q_w) <= e && from_p3(patch.subs(1.0, z.r() / 2.0)).dist(z.q_s) <= e);
+        assert!(from_p3(patch.subs(1.0, 0.0)).dist(z.q_w) <= e && from_p3(patch.subs(1.0, 0.5)).dist(z.q_s) <= e);
         assert!(z.tau_b(0.0).abs() < 1e-300 && (z.tau_b(1.0) - z.r() / 2.0).abs() <= 1e-15 * z.r());
         // Along L at t = 1: the ruling runs straight down it.
         assert!((z.ruling(1.0) + z.n * 2.0).len() <= 1e-15);
@@ -225,7 +225,7 @@ fn the_patch_is_regular_with_no_pole_at_p_star() {
             let t = i as f64 / 40.0;
             for j in 0..=8 {
                 let tau = z.tau_b(t) * j as f64 / 8.0;
-                let (du, dv) = (v3(patch.uder(t, tau)), v3(patch.vder(t, tau)));
+                let (du, dv) = (v3(patch.uder(t, tau / z.r())), v3(patch.vder(t, tau / z.r())) / z.r());
                 // ∂X/∂t has b-component −ρ*, ∂X/∂τ is the ruling, square to b.
                 assert!((du.dot(z.b) + z.rho_star).abs() <= 1e-9 * z.rho_star, "{z:?} {t} {tau}");
                 assert!(dv.dist(z.ruling(t)) <= 1e-9 * z.r() && dv.dot(z.b).abs() <= 1e-9);
@@ -492,7 +492,7 @@ fn the_trimmed_band_is_a_closed_loop_round_the_outward_normal() {
         // The surface's normal points out: along A's outward normal on Γ_A (towards its axis) and
         // B's on Γ_B (away from its axis); the joins are tangent.
         let ((a, da), (b, db)) = axes(&z);
-        let at = |t: f64, tau: f64| if z.faces_out { (t, tau) } else { (tau, t) };
+        let at = |t: f64, tau: f64| if z.faces_out { (t, tau / z.r()) } else { (tau / z.r(), t) };
         for i in 0..=20 {
             let t = i as f64 / 20.0;
             let out_a = {
@@ -525,7 +525,9 @@ fn tri(a: Vec3, b: Vec3, c: Vec3) -> f64 {
 /// The band's area: `∫∫ |∂X/∂t × ∂X/∂τ|` over `0 ≤ τ ≤ τ_B(t)`, from the NURBS's own derivatives.
 fn band_area(z: &Zone) -> f64 {
     let patch = z.patch().unwrap();
-    integrate(0.0, 1.0, 64, |t| integrate(0.0, z.tau_b(t), 4, |tau| v3(patch.uder(t, tau)).cross(v3(patch.vder(t, tau))).len()))
+    integrate(0.0, 1.0, 64, |t| {
+        integrate(0.0, z.tau_b(t), 4, |tau| v3(patch.uder(t, tau / z.r())).cross(v3(patch.vder(t, tau / z.r()))).len() / z.r())
+    })
 }
 
 #[test]
@@ -558,35 +560,439 @@ fn the_trimmed_band_has_the_area_of_its_mesh() {
     }
 }
 
-#[test]
-fn the_trimmed_band_makes_a_face_the_mesher_takes() {
-    use truck_meshalgo::prelude::RobustMeshableShape;
-    use truck_modeling::builder;
-    let ends = [first_end(), second_end()];
-    for z in ends.iter().flat_map(|f| RADII_TRIED.iter().filter_map(|(ra, rb)| zone(f, *ra, *rb).ok())) {
-        let trimmed = z.trimmed().unwrap();
-        let v: Vec<mt::Vertex> = trimmed.corners.iter().map(|p| builder::vertex(crate::body::p3(*p))).collect();
-        let edges: Vec<mt::Edge> = trimmed
-            .edges
-            .iter()
-            .enumerate()
-            .map(|(i, c)| mt::Edge::try_new(&v[i], &v[(i + 1) % 3], mt::Curve::NurbsCurve(c.clone())).unwrap())
-            .collect();
-        let face = mt::Face::try_new(vec![edges.into()], mt::Surface::NurbsSurface(trimmed.surface.clone())).unwrap();
-        let shell: mt::Shell = vec![face].into();
-        let meshed = shell.robust_triangulation(1e-4 * z.r());
-        let pm = meshed.face_iter().next().unwrap().surface().unwrap();
-        let (pos, uvs) = (pm.positions(), pm.uv_coords());
-        let mut area = 0.0;
-        for t in pm.faces().triangle_iter() {
-            let p = |i: usize| from_p3(pos[t[i].pos]);
-            let (a, b, c) = (p(0), p(1), p(2));
-            area += tri(a, b, c);
-            // Wound round the outward normal.
-            let uv = uvs[t[0].uv.unwrap()];
-            assert!((b - a).cross(c - a).dot(v3(trimmed.surface.normal(uv.x, uv.y))) >= 0.0, "{z:?}");
+// ---------------------------------------------------------------------------------------------
+// The band as a B-rep face.
+// ---------------------------------------------------------------------------------------------
+
+/// The sweep, and the analogue's ends at a hundredth and a hundred times its size.
+fn band_zones() -> Vec<Zone> {
+    let mut out = zones();
+    for scale in [0.01, 100.0] {
+        for f in [first_end(), second_end()] {
+            let f = Faces { v: f.v * scale, ..f };
+            for (ra, rb) in RADII_TRIED {
+                out.push(zone(&f, ra * scale, rb * scale).unwrap());
+            }
         }
-        let exact = band_area(&z);
-        assert!((area - exact).abs() <= 2e-3 * exact, "{z:?}: meshed {area} against {exact}");
+    }
+    out
+}
+
+/// A size for the zone's tolerances: its rounds and its distance from the origin.
+fn size(z: &Zone) -> f64 {
+    z.r() + z.v.len()
+}
+
+fn angle(a: Vec3, b: Vec3) -> f64 {
+    a.cross(b).len().atan2(a.dot(b))
+}
+
+/// `Γ_A′(t)`, differentiated by hand from the closed form.
+fn gamma_a_dt(z: &Zone, t: f64) -> Vec3 {
+    let (c, q) = ((z.theta / 2.0).cos(), 1.0 + t * t);
+    -z.w * (z.rho_star / c) - z.lambda * (2.0 * z.ra * (1.0 - t * t) / (q * q * c)) + z.n * (4.0 * z.ra * t / (q * q))
+}
+
+/// `Γ_B′(t)`.
+fn gamma_b_dt(z: &Zone, t: f64) -> Vec3 {
+    let (c, q) = ((z.theta / 2.0).cos(), 1.0 + t * t);
+    let across = -z.r() + 2.0 * z.rb * (1.0 - t * t) / (q * q);
+    -z.w * (z.rho_star / c) + z.lambda * (across / c) - z.n * (4.0 * z.rb * t / (q * q))
+}
+
+/// `d̃′(t)`.
+fn ruling_dt(z: &Zone, t: f64) -> Vec3 {
+    -z.lambda * (2.0 * t / (z.theta / 2.0).cos()) - z.n * 2.0
+}
+
+/// `∂X/∂t × ∂X/∂τ` from the closed form.
+fn closed_normal(z: &Zone, t: f64, tau: f64) -> Vec3 {
+    (gamma_a_dt(z, t) + ruling_dt(z, t) * tau).cross(z.ruling(t))
+}
+
+/// Up out of the material in the section at `t`: the ruling turned a quarter towards `n` (the
+/// material lies below the profile, which runs from `W` across to `S`).
+fn section_up(z: &Zone, t: f64) -> Vec3 {
+    z.lambda * (2.0 * t) + z.n * ((1.0 - t * t) / (z.theta / 2.0).cos())
+}
+
+/// The closed form's unit normal at `(t, τ)`, out of the material.
+fn outward(z: &Zone, t: f64, tau: f64) -> Vec3 {
+    let n = closed_normal(z, t, tau).normalized().unwrap();
+    if n.dot(section_up(z, t)) < 0.0 { -n } else { n }
+}
+
+/// `(t, τ)` of a point of the band: its section along the bisector, then how far along that
+/// section's ruling.
+fn params(z: &Zone, p: Vec3) -> (f64, f64) {
+    let t = 1.0 - (p - z.v).dot(z.b) / z.rho_star;
+    let d = z.ruling(t);
+    (t, (p - z.gamma_a(t)).dot(d) / d.dot(d))
+}
+
+/// The face's surface parameters at `(t, τ)`.
+fn uv(z: &Zone, t: f64, tau: f64) -> (f64, f64) {
+    if z.faces_out { (t, tau / z.r()) } else { (tau / z.r(), t) }
+}
+
+/// How far `p` lies above the merged profile in its own section, along `n` (below: inside the
+/// material). The profile: `A`'s arc out to `Γ_A`, the ruling, `B`'s arc on from `Γ_B`.
+fn above_profile(z: &Zone, p: Vec3) -> f64 {
+    let c = (z.theta / 2.0).cos();
+    let rho = (p - z.v).dot(z.b);
+    let t = 1.0 - rho / z.rho_star;
+    let o = z.v + z.w * (rho / c);
+    let across = |q: Vec3| ((q - o).dot(z.lambda), (q - z.v).dot(z.n));
+    let ((ea, za), (eb, zb), (e, h)) = (across(z.gamma_a(t)), across(z.gamma_b(t)), across(p));
+    let width = 2.0 * rho * (z.theta / 2.0).tan();
+    let (aa, ab) = (z.ra / c, z.rb / c);
+    let profile = if e <= ea {
+        z.ra - z.ra * (1.0 - ((e - aa) / aa).powi(2)).max(0.0).sqrt()
+    } else if e >= eb {
+        -z.rb + z.rb * (1.0 - ((e - (width - ab)) / ab).powi(2)).max(0.0).sqrt()
+    } else {
+        za + (zb - za) * (e - ea) / (eb - ea)
+    };
+    h - profile
+}
+
+fn band_of(z: &Zone) -> Band {
+    let v = |p: Vec3| truck_modeling::builder::vertex(crate::body::p3(p));
+    z.band(&v(z.p_star), &v(z.q_w), &v(z.q_s), 0.0).unwrap()
+}
+
+fn nurbs_of(face: &mt::Face) -> mt::NurbsSurface<mt::Vector4> {
+    match face.oriented_surface() {
+        mt::Surface::NurbsSurface(s) => s,
+        s => panic!("not a NURBS: {s:?}"),
+    }
+}
+
+/// The band's area from the closed form's own derivatives (not the NURBS's).
+fn exact_area(z: &Zone) -> f64 {
+    integrate(0.0, 1.0, 64, |t| integrate(0.0, z.tau_b(t), 4, |tau| closed_normal(z, t, tau).len()))
+}
+
+#[test]
+fn the_derivatives_by_hand_are_the_closed_forms() {
+    for z in band_zones() {
+        let h = 1e-6;
+        for i in 0..=20 {
+            let t = 0.05 + 0.9 * i as f64 / 20.0;
+            let diff = |f: &dyn Fn(f64) -> Vec3| (f(t + h) - f(t - h)) / (2.0 * h);
+            let e = 1e-7 * size(&z);
+            assert!(gamma_a_dt(&z, t).dist(diff(&|t| z.gamma_a(t))) <= e, "{z:?} {t}");
+            assert!(gamma_b_dt(&z, t).dist(diff(&|t| z.gamma_b(t))) <= e, "{z:?} {t}");
+            assert!(ruling_dt(&z, t).dist(diff(&|t| z.ruling(t))) <= 1e-7, "{z:?} {t}");
+        }
+    }
+}
+
+#[test]
+fn the_band_is_one_face_on_its_three_edges() {
+    for z in band_zones() {
+        let band = band_of(&z);
+        let e = tol(&z);
+        let face = &band.face;
+        assert!(face.orientation());
+        // The edges by role: Γ_A and Γ_B from P*, L's piece from q_W down to q_S.
+        let ends = |edge: &mt::Edge| (from_p3(edge.front().point()), from_p3(edge.back().point()));
+        let at = |(a, b): (Vec3, Vec3), p: Vec3, q: Vec3| a.dist(p) <= e && b.dist(q) <= e;
+        assert!(at(ends(&band.gamma_a), z.p_star, z.q_w) && at(ends(&band.gamma_b), z.p_star, z.q_s) && at(ends(&band.on_l), z.q_w, z.q_s));
+        assert!(matches!(band.on_l.curve(), mt::Curve::Line(_)));
+        assert!(band.gamma_a.front() == band.gamma_b.front() && band.gamma_a.back() == band.on_l.front() && band.on_l.back() == band.gamma_b.back());
+        // One loop: Γ_A, L down and Γ_B back when the patch faces out; Γ_B, L up and Γ_A back otherwise.
+        let loops = face.boundaries();
+        assert_eq!(loops.len(), 1);
+        let wire = &loops[0];
+        let got: Vec<(mt::EdgeID, bool)> = wire.edge_iter().map(|x| (x.id(), x.orientation())).collect();
+        let (a, l, b) = (band.gamma_a.id(), band.on_l.id(), band.gamma_b.id());
+        let want = if z.faces_out { vec![(a, true), (l, true), (b, false)] } else { vec![(b, true), (l, false), (a, false)] };
+        assert_eq!(got, want, "{z:?}");
+        // Each edge's curve runs between its vertices, both ways round.
+        for edge in wire.edge_iter() {
+            let c = edge.oriented_curve();
+            let (t0, t1) = c.range_tuple();
+            assert!(from_p3(c.subs(t0)).dist(from_p3(edge.front().point())) <= e, "{z:?}");
+            assert!(from_p3(c.subs(t1)).dist(from_p3(edge.back().point())) <= e, "{z:?}");
+        }
+        // A face on its own is an oriented shell, open along its three edges.
+        let shell: mt::Shell = vec![face.clone()].into();
+        assert_eq!(shell.shell_condition(), mt::ShellCondition::Oriented);
+        // The corners: at q_W and q_S the face turns from L to the rounds' edges by
+        // atan(k/rA) and atan(k/rB) (k = R/sin θ0); at P* from Γ_B to Γ_A, never a cusp.
+        let edges: Vec<mt::Edge> = wire.edge_iter().cloned().collect();
+        let k = z.r() / z.theta.sin();
+        for i in 0..3 {
+            let (into, out) = (&edges[(i + 2) % 3], &edges[i]);
+            let (ci, co) = (into.oriented_curve(), out.oriented_curve());
+            let corner = angle(-v3(ci.der(ci.range_tuple().1)), v3(co.der(co.range_tuple().0)));
+            let p = from_p3(out.front().point());
+            let want = if p.dist(z.q_w) <= e {
+                (k / z.ra).atan()
+            } else if p.dist(z.q_s) <= e {
+                (k / z.rb).atan()
+            } else {
+                angle(gamma_a_dt(&z, 0.0), gamma_b_dt(&z, 0.0))
+            };
+            assert!((corner - want).abs() <= 1e-9 && corner > 1e-3, "{z:?} {i}: {corner} against {want}");
+        }
+    }
+}
+
+#[test]
+fn the_bands_edges_lie_on_its_surface() {
+    for z in band_zones() {
+        let band = band_of(&z);
+        let surface = nurbs_of(&band.face);
+        // Well inside a part in 10⁹ of the size.
+        let accept = 1e-11 * size(&z);
+        for (which, edge) in [&band.gamma_a, &band.on_l, &band.gamma_b].into_iter().enumerate() {
+            let c = edge.curve();
+            let (t0, t1) = c.range_tuple();
+            for i in 0..=64 {
+                let x = c.subs(t0 + (t1 - t0) * i as f64 / 64.0);
+                let p = from_p3(x);
+                let (t, tau) = params(&z, p);
+                let (u, v) = uv(&z, t, tau);
+                assert!(from_p3(surface.subs(u, v)).dist(p) <= accept, "{z:?} {which} {i}");
+                // On its own side of the trim: τ = 0, t = 1, τ = τ_B(t).
+                let side = [tau, t - 1.0, tau - z.tau_b(t)][which];
+                assert!(side.abs() <= accept && (-accept..=1.0 + accept).contains(&t), "{z:?} {which} {i}: {t} {tau}");
+                // Truck's own search finds it there too.
+                let (u, v) = surface.search_parameter(x, Some((u, v)), 100).unwrap();
+                assert!(from_p3(surface.subs(u, v)).dist(p) <= accept, "{z:?} {which} {i}");
+            }
+        }
+        // The planner's check of every boundary against its face.
+        let solid = mt::Solid::new_unchecked(vec![vec![band.face.clone()].into()]);
+        assert!(crate::tess::boundaries_on_surfaces(&solid, 1e-9 * size(&z)), "{z:?}");
+    }
+}
+
+#[test]
+fn the_bands_loop_is_simple_and_counterclockwise_in_its_parameters() {
+    for z in band_zones() {
+        let band = band_of(&z);
+        let wire = &band.face.boundaries()[0];
+        let ring: Vec<(f64, f64)> = wire
+            .edge_iter()
+            .flat_map(|edge| {
+                let c = edge.oriented_curve();
+                let (t0, t1) = c.range_tuple();
+                (0..64).map(move |i| from_p3(c.subs(t0 + (t1 - t0) * i as f64 / 64.0))).collect::<Vec<_>>()
+            })
+            .map(|p| {
+                let (t, tau) = params(&z, p);
+                uv(&z, t, tau)
+            })
+            .collect();
+        let n = ring.len();
+        let seg = |i: usize| (ring[i], ring[(i + 1) % n]);
+        let wound: f64 = (0..n).map(|i| seg(i).0.0 * seg(i).1.1 - seg(i).1.0 * seg(i).0.1).sum::<f64>() / 2.0;
+        // The trim's area in (t, σ): ∫ t/(1 + t²) = ln 2 / 2, at any size.
+        assert!((wound - 2f64.ln() / 2.0).abs() <= 1e-3, "{z:?}: {wound}");
+        // No two segments cross but neighbours at their shared end.
+        let cross = |(a, b): ((f64, f64), (f64, f64)), (c, d): ((f64, f64), (f64, f64))| {
+            let side = |p: (f64, f64), q: (f64, f64), r: (f64, f64)| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
+            side(a, b, c) * side(a, b, d) < 0.0 && side(c, d, a) * side(c, d, b) < 0.0
+        };
+        for i in 0..n {
+            for j in i + 2..n {
+                if (j + 1) % n != i {
+                    assert!(!cross(seg(i), seg(j)), "{z:?}: {i} {j}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_bands_normals_point_out_square_to_its_rulings() {
+    for z in band_zones() {
+        let band = band_of(&z);
+        let surface = nurbs_of(&band.face);
+        let ((a, da), (b, db)) = axes(&z);
+        for i in 0..=40 {
+            let t = i as f64 / 40.0;
+            for j in 0..=8 {
+                let tau = z.tau_b(t) * j as f64 / 8.0;
+                let (u, v) = uv(&z, t, tau);
+                let normal = v3(surface.normal(u, v));
+                // The tangent plane of the closed form: it holds the ruling and ∂X/∂t.
+                assert!(normal.dot(z.ruling(t).normalized().unwrap()).abs() <= 1e-9, "{z:?} {t} {tau}");
+                assert!(normal.dist(outward(&z, t, tau)) <= 1e-9, "{z:?} {t} {tau}");
+                // Up out of the material in its section (at L, along it across to S's side).
+                assert!(normal.dot(section_up(&z, t).normalized().unwrap()) > 0.0, "{z:?} {t} {tau}");
+            }
+            // On Γ_A it is A's normal (towards A's axis), on Γ_B it is B's (away from B's).
+            let out_a = {
+                let q = a - z.gamma_a(t);
+                (q - da * q.dot(da)) / z.ra
+            };
+            let out_b = {
+                let q = z.gamma_b(t) - b;
+                (q - db * q.dot(db)) / z.rb
+            };
+            let (u, v) = uv(&z, t, 0.0);
+            assert!(v3(surface.normal(u, v)).dist(out_a) <= 1e-9, "{z:?} {t}");
+            let (u, v) = uv(&z, t, z.tau_b(t));
+            assert!(v3(surface.normal(u, v)).dist(out_b) <= 1e-9, "{z:?} {t}");
+        }
+        // Up T's normal at P*, square to n along L.
+        let (u, v) = uv(&z, 0.0, 0.0);
+        assert!(v3(surface.normal(u, v)).dist(z.n) <= 1e-9);
+        for j in 0..=8 {
+            let (u, v) = uv(&z, 1.0, z.r() / 2.0 * j as f64 / 8.0);
+            assert!(v3(surface.normal(u, v)).dot(z.n).abs() <= 1e-9);
+        }
+        // A step off the band along its normal leaves the material; a step against it enters.
+        let step = 1e-5 * z.r();
+        for i in 1..10 {
+            let t = i as f64 / 10.0;
+            for j in 1..10 {
+                let tau = z.tau_b(t) * j as f64 / 10.0;
+                let (u, v) = uv(&z, t, tau);
+                let (p, normal) = (from_p3(surface.subs(u, v)), v3(surface.normal(u, v)));
+                assert!(above_profile(&z, p).abs() <= 1e-9 * size(&z), "{z:?} {t} {tau}");
+                assert!(above_profile(&z, p + normal * step) > 0.0 && above_profile(&z, p - normal * step) < 0.0, "{z:?} {t} {tau}");
+            }
+        }
+    }
+}
+
+/// A mesh of the band, measured.
+#[derive(Debug)]
+struct Meshed {
+    /// The triangles' own area.
+    flat: f64,
+    /// Their signed area in the face's parameters, and its size: what they tile of the trim.
+    tiled: f64,
+    tiled_abs: f64,
+    /// Triangles with two corners at one point (within 1e-11 of the size), which have no
+    /// direction, and triangles wound against the outward normal, with their area.
+    repeated: usize,
+    inverted: usize,
+    inverted_area: f64,
+}
+
+/// Measures a mesh of the band, checking every corner lies on the band's surface and inside its
+/// trim. Truck's mesher puts the boundary's points on the surface by its own search, which settles
+/// within about 1e-8 along it: the trim is held to a millionth of the band.
+fn checked_mesh(z: &Zone, tris: &[[Vec3; 3]], how: &str) -> Meshed {
+    assert!(!tris.is_empty(), "{how} {z:?}");
+    let (on, inside) = (1e-9 * size(z), 1e-6 * z.r());
+    let mut m = Meshed { flat: 0.0, tiled: 0.0, tiled_abs: 0.0, repeated: 0, inverted: 0, inverted_area: 0.0 };
+    for [a, b, c] in tris {
+        let mut corners = [(0.0, 0.0); 3];
+        for (k, p) in [a, b, c].into_iter().enumerate() {
+            let (t, tau) = params(z, *p);
+            assert!(z.point(t, tau).dist(*p) <= on, "{how} {z:?}: {p:?} off the band");
+            let trim = (-t).max(t - 1.0).max(-tau / z.r()).max((tau - z.tau_b(t)) / z.r());
+            assert!(trim <= inside / z.r(), "{how} {z:?}: {p:?} outside the trim at {t} {tau}");
+            corners[k] = uv(z, t, tau);
+        }
+        let [(u0, v0), (u1, v1), (u2, v2)] = corners;
+        let tiled = 0.5 * ((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0));
+        m.tiled += tiled;
+        m.tiled_abs += tiled.abs();
+        let cross = (*b - *a).cross(*c - *a);
+        m.flat += 0.5 * cross.len();
+        if a.dist(*b).min(b.dist(*c)).min(c.dist(*a)) <= 1e-11 * size(z) {
+            m.repeated += 1;
+            continue;
+        }
+        let (t, tau) = params(z, (*a + *b + *c) / 3.0);
+        let t = t.clamp(0.0, 1.0);
+        if cross.dot(outward(z, t, tau.clamp(0.0, z.tau_b(t)))) <= 0.0 {
+            m.inverted += 1;
+            m.inverted_area += 0.5 * cross.len();
+        }
+    }
+    m
+}
+
+/// Truck's mesher takes no chord under 1e-6.
+fn chord_for(z: &Zone) -> f64 {
+    (1e-4 * z.r()).max(2e-6)
+}
+
+fn reference_mesh(z: &Zone, face: &mt::Face, chord: f64) -> Vec<[Vec3; 3]> {
+    use truck_meshalgo::prelude::*;
+    let shell: mt::Shell = vec![face.clone()].into();
+    let meshed = shell.robust_triangulation_within(Deflection { display: true, ..Deflection::chord(chord) });
+    let pm = meshed.face_iter().next().and_then(|f| f.surface()).unwrap_or_else(|| panic!("{z:?}: not meshed"));
+    let pos = pm.positions();
+    pm.faces().triangle_iter().map(|t| [0, 1, 2].map(|k| from_p3(pos[t[k].pos]))).collect()
+}
+
+#[test]
+fn the_band_meshes_to_its_area_both_ways() {
+    for z in band_zones() {
+        let band = band_of(&z);
+        let exact = exact_area(&z);
+        // The closed form's area against the NURBS's own derivatives.
+        assert!((exact - band_area(&z)).abs() <= 1e-10 * exact, "{z:?}");
+        assert!(exact > tri(z.p_star, z.q_w, z.q_s));
+        let chord = chord_for(&z);
+        // A flat facet sagging `chord` from a surface of curvature 1/r misses about (2/3)·chord/r of
+        // its area; the smaller radius bounds the curvature.
+        let bound = 2.0 * chord / z.ra.min(z.rb) * exact;
+        // The trim's area in (t, σ), which the triangles must tile once over: ln 2 / 2, less the
+        // chords along Γ_B.
+        let trim = 2f64.ln() / 2.0;
+        let tiles = |m: &Meshed, how: &str| {
+            assert!((m.tiled - trim).abs() <= 1e-3 * trim, "{how} {z:?}: tiles {} of {trim}", m.tiled);
+            assert!(m.tiled_abs - m.tiled <= 1e-6 * trim, "{how} {z:?}: folded {m:?}");
+        };
+        // As the body meshes (truck's mesher, ruling lines on): every triangle wound out. Its
+        // facets reach across the band's twist, so their area runs over by up to a few parts in
+        // 10³ at wide corners: then a finer mesh comes closer.
+        let reference = checked_mesh(&z, &reference_mesh(&z, &band.face, chord), "reference");
+        tiles(&reference, "reference");
+        assert!(reference.inverted == 0 && reference.repeated == 0, "{z:?}: {reference:?}");
+        let over = (reference.flat - exact).abs();
+        assert!(over <= 4e-3 * exact, "{z:?}: meshed {} against {exact}", reference.flat);
+        if over > bound {
+            let finer = checked_mesh(&z, &reference_mesh(&z, &band.face, chord / 16.0), "finer");
+            assert!((finer.flat - exact).abs() <= over / 3.0, "{z:?}: {} then {} against {exact}", reference.flat, finer.flat);
+        }
+        // As the display plan meshes. At the narrowest corner (5.5°, with one radius four times
+        // the other) it falls back to Delaunay and leaves triangles on repeated points along Γ_B;
+        // on the smallest parts a sliver may lie a hair the wrong way. Neither covers anything.
+        let solid = mt::Solid::new_unchecked(vec![vec![band.face.clone()].into()]);
+        let (plan, stats) = crate::tess::plan(&solid, chord, None, None).unwrap();
+        assert_eq!(stats.planar, 0);
+        let mesh = plan.evaluate();
+        let tris: Vec<[Vec3; 3]> = mesh.triangles.iter().map(|t| t.map(|i| mesh.positions[i as usize])).collect();
+        let display = checked_mesh(&z, &tris, "display");
+        tiles(&display, "display");
+        assert!(display.repeated == 0 || z.theta < 6f64.to_radians(), "{z:?}: {display:?}");
+        assert!(display.inverted_area <= 1e-6 * exact, "{z:?}: {display:?}");
+        assert!((display.flat - exact).abs() <= bound, "{z:?}: planned {} against {exact}", display.flat);
+        // At the analogue's own size, both meshes are clean.
+        if z.r() >= 0.5 && z.v.len() < 50.0 && z.theta > 6f64.to_radians() {
+            assert!(display.inverted == 0 && display.repeated == 0, "{z:?}: {display:?}");
+        }
+    }
+}
+
+#[test]
+fn a_band_on_misplaced_corners_is_refused() {
+    let z = zone(&first_end(), 1.0, 0.5).unwrap();
+    let v = |p: Vec3| truck_modeling::builder::vertex(crate::body::p3(p));
+    let (p, qw, qs) = (v(z.p_star), v(z.q_w), v(z.q_s));
+    assert!(z.band(&p, &qw, &qs, 0.0).is_ok());
+    // Each corner off by 1e-6, taken within a tolerance of 1e-5 and refused within 1e-7.
+    let off = Vec3::new(0.0, 0.0, 1e-6);
+    let nudged = [(v(z.p_star + off), qw.clone(), qs.clone()), (p.clone(), v(z.q_w + off), qs.clone()), (p.clone(), qw.clone(), v(z.q_s + off))];
+    for (a, b, c) in &nudged {
+        assert!(z.band(a, b, c, 1e-5).is_ok() && z.band(a, b, c, 1e-7).is_err());
+    }
+    // The corners in the wrong roles, one vertex twice, and hostile tolerances.
+    assert!(z.band(&qw, &p, &qs, 1e-3).is_err() && z.band(&p, &qs, &qw, 1e-3).is_err());
+    assert!(z.band(&p, &qw, &qw, 1e-3).is_err());
+    for tol in [f64::NAN, f64::INFINITY, -1.0] {
+        assert!(z.band(&p, &qw, &qs, tol).is_err(), "{tol}");
     }
 }
