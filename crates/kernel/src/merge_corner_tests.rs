@@ -170,10 +170,51 @@ fn the_band_runs_from_p_star_to_the_line_of_the_wall_end() {
         assert!(z.tau_b(0.0).abs() < 1e-300 && (z.tau_b(1.0) - z.r() / 2.0).abs() <= 1e-15 * z.r());
         // Along L at t = 1: the ruling runs straight down it.
         assert!((z.ruling(1.0) + z.n * 2.0).len() <= 1e-15);
-        // The runs each round needs: P*'s distance along each trace.
+        // The runs each round needs reach at least to P* along each trace.
         let (along_w, along_s) = z.needed_run();
-        assert!((p.dot(z.w) - along_w).abs() <= e && (p.dot(z.s) - along_s).abs() <= e, "{z:?}");
+        assert!(along_w >= p.dot(z.w) - e && along_s >= p.dot(z.s) - e, "{z:?}");
     }
+}
+
+#[test]
+fn the_needed_run_is_as_far_as_each_edge_reaches_along_its_trace() {
+    let mut frames = vec![first_end(), second_end()];
+    for deg in [5.5, 33.69, 59.0, 61.0, 75.0, 90.0, 110.0, 140.0, 170.0] {
+        frames.push(turned(f64::to_radians(deg), Vec3::new(4.0, -3.0, 7.0), false));
+    }
+    let radii = [(0.5, 0.5), (2.0, 0.5), (0.5, 2.0), (1.0, 0.1), (0.1, 1.0), (1.0, 0.75)];
+    let mut past = 0;
+    for z in frames.iter().flat_map(|f| radii.iter().filter_map(|(ra, rb)| zone(f, *ra, *rb).ok())) {
+        // Densely sampled, then refined by a golden search on the best span.
+        let reach = |along: &dyn Fn(f64) -> f64| {
+            let n = 4000;
+            let best = (0..=n).max_by(|i, j| along(*i as f64 / n as f64).total_cmp(&along(*j as f64 / n as f64))).unwrap();
+            let (mut lo, mut hi) = ((best.max(1) - 1) as f64 / n as f64, ((best + 1).min(n)) as f64 / n as f64);
+            let g = (5f64.sqrt() - 1.0) / 2.0;
+            for _ in 0..80 {
+                let (a, b) = (hi - g * (hi - lo), lo + g * (hi - lo));
+                if along(a) < along(b) { lo = a } else { hi = b }
+            }
+            along(0.5 * (lo + hi)).max(along(0.0)).max(0.0)
+        };
+        let (along_w, along_s) = z.needed_run();
+        let (w, s) = (reach(&|t| (z.gamma_a(t) - z.v).dot(z.w)), reach(&|t| (z.gamma_b(t) - z.v).dot(z.s)));
+        let e = 1e-12 * (z.r() + z.v.len());
+        assert!((along_w - w).abs() <= e && (along_s - s).abs() <= e, "{z:?}: {along_w} {along_s} against {w} {s}");
+        if w > (z.p_star - z.v).dot(z.w) + 1e-6 || s > (z.p_star - z.v).dot(z.s) + 1e-6 {
+            past += 1;
+        }
+    }
+    // Some of the corners have an edge running on past P*.
+    assert!(past >= 5, "{past}");
+    // The review's cases: 90° with (2, 0.5), 75° with (2, 0.5), and 170° with (0.5, 2), where P* lies
+    // behind the vertex along S's trace.
+    let at = |deg: f64, ra: f64, rb: f64| zone(&turned(f64::to_radians(deg), Vec3::ZERO, false), ra, rb).unwrap().needed_run();
+    let (w, s) = at(90.0, 2.0, 0.5);
+    assert!((w - 0.879_311_103_710).abs() < 1e-9 && (s - 2.0).abs() < 1e-12, "{w} {s}");
+    assert!((at(75.0, 2.0, 0.5).0 - 1.128_886_070_295).abs() < 1e-9);
+    let (w, s) = at(170.0, 0.5, 2.0);
+    assert!((w - 8.681_900_056_478).abs() < 1e-9 && (s - 3.087_152_267_019).abs() < 1e-9, "{w} {s}");
 }
 
 #[test]
@@ -349,6 +390,11 @@ fn hostile_corners_are_refused() {
     for f in bad {
         assert!(zone(&f, 0.5, 0.5).is_err(), "{f:?}");
     }
+    // Tiny rounds far from the origin: the band's points would carry more rounding than the radius
+    // allows. The same rounds near the origin are taken.
+    let far = |d: f64, r: f64| zone(&turned(33.69f64.to_radians(), Vec3::new(d, d, d), false), r, r);
+    assert!(far(1e9, 1e-6).is_err() && far(1e9, 1e-3).is_err() && far(1e6, 1e-6).is_err());
+    assert!(far(1.0, 1e-6).is_ok() && far(1e3, 1e-3).is_ok() && far(1e9, 2.0).is_ok());
     // A corner so obtuse that the band reaches back past the wall's end (θ0 = 120°, rA cos θ0 + rB
     // = 0): refused; and a hair inside the tolerances is taken.
     assert!(zone(&turned(120f64.to_radians(), Vec3::ZERO, false), 0.5, 0.25).is_err());
