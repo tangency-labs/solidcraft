@@ -1451,8 +1451,9 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
                     .map_err(|_| e2),
                 None => match local() {
                     Ok(o) => Ok((o, vec![j])),
-                    // A curved edge, or one between curved faces: roll a ball along its smooth chain.
-                    Err(e) if !curved_case(&solid, &edge, curved_ends) => Err(e),
+                    // A curved edge, or one between curved faces, or a straight one whose end only
+                    // the rolling ball builds: roll a ball along its smooth chain.
+                    Err(e) if !curved_case(&solid, &edge, curved_ends) && !rolled_end(&solid, &edge, size) => Err(e),
                     Err(e) => match chain.as_deref() {
                         // The chain that cannot be rolled (it runs on into the edge an earlier round
                         // left where it met another face): the edge alone, ending on that round. A
@@ -1477,7 +1478,27 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
             };
             // What this attempt could change: the edge and its smooth chain, with room for the blend.
             let reach = edges_box(&solid, chain.as_deref().unwrap_or(&[edge.id()]), r + tol);
-            match attempt.and_then(|((o, rec), js)| record::rebuilt(o, &[&solid], &rec).map(|b| (b, js))) {
+            // Picks of edges the blend took up and left no trace of (an earlier round's end where
+            // the chain merged with it) are done with it: picked or not, the result is the same.
+            let absorbed = |o: &Solid, rec: &Rebuild, mut js: Vec<usize>| {
+                let kept = Body::unique_edges(o);
+                let gone: Vec<mt::EdgeID> = rec.blended().filter(|id| !kept.iter().any(|e| e.id() == *id)).collect();
+                if gone.is_empty() {
+                    return js;
+                }
+                let all = Body::unique_edges(&solid);
+                for (k, q) in todo.iter().enumerate() {
+                    let on = cur.nearest_edge(*q, tol).ok().flatten().and_then(|(i, _)| all.get(i)).is_some_and(|x| gone.contains(&x.id()));
+                    if on && !js.contains(&k) {
+                        js.push(k);
+                    }
+                }
+                js
+            };
+            match attempt.and_then(|((o, rec), js)| {
+                let js = absorbed(&o, &rec, js);
+                record::rebuilt(o, &[&solid], &rec).map(|b| (b, js))
+            }) {
                 Ok((b, js)) => {
                     done = Some((b, js, reach));
                     break;
@@ -1631,6 +1652,48 @@ fn curved_case(solid: &Solid, edge: &mt::Edge, curved_ends: bool) -> bool {
     let curved = |f: &mt::Face| !matches!(f.oriented_surface(), mt::Surface::Plane(_));
     solid.face_iter().filter(|f| f.edge_iter().any(|e| e.id() == edge.id())).any(curved)
         || (curved_ends && solid.face_iter().filter(|f| f.vertex_iter().any(|v| v == *edge.front() || v == *edge.back())).any(curved))
+}
+
+/// Whether a straight edge between planes ends where the rolling ball builds the end and the
+/// local blend does not: at a vertex of four faces whose two end faces are planes meeting along a
+/// straight seam, each beside one of the edge's faces (a wall's end flush with the face beneath
+/// it, the blend crossing the seam's line past the vertex), or where an earlier round of the
+/// other kind ends flush with a wall's end ([`crate::merge_corner::mixed_end`]). `size`: the
+/// body's.
+fn rolled_end(solid: &Solid, edge: &mt::Edge, size: f64) -> bool {
+    if !matches!(edge.curve(), mt::Curve::Line(_)) {
+        return false;
+    }
+    let sides: Vec<&mt::Face> = solid.face_iter().filter(|f| f.edge_iter().any(|e| e.id() == edge.id())).take(3).collect();
+    let [a, b] = sides[..] else { return false };
+    if plane_normal(a).is_none() || plane_normal(b).is_none() {
+        return false;
+    }
+    let tol = (size * 1e-7).max(1e-9);
+    let fit = (size * 1e-5).clamp(1e-5, 1e-3);
+    let faces: Vec<mt::Face> = solid.face_iter().cloned().collect();
+    let at = |e: &mt::Edge, v: &mt::Vertex| e.front() == v || e.back() == v;
+    let seam = |f: &mt::Face, g: &mt::Face, v: &mt::Vertex| f.edge_iter().find(|e| at(e, v) && g.edge_iter().any(|x| x.id() == e.id()));
+    [edge.front(), edge.back()].into_iter().any(|v| {
+        let ends: Vec<&mt::Face> =
+            faces.iter().filter(|f| f.id() != a.id() && f.id() != b.id() && f.vertex_iter().any(|x| x == *v)).take(3).collect();
+        match ends[..] {
+            [g, h] => {
+                let beside = |s: &mt::Face, t: &mt::Face| seam(g, s, v).is_some() && seam(h, t, v).is_some();
+                plane_normal(g).is_some()
+                    && plane_normal(h).is_some()
+                    && (beside(a, b) || beside(b, a))
+                    && seam(g, h, v).is_some_and(|e| crate::curveblend::straight(&e, tol * 10.0))
+            }
+            [g] => {
+                plane_normal(g).is_none()
+                    && [(a, b), (b, a)].into_iter().any(|(t, x)| {
+                        crate::guard("blend end", || Ok(crate::merge_corner::mixed_end(&faces, v, t, x, g, fit))).ok().flatten().is_some()
+                    })
+            }
+            _ => false,
+        }
+    })
 }
 
 /// Whether the two faces of `edge` meet tangentially along it (sampled at a quarter, the
