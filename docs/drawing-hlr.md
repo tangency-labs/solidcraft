@@ -2,7 +2,7 @@
 
 This is the geometry core of Drawing package W06 from the [published plan][plan] in
 [#860][rfc]: [#2455][issue] / [PR #2457][pr], with its parallel work and shared limits in
-[PR #2458][pr2]. It turns the subset that the W05a
+[PR #3013][pr2]. It turns the subset that the W05a
 investigation ([#2105][w05-issue], [draft #2106][w05-pr], [findings][findings])
 showed to be ready into code: exact orthographic hidden lines for placed bodies whose
 faces are planes, cylinders, cones, spheres or tori.
@@ -234,6 +234,6 @@ and intervals:
 [findings]: https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6243691483
 [issue]: https://github.com/tangency-labs/solidcraft/issues/2455
 [pr]: https://github.com/tangency-labs/solidcraft/pull/2457
-[pr2]: https://github.com/tangency-labs/solidcraft/pull/2458
+[pr2]: https://github.com/tangency-labs/solidcraft/pull/3013
 [w05-issue]: https://github.com/tangency-labs/solidcraft/issues/2105
 [w05-pr]: https://github.com/tangency-labs/solidcraft/pull/2106
