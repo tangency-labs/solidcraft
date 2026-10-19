@@ -180,7 +180,16 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    cargo test -p solidcore
    cargo check -p solidcore --target wasm32-unknown-unknown
    cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
-   cargo run --profile difftest -p difftest --features cpp -- --green --jobs 4   # what CI runs (with --jobs 0)
+   cargo run --profile difftest -p difftest --features cpp -- --green            # what CI runs (~2 min)
+   cargo run --profile difftest -p difftest --features cpp -- --green --perturb  # CI too
+   ```
+   CI also runs `--green` with `--baseline` set to `main`'s committed reports: no case
+   that passed there may disappear, stop passing or stop comparing values, and at least
+   75% of a unit's passes must compare values (`crates/difftest/README.md`, "Regression
+   gate"). To check locally, extract them first:
+   ```sh
+   mkdir -p bin/baseline && git archive origin/main reports/difftest | tar -x -C bin/baseline
+   cargo run --profile difftest -p difftest --features cpp -- --unit <unit id> --baseline bin/baseline/reports/difftest --no-report
    ```
    `--jobs N` runs N units at a time, each in its own process (`0` = every core; the
    output and reports are the same as a serial run). On a shared machine stay within the

@@ -1,0 +1,9 @@
+# Accepted difftest regression-gate violations (crates/difftest/README.md, "Regression gate").
+# Every entry needs a reason a reviewer can check. Remove ratchet waivers once the PR
+# that needed them has merged (the base commit's reports then no longer contain the case).
+#
+# [[waiver]]
+# unit = "nlib.knots"
+# check = "ratchet"          # or "value-share"
+# case = "insert_at_end"     # ratchet only; omit to waive every case of the unit
+# reason = "fixture asserted the pre-#123 clamp; replaced by insert_at_end_clamped"

@@ -1,0 +1,91 @@
+name: Nightly difftest
+
+# Slow checks that are too expensive for every pull request:
+# * `--fuzz` on every green or partial unit (probes the FFI guards for crashes, panics
+#   and hangs; see crates/difftest/README.md). Failing inputs are uploaded as an artifact;
+#   copy them into fixtures/<unit>/ as regression cases once fixed.
+# Runs on GitHub's runners, like Run workflow in ci.yml.
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_cases:
+        description: "Fuzz cases per unit"
+        default: "300"
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Must match ci.yml.
+  UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
+  UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
+      FUZZ_CASES: ${{ github.event.inputs.fuzz_cases || '300' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone upstream at pinned commit
+        run: |
+          git init upstream
+          git -C upstream remote add origin "$UPSTREAM_REPO"
+          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+            || git -C upstream fetch origin
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+
+      - name: Install C++ build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
+
+      # Same key as ci.yml, so the nightly reuses the PR jobs' C++ build.
+      - name: Cache C++ reference build
+        uses: actions/cache@v4
+        with:
+          path: .cpp
+          key: cpp-v2-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
+
+      - name: Build C++ reference (when the cache did not provide the libs)
+        run: |
+          cpp=$SOLIDCORE_CPP_DIR
+          if [ -f "$cpp/lib/libSMLib.a" ] && [ -f "$cpp/lib/libSM_API.a" ] && [ -f "$cpp/ffi.env" ]; then
+            echo "C++ reference restored from cache"
+          else
+            harness/cpp/build.sh --jobs "$(nproc)"
+          fi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+          key: difftest
+
+      - name: Build difftest
+        run: cargo build --profile difftest -p difftest --features cpp
+
+      # One unit at a time so a failure names its unit and the rest still run.
+      - name: Fuzz every green or partial unit
+        run: |
+          bin=bin/difftest/difftest
+          units=$("$bin" --list | awk -F'\t' '$2 == "status=green" || $2 == "status=partial" { print $1 }')
+          failed=0
+          for u in $units; do
+            "$bin" --unit "$u" --fuzz "$FUZZ_CASES" --fuzz-out bin/fuzz || failed=$((failed + 1))
+          done
+          echo "fuzz: $failed unit(s) failed"
+          test "$failed" -eq 0
+
+      - name: Upload failing fuzz inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: bin/fuzz
+          if-no-files-found: ignore

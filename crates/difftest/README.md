@@ -38,6 +38,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--seeds N` | generated cases per unit (default 16) |
 | `--filter S` | only cases whose name contains `S` |
 | `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
+| `--baseline D` | regression ratchet: compare each unit with its earlier report `D/<unit>.json` (see [Regression gate](#regression-gate---baseline-value-share)). CI passes the base commit's `reports/difftest` |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
 | `--fuzz N` | with `--unit`: probe the unit's FFI guard with N mutated cases, each run in a child process (below). No report written. |
 | `--fuzz-out D` | where `--fuzz` writes failing inputs (default `bin/fuzz/`; files go to `D/<unit>/`) |
@@ -184,48 +185,8 @@ Rust port), then copy the case into `fixtures/<unit>/` as a regression case
 failure. A `differs` case is printed as a `note (differs)` line with its file and
 is written the same way (so it can be re-run), but does not fail the run.
 
-## Fuzzing the `.smb` readers (`examples/reader_fuzz.rs`)
-
-A mutation fuzzer for the Rust database readers only (no C++, not part of the
-gate). Build and run it with the difftest profile, so arithmetic overflow
-panics and is reported. Unix-only (the code is in `examples/reader_fuzz/fuzz.rs`;
-on other platforms the example only prints a notice and exits 2):
-
-```sh
-X="nice -n 10 cargo run --profile difftest -p difftest --example reader_fuzz --"
-$X sweep --seeds-dir upstream/TestFiles/pt_TestFiles --cases 2000 --jobs 4 \
-    --out reader-fuzz-out --tag read [--stage read|topo|full|persist] [--filter <substr>]
-$X repro --seed <seed file> --case <i> [--write out.smb]     # rebuild one case
-$X run --input f.smb [--binary] [--stage ..] [--stack-kb N]  # run one file in-process
-$X minimize --input f.smb [--binary] --expect <verdict prefix> [--output f.min]
-$X stats --seeds-dir <dir> --cases N [--stage ..]            # error-site histogram
-```
-
-* **Stages.** `read`: `BrepData::read_from_file`. `full`:
-  `topology::brep::p7::read_from_file`. `topo`: read, then
-  `p10::make_topology_from_data` without analytics, healing or UV checks.
-  `persist`: `BrepData::read_from_db` with persisted attributes and a small
-  attribute table. `selftest` checks that every bad verdict is detected.
-* **Cases.** Case `i` of a seed applies 1 to 5 mutations (bit and byte flips,
-  truncation, integer and float token swaps, line and section edits, type-code
-  swaps, nesting wrappers, raw 8-byte overwrites for binary files) chosen by
-  splitmix64 seeded from the seed's relative path and `i`, so `repro` rebuilds
-  any case. A seed under a directory named `corpus-bin` is read as binary.
-* **Isolation.** Batches (`--batch`, default 250) run in child processes under
-  `ulimit -v` (`--mem-mb`, default 3072), one thread per case with a fixed
-  stack (`--stack-kb`, default 8192), with a per-case timeout (`--timeout`,
-  default 20 s).
-* **Verdicts.** `ok`, `err`, `unported` are fine; `panic`, `oom`,
-  `stack-overflow`, `crash` and `timeout` are bad. Each bad case is written to
-  `<out>/crashes/` (mutated file plus a `.txt` with seed, case and mutations);
-  each sweep writes `<tag>-summary.txt`, `<tag>-findings.tsv` and
-  `<tag>-per-seed.tsv`. Exit status `1` on any bad verdict.
-* `stats` runs in-process (use it only after a clean sweep) and counts the
-  error site each case ended at, as a coverage proxy.
-* Binary and persisted-attribute seeds must be written by upstream
-  (`SmBrepData::WriteToFile(SM_BINARY)`, `WriteToDB(.., bPersistAttribs)`).
-  The tool that does this is not in the repo; it would go in `harness/cpp/`
-  as a small program (or shim functions) linked against the reference build.
+`.github/workflows/nightly.yml` runs `--fuzz 300` on every green and partial unit
+each night and uploads failing inputs as the `fuzz-failures` artifact.
 
 ## Deferred cases, `partial` units
 
@@ -262,13 +223,54 @@ summaries include a rejected count when nonzero. A run containing only rejected
 fixtures fails the gate: rejection cannot establish parity. Layout errors, native
 exceptions and errors from the operation itself must not be classified this way.
 
-The same mechanism covers inputs that are undefined in C++ (AGENTS.md section 4,
-step 5.6): an FFI guard that refuses an input upstream would crash on, or a shim's
-crash trap that ran the call in a forked child and saw it crash, returns
-`Output::rejected(reason)` with the reason naming the upstream issue (e.g.
-`topology.face_p1`'s UB-137 seam calls). The C++ side never returns
-`Output::deferred`: deferrals are decided by the Rust side only, and a C++-side
-deferral is a harness error.
+## Regression gate (`--baseline`, value share)
+
+Passing every case is not enough: a unit that silently loses cases, turns passes
+into deferrals, or makes its generator reach only error paths stays green. Two
+checks, run on every unit that does not already fail, close that gap
+(`src/baseline.rs`):
+
+* **Ratchet** (`--baseline D`): the run is compared case by case, by name, with
+  the unit's earlier report `D/<unit>.json`. CI uses the reports committed on the
+  base commit (main for a PR, the previous main for a push), extracted by
+  `scripts/ci/difftest-baseline.sh`; if that fails, the job fails (only a push
+  without a base commit, or a manual run, skips the ratchet). A **GATE-FAIL** is
+  printed when a case that **passed** there is missing, now deferred or rejected,
+  or compared values there but compares nothing now (e.g. both sides now return
+  the same error); when a **deferred or failing** case is missing; or, with
+  `--green`, when a unit that was green/partial there is no longer run. Allowed:
+  new cases, deferred → pass (a dependency landed), removing rejected fixtures.
+  Generated cases are matched only when both runs used the same `--seeds`; with
+  `--filter` the ratchet is skipped. A unit with no earlier report is new and
+  only gets the value-share check.
+* **Value share** (always on, also in `--status-of`): at least 75% of a unit's
+  passing cases, and at least one, must compare a value (float, integer or
+  topology entry), not only an error string both sides agreed on. When this
+  floor was set, every green/partial unit was at 78% or more.
+
+Reports record `exact_compared` (integer/topology comparisons) per case when
+nonzero, so the ratchet can tell integer-only cases that compared something.
+
+**Stale reports.** Before overwriting `reports/difftest/<unit>.json`, a run compares
+the counts recorded there (status, cases, passed, failed, deferred, rejected) with
+its own and prints `STALE-REPORT` when they differ. On GitHub Actions this is also a
+warning annotation on the file. A stale committed report makes the next PR's ratchet
+baseline weaker, so regenerate and commit it, also for units your change affected
+indirectly (e.g. by wiring a back-edge). It warns and does not fail.
+
+A legitimate regression (a wrong fixture removed, a case renamed) needs a waiver
+in `plan/difftest-waivers.toml`, reviewed with the PR:
+
+```toml
+[[waiver]]
+unit = "nlib.knots"
+check = "ratchet"          # or "value-share"
+case = "insert_at_end"     # ratchet only; omit to waive every case of the unit
+reason = "fixture asserted the pre-#123 clamp; replaced by insert_at_end_clamped"
+```
+
+A waiver is only needed until the base commit's reports catch up, so remove
+ratchet waivers once the PR has merged.
 
 ## Pass criteria (fixed; never weaken)
 

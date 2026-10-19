@@ -34,6 +34,13 @@ jobs:
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo fmt --all --check
 
+  # Shell tests for the CI scripts (no Rust build; a few seconds).
+  ci-scripts:
+    runs-on: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'self-hosted-fast' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/ci/test-difftest-baseline.sh
+
   clippy:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
@@ -168,39 +175,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-reports.sh || echo "no previous reports; queue ordered by fixture size"
 
+      # The committed reports of the base commit (main for a PR, the previous main for a
+      # push) are the ratchet's baseline: no case that passed there may disappear, stop
+      # passing or stop comparing values (crates/difftest/README.md, "Regression gate").
+      # A failed fetch or extraction fails the job (it must never fall back to running
+      # --green without a baseline); only a push without a base commit or a manual run
+      # skips the ratchet. See scripts/ci/difftest-baseline.sh.
+      - name: Baseline reports from the base commit
+        if: steps.green.outputs.any == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          arg=$(scripts/ci/difftest-baseline.sh "$EVENT" "$BASE" "$RUNNER_TEMP/difftest-baseline")
+          if [ -z "$arg" ]; then
+            echo "::notice::no base commit for this $EVENT run; the difftest ratchet is skipped"
+          fi
+          echo "DIFFTEST_BASELINE=$arg" >> "$GITHUB_ENV"
+
       - name: Difftest green units
         if: steps.green.outputs.any == 'true'
         # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
-        # faster than the debug build that used to take ~35 min here. --jobs 0: one child
-        # process per unit, one per vCPU (same output and reports as a serial run).
-        run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0
+        # faster than the debug build that used to take ~35 min here.
+        run: cargo run --profile difftest -p difftest --features cpp -- --green $DIFFTEST_BASELINE
 
-      # main's reports are published from here (site, PROGRESS.md case counts,
-      # scripts/fetch-reports.sh), never committed.
-      - name: Keep only reports of green/partial units
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
-        run: |
-          python3 - <<'PY'
-          import pathlib, sys
-          sys.path.insert(0, "harness/plan")
-          import units
-          keep = {u["id"] for u in units.load_units() if u.get("status") in ("green", "partial")}
-          for p in pathlib.Path("reports/difftest").glob("*.json"):
-              if p.stem not in keep:
-                  p.unlink()
-          PY
-
-      - name: Upload difftest reports
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: difftest-reports
-          path: |
-            reports/difftest/*.json
-            reports/difftest/times.tsv
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: sccache stats
-        if: always() && steps.green.outputs.any == 'true'
-        run: sccache --show-stats || true
+      # Sensitivity: a runner whose comparison would not notice a changed output fails.
+      - name: Difftest perturbation check
+        if: steps.green.outputs.any == 'true'
+        run: cargo run --profile difftest -p difftest --features cpp -- --green --perturb

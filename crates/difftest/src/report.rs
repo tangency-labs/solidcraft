@@ -33,9 +33,10 @@ fn case_json(c: &CaseResult) -> Value {
     }
     m.insert("max_rel_err".into(), num(c.diff.max_rel_err));
     m.insert("values_compared".into(), json!(c.diff.values_compared));
-    m.insert("exact_compared".into(), json!(c.diff.exact_compared));
-    if !c.diagnostics.is_empty() {
-        m.insert("diagnostics".into(), json!(c.diagnostics));
+    // Integer and topology comparisons, which `--baseline` also counts as values
+    // (omitted when zero to keep float-only reports unchanged).
+    if c.diff.exact_compared > 0 {
+        m.insert("exact_compared".into(), json!(c.diff.exact_compared));
     }
     if c.both_errored {
         m.insert("both_errored".into(), json!(true));
@@ -127,6 +128,61 @@ pub fn write_unit_report(dir: &Path, r: &UnitResult) -> Result<PathBuf, HarnessE
     Ok(path)
 }
 
+/// The counts a report records, compared by `--green` to spot a committed report that no
+/// longer matches the code (a "stale" report weakens the `--baseline` ratchet).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportCounts {
+    /// `green`, `partial` or `fail`.
+    pub status: String,
+    /// All cases.
+    pub total: u64,
+    /// Passing cases.
+    pub passed: u64,
+    /// Failing cases.
+    pub failed: u64,
+    /// Deferred cases.
+    pub deferred: u64,
+    /// Rejected native fixtures.
+    pub rejected: u64,
+}
+
+impl ReportCounts {
+    /// Counts of a run.
+    pub fn of(r: &UnitResult) -> Self {
+        let n = |x: usize| u64::try_from(x).unwrap_or(u64::MAX);
+        Self {
+            status: r.status().as_str().to_string(),
+            total: n(r.cases.len()),
+            passed: n(r.passed()),
+            failed: n(r.failed()),
+            deferred: n(r.deferred()),
+            rejected: n(r.rejected()),
+        }
+    }
+
+    /// Counts recorded in report text; `None` if it is not a unit report.
+    pub fn parse(text: &str) -> Option<Self> {
+        let v: Value = serde_json::from_str(text).ok()?;
+        let n = |k: &str| v.get(k).and_then(Value::as_u64);
+        Some(Self {
+            status: v.get("status")?.as_str()?.to_string(),
+            total: n("cases_total")?,
+            passed: n("cases_passed")?,
+            failed: n("cases_failed")?,
+            deferred: n("cases_deferred")?,
+            rejected: n("cases_rejected").unwrap_or(0),
+        })
+    }
+
+    /// `status=… cases=… passed=… failed=… deferred=… rejected=…`.
+    pub fn describe(&self) -> String {
+        format!(
+            "status={} cases={} passed={} failed={} deferred={} rejected={}",
+            self.status, self.total, self.passed, self.failed, self.deferred, self.rejected
+        )
+    }
+}
+
 /// One-line summary, e.g.
 /// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16 with_values=36 no_values=4 vacuous=1`.
 /// The status word is `PASS` (green), `PARTIAL` or `FAIL`; `with_values` / `no_values`
@@ -179,37 +235,31 @@ pub fn summary_line(r: &UnitResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::case::CaseSource;
-    use crate::compare::compare;
-    use crate::output::Output;
 
     #[test]
-    fn known_mismatch_reports_distinguish_integer_checks_from_length_only_failures() {
-        for (cpp, rust, expected) in [
-            (Output::new().int("ids", 1), Output::new().int("ids", 2), 1),
-            (
-                Output::new().ints("ids", vec![1, 2]),
-                Output::new().ints("ids", vec![1]),
-                0,
-            ),
-        ] {
-            let case = CaseResult {
-                name: "known".into(),
-                source: CaseSource::Inline,
-                inputs: Value::Null,
-                diff: compare(&cpp, &rust, &[]),
-                harness_error: None,
-                both_errored: false,
-                rejected: None,
-                deferred: None,
-                perturbed: None,
-                diagnostics: std::collections::BTreeMap::new(),
-                known_mismatch: Some("test comparison".into()),
-            };
-            let report = case_json(&case);
-            assert_eq!(report["outcome"], "known_mismatch");
-            assert_eq!(report["values_compared"], 0);
-            assert_eq!(report["exact_compared"], expected);
-        }
+    fn counts_round_trip_through_a_report() {
+        let r = UnitResult {
+            unit: "a.b".into(),
+            cases: Vec::new(),
+            harness_error: None,
+            abs_floors: Vec::new(),
+            seeds: 16,
+        };
+        let text = to_canonical_string(&unit_report(&r));
+        assert_eq!(ReportCounts::parse(&text), Some(ReportCounts::of(&r)));
+        assert_eq!(
+            ReportCounts::of(&r).describe(),
+            "status=fail cases=0 passed=0 failed=0 deferred=0 rejected=0"
+        );
+    }
+
+    #[test]
+    fn old_reports_without_rejected_parse() {
+        let c = ReportCounts::parse(
+            r#"{"status":"partial","cases_total":3,"cases_passed":1,"cases_failed":0,"cases_deferred":2}"#,
+        )
+        .unwrap();
+        assert_eq!((c.deferred, c.rejected), (2, 0));
+        assert_eq!(ReportCounts::parse(r#"{"unit":"x"}"#), None);
     }
 }

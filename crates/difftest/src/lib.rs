@@ -8,6 +8,7 @@
 //! defining `pub struct Runner;` that implements [`UnitDiff`]. It is
 //! registered automatically by `build.rs`. See `crates/difftest/README.md`.
 
+pub mod baseline;
 pub mod case;
 pub mod compare;
 pub mod export_memo;
