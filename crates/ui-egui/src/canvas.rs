@@ -1199,7 +1199,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
     let mut edit = None;
     // Double-clicking the curve adds a control radius at the nearest position along it. Under
     // the handles, which are registered after it and so take the pointer first.
-    let near = ui.input(|i| i.pointer.hover_pos()).and_then(|p| {
+    let near = ui.input(crate::navigation::pointer_pos).and_then(|p| {
         drawn
             .iter()
             .flat_map(|e| e.curve.windows(2))
