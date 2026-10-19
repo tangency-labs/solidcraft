@@ -7,6 +7,7 @@
 
 mod fanuc;
 mod grbl;
+mod haas;
 mod linuxcnc;
 mod mach3;
 mod marlin;
@@ -31,8 +32,7 @@ pub fn post_toolpath(segments: &[PathSegment], profile: &PostProfile, tool: &Too
         GcodeDialect::Mach3Mach4 => mach3::write_header(&mut out, tool, eol),
         GcodeDialect::LinuxCnc => linuxcnc::write_header(&mut out, tool, eol),
         GcodeDialect::Fanuc => fanuc::write_header(&mut out, tool, eol),
-        // Remaining dialects share the GRBL-class header until their peel PRs land.
-        _ => grbl::write_header(&mut out, tool, eol),
+        GcodeDialect::Haas => haas::write_header(&mut out, tool, eol),
     }
     if !profile.preamble.is_empty() {
         for line in profile.preamble.lines() {
@@ -95,6 +95,7 @@ pub fn preset_posts() -> Vec<(&'static str, PostProfile)> {
     out.push(mach3::preset());
     out.push(linuxcnc::preset());
     out.push(fanuc::preset());
+    out.push(haas::preset());
     out
 }
 
@@ -134,6 +135,6 @@ mod tests {
     #[test]
     fn presets_cover_landed_dialects() {
         let names: Vec<_> = preset_posts().iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["GRBL", "Marlin", "Repetier", "Mach3", "LinuxCNC", "Fanuc"]);
+        assert_eq!(names, ["GRBL", "Marlin", "Repetier", "Mach3", "LinuxCNC", "Fanuc", "Haas"]);
     }
 }
