@@ -1060,9 +1060,108 @@ fn rounds_meeting_at_the_wall_ends_are_refused_alike_in_any_order() {
         if ra == rb {
             assert_eq!(fillet(&body, &both, ra).unwrap_err(), expected, "together {ra}");
         }
+        // Tapering where the round doesn't fit gets round it no more.
+        assert_eq!(crate::fillet_tapered(&footed, &outline, rb).unwrap_err(), expected, "taper, foot {ra} then edge {rb}");
+        assert_eq!(crate::fillet_tapered(&edged, &foot, ra).unwrap_err(), expected, "taper, edge {rb} then foot {ra}");
     }
     // No smaller radius gets round it: the search for one gives up at once.
     let footed = round_the_foot(&body, 0.5).unwrap();
     assert!(crate::fillet_max(&footed, &outline, 0.5).is_none());
     assert!(crate::fillet_max_each(&footed, &outline, 0.5).is_none());
+}
+
+/// The chain along `pick` on `body` is `len` edges, and a round of it at each radius is built
+/// sound.
+fn chain_and_round_kept(body: &Body, pick: Vec3, len: usize, radii: &[f64]) {
+    assert_eq!(chain_at(body, pick), len);
+    for r in radii {
+        let result = fillet(body, &[pick], *r).unwrap_or_else(|e| panic!("r {r}: {e}"));
+        assert!(result.validity().is_empty(), "r {r}: {:?}", result.validity());
+        assert_eq!(result.crossed_face_loops().unwrap(), 0, "r {r}");
+        assert!(result.solid.face_iter().count() > body.solid.face_iter().count(), "r {r}");
+    }
+}
+
+#[test]
+fn a_chain_runs_on_over_a_designed_cove_on_an_oblique_side() {
+    // A ramp's top runs down a cove (a cylinder bending up, no earlier round) into a step, cut by a
+    // slanted side: the top edge of the side runs on smoothly over the cove's oblique seam with the
+    // top and on up the step. No earlier round of the other kind ends there: the chain runs on.
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    let profile = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                line((0.0, 0.0), (20.0, 0.0)),
+                line((20.0, 0.0), (20.0, 2.0)),
+                line((20.0, 2.0), (10.0, 2.0)),
+                Seg2::Arc { center: Vec2::new(10.0, 5.0), radius: 3.0, start: -std::f64::consts::FRAC_PI_2, sweep: -std::f64::consts::FRAC_PI_2 },
+                line((7.0, 5.0), (7.0, 8.0)),
+                line((7.0, 8.0), (0.0, 8.0)),
+                line((0.0, 8.0), (0.0, 0.0)),
+            ],
+        },
+        holes: vec![],
+    };
+    let ramp = crate::extrude(&Plane::YZ, &[profile], 0.0, 10.0).unwrap().pop().unwrap();
+    // Away the side of x = 2 + 0.3 y.
+    let cut = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                line((-5.0, -5.0), (0.5, -5.0)),
+                line((0.5, -5.0), (9.5, 25.0)),
+                line((9.5, 25.0), (-5.0, 25.0)),
+                line((-5.0, 25.0), (-5.0, -5.0)),
+            ],
+        },
+        holes: vec![],
+    };
+    let cut = crate::extrude(&Plane::XY, &[cut], -1.0, 10.0).unwrap().pop().unwrap();
+    let body = boolean(&ramp, &cut, BoolOp::Cut).unwrap().unwrap();
+    chain_and_round_kept(&body, Vec3::new(6.5, 15.0, 2.0), 3, &[0.5, 1.0]);
+}
+
+#[test]
+fn a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side() {
+    // A wall on a plate, its end in one plane with the plate's slanted side, its foot rounded: the
+    // round's end runs across that one face from the plate's top edge up the wall's end. That is
+    // no end against a separate end face ([`crate::merge_corner`]): the plate's top edge runs on
+    // over it and up the wall's end.
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (5.0, 10.0)])], 0.0, 2.0).unwrap().pop().unwrap();
+    let wall = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 2.0), (1.0, 2.0)])], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    for r in [0.5, 1.0] {
+        let footed = fillet(&body, &[Vec3::new(10.0, 2.0, 2.0)], r).unwrap();
+        chain_and_round_kept(&footed, Vec3::new(3.0, 6.0, 2.0), 3, &[0.5, 1.0]);
+    }
+}
+
+/// A 12 by 4 bar standing on the origin, 10 high, its four upright edges rounded 1.5.
+fn rounded_bar() -> Body {
+    let bar = box_solid(Vec3::new(-6.0, -2.0, -5.0), Vec3::new(6.0, 2.0, 5.0)).unwrap();
+    fillet(&bar, &[Vec3::new(-6.0, -2.0, 0.0), Vec3::new(6.0, -2.0, 0.0), Vec3::new(6.0, 2.0, 0.0), Vec3::new(-6.0, 2.0, 0.0)], 1.5).unwrap()
+}
+
+#[test]
+fn a_chain_runs_on_round_a_tilted_slot_and_a_boss_on_a_tilted_plate() {
+    // A rounded slot sunk at a slant into a block's top, and a rounded bar standing on a tilted
+    // plate: the rim and the foot run round the slot's and the bar's rounded corners, whose seams
+    // cross them obliquely and which bend away from the ball. They are the design's corners, not
+    // an earlier round's ends: the chains go all the way round and a round of one edge takes them.
+    let tilt = 20f64.to_radians();
+    let slot = crate::transform(&rounded_bar(), Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Y, tilt).unwrap();
+    let block = box_solid(Vec3::new(-15.0, -10.0, 0.0), Vec3::new(15.0, 10.0, 10.0)).unwrap();
+    let slotted = boolean(&block, &slot, BoolOp::Cut).unwrap().unwrap();
+    chain_and_round_kept(&slotted, Vec3::new(0.0, 2.0, 10.0), 8, &[0.5]);
+    let plate = box_solid(Vec3::new(-15.0, -10.0, -2.0), Vec3::new(15.0, 10.0, 0.0)).unwrap();
+    let plate = crate::transform(&plate, Vec3::ZERO, Vec3::ZERO, Vec3::Y, tilt).unwrap();
+    let boss = boolean(&plate, &rounded_bar(), BoolOp::Union).unwrap().unwrap();
+    chain_and_round_kept(&boss, Vec3::new(0.0, 2.0, 0.0), 8, &[0.5]);
 }
