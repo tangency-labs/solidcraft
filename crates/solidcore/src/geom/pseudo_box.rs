@@ -702,7 +702,10 @@ impl PseudoBox {
         points.iter().zip(vectors).any(|(pnt, vec)| {
             // Calculate D of plane equation, A, B, C are in aVectors
             let d = -pnt.dot(*vec);
-            corners.iter().all(|c| vec.dot(*c) + d >= EFF_ZERO)
+            // `!any(< EFF_ZERO)`, as upstream's loop: a NaN corner (a perspective eye on the
+            // view plane projects the boxes to NaN) is not below the limit, so the plane
+            // separates. `all(>= EFF_ZERO)` says the opposite for NaN (#59).
+            !corners.iter().any(|c| vec.dot(*c) + d < EFF_ZERO)
         })
     }
 
