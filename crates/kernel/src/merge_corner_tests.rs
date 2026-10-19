@@ -630,9 +630,10 @@ fn params(z: &Zone, p: Vec3) -> (f64, f64) {
     (t, (p - z.gamma_a(t)).dot(d) / d.dot(d))
 }
 
-/// The face's surface parameters at `(t, τ)`.
+/// The face's surface parameters at `(t, τ)`: `(t, σ)` (or `(σ, t)`) stretched by `k = ρ*/c`.
 fn uv(z: &Zone, t: f64, tau: f64) -> (f64, f64) {
-    if z.faces_out { (t, tau / z.r()) } else { (tau / z.r(), t) }
+    let k = z.k();
+    if z.faces_out { (t * k, tau / z.r() * k) } else { (tau / z.r() * k, t * k) }
 }
 
 /// How far `p` lies above the merged profile in its own section, along `n` (below: inside the
@@ -771,6 +772,32 @@ fn the_bands_edges_lie_on_its_surface() {
 }
 
 #[test]
+fn a_search_from_nowhere_finds_the_nearest_point_of_the_band() {
+    // As the blends project onto a face: truck's search with no starting point. On the band's
+    // own parameters it settled on its grid at a hundredth of the analogue, 2e-4 off (a part in 50
+    // of the radius); stretched in proportion it finds the point at every size, to its own
+    // tolerance (about 1e-6, as on the rounds' strips).
+    use truck_modeling::SearchNearestParameter;
+    for z in band_zones() {
+        let band = band_of(&z);
+        let surface = band.face.oriented_surface();
+        for i in 1..8 {
+            let t = i as f64 / 8.0;
+            for j in 1..4 {
+                let tau = z.tau_b(t) * j as f64 / 4.0;
+                let p = z.point(t, tau);
+                for off in [0.0, 0.1 * z.r()] {
+                    let q = p + outward(&z, t, tau) * off;
+                    let (u, v) = surface.search_nearest_parameter(crate::body::p3(q), None, 100).unwrap();
+                    let miss = from_p3(mt::ParametricSurface::subs(&surface, u, v)).dist(p);
+                    assert!(miss <= 2e-6 + 1e-9 * size(&z), "{z:?} {t} {tau} {off}: {miss}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn the_bands_loop_is_simple_and_counterclockwise_in_its_parameters() {
     for z in band_zones() {
         let band = band_of(&z);
@@ -790,8 +817,9 @@ fn the_bands_loop_is_simple_and_counterclockwise_in_its_parameters() {
         let n = ring.len();
         let seg = |i: usize| (ring[i], ring[(i + 1) % n]);
         let wound: f64 = (0..n).map(|i| seg(i).0.0 * seg(i).1.1 - seg(i).1.0 * seg(i).0.1).sum::<f64>() / 2.0;
-        // The trim's area in (t, σ): ∫ t/(1 + t²) = ln 2 / 2, at any size.
-        assert!((wound - 2f64.ln() / 2.0).abs() <= 1e-3, "{z:?}: {wound}");
+        // The trim's area in (t, σ): ∫ t/(1 + t²) = ln 2 / 2, at any size (stretched by k²).
+        let trim = 2f64.ln() / 2.0 * z.k().powi(2);
+        assert!((wound - trim).abs() <= 1e-3 * trim, "{z:?}: {wound}");
         // No two segments cross but neighbours at their shared end.
         let cross = |(a, b): ((f64, f64), (f64, f64)), (c, d): ((f64, f64), (f64, f64))| {
             let side = |p: (f64, f64), q: (f64, f64), r: (f64, f64)| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
@@ -878,10 +906,12 @@ struct Meshed {
 
 /// Measures a mesh of the band, checking every corner lies on the band's surface and inside its
 /// trim. Truck's mesher puts the boundary's points on the surface by its own search, which settles
-/// within about 1e-8 along it: the trim is held to a millionth of the band.
+/// within about 1e-6 in the face's parameters, as far in space on the band (in proportion): the
+/// trim is held to a millionth of the band, or of a millimetre on a smaller one (at a hundredth of
+/// the analogue the reference mesh strays up to 2e-5 of the band, a tenth of its chord).
 fn checked_mesh(z: &Zone, tris: &[[Vec3; 3]], how: &str) -> Meshed {
     assert!(!tris.is_empty(), "{how} {z:?}");
-    let (on, inside) = (1e-9 * size(z), 1e-6 * z.r());
+    let (on, inside) = (1e-9 * size(z), 1e-6 * z.r().max(1.0));
     let mut m = Meshed { flat: 0.0, tiled: 0.0, tiled_abs: 0.0, repeated: 0, inverted: 0, inverted_area: 0.0 };
     for [a, b, c] in tris {
         let mut corners = [(0.0, 0.0); 3];
@@ -938,9 +968,9 @@ fn the_band_meshes_to_its_area_both_ways() {
         // A flat facet sagging `chord` from a surface of curvature 1/r misses about (2/3)·chord/r of
         // its area; the smaller radius bounds the curvature.
         let bound = 2.0 * chord / z.ra.min(z.rb) * exact;
-        // The trim's area in (t, σ), which the triangles must tile once over: ln 2 / 2, less the
-        // chords along Γ_B.
-        let trim = 2f64.ln() / 2.0;
+        // The trim's area in (t, σ), which the triangles must tile once over: ln 2 / 2 (stretched
+        // by k² in the face's parameters), less the chords along Γ_B.
+        let trim = 2f64.ln() / 2.0 * z.k().powi(2);
         let tiles = |m: &Meshed, how: &str| {
             assert!((m.tiled - trim).abs() <= 1e-3 * trim, "{how} {z:?}: tiles {} of {trim}", m.tiled);
             assert!(m.tiled_abs - m.tiled <= 1e-6 * trim, "{how} {z:?}: folded {m:?}");
