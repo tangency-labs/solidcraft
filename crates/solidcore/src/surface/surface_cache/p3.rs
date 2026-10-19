@@ -26,6 +26,11 @@
 //!   [`SurfaceCache::build_tree`]`(for_derived_cache)`: `true` for a non-NULL block (a
 //!   derived cache finishes the construction), `false` for NULL. New nodes and their data
 //!   come from zero-filled block memory upstream: all-zero boxes, as in part 2.
+//! - **Failed patch split.** `SubdivideNode` ignores the status of `sm_SplitSrf`
+//!   (`GW_ERR` logs only): the children then are the zero-filled patches the block
+//!   memory holds (`zeroed_like`), as for the approximation branch. Before PR #147
+//!   round 4 the port returned the error, failing the cache build of a surface whose
+//!   constructed knot vector is non-monotone, which upstream builds.
 //! - **Split surfaces.** Splitting a node that holds a temporary subdivision surface
 //!   (only `SmTessSrfCache` puts them on nodes; the tree build never does) snaps the
 //!   split to a knot and splits the surface; the halves are named by the cache's
@@ -558,8 +563,15 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 .clone()
                 .ok_or_else(|| invalid(OP_NODE, "patch node without its Bezier"))?;
             let (bez1, bez2) = if bspline_of(self.surface()).is_some() {
-                // build child Beziers = split parent Bezier patch
-                split_srf(&parent_bezier, split_param, dir).map_err(SolidError::nl_ser(OP_NODE))?
+                // build child Beziers = split parent Bezier patch; upstream's `GW_ERR` only
+                // logs a failed split, whose checks (`N_KnotVectorIsEndParam`, span and
+                // multiplicity) fail before it writes, so the children keep their
+                // zero-filled block memory (sized like the parent by
+                // `sm_InitNurbSurfaceMemory`)
+                match ignore(split_srf(&parent_bezier, split_param, dir))? {
+                    Some(children) => children,
+                    None => (zeroed_like(&parent_bezier)?, zeroed_like(&parent_bezier)?),
+                }
             } else {
                 // let child Bezier patches = Bezier approximations to the parent surface
                 // subdomain (coarse for all but the final leaf nodes)

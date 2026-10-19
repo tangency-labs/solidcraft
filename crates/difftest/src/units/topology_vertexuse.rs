@@ -416,10 +416,14 @@ fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError
     Ok(Some(SmCurve::from(base)))
 }
 
-fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError> {
+/// An exported surface block: the surface, whether it was imported exactly, and the
+/// exported `SmBSplineSurface` subclass type code (`None` for a plane or no surface).
+type SurfaceBlock = (Option<Surface>, bool, Option<i64>);
+
+fn read_surface(rd: &mut Rd<'_>) -> Result<SurfaceBlock, HarnessError> {
     let kind = rd.num()?;
     if kind == -1.0 {
-        return Ok((None, true));
+        return Ok((None, true, None));
     }
     if kind == 1.0 {
         // an SmPlane: origin, axes, scales, analytic domain
@@ -428,14 +432,15 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError
         let y = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
         let sc = Vec2::new(rd.num()?, rd.num()?);
         let d = Extent2d::from_bounds(rd.num()?, rd.num()?, rd.num()?, rd.num()?);
-        return Ok((Some(Surface::from(Plane::new(o, x, y, sc, &d))), true));
+        return Ok((Some(Surface::from(Plane::new(o, x, y, sc, &d))), true, None));
     }
     if kind != 0.0 {
         return Err(harness("export: a surface is not a B-spline or plane"));
     }
     // an SmBSplineSurface subclass other than SmPlane: only its B-spline part is
     // imported, so its evaluations are not the upstream ones
-    let exact = rd.num()? == B_SPLINE_SURFACE_TYPE as f64;
+    let ty = rd.idx()?;
+    let exact = ty == B_SPLINE_SURFACE_TYPE;
     let oob = rd.num()? != 0.0;
     let form = rd.num()?;
     let n = rd.usize()?;
@@ -461,7 +466,7 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError
     let form =
         BSplineSurfaceForm::from_code(form as u64).ok_or_else(|| harness("bad surface form"))?;
     b.set_b_spline_surface_form(form);
-    Ok((Some(Surface::from(b)), exact))
+    Ok((Some(Surface::from(b)), exact, Some(ty)))
 }
 
 /// Reads an exported region record's shell list (`SmRegion::m_pList` from its head).
@@ -542,6 +547,15 @@ pub(crate) fn read_shell_state(
 /// Builds the Rust B-rep from the shim's export (see the module docs), with whether
 /// each face's surface was imported exactly.
 pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
+    import_with_types(ex).map(|(b, exact, _)| (b, exact))
+}
+
+/// An imported B-rep with, per face, whether its surface was imported exactly and its
+/// exported surface subclass type code (`None` for a plane or no surface).
+pub(crate) type TypedImport = (Brep, Vec<bool>, Vec<Option<i64>>);
+
+/// [`import`], also with each face's exported surface subclass type code.
+pub(crate) fn import_with_types(ex: &[f64]) -> Result<TypedImport, HarnessError> {
     let c = ffi::counts(ex).ok_or_else(|| harness("import of a failed build"))?;
     let [n_r, n_s, n_fu, n_f, n_lu, n_l, n_eu, n_e, n_vu, n_v] = c;
     let mut rd = Rd { v: ex, at: 1 };
@@ -594,9 +608,11 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     }
     let mut surfaces = Vec::new();
     let mut exact_faces = Vec::new();
+    let mut face_types = Vec::new();
     for f in 0..n_f {
-        let (mut surface, exact) = read_surface(&mut rd)?;
+        let (mut surface, exact, ty) = read_surface(&mut rd)?;
         exact_faces.push(exact);
+        face_types.push(ty);
         let faceuse = opt(rd.idx()?, FaceuseId::from_index)?;
         let dom = Extent2d::from_bounds(rd.num()?, rd.num()?, rd.num()?, rd.num()?);
         let rect = rd.idx()?;
@@ -847,7 +863,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
         b.add_vertexuse_record(vu)
             .map_err(|e| harness(e.to_string()))?;
     }
-    Ok((b, exact_faces))
+    Ok((b, exact_faces, face_types))
 }
 
 fn id<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> i64 {

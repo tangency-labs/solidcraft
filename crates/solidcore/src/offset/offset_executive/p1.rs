@@ -11,6 +11,7 @@
 //! | [`OffsetExecutive::replace_implicit_offsets`] | `ReplaceImplicitOffsets` |
 //! | [`OffsetExecutive::remove_excess_faces`] | `RemoveExcessFaces` |
 //! | [`OffsetExecutive::get_create_extended_surface`] | `GetCreateExtendedSurface` |
+//! | [`OffsetExecutive::insert_extended_surface`] | `m_vSurfExtSurf.Insert` (protected upstream; harness seeding) |
 //! | [`OffsetExecutive::piecewise_merge`] | `PiecewiseMerge` |
 //! | `sort_edgeuses`, `insert_breaks`, `remove_small_stuff`, `extract_gaps` (private) | `sm_SortEdgeuses`, `sm_InsertBreaks`, `sm_RemoveSmallStuff`, `sm_ExtractGaps` |
 //! | [`OffsetExecutive::offset_edgeuse`] | `GetOffsetEdgeuse` |
@@ -48,6 +49,7 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{Solution, SolutionArray};
 use crate::geom::tol::Relation;
+use crate::heal::stitch::p2 as stitch;
 use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
@@ -55,6 +57,7 @@ use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
 use crate::topology::brep_cache::{
     arena_identity, make_brep_cache, BrepCache, BrepObjects, CacheObject, CacheSource,
 };
@@ -388,6 +391,14 @@ impl OffsetExecutive {
         }
     }
 
+    /// Caches `surface` as the extension of `base_key` (`m_vSurfExtSurf.Insert`), replacing
+    /// any earlier entry. Upstream's map is protected; the offset difftest shims reach it
+    /// through a subclass to seed every base with itself, so that a lookup never extends,
+    /// and their runners seed the port's cache through this method.
+    pub fn insert_extended_surface(&mut self, base_key: u64, surface: Surface) {
+        self.extended_surfaces.insert(base_key, surface);
+    }
+
     /// Replaces implicit offset surfaces with approximations (`ReplaceImplicitOffsets`).
     /// The unconditional initial shrink is owned by `topology.brep_p4`.
     pub fn replace_implicit_offsets(
@@ -703,24 +714,39 @@ impl OffsetExecutive {
     ///
     /// On the non-merge path the B-rep is taken and relations are cleared *before*
     /// stitching, as upstream. A deferred stitch therefore leaves `offset_brep()` empty.
-    pub fn piecewise_merge(&mut self, kernel: &Kernel, original: &mut Brep) -> Result<Brep> {
+    pub fn piecewise_merge(&mut self, kernel: &mut Kernel, original: &mut Brep) -> Result<Brep> {
         if !self.merge_results {
             self.clear_relations();
-            let _result = required(self.offset_brep.take())?;
+            let mut result = required(self.offset_brep.take())?;
+            // the stitch statuses are ignored upstream
             if self.create_offset_solid {
-                // TRUE, result tolerance; continuation checks multiple regions and
-                // calls FindAndSetInfiniteRegion with editing temporarily disabled.
-                // UNPORTED(heal.stitch_p2): SmStitch::StitchIntoShell
-                return Err(SolidError::unported(
-                    "SmStitch::StitchIntoShell",
-                    "heal.stitch_p2",
-                ));
+                // Tol: StitchIntoShell() adds in the tols of the topology objects,
+                // so the Brep's tolerance should be plenty.
+                let stitch_tol_3d = result.tolerance();
+                ignore_status(stitch::stitch_into_shell(
+                    kernel,
+                    &mut result,
+                    true,
+                    stitch_tol_3d,
+                ))?;
+            } else {
+                ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
             }
-            // UNPORTED(heal.stitch_p2): SmStitch::StitchIntoSolid
-            return Err(SolidError::unported(
-                "SmStitch::StitchIntoSolid",
-                "heal.stitch_p2",
-            ));
+
+            if bp1::regions(&result, None)?.len() > 1 {
+                let old = result.editing_enabled();
+                result.set_editing_enabled(false);
+                let r = stitch::find_and_set_infinite_region(
+                    kernel,
+                    &mut result,
+                    None,
+                    SetRegionVoidType::InfiniteRegionSwap,
+                    None,
+                );
+                result.set_editing_enabled(old);
+                r?;
+            }
+            return Ok(result);
         }
 
         // Surfaces are face-owned concrete values. Face ids identify the two sides
@@ -2063,21 +2089,24 @@ mod tests {
 
     #[test]
     fn merge_clears_all_relations_and_preserves_upstream_transfer_order() {
-        let kernel = Kernel::default();
+        let mut kernel = Kernel::default();
         let mut original = Brep::new();
         for solid in [false, true] {
             let mut executive = executive();
             executive.set_offset_brep(Brep::new());
             executive.set_create_offset_solid(solid);
             executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
+            // StitchIntoShell defers at DoStitching's first Notify, StitchIntoSolid at
+            // its bounding box
+            let (symbol, owner) = if solid {
+                ("SmBrep::Notify", "topology.brep_p2")
+            } else {
+                ("SmBrep::CalculateBoundingBox", "query.brep")
+            };
             assert_dependency(
-                executive.piecewise_merge(&kernel, &mut original),
-                if solid {
-                    "SmStitch::StitchIntoShell"
-                } else {
-                    "SmStitch::StitchIntoSolid"
-                },
-                "heal.stitch_p2",
+                executive.piecewise_merge(&mut kernel, &mut original),
+                symbol,
+                owner,
             );
             assert!(executive.offset_brep().is_none());
             assert_eq!(executive.offset_edgeuse(EdgeuseId::from_index(1)), None);
@@ -2087,7 +2116,7 @@ mod tests {
         executive.set_offset_brep(Brep::new());
         executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
         assert_dependency(
-            executive.piecewise_merge(&kernel, &mut original),
+            executive.piecewise_merge(&mut kernel, &mut original),
             "SmBrep::ShrinkGeometry",
             "topology.brep_p4",
         );

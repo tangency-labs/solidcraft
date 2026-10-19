@@ -60,9 +60,9 @@
 //! - The calls into `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
 //!   (`topology.brep_p3`), `Notify`
 //!   (`topology.brep_p2`), `CalculateBoundingBox` (`query.brep`), `SmFace::GetBrep`,
-//!   `GetVertices`, `GetEdges` (`topology.face_p4`), `SmMerge::MergeAddedFace`
-//!   (`boolean.merge_p2`) and `SmStitch::DoStitching`, `StitchIntoSolid`,
-//!   `StitchIntoShell` (`heal.stitch_p2`) return [`SolidError::Unported`].
+//!   `GetVertices`, `GetEdges` (`topology.face_p4`) and `SmMerge::MergeAddedFace`
+//!   (`boolean.merge_p2`) return [`SolidError::Unported`]. The API entry points call
+//!   `DoStitching`, `StitchIntoSolid` and `StitchIntoShell` in [`super::p2`].
 
 use std::collections::BTreeMap;
 
@@ -2225,12 +2225,7 @@ pub struct AdvancedStitch {
 pub fn api_stitch_into_solid(k: &mut Kernel, b: Option<&mut Brep>) -> Result<AdvancedStitch> {
     let b =
         b.ok_or_else(|| SolidError::invalid_input(API_OP, "SmApiStitchIntoSolid: null B-rep"))?;
-    let _ = (k, b);
-    // UNPORTED(heal.stitch_p2): SmStitch::StitchIntoSolid
-    Err(SolidError::unported(
-        "SmStitch::StitchIntoSolid",
-        "heal.stitch_p2",
-    ))
+    super::p2::stitch_into_solid(k, b)
 }
 
 /// `SmApiStitchIntoShell`: `SmStitch::StitchIntoShell`.
@@ -2246,12 +2241,7 @@ pub fn api_stitch_into_shell(
 ) -> Result<AdvancedStitch> {
     let b =
         b.ok_or_else(|| SolidError::invalid_input(API_OP, "SmApiStitchIntoShell: null B-rep"))?;
-    let _ = (k, b, shell_is_well_formed, max_stitching_ratio);
-    // UNPORTED(heal.stitch_p2): SmStitch::StitchIntoShell
-    Err(SolidError::unported(
-        "SmStitch::StitchIntoShell",
-        "heal.stitch_p2",
-    ))
+    super::p2::stitch_into_shell(k, b, shell_is_well_formed, max_stitching_ratio)
 }
 
 /// `SmApiUnifyNormals`: [`Stitch::unify_normals`] with the default callback and the
@@ -2334,12 +2324,14 @@ pub fn api_stitch_advanced(
     stitch.split_edges_with_vertices = options.split_edges_with_vertices;
     stitch.making_manifold_solid = options.making_manifold_solid;
     stitch.remove_laminar_slivers = options.remove_laminar_slivers;
-    let _ = (k, b, stitch);
-    // UNPORTED(heal.stitch_p2): SmStitch::DoStitching
-    Err(SolidError::unported(
-        "SmStitch::DoStitching",
-        "heal.stitch_p2",
-    ))
+    let r = stitch.do_stitching(k, b, None, None, super::p2::MinGapRequest::default())?;
+    Ok(AdvancedStitch {
+        produces_a_solid: false,
+        stitched_edges: r.stitched_edges,
+        lamina_edges: r.lamina_edges,
+        max_vertex_gap: r.max_vertex_gap,
+        max_edge_gap: r.max_edge_gap,
+    })
 }
 
 #[cfg(test)]

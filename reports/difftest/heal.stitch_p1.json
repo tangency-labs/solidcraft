@@ -3,8 +3,8 @@
   "cases": [
     {
       "deferred": {
-        "symbol": "SmStitch::StitchIntoSolid",
-        "unit": "heal.stitch_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "box_stitch_into_solid",
@@ -15,8 +15,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmStitch::StitchIntoShell",
-        "unit": "heal.stitch_p2"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_stitch_into_shell",
@@ -39,8 +39,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmStitch::DoStitching",
-        "unit": "heal.stitch_p2"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_advanced_stitch",
@@ -2681,10 +2681,10 @@
   "cases_total": 300,
   "deferred_by_unit": {
     "harness:analytic-geometry-export": 1,
-    "heal.stitch_p2": 3,
-    "query.brep": 7,
-    "topology.brep_p2": 5,
-    "topology.brep_p4": 1,
+    "query.brep": 8,
+    "topology.brep_p2": 2,
+    "topology.brep_p5": 6,
+    "topology.brep_p9": 26,
     "topology.face_p2": 49,
     "topology.face_p4": 2
   },

@@ -54,7 +54,10 @@
 //!   propagated, as everywhere.
 //! - **`CreateSphereFromArcs`** returns the indices of the input arcs in CCW order
 //!   (upstream returns the same curve pointers). The recomputing `IsArc` calls whose
-//!   result upstream ignores keep the previous frame and angles when they fail.
+//!   result upstream ignores keep the previous frame and angles when they fail. Its
+//!   `rOrigin` is a reference into the frame those calls overwrite, so the centre check
+//!   never fires and the sphere centre is the last examined arc's (WR-103): the port
+//!   reads the current frame's origin at each use.
 //! - **`SetCanonical`** passes no domain to `CreateCanonical` (as upstream), so the
 //!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only
 //!   the NURB is replaced: form and knot type stay those of the surface.
@@ -222,14 +225,11 @@ fn is_nurb_surface_cone(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surfa
     })
 }
 
-/// `SmCurve::IsArc(lNumberOfSamplePoints, d3DTol, ..)` of a B-spline curve.
-fn curve_is_arc(c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
-    let arc = crate::curve::curve::p5::is_arc_base(
-        c,
-        |c, tol| c.is_degenerate(tol, None),
-        num_samples,
-        tol,
-    )?;
+/// `pArc->IsArc(lNumberOfSamplePoints, d3DTol, ..)`: the virtual call on an
+/// `SmBSplineCurve *` whose real kind may be a circle (`SmCircle::IsArc`, exact) or a
+/// line (never an arc); [`SmCurve::is_arc`].
+fn curve_is_arc(c: &SmCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+    let arc = c.is_arc(num_samples, tol)?;
     Ok(arc.map(|(frame, radius, start_deg, end_deg)| ArcData {
         frame,
         radius,
@@ -458,7 +458,7 @@ impl BSplineSurface {
     ///
     /// `SM_ERR` unless there are exactly three arcs of a common center and radius
     /// meeting at their ends; [`SolidError::Unported`] (`SmCurve::IsArc`).
-    pub fn create_sphere_from_arcs(arcs: &[BSplineCurve], tol_3d: f64) -> Result<SphereFromArcs> {
+    pub fn create_sphere_from_arcs(arcs: &[SmCurve], tol_3d: f64) -> Result<SphereFromArcs> {
         let total_curves = arcs.len();
 
         // no work - not given exactly 3 curves
@@ -477,7 +477,8 @@ impl BSplineSurface {
 
         // extract Sphere Params from Arc shapes
         let mut angle_span = first.end_deg - first.start_deg;
-        let origin = ref_frame.origin();
+        // (upstream's `rOrigin` is a reference into `sRefFrame`, which every later `IsArc`
+        // overwrites: the centre is read from the current frame at each use, WR-103)
 
         // for all other input arcs - check for Compatible centers and radii
         for i in 1..total_curves {
@@ -490,11 +491,9 @@ impl BSplineSurface {
             }
             ref_frame = a.frame;
 
-            // no work - OtherCurve center is not the same as 1st Curve cent
-            let diff = ref_frame.origin() - origin;
-            if diff.length() > tol_3d {
-                return Err(SolidError::sm_err(OP_SPHERE));
-            }
+            // no work - OtherCurve center is not the same as 1st Curve cent: upstream
+            // compares `sRefFrame.GetOriginRef()` with `rOrigin`, a reference to that same
+            // origin, so the difference is zero and the check never fires (WR-103)
 
             // remember the largest ArcAngle seen
             let angle_span1 = a.end_deg - a.start_deg;
@@ -541,7 +540,7 @@ impl BSplineSurface {
         }
 
         // Now find the non common point between the second largest and the gen curve
-        let ends = |c: &BSplineCurve| -> Result<(Point3, Point3)> {
+        let ends = |c: &SmCurve| -> Result<(Point3, Point3)> {
             let ivl = c.natural_interval();
             Ok((c.evaluate_point(ivl.min())?, c.evaluate_point(ivl.max())?))
         };
@@ -601,18 +600,24 @@ impl BSplineSurface {
         }
 
         // Define ZAxis in same general direction as sRefZAxis
-        let mut z_axis = origin - non_common_pnt;
+        let mut z_axis = ref_frame.origin() - non_common_pnt;
         if z_axis.dot(ref_z_axis) < 0.0 {
             z_axis = -z_axis;
         }
         let z_axis = z_axis.unitize_or_z();
 
-        // Make the Sphere as a SurfOfRevolution
-        // (no sweep circle is given, so the kernel is not used)
+        // Make the Sphere as a SurfOfRevolution (of the generator's NURB data: a B-spline
+        // or a circle, the only kinds IsArc accepts; no sweep circle is given, so the
+        // kernel is not used)
+        let gen_nurb = match gen_curve.kind() {
+            CurveKind::BSpline(b) => b,
+            CurveKind::Ellipse(e) => e.base(),
+            _ => return Err(SolidError::sm_err(OP_SPHERE)),
+        };
         let sphere = Self::create_surf_of_revolution(
             &Kernel::default(),
-            gen_curve,
-            origin,
+            gen_nurb,
+            ref_frame.origin(),
             z_axis,
             angle_span,
             false,
@@ -1448,6 +1453,47 @@ mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface;
+
+    /// A rational quadratic arc from `p0` to `p2` with tangent corner `c` and corner
+    /// weight `w` (the cosine of half the arc angle).
+    fn arc3(p0: [f64; 3], c: [f64; 3], w: f64, p2: [f64; 3]) -> SmCurve {
+        let pw = vec![
+            CPoint::new(p0[0], p0[1], p0[2], 1.0),
+            CPoint::new(c[0] * w, c[1] * w, c[2] * w, w),
+            CPoint::new(p2[0], p2[1], p2[2], 1.0),
+        ];
+        let cur = crate::nurbs::crv_basic::Curve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+            .expect("curve");
+        SmCurve::from(BSplineCurve::from_nurb(cur, 3, false))
+    }
+
+    /// WR-103: arcs about two centres (the first two sharing their start point) build a
+    /// sphere, as upstream's aliased (dead) centre check lets them.
+    #[test]
+    fn sphere_from_arcs_about_two_centres() {
+        let arcs = [
+            arc3(
+                [5.0, 0.0, 0.0],
+                [5.0, 8.660_254_037_844_386, 0.0],
+                0.5,
+                [-2.5, 4.330_127_018_922_193, 0.0],
+            ),
+            arc3(
+                [5.0, 0.0, 0.0],
+                [5.0, 0.0, 5.0],
+                std::f64::consts::FRAC_1_SQRT_2,
+                [10.0, 0.0, 5.0],
+            ),
+            arc3(
+                [10.0, 5.0, 0.0],
+                [10.0, 5.0, 2.886_751_345_948_129],
+                0.866_025_403_784_438_6,
+                [10.0, 2.5, 4.330_127_018_922_193],
+            ),
+        ];
+        let r = BSplineSurface::create_sphere_from_arcs(&arcs, 1e-6).unwrap();
+        assert_eq!(r.ccw_arcs, vec![0, 1, 2]);
+    }
 
     /// A biquadratic 3 x 3 patch over `[0, 2] x [0, 1]`.
     fn patch(rational: bool) -> BSplineSurface {

@@ -487,10 +487,18 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "three_arcs_about_two_centres",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#60 (upstream source/SMLib/src/SmBSplineSurface.cpp CreateSphereFromArcs (WR-103: rOrigin aliases sRefFrame, so the centre check is dead: three radius-5 arcs, a 120-degree generator about the origin, its 90-degree neighbour about (10,0,0) sharing its start point, a 60-degree arc about (10,0,0), build a sphere; a port with the check rejects them))",
+      "values_compared": 94
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "empty_swap",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#60 (upstream edge: SwapUV without NURB (SM_ERR_NULL_POINTER))",
+      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#61 (upstream edge: SwapUV without NURB (SM_ERR_NULL_POINTER))",
       "values_compared": 6
     },
     {
@@ -498,7 +506,7 @@
       "name": "empty_iso",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#61 (upstream edge: CreateIsoParametricCurve without NURB (SM_ERR_NULL_POINTER))",
+      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#62 (upstream edge: CreateIsoParametricCurve without NURB (SM_ERR_NULL_POINTER))",
       "values_compared": 1
     },
     {
@@ -506,7 +514,7 @@
       "name": "empty_bilinear",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#62 (upstream edge: IsBilinear without NURB)",
+      "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#63 (upstream edge: IsBilinear without NURB)",
       "values_compared": 2
     },
     {
@@ -6129,8 +6137,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 5,
   "cases_failed": 0,
-  "cases_passed": 758,
-  "cases_total": 763,
+  "cases_passed": 759,
+  "cases_total": 764,
   "deferred_by_unit": {
     "surface.sphere": 5
   },

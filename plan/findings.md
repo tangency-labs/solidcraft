@@ -7135,6 +7135,265 @@ exactly and 48 defer deeper to p2 (plus the 12 new wr155 fixtures).
   Earlier `7c60fc1d` CI passed all eight checks and the then 187-unit native gate,
   but does not certify these review changes.
 
+## offset.offset_geometry_creation (`SmOffsetGeometryCreation.cpp`, PR #156, 2026-10-16; partial, no disagreements)
+
+**Shape of the port.** `SmOffsetGeometryCreation` / `SmLocalOperationGeometryCreation`
+are generic over caller handles (`O: ClassObject + SolutionObject`), as the proto
+topology and the topology intersector: the two B-reps are reached through the
+`OffsetBrep<O>` trait (each method names the ported topology function it stands for)
+and the executive's stored data (`GetInset`, `GetExtendConvexEdges`, `GetShellFaces`,
+`GetOffsetEdgeuse`, `GetCreateExtendedSurface`; the tangency tolerance is the
+creation's own) through `OffsetExecutive<O>`, which its owner implements over the ported
+`offset::offset_executive::p1::OffsetExecutive` (first a co-port of that unit's
+accessors, before #175 merged). `SmSSIData` (no owning
+unit) is `SsiData<O>`. The curves and surfaces the unit makes go to the owner's stores.
+
+**Difftest.** The shim builds the original and the "offset" B-rep from real `.smb`
+files (or a wire edge / single face / the `prog_test` network), makes a real
+`SmOffsetExecutive` whose `m_vEUToEU` relation is filled with the given edge-use pairs
+through pointer-to-member access (`MapEdgeuses` belongs to `offset.offset_executive_p1`),
+and runs scripts that first shape the fixture (store curves, `SmEdge::SetCurve` of an
+offset edge with a copy of a store curve, `SetUVTrimCurve`, marks) and then call the
+unit's functions. Crafted rails (three circles in one plane, parallel lines, rails
+closer than ten tolerances, mismatched intervals) reach the torus, self-intersecting
+torus, cylinder, "raise the tolerances" and "non-synchronised" branches of
+`EdgeuseOffset`; three rational arcs through an offset corner reach the sphere of
+`VertexOffset`.
+
+**Upstream hangs (HANG-17; HANG-16).** `SmOffsetExecutive::GetCreateExtendedSurface`
+extends the face's surface by five offset distances (`SmBSplineSurface::CreateExtendedSurface`,
+`SM_CT_G1R`) unless its `m_vSurfExtSurf` cache already holds the surface, in which case it
+returns the cached one without extending (`SmOffsetExecutive.cpp:2123`). Two things make the
+extension not return. (1) With a negative offset distance the per-side loop `while (dExtDist <
+dDist/2.0) { dExtDist *= 2.0; ... }` holds from the start and keeps holding while the extensions
+succeed, so the distance doubles without bound on any face, planes included (three generated
+cases at -0.25 ran past 60 s, gdb backtraces in `ST_surxsdr` under `CreateExtendedSurface`); this
+is HANG-16 ("Direct negative-distance surface extension moves away from its loop's exit", from
+PR #175), which the HANG-17 entry in `plan/upstream-issues.md` references. Real callers build the
+geometry creation with `fabs(dOffsetDistance)`, so a negative creator distance (as the generator
+uses) is outside the executive's internal contract. (2) HANG-17: with a
+positive distance `ST_surxsdr` splits a large extension and recurses twice per level to depth
+10, so a surface whose iso-curves are short relative to the distance runs through up to `2^11`
+extensions (28 minutes, killed). The shim seeds the cache before every op with every face
+surface of both B-reps and every store surface mapped to itself, and the runner seeds the ported
+executive's cache (`OffsetExecutive::insert_extended_surface`) the same way: neither side ever
+extends, `GetCreateExtendedSurface` returns the face's own surface on both, and every op is
+compared past that call with no guard status and no over-rejection (an earlier version refused these calls with a `-5` status on both sides,
+which turned 21 would-be deferrals into constant-status passes and refused, through a
+closed-surface proxy, a third of the probe faces that complete; the pre-review removed it).
+
+**Local creation.** `SmLocalOperationGeometryCreation(dist, approx, faces, surfaces)`
+copies its two lists at construction and its `FaceuseOffset` returns the surface listed
+for the face (`SM_ERR` for an unlisted face). Its `m_bMakeAnalytics` is `FALSE` from the
+constructor and neither side calls `SetMakeAnalytics` on it, so the analytic branch (which
+reparameterises, copies and deletes the listed surface) is not exercised. The listed
+surfaces must be store surfaces: three generated cases that listed a face's own surface
+segfaulted (the analytic copy would delete the face's surface; without it the shim freed
+the store's copy of the pointer at teardown), so the FFI and the runner refuse such pairs.
+The store is filled by the script's ops, so the header's surface handles are resolved
+again before each local op on both sides (the local creation is rebuilt then; a listed
+face whose surface is not there yet is refused with `-2`, as upstream dereferences it);
+the fixed cases `local_offset_*` cover the listed, unlisted and not-yet-added surfaces.
+
+**Fixes the first run forced.** The 12 disagreements of the first complete run were:
+`values.state.len` differences from the shim emitting an op's out-parameters after an
+error status (the rule above), a library `InvalidInput` reported as the runner's `-2`
+where upstream returned status 1007 (the module's own null dereferences now carry the
+`UNDEFINED_UPSTREAM` operation, which the runner reports as `-2`; a callee's
+`SM_ERR_INVALID_INPUT` stays 1007), UV trim curves of a line or conic kind refused by a
+`CurveKind::BSpline`-only match (`SM_CAST_PTR(SmBSplineCurve, ..)` accepts every
+subclass and the curve keeps its kind), the ruled-plane call of `EdgeuseOffset` propagating the
+`SM_ERR` of a zero `Unitize` instead of taking upstream's `!= SM_SUCCESS` fallback,
+`VertexOffset` re-reading a replaced arc inside its plane loop (upstream keeps `pArc`),
+and WR-103 below. Three segfaults and three stalls of that run are the local-pair and
+hang-guard items above.
+
+**Changes outside the unit.** `nurbs::b_spline_surface::p2::create_sphere_from_arcs` (green,
+#13) captured the first arc's centre by value; upstream's `rOrigin` is a reference into the
+frame every later `IsArc` overwrites, so its centre check is dead and its sphere centre is
+the last arc's (WR-103). A generated `VertexOffset` on circles about two centres exposed it
+(the C++ builds the sphere, the port said `SM_ERR`); the port now reproduces the aliasing
+(reads the current frame's origin at each use), takes its arcs as `Curve`s so that
+`IsArc` dispatches on each arc's kind (`SmCircle::IsArc` is exact; the sphere is revolved
+from the arc's NURB part), and that unit gains a fixture case with three equal-radius arcs
+about two centres; its difftest stays green.
+
+**Solutions need an object.** `TrimExtendedEdge` intersects each tangent UV curve with
+the extended copy of the edge use's UV trim curve, and `EdgeuseOffset` ray-fires the
+self-intersecting torus arc; both curves are temporaries upstream but still objects, and
+the solver's duplicate comparison (`SmSolution::GetParameterInterval`) dereferences every
+solution's object for its natural interval. The port first gave those solutions no
+object (`None`), and `Solution::parameter_interval` then reported `InvalidInput` (as 1007)
+where the C++ found a trim interval (the 4000-seed case gen2353, 1 of the 4 the
+pre-review found; the other 3 were deferrals once the hang guards went). The temporaries
+now go to the owner's curve store and the solutions name them.
+
+**Pre-review fixes (1156d7fe -> this push).** The reviewer's must-fix list, all applied:
+`FaceuseOffset` dispatches `CreateOffsetSurface` on the surface kind (plane, surface of
+revolution and B-spline overrides, else the base) and passes `m_dThisApproxTol3d / 10`, so
+plane faces are offset and self-intersected instead of deferred under `surface.offset_surface`;
+the edge curves `SM_CAST_PTR(SmBSplineCurve, ..)` casts keep their kind (a line's
+`IsArc`/`IsLine`/`CalculateBoundingBox`/`Trim`, a circle's `IsArc`, take the override; only
+`new SmBSplineCurve(*p)` and the static B-spline routines see the NURB part);
+`CreateSphereFromArcs`' `Unported` propagates instead of becoming `SM_ERR`; every
+`Trim(SmExtent1d &)` sequence shares one interval so a knot snap reaches the next trim;
+the rail evaluations use `SmBSplineCurve::Evaluate`'s `bNonZeroTangents = FALSE`; the hang
+guards are gone (above); `GetOffsetEdgeuse` gives an offset edge use only when exactly
+one is related (the relation is many-to-many: the generator keeps repeated pairs and the
+runner's adapter holds a list per original); the surface outputs carry the NURB of a
+plain B-spline surface or a surface of revolution beside the 3x3 sample; and
+`ExtendTrimEdges` takes the offset edge use as upstream does (null is undefined only
+where upstream dereferences it).
+
+**Guards.** The topology-walking functions dereference edge, curve, vertex use, mate,
+CW/CCW neighbour, face use, face and surface pointers without checking, so the shim
+refuses them (`-2`) unless every edge use of both B-reps is a loop edge use with all of
+those (wire, single-face and network B-reps therefore only exercise the refusal; the
+runner mirrors the predicate on the imported B-reps). `ReplaceEdgeCurves` with a 3D
+curve and a null UV curve dereferences the UV curve only when the curves run opposite:
+the shim replicates the shape test (end-point matches, then the tangent dot product)
+and refuses only then. These refusals are C++ crash guards, not `UNPORTED` deferrals.
+
+**Deferred (Rust `Unported`, never compared).** `SmCrvOnSurf::SmCrvOnSurf` over a
+non-B-spline surface (`curve.crv_on_surf`, main's label for that dispatch gap): the
+offset-surface rail of `EdgeuseOffset` without an offset edge use builds its
+`SmOffsetSurface` (`surface.offset_surface`, PR #62, wired) but the ported `CrvOnSurf`
+holds an `SmBSplineSurface` only, so the curve on it and its `ApproximateCurve` defer;
+`SmFace::CreateUVTrimCurves` (`topology.face_p3`, inside `UpdateFaceSurfaceDomain`'s
+`CalculateUVDomainFromUVTrimCurves`, wired since `topology.face_p1` merged); the
+trimmed surface cache of a face's own surface (its construction first reaches
+`SmTol::GetZoneTol3d(const SmObject*)`, labelled `surface.surface_cache_p2` on main since
+`topology.brep_p1` merged (`topology.brep_p1` before), the label all 78 print; then the
+face's B-rep editing flag and `SmFace::CreateUVTrimCurves`): the seeded
+`GetCreateExtendedSurface` hands `MateEdges` / `TrimExtendedEdge` the face's surface, and the
+surface intersections build that cache; `SmSurface::DropCurve` and the drop-curve tracer
+(`intersect.surface_drop_lib_p3`, `intersect.surface_drop_curve`) inside `CreateUVTrimCurve`;
+the face handle of a surface's cache (`topology.face_p2`); `SmBrep::Notify` and `MateLaminaEdgeToSurface`
+(`topology.brep_p2`: the notification after an in-place edit, the inset-on-shell-face
+branch of `EdgeuseOffset`); `SmCircularCrossSectionFSG` (`blend.fillet_standard_solver_p1`,
+the general cap of `EdgeuseOffset`); `SmSphere::IsNurbSurfaceSphere` (`surface.sphere`; the
+same two cases stopped at `SmCone::IsNurbSurfaceCone`, `surface.cone_p2`, until #153 merged).
+`SmSurface::GlobalCurveIntersect` (`surface.surface_p8`) is a real call, only reached
+after the extended surface.
+
+**Offset surfaces.** `SmSurface::CreateOffsetSurface` dispatches through
+`Surface::create_offset_surface` (the plane, surface-of-revolution and B-spline
+overrides, else the base `SmOffsetSurface`), and `SetAllowExtension(FALSE)` is applied to
+an analytic copy that is an offset surface, as both `FaceuseOffset`s do. Wiring
+`surface.offset_surface` moved its 31 deferrals: 21 to `curve.crv_on_surf` (the rail
+above), 4 to `topology.brep_p2`, 1 to `topology.face_p3`, 1 to
+`harness:analytic-geometry-export` (`gen0044`, which reaches `CreateOffsetSurface` on an
+inexact face after the rail), and 4 now pass (`gen0268`, `gen0373`, `gen0401`, `gen0638`:
+the offset of an exact B-spline face, compared through its 3x3 samples; a review probe that
+scales the port's offset distance by 1 + 1e-9 fails two of them, so they compare values
+that depend on the offset surface's geometry). `SetAllowExtension(FALSE)` is unobserved
+by construction: the `SmOffsetSurface` constructor already sets it, the copy keeps it,
+and the exported samples lie inside the domain, where the extension never applies (the
+review flipped both sites to `TRUE` and the unit's results did not change); its placement
+is verified by reading only.
+
+**Not compared by construction.** The script's store curves are plain
+`SmBSplineCurve`s, so a line or conic registered as a 3D or UV curve is never
+compared (the port slices such a curve to its B-spline part exactly as the
+`new SmBSplineCurve(*p)` copies upstream do; the edge curves of the file B-reps, which
+include `SmLine`s, are compared). An offset surface's export is its kind code and 3x3
+sample (no NURB block), on both sides.
+
+**Analytic faces.** The `.smb` importer keeps a plane exactly but brings every other
+`SmBSplineSurface` subclass (cylinder, cone, sphere, torus, revolution, ...) in as its
+B-spline part; `import_with_types` also returns each face's upstream surface type code.
+Where upstream dispatches a subclass-overridden virtual on such a face's own surface,
+the runner defers under `harness:analytic-geometry-export` instead of letting the port
+run the B-spline override: `CreateOffsetSurface` in the non-local `FaceuseOffset` (60
+cases) and `IsClosed` in `SmEdge::IsSeam` on an `SmSphere` face (3 cases; only
+`SmSphere` overrides `IsClosed`, so the other inexact faces are compared). Exporting the
+analytic kinds exactly would turn these 63 back into compares. No op creates faces, so a
+face handle always names an imported face; a non-local `FaceuseOffset` on a face outside
+the import table is refused as a harness error rather than assumed exact.
+
+**Hang guards (`-6`, the script stops; the Rust defers).** `difftest --fuzz 2000` found
+two upstream hangs (`plan/upstream-issues.md`): HANG-26, the self-intersection of the
+offset of an `SmSurfOfRevolution` face (slow at ordinary distances, erratic at large
+ones): the shim does not run a non-local `FaceuseOffset` on a face that is neither an
+`SmPlane` nor a plain `SmBSplineSurface`, which the Rust already defers under
+`harness:analytic-geometry-export`, so nothing comparable is lost; HANG-27,
+`SmCrvOnSurf::ApproximateCurve` of the offset-surface rail, which grows with the offset
+distance: an `EdgeuseOffset` with `|distance| > 1e6` stops with `-6` and the Rust defers
+under `upstream:HANG-27` ("EdgeuseOffset beyond the HANG-27 distance bound"; the guard
+sits at op entry, so it also stops calls that would not build a rail). The bound is chosen for the fuzz time budget (20 s per side),
+not the termination boundary (about 1e250); the generator's distances (0.001 to 100)
+are far below it. Non-finite numbers (and magnitudes above 1e300) are malformed
+input to the FFI, refused before either side runs. `gen0577`
+takes 18 s in C++ (0.03 s in Rust) and is kept: it finishes inside the budget and is not
+a hang.
+
+**Performance: `gen0353` and PR #224.** One `TrimExtendedEdge` of `gen0353` took 27.2 s
+in Rust against 0.03 s in C++, which failed the fuzz time budget: the port rebuilt the
+curve cache for every `GlobalPointSolve` inside `GlobalCoincidenceChecker`'s split
+recursion, where upstream keeps it on the curve. PR #224 (`perf/curve-cache-reuse`,
+merged into this branch, which depends on it) keeps one cache per curve for the
+recursion; reports are byte-identical and `gen0353` now runs in under a second.
+
+**Wiring round: `offset.offset_executive_p1` (#175), `topology.edgeuse_p3` (#117), #147.**
+`GetCreateExtendedSurface` goes through `OffsetExecutive<O>::get_create_extended_surface`
+(the executive is now `&mut`); the runner wraps #175's `OffsetExecutive` behind the trait
+(its typed ids each name one B-rep, the script's handles span both, so a handle is folded
+into an id and back) and seeds its cache as the shim seeds `m_vSurfExtSurf`.
+`NormalizedEvaluate` and `CreateUVTrimCurve` go through two `OffsetBrep` methods over
+`topology::edgeuse::p3` with upstream's arguments at every call site (3D evaluation, no
+derivative, null optional outputs); #117's `&mut Brep` signatures make the seam,
+tangent-sector and convex-sector methods and `HaveTangentGaps` take the B-rep mutably.
+The first complete run passed 445, failed 5 (gen0153, gen0230, gen0266, gen0550, gen0583,
+all on `Endcap.smb`): with the cache seeded, `GetCreateExtendedSurface` returns the face's
+own surface, so C++ `MateEdges`' `GlobalSurfaceIntersect` builds that face's trimmed surface
+cache, whose `ImplantFace` runs `SmFace::CreateUVTrimCurves` (UV trim curves attached, the
+offset edge's tolerance raised from 0.004051 to 0.007557) and finds the intersection curve;
+the port's `make_trim_srf_cache` built its cache on `surface.clone()`, which drops the owner
+(the copy constructor), so the cache ran as a standalone surface and found no curve. PR
+#147 builds the caches on `clone_for_evaluation()`, which keeps the owner; merged here, the
+five defer at `SmTol::GetZoneTol3d` and 17 cases that had passed through the standalone path
+defer too (97 cases newly pass). Main's other units barely reach that path: on main
+cd483d51 + #147 (b396cdd3) + this PR every regenerated `green` report has main's per-case
+outcomes except `nurbs.b_spline_surface_p2`'s WR-103 case (this PR) and
+`topology.brep_p1` (merged after the first comparison), where #147's change moves one
+pass (`Endcap_parallel_proj_1`) and 36 deferrals to the same `GetZoneTol3d` stub. #175's own
+`UNPORTED(offset.offset_geometry_creation)` `EdgeuseOffset` / `VertexOffset` calls stay
+stubbed: they need an `OffsetBrep` over the executive's original and offset B-reps and
+#175's code after `EdgeuseOffset` (cpp:2956-3071), which reaches `topology.brep_p7/p8`; a
+follow-up once this PR merges.
+
+**Results.** 861 cases (5 upstream-derived fixtures, 56 cases built in code, 800 generated
+two-B-rep scripts): 428 pass bit for bit (`max_rel_err 0`), 0 fail, 433 deferred, 0 cases
+where both sides reject the script. 426 passes compare an upstream result; 2 (`gen0264`,
+`gen0685`) are guard agreements: the shim refuses the only op as an upstream null
+dereference, so no C++ runs and both sides compare `[0, op, -2]` (they count under
+`with_values=428 no_values=0` because the record has three values). Deferred, by the unit that blocks: `topology.brep_p2` 166,
+`surface.surface_cache_p2` 78, `harness:analytic-geometry-export` 70, `topology.face_p3` 42,
+`intersect.surface_drop_curve` 27, `curve.crv_on_surf` 25, `topology.face_p2` 12,
+`intersect.surface_drop_lib_p3` 7, `blend.fillet_standard_solver_p1` 4, `surface.sphere` 2.
+Success-path coverage (counted at this head): 211 of the 428 passes complete at least one
+successful call among the unit's ops (the rest compare matching `-2` refusals or matching
+upstream error statuses). Per op, the passing cases that contain a success / a refusal / an
+upstream error (a case can count in several): `FaceuseOffset` 30 / 15 / 0, `VertexOffset`
+48 / 24 / 18, `ReplaceEdgeCurves` 49 / 9 / 0, `TrimExtendedEdge` 44 / 50 / 0,
+`ExtendTrimEdges` 1 / 39 / 7, `HaveTangentGaps` 55 / 30 / 0, `EdgeuseOffset` 34 / 22 / 10,
+`LocalFaceuseOffset` 6 / 37 / 52 (`HaveTangentGaps`' points: upstream ignores
+`NormalizedEvaluate`'s status and a failed evaluation leaves `sPnt` at `SM_UNDEF_DOUBLE`, which
+the port mirrors; an evaluator that wrote part of the point before failing would diverge, a
+theoretical case no input reaches); no successful pass: `UpdateFaceSurfaceDomain` (54
+refusals), `MateEdges` (18 refusals, 54 upstream errors). (This PR's earliest per-op
+counts swapped the `FaceuseOffset` and `ReplaceEdgeCurves` labels.) A 4000-seed sweep
+(4061 cases) passes 2114, fails 0, defers 1947, with no C++ crash or stall. Perturb:
+`SENSITIVE 428/428`. `--fuzz 2000`: `FUZZ-PASS cases=2000 rejected=243 malformed=635
+ran=1122 differs=0 crashes=0 panics=0 timeouts=0`. Valgrind: 54 sampled shim programs
+before the wiring round, then 64 on the new paths (54 newly passing cases, up to ten per
+op family plus eight built-in ones, and ten new deferrals including the five above): clean.
+`nurbs.b_spline_surface_p2` (touched): 764 cases, 759 pass, 5 deferred; its
+`three_arcs_about_two_centres` case (arcs about two centres, the first two sharing their
+start point) compares 94 values and fails with the first arc's centre captured by value, so
+it pins WR-103. All green/partial units: `green-par: 213 units, failed=0` on main 61670af3 +
+#147 (b396cdd3) + this PR.
+
 ## boolean.topology_intersector_p1 (`SmTopologyIntersector.cpp` part 1, PR #146, 2026-10-16; partial, no disagreements)
 
 Builds on #121 (`topology.proto_topology_p3`) and #150 (`intersect.curve_class_p5`), both
@@ -7510,6 +7769,267 @@ renumber the parallel claim in #148. No bundled numerical results certify this
 independent tree. The maintainer confirmed all review items resolved before the
 independent p6 integration.
 
+## blend.fillet_geom_p1 (`SmFilletGeom.cpp` part 1: fillet records, pseudo B-rep, static helpers; PR #147, 2026-10-16; partial, no disagreements)
+
+Gate: `PARTIAL blend.fillet_geom_p1 cases=480 passed=446 failed=0 deferred=21 max_rel_err=0e0 rejected=13`
+(`cases_both_errored` 0, so 446 real passes; the 13 rejected cases are the flagged
+regression inputs below; 2000-seed sweep 2051 pass / 116 deferred / 0 failed / 13 rejected; `--perturb` 446/446 detected).
+
+- **Deferred (unported callees, no stub of this unit's own code).**
+  `sm_ClassifyFacePoint` calls `SmFace::CalculateUVDomainFromUVTrimCurves`, wired to
+  `topology.face_p1` (PR #148) with upstream's defaults (`bLimitDomain = TRUE`, no gap
+  outputs) and its status ignored except `Unported`; that port's first callee,
+  `SmFace::CreateUVTrimCurves`, is `UNPORTED(topology.face_p3)`, so every face with a
+  surface still defers there (then `SmFace::Point3DClassify` of `query.face_p1`):
+  14 cases (one is the 1e50 boundary input below), so `SmFilletVertex::UpdateSplitFace` defers only
+  for a vertex classified to the split face and other vertices compare.
+  `sm_TwoPntsIntersection` defers past its point drops in
+  `SmSurface::PointBasedSurfaceIntersect` (5 cases): `surface.surface_p2`'s port stops
+  at `SmSurfaceIntersector::DoPointIntersection`, labelled
+  `intersect.surface_intersector_p4` although that unit is partial, because part 4's
+  function runs the basic intersector's `ComputeSingularityPoint` instead of
+  `SmAdvSurfaceIntersector`'s override until the intersector parts dispatch their
+  virtual calls (comment in `surface/surface/p2.rs`); cases whose drops fail compare the
+  failure. `SmFilletVertex::CalcCliffRailIntEdge` reaches `SmSurface::GlobalCurveIntersect`
+  (wired, `surface.surface_p8`), which stops at `intersect.surface_drop_lib_p1`'s own
+  unwired call of `SmSurfaceDropCurve::DoTrace` (ported; the stub in
+  `intersect/surface_drop_lib/p1.rs` is labelled `intersect.surface_drop_curve`, which
+  is what the difftest's `blocked_by` prints): the true owner is
+  `intersect.surface_drop_lib_p1`, whose open PR #140 wires it (2 cases: the cliff
+  fixture and its near-zero-knot probe; this PR does not build on #140 so its diff
+  stays its own).
+  `sm_ExamineNFixFilletGeoms` compares only its early returns (analytic/low-degree
+  surfaces, no adjustment needed, both surfaces need adjusting, the same geometry
+  twice): the adjusting path, control-net copy included, has no compared case. The
+  shim's geometries have no `SmFilletSolver` (`new SmFilletGeom(NULL, type)`) and
+  upstream dereferences it there (`GetFilletSolver()->GetSurface(k)`: SIGSEGV, found
+  by the pre-review), so the shim repeats upstream's degree / kind / end-distance
+  pre-checks and refuses (`SC_ERR_ARG`, recorded as a rejected case) any input that
+  would reach it; the Rust side on that path rebuilds the rails, takes the drop domain
+  from the wired `SmOffsetSurface::GetNaturalUVDomain` (`surface.offset_surface`, #62)
+  and stops at `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`) with
+  `Unported`, or with a null-pointer error when, as in the difftest, no solver is
+  passed. The Rust adjusting path (net-row copy, rail `SetCurve` resets, the solver's
+  offset-distance save and restore, the `Unported` at the drop, the null-solver
+  error) is covered by the unit test `examine_copies_the_good_row_rebuilds_the_rail_and_stops_at_the_drop`
+  only.
+  `sm_FindStepoffUV` and `sm_CreateCubicRailRailInterpolant` take an `SmFilletSolver`
+  (unported) and have no difftest cases: the first is ported over the co-ported
+  `ConstantRadiusAssistedFs` and a B-rep, the second returns `Unported` at its first
+  solver call (`FindIndexOfRailOnFace`); its tail (guess UV point, rail/rail
+  intersection, the five-point cubic through `CreateCanonical`) is ported behind the
+  two solver call stubs but cannot run yet (lesson 27: a stub replaces only its call).
+- **Pseudo-B-rep construction.** `SmFilletEdgeuse(SmFilletBrep*)` needs the pseudo
+  B-rep's infinite region and first shell. `SmBrep::GetInfiniteRegion`
+  (`topology.brep_p1`, #145) and `SmRegion::GetShells` (`topology.shell`, #154) are
+  wired; the region itself is created by `SmBrep()` (`SmBrep.cpp:533`, run by
+  `SmFilletBrep()`), whose constructor is `topology.brep_p3`'s and unported, so
+  `FilletBrep::new` has none and the constructor stops at
+  `UNPORTED(topology.brep_p3) SmBrep::SmBrep` (never upstream's NULL), then at
+  `UNPORTED(topology.brep_p2) SmBrep::MakeShellVertexTopology` when the region has no
+  shell. The difftest builds the pseudo B-rep with `SmFilletEdge::MakeFilletEdge` on
+  the C++ side and with the low-level record writes on the Rust side (both documented
+  in the FFI module), so the record methods compare without it.
+- **Solution handles.** `GlobalCurveIntersect` and `GlobalPointSolve` record the curve
+  and surface they ran on in their `SmSolutionArray`; `Solution::parameter_interval`
+  reads the natural domain off that handle. `calc_cliff_rail_int_edge` passes a private
+  `CliffHandle` (curve or surface reference) so the natural domains are real, and the
+  point drops pass `NoObject` (nothing reads them back).
+- **Harness notes (no port issue).** Upstream `CreateWireEdgeFromCurve` glues the two
+  vertices of a wire edge shorter than the B-rep tolerance; the Rust-side builder mirrors
+  that (a 1e-6-scale target curve maps both its end vertices to one). Upstream
+  `CreateFaceFromSurface` refuses surfaces at that scale (the shim then reports
+  `SC_ERR_ARG`); generated faces stay at scale 1e-2 or above.
+- **Surface cache flags.** `sm_SurfaceDropPoint` / `sm_FindStepoffUV` toggle
+  `m_bPointTestEnabled` / `m_bProcessBoundaryCurves` around `GlobalPointSolve`; for a
+  standalone surface the cache already has that state, and the Rust point solve of a
+  face-owned surface is itself unported (`query.face_p2`), so nothing is toggled.
+- **Coverage.** The shim builds plain B-spline surfaces and curves, except for the
+  `evaluate_mate_analytic` op (maintainer review): `sm_EvaluateMate` on a real `SmPlane`
+  (with and without its NURB) and on a canonical `SmSurfOfRevolution` of a line, so
+  both arms of its `SmBSplineSurface` cast compare, inside the domain (the virtual
+  `EvaluatePoint`) and outside it (`EvaluatePointOnExtendedSurface`). A real
+  `SmCylinder` / `SmCone` cannot be a Rust `Surface` yet (the cone kind's dispatch gap,
+  `surface.cone_p1`). Analytic-kind paths inside the other surface callees are never
+  compared. `fb` `cliff` (op 31) has 2 status-0 and 2 error-status passes and 2
+  deferrals. Ops with no passing case: `classify_face_point` (all deferred), `fb`
+  `split_face` of a vertex classified to the split face (deferred; other vertices
+  pass), `two_pnts` past its point drops (deferred; drop failures pass), `fb`
+  `examine` past its pre-checks (rejected, above), `sm_FindStepoffUV` and
+  `sm_CreateCubicRailRailInterpolant` (no cases: they take an `SmFilletSolver`).
+  `capping` with a cap (iso-parameter lines lifted through `sm_ExtractIsoCurve`)
+  compares.
+- **Tolerance classes (maintainer review of `f0240ceb`).** `sm_SurfaceDropPoint` passes
+  its `double` dropping tolerance to `GlobalPointSolve`'s `SmZoneTol3d` parameter, which
+  converts it (`SmZoneTol3d(double)`, `SmTol.cpp:107`: `SM_USE_DEFAULT` becomes the zone
+  tolerance, then `fabs`, `SmTol.h:148`); the port passed it raw, so a negative
+  `approx_tol` (e.g. `-1e-3`) found the point in C++ and nothing in Rust (`SM_ERR`):
+  5 of the reviewer's 686 adversarial cases (a closed cylinder at `(1, 0, 0.5)`, a
+  bilinear corner, cubic patches at scale 1 and 1e-5). Fixed with `zone_tol3d`; the
+  audit of every call in this unit's 111 functions found the same raw pass at
+  `sm_FindStepoffUV` (`GlobalPointSolve`), `sm_ClassifyFacePoint` (`GetZoneTol3d` of
+  the face, an `SmZoneTol3d`), `JoinVertsByCapping` (`LiftCurve`'s `SmApproxTol3d`) and
+  the examine path (`DropCurve`'s `SmApproxTol3d`), now converted with `zone_tol3d` /
+  `approx_tol3d`. `sm_TwoPntsIntersection`'s `SM_CAST_APPROXTOL3D_PTR(&dSSITol)` is a
+  pointer cast (no conversion), so `PointBasedSurfaceIntersect` keeps the raw value;
+  `GlobalCurveIntersect`, `SmCurve::GlobalPointSolve` and `ContainsPoint2d` take plain
+  `double`s. Regression fixtures `surface_drop_point_negative_tol_*`,
+  `two_pnts_negative_tol_*`, `capping_gap_negative_tol` and `capping_gap_use_default_tol`;
+  the generator now draws negative tolerances for these ops too.
+- **Upstream hang HANG-29 and the magnitude guard.** The `fuzz_guards` sweep found a
+  face whose surface has a control point of magnitude 1e154: `sm_ClassifyFacePoint`'s
+  C++ path (`CalculateUVDomainFromUVTrimCurves` -> `DropAndTrimCurve` ->
+  `SmCurve::GlobalCoincidenceChecker`) splits the boundary forever once squared
+  distances overflow to infinity (1e153 returns in 90 ms). That is the only
+  non-termination established; below it the call terminates but is slow in a
+  shape-dependent way from about 1e15 on (the re-review's probes on the pre-review's
+  fixture: one control point of -1e15 in all three coordinates 54 s, -1e20 14 s,
+  -1e50 12 s, the same magnitude in one coordinate 0.2 s, both surfaces and the point
+  scaled uniformly by 1e30 55 s and by 1e10 3 ms, a 1e-10 weight under a homogeneous
+  9.9e39 37 s, -1e80 10 s, -1e100 23 s, -1e120..-1e150 70-99 s; a random sweep of the
+  two ops found 14 calls in 40k above 2 s, worst 38 s, all with a value of at least
+  3e15, none above 120 s). The FFI therefore bounds, for `ClassifyFacePoint` and
+  `FbSplitFace` only (the ops that reach `sm_ClassifyFacePoint`), every value and every
+  Euclidean control point `Pw / w` by `MAX_MAGNITUDE = 1e150`, the overflow regime, and
+  accepts the slow inputs under it: slow is not undefined, and a lower bound would
+  reject valid inputs that are no slower than ones it accepts. The other ops take any
+  finite value. Rejected regression cases (`expected_rejection`): the original 1e154
+  shape, the pre-review's slow input moved to -1e151, a 1e-120 weight under a
+  homogeneous 1e40 (Euclidean 1e160); the -1e50 input is an accepted case (the C++
+  returns in 0.3 s). The Rust side still defers that op (on `topology.face_p3`). The
+  sweep itself runs one thread per call with a 30 s timeout, 180 s for those two ops
+  (`FUZZ_SEED` / `FUZZ_CALLS` override the seed and length); its specials include the
+  bound, 1e15, 1e30, the UB-166 knot gaps (both fixup stages) and the HANG-20 bound;
+  one mutation sets a value a hair above its predecessor, one compresses a run of
+  values towards its predecessor so a knot range drops under the spread tolerance, and
+  one sets a run of values to one offset under the scaled zero (an end group). A
+  clean sweep is evidence, not proof: the
+  earlier sweeps (seeds 777, default, 4242) missed UB-166 and the slow inputs, and the
+  widened specials then found HANG-20. With the HANG-20 bound in place, seed 4242 (40k:
+  11429 ran), seed 777 (40k: 11490 ran) and the default seed (60k: 17189 ran) found no
+  crash or hang.
+- **`sm_CreateCubicRailRailInterpolant` asks for degree 2 with cubic knots (unmeasured).** `SmFilletGeom.cpp:4170` calls `SmBSplineCurve::CreateCanonical(crContext, 2, 2, ..)` with 5 control points, knots `[0, 0.5, 1]` and multiplicities `[4, 1, 4]`: 9 knots for 5 points fit degree 3 (the function's name says cubic), not 2. The port passes the same arguments. No case reaches this tail (it takes an `SmFilletSolver`, and `FindIndexOfRailOnFace` / `RailRailIntersect` are stubs), so whether `CreateCanonical` refuses it or builds something else is not measured. Check it in C++ once `blend.fillet_solver_p1/p2` land; it is a candidate for `plan/upstream-issues.md` (round-6 review, minor 2).
+- **Fuzz (`difftest --fuzz 2000`, round 6).** The first run found three Rust panics
+  (`attempt to add with overflow`, `nurbs/srf_nurb.rs:1087`, `N_SrfIsClosedSmooth`'s
+  u-closure loop): a fuzzed surface `q = i64::MAX` that the FFI refuses, but whose
+  Rust side the fuzz still runs. `nurbs::srf_basic::Surface::new` and
+  `crv_basic::Curve::new` check only shapes ("see `is_valid`"), so the runner now
+  applies the FFI's count rules (`1 <= p <= n`, `r = n + p + 1`, likewise in v and
+  for curves) before building either. Library code that takes an unvalidated
+  `srf_basic::Surface` still assumes consistent counts (owner: `nurbs.srf_nurb`).
+  Round 8: fuzz mutations that unflag the HANG-20 fixtures (`expected_rejection =
+  false`) reached the Rust solver above the 1e307 bound, where it loops as upstream
+  does (3 timeouts). The runner now runs the FFI's own validation
+  (`blend_fillet_geom_p1::validate`, which `eval` calls) before the Rust side, so an
+  input the FFI refuses is a harness error on both sides and never runs in Rust.
+- **Upstream crash UB-166: a near-zero or near-start interior v knot.** The
+  re-review's fuzz found a SIGSEGV in `sm_DecomposeSrf` through the surface cache
+  (`sm_SurfaceDropPoint`, and `sm_ClassifyFacePoint` through `SmSurface::DropCurve`):
+  every `SmBSplineSurface` constructor runs `sm_FixupKnotVector`, whose first stage
+  snaps a knot less than `SmTol::GetScaledZero(u0, u1)` (`1e-12 * (1 + max |u|)`, 2e-12
+  on `[0, 1]`) above its already-snapped predecessor onto it, and whose second stage
+  spreads distinct knots closer than `SM_EFF_ZERO_PARAM` (1.2e-8) to 1.212e-8 apart,
+  moving the first knot of the last pair down with nothing keeping it off the start knot
+  (the round-3 review's `v = [0, 0, 0, 5e-9, 5e-9, 1.212e-8 x3]` becomes
+  `[0, 0, 0, 0, 0, 1.212e-8 x3]`). Either way the start multiplicity reaches
+  `degree + 2`, `N_BasisGetSpanCount` does not count the zero-length span but
+  `sm_DecomposeSrf`'s v loop extracts a patch for it and then reads one patch pointer
+  past the array; the u loop has upstream's B262 guard and fails with status 1006
+  instead. A third route (round-4 review): an end group within the scaled zero of its
+  predecessor (`[.., E, E + d x3]`, `E = 1.212e-8`) snaps to `E` first, and the spread
+  then moves the knot before it onto the start. A Rust replica of both stages in the FFI
+  missed that route by one operation (it took the unsnapped last knot), so the guard
+  now lives in the shim: after the real constructor, `read_surface` reads the knot
+  vector back and, for the six ops whose upstream path builds the surface cache
+  (`SurfaceDropPoint`, `TwoPnts`, `ClassifyFacePoint`, `FbSplitFace`, `FbVertOnVert`
+  through `SmSurfaceIntersector::DoIntersection`, `FbCliff` through
+  `SmSurface::GlobalCurveIntersect`), refuses (`SC_ERR_ARG`) a surface whose v start
+  multiplicity exceeds `degree + 1`. That condition is exact by construction, but it is
+  the crash precondition rather than a per-path prediction: the round-5 review put every
+  surface of 169 cache-op programs at start multiplicity `q + 2` with the guard
+  bypassed; 141 crashed in `sm_DecomposeSrf` and 28 completed because their path
+  returns before building the cache for that surface (`TwoPnts` 4 with 1001,
+  `FbVertOnVert` 9, `FbCliff` 2, `FbSplitFace` 13; valgrind showed nothing new on 10 of
+  them, and the Rust ran all 10). Those 28 are refused anyway; telling them apart would
+  mean replicating upstream's control flow. Every other op, the
+  u over-multiplicity and curves are compared as given (the round-3 review ran the
+  snapped inputs through every other op without a crash). The rejected regression
+  cases are the reviewers' reproducers: `*_near_zero_v_knot*_rejected`,
+  `surface_drop_point_spread_v_knot_rejected` and
+  `surface_drop_point_endsnap_v_knot_rejected`.
+  Non-monotone constructed vectors (the spread moved a knot below the start) are
+  defined in C++ (valgrind clean, round-4 review) and compared:
+  `..._spread_v_knot_non_monotone` (1006 on both sides), `..._spread_v_knot_below_start`
+  (1001) and `..._endsnap_v_knot_control` (status 0, one solution). Comparing them found
+  three port bugs on the surface-cache path, fixed here as faithful-port fixes in
+  units already on main (`surface.surface_p1`, `nurbs.nurbs_srf`,
+  `surface.surface_cache_p3`): (1) `surface::surface::p1::make_surface_cache` /
+  `make_trim_srf_cache` stored `surface.clone()`, which for a B-spline is the copy
+  constructor and runs `sm_FixupKnotVector` a second time, where upstream's cache keeps
+  a pointer to the surface itself (`m_cpSurface`); on an already non-monotone vector the
+  second fixup snapped the below-start knot back onto the start and the bounded
+  decomposition refused it; they now store `clone_for_evaluation()`. (2)
+  `nurbs::nurbs_srf::compute_net_constants` returned the error of the UV diagonal
+  sampling's `N_SrfEvalPt`, whose status upstream ignores (gdb: 18 `N_BasisEval`
+  numerical errors inside `sm_ComputeNetConstants` during that cache build, and the
+  build completes); the port now keeps upstream's function-scope points and leaves them
+  unchanged on a failed evaluation. (3) `surface::surface_cache::p3`'s
+  `subdivide_node` returned the error of `split_srf` on a patch with a reversed domain,
+  where upstream's `GW_ERR(sm_SplitSrf(..))` only logs: `N_SrfSplit` fails in its
+  parameter checks before writing, so the children keep the zero-filled
+  `SmMemBlockMgr` memory (`calloc`'d blocks, elements handed out sequentially) that
+  `sm_InitNurbSurfaceMemory` sized like the parent; the port now uses `zeroed_like` for
+  both, as its approximation branch already does. With the three fixes the three
+  non-monotone cases compare bit-identical (`below_start` 1001, `non_monotone` 1006,
+  `endsnap_v_knot_control` status 0 with its solution). Two other `Clone`s stand for upstream using the
+  same object and would differ the same way on such vectors, but no case here reaches
+  them: `SurfaceCache::map_objects` (`surface/surface_cache/p1.rs`) and
+  `out_of_bounds_copy` (`surface/surface/p3.rs`); noted for their owners. The
+  u-direction transpose (`surface_drop_point_near_zero_u_knot`) is a compared case:
+  both sides 1006, once `surface_drop_point` ported upstream's own
+  `smsurf_GetSurfaceCache` + `NER` fetch (a surface whose cache cannot be built is
+  `SM_ERR_NULL_POINTER` before any solve; the Rust solve builds the cache again, which
+  costs time only). Curves:
+  `sm_CreateBezSegments` skips a snapped start over-multiplicity and bounds its segment
+  index, and their constructors pass `SM_EFF_ZERO` as the spread tolerance, so curves are
+  only checked as given; the probes `fb_cliff_near_zero_curve_knot` (a 1e-13 knot
+  inserted in the cliff's target and edge curves) and `capping_near_zero_uv_knot` (in
+  both UV curves) run on the C++ side without a crash.
+- **Upstream hang HANG-20: the global solvers in the top decade of the double range.**
+  This round's fuzz, with the widened specials, hung three ops: `FbCliff` (seed 4242),
+  `SurfaceDropPoint` (seed 777) and `TwoPnts` (seed 4242), each on a program with an
+  `NL_NOW` marker (`-DBL_MAX`) or `-7e307` dropped into a surface coordinate:
+  `SmGlobalSolver::SolveBranch` with the curve/surface, point/surface or
+  surface/surface local solver never returns (gdb). Replaying each program with that
+  coordinate substituted (`replay_program`, `REPLAY_FILE` / `REPLAY_SET`): the cliff
+  returns in 3 ms at `-7e307` and never at `-8e307` or `+-DBL_MAX` in any coordinate; the
+  point drop returns at `-3e307` and never at `-7e307`; the two-point intersection
+  returns at a homogeneous `-2e307` (Euclidean `1.3e307`) and never at `-3e307`; all
+  return in 1-3 ms at `-1e300` and below (`-1e200`, `-1e150`, `-1e100`). So the trigger
+  is the coordinate itself overflowing by a small factor in the solvers' box arithmetic,
+  not HANG-29's squared distances. The FFI bounds every value (Euclidean `Pw / w`) of
+  those four ops (`FbVertOnVert` drops a point too) by `MAX_SOLVER_MAGNITUDE = 1e307`,
+  under every measured hang and at or under every measured return; the other ops are
+  untouched (capping, the seam checks and the record ops ran the same values without
+  hanging in every sweep). Regression cases: `*_hang20_*_rejected` (the three fuzz
+  programs and the cliff at `-8e307`, flagged) and `*_hang20_boundary_1e307` (the same
+  programs at `-1e307`, accepted: the point drop and two-point cases compare, the cliff
+  one compares its `SM_ERR`).
+- **Rejected cases are opt-in.** A fixture carries `expected_rejection: true` when the
+  wrapper or the shim must refuse it; only then is a refusal recorded as rejected
+  (`Output::rejected`, as `intersect.curve_class_p6` does with `fixture_rejected`). A
+  refusal of any other case, generated ones included, is a harness error, as is a
+  flagged case that runs, so a guard that over-rejects fails the gate.
+- **Record writes without a notification environment.** `SmVertex::SetPoint` and
+  `SmEdge::SetCurve(.., TRUE)` notify `SM_NO_CHANGE_GEOMETRY`; the pseudo B-rep has no
+  notification environment, so the port applies the same resets directly (vertex-use
+  gaps; edge-use UV trim curve, drop-curve record and edge/face gap with its mate's,
+  and their vertex-use gaps). The co-ported `SmFilletEdge` constructor sets the edge
+  tolerance to `0.0` as `SmEdge()` does. `SmBoundaryTrimmingType` is also co-ported,
+  identically, by PR #168 (`blend.fillet_standard_solver_p1`); whichever lands second
+  re-exports the other's (COORD.md).
+- Upstream defect UB-159 (`SmFilletGeom` constructor leaves `m_dOrientations` and
+  `m_bCapped` uninitialised) recorded in `plan/upstream-issues.md`.
 
 ## heal.heal_data_p3 (healer sequencing, target refresh and repair stages; PR #164, 2026-10-16; partial, no disagreements)
 
@@ -8278,6 +8798,14 @@ rejected: nothing runs on either side.
   (a surface cannot reach its owner's B-rep there) and `proto_topology::p2`'s
   `CalculateUVDomainFromUVTrimCurves` (a `ProtoBrep` face handle cannot reach a `Brep`
   face); both keep their `UNPORTED(topology.face_p1)` markers with that note.
+- **Open follow-up for this unit (found by the #147 round-6 and #156 round-4 reviews):**
+  upstream `SmFace::CalculateUVDomainFromUVTrimCurves` intersects the face domain with
+  the surface domain *before* `CreateUVTrimCurves`, ignoring the status
+  (`sThisDomain.Intersect(sSurfDomain, rNewFaceDomain)`), so when `CreateUVTrimCurves`
+  fails it returns face ∩ surface (or the `Init()`ed extent when they are disjoint); the
+  port (`topology/face/p1.rs`) returns the raw face domain on that path. Latent while
+  every caller defers at `CreateUVTrimCurves` (`topology.face_p3`; 38 cases in
+  `offset.offset_geometry_creation`); fix it in this unit, not in its callers.
 - **`heal.heal_data_p3` back-edges wired** (after #164): `Fix_MoveSeam` and
   `Fix_SplitFaceAtSeams` call `move_seam` / `split_at_seam` with upstream's arguments (the
   face properties' classifications, seam problems and the properties). Classification
@@ -8938,3 +9466,31 @@ Difftest (`fixtures/heal.stitch_p1/constructed.json`: the SM_API_test box tests,
   unchanged with 0 flips: 300/206/0/94, 1000 seeds 1284/868/0/410, perturb 333/333, fuzz 2000 pass.
   valgrind with `harness/valgrind/ub11.supp` gives 0 errors on the simple, unify, select and split
   samples.
+
+## heal.stitch_p2 (`SmStitch.cpp` part 2: `DoStitching`, `StitchIntoSolid`, `StitchIntoShell`, one-list `StitchVertexPairs`, `SplitEdgesWithVertices`; PR #205, 2026-10-17; partial, no disagreements)
+
+- **Co-port with `heal.stitch_p1` (#196).** p1 owns the `Stitch` struct, the callback and
+  the `SM_API` entry points; p2 adds `impl Stitch` members in `heal::stitch::p2` and wired
+  p1's three `UNPORTED(heal.stitch_p2)` API stubs (`SmApiStitchIntoSolid`,
+  `SmApiStitchIntoShell`, `SmApiStitchAdvanced`). The harness is p2's own (same B-rep
+  blocks and export as p1's, copied, so fixtures are interchangeable).
+- **Mostly deferred by design.** `DoStitching` starts with `SmBrep::Notify`
+  (`topology.brep_p2`), so every `DoStitching` case, every `StitchIntoShell` case with a
+  positive tolerance and the three API entry points defer there; `StitchIntoSolid` defers
+  at `SmBrep::CalculateBoundingBox` (`query.brep`). Neither has a passing case. When
+  those land, `DoStitching` runs into `GlueVertices` / `FindAndSetInfiniteRegion`
+  (`topology.brep_p5`), `SqueezeEdge` / `DeleteFace` (`topology.brep_p3`),
+  `GlueEdgesGeneral` (`topology.brep_p7`), `MakeVertexSplitEdge` (`topology.brep_p9`)
+  and `SmFace::IsLamina` / `IsDegenerate` / `Notify` (`topology.face_p3`); the runner
+  already emits the full outputs and the B-rep digest after the op.
+- **What the passes cover.** One-list `StitchVertexPairs`: the sorting, coincidence scan,
+  gap bookkeeping, `SelectTopologyToKeep` and the manifold / squeeze skips (the glue is
+  deferred). `SplitEdgesWithVertices`: the per-vertex `sm_TestAndSplitEdge` drops, far and
+  close-to-boundary outcomes (an interior split defers at `MakeVertexSplitEdge`).
+  `StitchIntoShell`: only the path where the doubling loop never runs (`max_tol <= 0`).
+- **Guards.** `-3` (upstream never returns): `StitchIntoShell` when `max_tol / 100`
+  underflows to zero (HANG-23, confirmed by a C++ run), `StitchIntoSolid` from a zero
+  or negative B-rep tolerance (HANG-24; a non-finite diagonal ends or skips the loop).
+  The FFI refuses a vertex repeated in the one-list `StitchVertexPairs` list (UB-178).
+  Upstream defects kept by the port: WR-186 (`DoStitching`'s sticky candidate flags),
+  WR-187 (a cancelled squeeze reported as done), UB-179 (stale edge after a failed glue with `m_bIgnoreProblems`).

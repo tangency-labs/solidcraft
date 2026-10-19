@@ -1,0 +1,5621 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "cleanup_noise_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#0 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cleanup_noise_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#1 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cleanup_noise_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#2 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cleanup_noise_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#3 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cleanup_noise_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#4 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cleanup_noise_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#5 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#6 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#7 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#8 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#9 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#10 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#11 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#12 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#13 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#14 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#15 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_out_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#16 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#17 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#18 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#19 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#20 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#21 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#22 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#23 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#24 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#25 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "check_seam_on_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#26 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closure_cylinder_full",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#27 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closure_cylinder_half",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#28 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closure_patch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#29 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "closure_cubic_sub",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#30 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "order_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#31 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "order_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#32 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "order_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#33 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "order_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#34 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "order_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#35 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "order_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#36 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#37 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#38 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#39 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#40 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#41 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#42 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#43 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adjust_seam_open_patch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#44 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#45 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#46 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#47 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#48 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#49 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#50 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#51 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#52 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#53 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#54 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#55 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "interpolate_11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#56 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#57 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#58 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#59 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#60 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#61 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#62 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#63 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_cylinder_seam",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#64 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "drop_point_cylinder_mid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#65 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_pnts_on_both",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#66 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "two_pnts_far_point",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#67 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 7
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_pnts_with_end",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#68 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "two_pnts_zero_dir",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#69 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#70 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#71 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#72 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#73 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#74 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#75 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_cubic_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#76 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "capping_gap",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#77 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 107
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "capping_on_boundary",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#78 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "capping_coincident",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#79 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#80 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_export",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#81 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vertex_geoms_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#82 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vertex_geoms_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#83 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vertex_geoms_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#84 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vertex_geoms_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#85 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vu_at_rail_end_any",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#86 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vu_at_rail_end_geom1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#87 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vu_at_rail_end_exclude",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#88 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vu_at_rail_end_rail2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#89 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vu_at_rail_end_rail3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#90 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vu_at_rail_end_v1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#91 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_rail_vertexuse_00",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#92 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_rail_vertexuse_01",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#93 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_rail_vertexuse_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#94 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_rail_vertexuse_11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#95 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_edge_name_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#96 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_edge_name_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#97 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_edge_name_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#98 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_edge_name_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#99 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_find_edge_single",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#100 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_find_edge_single_slop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#101 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_find_edge_none",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#102 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_find_edge_multi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#103 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_find_edge_multi_cubic",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#104 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_find_edge_multi_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#105 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_clear_edges_both",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#106 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_clear_edges_one",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#107 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_clear_edges_none",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#108 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_brep_edges_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#109 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_brep_edges_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#110 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_trim_half",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#111 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 491
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_trim_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#112 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 491
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_trim_point",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#113 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 491
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_delete_vertex_free",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#114 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 473
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_delete_edge_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#115 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 430
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_delete_edge_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#116 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 430
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_delete_edge_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#117 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 434
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_delete_edge_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#118 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 462
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_vert_on_vert",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#119 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "fb_cliff",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#120 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "fb_split_face_classified",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#121 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_split_face_other",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#122 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_examine_no_adjust",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#123 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_examine_low_degree_quit",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#124 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_examine_both_adjust_err",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#125 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_examine_no_adjust_tol_half",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#126 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_set_eu_geom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#127 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 491
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_set_eu_geom_null",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#128 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_set_uv_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#129 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 505
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_set_uv_curve_null",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#130 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 473
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_orig_uv_curve_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#131 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_orig_uv_curve_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#132 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_set_vu_property",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#133 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_remove_edge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#134 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 438
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_remove_readd_edge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#135 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "model": {
+          "edges": [
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "uv_curve": {
+                    "cpts": [
+                      [0, 0, 0, -1.7976931348623157e+308],
+                      [1, 0, 0, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [0, 0, 1, 1]
+                  },
+                  "vu_uv": [0, 0]
+                },
+                {
+                  "geom": 0,
+                  "vu_uv": [1, 0]
+                }
+              ],
+              "fbe": [0, -1],
+              "interval": [0, 1],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [1, 0, 0, -1.7976931348623157e+308],
+                  [1, 1, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "vu_uv": [1, 0]
+                },
+                {
+                  "geom": 1,
+                  "uv_curve": {
+                    "cpts": [
+                      [1, 0, 0, -1.7976931348623157e+308],
+                      [1, 1, 0, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [0, 0, 1, 1]
+                  },
+                  "vu_uv": [1, 1]
+                }
+              ],
+              "fbe": [-1, -1],
+              "interval": [0, 1],
+              "status": 1,
+              "ve": 2,
+              "vs": 1
+            },
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [1, 1, 0, -1.7976931348623157e+308],
+                  [0.5, 1, 0, -1.7976931348623157e+308],
+                  [0, 0.5, 0, -1.7976931348623157e+308],
+                  [0, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1]
+              },
+              "etype": 2,
+              "eus": [
+                {
+                  "geom": 1,
+                  "vu_uv": [1, 1]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0, 0]
+                }
+              ],
+              "fbe": [3, 2],
+              "interval": [0.1, 0.9],
+              "status": 0,
+              "ve": 0,
+              "vs": 2
+            },
+            {
+              "corner": 1,
+              "etype": 1,
+              "eus": [
+                {
+                  "geom": -1,
+                  "vu_uv": [0.5, 0.5]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0.5, 0.5]
+                }
+              ],
+              "status": 5,
+              "ve": 0,
+              "vs": 0
+            }
+          ],
+          "faces": [
+            {
+              "net": [
+                [
+                  [0, 0, 0.0, -1.7976931348623157e+308],
+                  [0, 2.0, 0.0, -1.7976931348623157e+308]
+                ],
+                [
+                  [3.0, 0, 0.0, -1.7976931348623157e+308],
+                  [3.0, 2.0, 0.5, -1.7976931348623157e+308]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [0, 0, 1, 1],
+              "v": [0, 0, 1, 1]
+            }
+          ],
+          "fillet_brep": [
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 1e-9, -1.7976931348623157e+308],
+                  [1, 0, 1e-9, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0.5, -1.7976931348623157e+308],
+                  [1, 0, 0.5, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 1, 0, -1.7976931348623157e+308],
+                  [2, -1, 0, -1.7976931348623157e+308],
+                  [3, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1]
+              },
+              "tol": 0.001
+            }
+          ],
+          "geoms": [
+            {
+              "center": {
+                "cpts": [
+                  [0, 0, 1, -1.7976931348623157e+308],
+                  [1, 0, 1, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "gtype": 1,
+              "other1": [2],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [
+                [2, 0],
+                [2, 1]
+              ],
+              "status": 1,
+              "surface": {
+                "net": [
+                  [
+                    [0.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [0.3333333333333333, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [0.6666666666666666, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ]
+                ],
+                "p": 3,
+                "q": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1],
+                "v": [0, 0, 0, 0, 1, 1, 1, 1]
+              }
+            },
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [1, -1],
+              "sides": [],
+              "status": 0,
+              "surface": {
+                "net": [
+                  [
+                    [1.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.3333333333333333, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.6666666666666665, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [2.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [2.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [2.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [2.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ]
+                ],
+                "p": 3,
+                "q": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1],
+                "v": [0, 0, 0, 0, 1, 1, 1, 1]
+              }
+            },
+            {
+              "gtype": 6,
+              "rails": [-1, -1],
+              "status": 0
+            }
+          ],
+          "targets": [
+            {
+              "cpts": [
+                [0, 0, 0, -1.7976931348623157e+308],
+                [1, 0, 0, -1.7976931348623157e+308]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0, 0, 1, 1]
+            },
+            {
+              "cpts": [
+                [0, 0, 0, -1.7976931348623157e+308],
+                [1, 1, 0, -1.7976931348623157e+308],
+                [2, -1, 0, -1.7976931348623157e+308],
+                [3, 0, 0, -1.7976931348623157e+308]
+              ],
+              "dim": 3,
+              "p": 3,
+              "u": [0, 0, 0, 0, 1, 1, 1, 1]
+            }
+          ],
+          "vertices": [
+            {
+              "corner": 0,
+              "mates": [1, -1],
+              "pc_class": 104,
+              "pc_index": 1,
+              "pc_kind": 1,
+              "pc_sub": 1,
+              "point": [0, 0, 0],
+              "status": 0,
+              "t_param": 0.25,
+              "uv": [0.1, 0.2],
+              "vtype": 7
+            },
+            {
+              "corner": 0,
+              "mates": [0, -1],
+              "pc_class": 109,
+              "pc_face": 0,
+              "pc_index": 0,
+              "pc_kind": 2,
+              "point": [1, 0, 0],
+              "status": 1,
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 102,
+              "pc_face": 0,
+              "pc_index": 0,
+              "pc_kind": 3,
+              "point": [1, 1, 0],
+              "status": 0,
+              "vtype": 4
+            },
+            {
+              "corner": 2,
+              "mates": [-1, -1],
+              "point": [5, 5, 5],
+              "status": 9,
+              "vtype": 13
+            }
+          ]
+        },
+        "op": "fb",
+        "query": {
+          "at1": false,
+          "at2": false,
+          "ev": 2,
+          "g1": 0,
+          "g2": 1,
+          "q": "examine",
+          "sv": 1,
+          "tol": 1e-6
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "fb_examine_adjust_null_solver_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_args",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#136 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_examine_same_geom_no_adjust",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#137 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_examine_same_geom_both_adjust",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#138 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 489
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "classify_face_point",
+        "pos": [1.5, 1.0, 0.125],
+        "surface1": {
+          "net": [
+            [
+              [0, 0, 1e+154, -1.7976931348623157e+308],
+              [0, 2.0, 0.0, -1.7976931348623157e+308]
+            ],
+            [
+              [3.0, 0, 0.0, -1.7976931348623157e+308],
+              [3.0, 2.0, 0.5, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 1,
+          "q": 1,
+          "u": [0, 0, 1, 1],
+          "v": [0, 0, 1, 1]
+        },
+        "surface2": {
+          "net": [
+            [
+              [0, 0, 0.0, -1.7976931348623157e+308],
+              [0, 2.0, 0.0, -1.7976931348623157e+308]
+            ],
+            [
+              [3.0, 0, 0.0, -1.7976931348623157e+308],
+              [3.0, 2.0, -0.5, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 1,
+          "q": 1,
+          "u": [0, 0, 1, 1],
+          "v": [0, 0, 1, 1]
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_hang29_huge_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "non-finite or oversized value",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#139 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "classify_face_point",
+        "pos": [1.5, 1.0, 0.125],
+        "surface1": {
+          "net": [
+            [
+              [0, 0, 1e+40, 1e-120],
+              [0, 2.0, 0.0, 1.0]
+            ],
+            [
+              [3.0, 0, 0.0, 1.0],
+              [3.0, 2.0, 0.5, 1.0]
+            ]
+          ],
+          "p": 1,
+          "q": 1,
+          "u": [0, 0, 1, 1],
+          "v": [0, 0, 1, 1]
+        },
+        "surface2": {
+          "net": [
+            [
+              [0, 0, 0.0, -1.7976931348623157e+308],
+              [0, 2.0, 0.0, -1.7976931348623157e+308]
+            ],
+            [
+              [3.0, 0, 0.0, -1.7976931348623157e+308],
+              [3.0, 2.0, -0.5, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 1,
+          "q": 1,
+          "u": [0, 0, 1, 1],
+          "v": [0, 0, 1, 1]
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_hang29_tiny_weight_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "oversized Euclidean control point",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#140 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "classify_face_point",
+        "pos": [-0.41399677338394025, -0.34234151162645854, 0.7437468811141361],
+        "surface1": {
+          "net": [
+            [
+              [0.017894790924318046, 0.010946082265725493, -0.13325572179631093, -1.7976931348623157e+308],
+              [0.08797768381180626, 0.583483852108951, 0.07860105611923746, -1.7976931348623157e+308],
+              [0.0907441342157412, 999.0, -0.061360338081731525, -1.7976931348623157e+308]
+            ],
+            [
+              [0.35934803430495155, 0.04038298666706386, 0.051552818734989625, -1.7976931348623157e+308],
+              [0.3531785473233273, 0.5442656201076617, 0.01973888094078502, -1.7976931348623157e+308],
+              [0.2897325297077611, 0.9616420057827205, 0.1448726395922858, -1.7976931348623157e+308]
+            ],
+            [
+              [0.5816561062590113, -0.09442210749096508, 0.10783435895701554, -1.7976931348623157e+308],
+              [0.6543002453633071, 0.40067080122628174, -0.2286294586255536, -1.7976931348623157e+308],
+              [0.6539205278547586, 0.9858564643039249, -0.2263496285354789, -1.7976931348623157e+308]
+            ],
+            [
+              [-1e+151, -0.0571578543965551, 0.13899113519863582, -1.7976931348623157e+308],
+              [1.0853480561679478, 0.5966436662519258, -0.10345835402207024, -1.7976931348623157e+308],
+              [1.0090295010477166, 1.0220578321951148, -0.005115942429555875, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 3,
+          "q": 2,
+          "u": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+        },
+        "surface2": {
+          "net": [
+            [
+              [0.02093523306703307, 0.08130940073894863, -0.28275608641634326, 1.564867684754716],
+              [-0.07274025030526872, 0.4283821541258793, -0.2992621971955972, 0.689694150735942],
+              [-0.09112918159708316, 0.7627989872237476, -0.031192296171928202, 0.7387707270218433],
+              [0.09009068182267282, 1.0683049069563813, -0.21548429064790686, 1.688404781940669]
+            ],
+            [
+              [0.5171256885923744, 0.027651581094411376, 0.05191976639092921, 1.9085339565246058],
+              [0.52634532018283, 0.247482936831123, -0.033685864184508474, 1.7089164384078446],
+              [0.40651647003545366, 0.6641121270670166, 0.04842930522145289, 1.6013127612408744],
+              [0.5865461133516824, 0.9558030561582866, 0.13212991931292256, 0.9523677712994322]
+            ],
+            [
+              [1.0437472830900951, 0.010221526163526187, -0.23048521908123198, 1.6351142164100958],
+              [1.003949314848414, 0.27387780804113515, -0.12991736505438925, 1.2193748888336342],
+              [1.036934529876545, 0.7540253832258703, -0.04432455095866544, 1.1123818569168962],
+              [0.9195158318477559, 1.0000654939094733, 0.1947060033487325, 1.2682490367927008]
+            ]
+          ],
+          "p": 2,
+          "q": 3,
+          "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 0.0, 3.800328310091566, 3.800328310091566, 3.800328310091566, 3.800328310091566]
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_hang29_over_1e150_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "non-finite or oversized value",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#141 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_hang29_large_1e50_accepted",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#142 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "surface_drop_point",
+        "pnt": [-8.441345836979168e-31, 4.046822954776353e-31, 1.590919568150211e-31],
+        "surface": {
+          "net": [
+            [
+              [0.025272794194751064, -0.09137617356236333, 0.24989067863759445, 1.4273220631433399],
+              [0.06810438750020717, 0.21988190371700722, 0.24441415989269571, 0.6893213235764994],
+              [-0.0323561682294808, 0.5294294678141442, -0.16783920290539503, 0.695835758577916],
+              [-0.05338986939654753, 0.814639118560299, -0.16626700180105408, 1.5633618466566426],
+              [0.09871939215619652, 1.0530091055908675, 0.03705448385029403, 0.8979875113602122]
+            ],
+            [
+              [0.5750566104451098, -0.06664018303649882, 0.11952619339602427, 1.2102562894118285],
+              [0.40698735153787136, 0.24414858251790333, -0.014884688465585771, 0.5006985946020376],
+              [0.5372049158690442, 0.43758227840961983, 0.01412505815051579, 1.3474942539959684],
+              [0.5320615939402149, 0.8232190086502043, -0.2579231338806038, 1.4016598387783086],
+              [0.48016474658200536, 1.0116986908297911, -0.016169899483206462, 0.5031847253330031]
+            ],
+            [
+              [1.0839881523390404, 0.010788156830674245, -0.207351289517641, 1.073561541641512],
+              [1.0089669553598153, 0.2356773920839062, 0.10646432207974604, 1.514626346584243],
+              [1.0536801207095619, 0.58629118034788, 0.2845682469847188, 0.6541208101967024],
+              [1.0442626648302031, 0.8405988193176447, 0.25976847797009867, 1.8490783763946115],
+              [2.0, 1.0579140548354127, -0.18628118164128368, 1.4302952817471666]
+            ]
+          ],
+          "p": 2,
+          "q": 2,
+          "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 6.249421640442009e-31, 6.818487193967173e-31, 1.0, 1.0, 1.0]
+        },
+        "tol": 1e-31
+      },
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_near_zero_v_knot_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_args",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#143 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf), SmBSplineSurface.cpp:203 (sm_FixupKnotVector); UB-166 (re-review of #147))",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "surface_drop_point",
+        "pnt": [-8.441345836979168e-31, 4.046822954776353e-31, 1.590919568150211e-31],
+        "surface": {
+          "net": [
+            [
+              [0.025272794194751064, -0.09137617356236333, 0.24989067863759445, 1.4273220631433399],
+              [0.06810438750020717, 0.21988190371700722, 0.24441415989269571, 0.6893213235764994],
+              [-0.0323561682294808, 0.5294294678141442, -0.16783920290539503, 0.695835758577916],
+              [-0.05338986939654753, 0.814639118560299, -0.16626700180105408, 1.5633618466566426],
+              [0.09871939215619652, 1.0530091055908675, 0.03705448385029403, 0.8979875113602122]
+            ],
+            [
+              [0.5750566104451098, -0.06664018303649882, 0.11952619339602427, 1.2102562894118285],
+              [0.40698735153787136, 0.24414858251790333, -0.014884688465585771, 0.5006985946020376],
+              [0.5372049158690442, 0.43758227840961983, 0.01412505815051579, 1.3474942539959684],
+              [0.5320615939402149, 0.8232190086502043, -0.2579231338806038, 1.4016598387783086],
+              [0.48016474658200536, 1.0116986908297911, -0.016169899483206462, 0.5031847253330031]
+            ],
+            [
+              [1.0839881523390404, 0.010788156830674245, -0.207351289517641, 1.073561541641512],
+              [1.0089669553598153, 0.2356773920839062, 0.10646432207974604, 1.514626346584243],
+              [1.0536801207095619, 0.58629118034788, 0.2845682469847188, 0.6541208101967024],
+              [1.0442626648302031, 0.8405988193176447, 0.25976847797009867, 1.8490783763946115],
+              [2.0, 1.0579140548354127, -0.18628118164128368, 1.4302952817471666]
+            ]
+          ],
+          "p": 2,
+          "q": 2,
+          "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 5e-9, 5e-9, 1.212e-8, 1.212e-8, 1.212e-8]
+        },
+        "tol": 1e-31
+      },
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_spread_v_knot_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_args",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#144 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf), SmNurbsCrv.cpp:386 (sm_FixupKnotVector second stage: distinct knots under SM_EFF_ZERO_PARAM spread by 1.212e-8); UB-166 (round-3 review of #147))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_spread_v_knot_non_monotone",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#145 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf), SmNurbsCrv.cpp:386 (sm_FixupKnotVector second stage: distinct knots under SM_EFF_ZERO_PARAM spread by 1.212e-8); UB-166 (round-3 review of #147); non-monotone constructed vector: defined in C++ (valgrind clean), compared (round-4 review of #147))",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_spread_v_knot_below_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#146 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf), SmNurbsCrv.cpp:386 (sm_FixupKnotVector second stage: distinct knots under SM_EFF_ZERO_PARAM spread by 1.212e-8); UB-166 (round-3 review of #147); non-monotone constructed vector: defined in C++ (valgrind clean), compared (round-4 review of #147))",
+      "values_compared": 2
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "surface_drop_point",
+        "pnt": [-8.441345836979168e-31, 4.046822954776353e-31, 1.590919568150211e-31],
+        "surface": {
+          "net": [
+            [
+              [0.0, 0.0, 0.0, 1.0],
+              [0.0, 0.2, 0.0, 1.0],
+              [0.0, 0.4, 0.0, 1.0],
+              [0.0, 0.6000000000000001, 0.0, 1.0],
+              [0.0, 0.8, 0.0, 1.0],
+              [0.0, 1.0, 0.0, 1.0]
+            ],
+            [
+              [0.3, 0.0, 0.0, 1.0],
+              [0.3, 0.2, 0.05, 1.0],
+              [0.3, 0.4, 0.1, 1.0],
+              [0.3, 0.6000000000000001, 0.15000000000000002, 1.0],
+              [0.3, 0.8, 0.2, 1.0],
+              [0.3, 1.0, 0.25, 1.0]
+            ],
+            [
+              [0.6, 0.0, 0.0, 1.0],
+              [0.6, 0.2, 0.1, 1.0],
+              [0.6, 0.4, 0.2, 1.0],
+              [0.6, 0.6000000000000001, 0.30000000000000004, 1.0],
+              [0.6, 0.8, 0.4, 1.0],
+              [0.6, 1.0, 0.5, 1.0]
+            ]
+          ],
+          "p": 2,
+          "q": 2,
+          "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 5e-9, 5e-9, 1.212e-8, 1.2120500000000001e-8, 1.2120500000000001e-8, 1.2120500000000001e-8]
+        },
+        "tol": 1e-31
+      },
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_endsnap_v_knot_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_args",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#147 (upstream source/SMLib/src/SmNurbsCrv.cpp:386 (sm_FixupKnotVector: the end group snaps to 1.212e-8 first, then the spread moves 5e-9 onto the start knot), SmNurbsSrf.cpp:1524 (sm_DecomposeSrf); UB-166 (round-4 review of #147))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_endsnap_v_knot_control",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#148 (upstream source/SMLib/src/SmNurbsCrv.cpp:386 (sm_FixupKnotVector: an end group 2e-12 away does not snap, the spread leaves a non-monotone vector and upstream solves with status 0); UB-166 control (round-4 review of #147))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_near_zero_u_knot",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#149 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf, u loop: the B262 guard fails with status 1006), SmBSplineSurface.cpp:135 (sm_FixupKnotVector); UB-166 (re-review of #147))",
+      "values_compared": 2
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "classify_face_point",
+        "pos": [0.03765970326815066, -0.019060973719042584, 0.06252868892299185],
+        "surface1": {
+          "net": [
+            [
+              [0.009062472170024153, 0.008115910027994578, 0.0036810929419321074, -1.7976931348623157e+308],
+              [-0.006919070474391094, 0.02622942762084124, 0.023697836613663897, -1.7976931348623157e+308],
+              [-0.002171243117703399, 0.044454114321065566, -0.012150696889323196, -1.7976931348623157e+308],
+              [0.0023126394309957595, 0.06691099185633688, -0.016315186666857592, -1.7976931348623157e+308],
+              [-0.005979030463936069, 0.1036334896682794, -0.028663230113498635, -1.7976931348623157e+308]
+            ],
+            [
+              [0.01631003497716147, -0.0024788964442347657, 0.012947734979937293, -1.7976931348623157e+308],
+              [0.019782090957098295, 0.02200247769069156, 1.0, -1.7976931348623157e+308],
+              [0.03125524984142302, 0.04767947512736866, -0.015404813928110253, -1.7976931348623157e+308],
+              [0.02514750633302499, 0.08267046315070543, 0.013314424513170066, -1.7976931348623157e+308],
+              [0.03467548485580053, 0.09159217274599511, -0.016093117778074293, -1.7976931348623157e+308]
+            ],
+            [
+              [0.04524194894268023, -0.0055542045247884, 0.00440493558714955, -1.7976931348623157e+308],
+              [0.04935617368408419, 0.028068842675392076, -0.009992603204262165, -1.7976931348623157e+308],
+              [0.05476941200354998, 0.04195352239315733, 0.0018010058173563827, -1.7976931348623157e+308],
+              [0.04029445552445197, 0.08074674468824501, -0.016672284039896332, -1.7976931348623157e+308],
+              [-0.08675185234275494, 0.10458322353527055, -0.00014460512502068035, -1.7976931348623157e+308]
+            ],
+            [
+              [0.08051874449257265, 0.005706474276108881, -0.018445733070407946, -1.7976931348623157e+308],
+              [0.08485652559590727, 0.01811523118610182, -0.023283064057319836, -1.7976931348623157e+308],
+              [0.07053906459096328, 0.053230596419687304, 0.0023701961993777055, -1.7976931348623157e+308],
+              [0.06919682986143814, 0.08395525727981218, 0.0004397389699304144, -1.7976931348623157e+308],
+              [0.07827178912020603, 0.09588377060580365, 0.04477635007720749, -1.7976931348623157e+308]
+            ],
+            [
+              [0.10886808490894953, 0.008774535535277803, 0.029883850328906364, -1.7976931348623157e+308],
+              [0.10177683040488478, 0.015728645784950906, -0.006653927952786418, -1.7976931348623157e+308],
+              [0.1075145431033687, 0.05205278127333634, 0.0010769848499493863, -1.7976931348623157e+308],
+              [0.10921708330185642, 0.06677398040181734, 0.001246819275030675, -1.7976931348623157e+308],
+              [0.10978057364199079, 0.09501561979102355, 0.012052849176598763, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 2,
+          "q": 3,
+          "u": [0.0, 0.0, 0.0, 0.1657380125333413, 0.3791873995525702, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 0.0, 0.7673259238835947, 1.0, 1.0, 1.0, 1.0]
+        },
+        "surface2": {
+          "net": [
+            [
+              [-0.002060961246578319, -0.0033596218088764772, -0.01695449604416185, -1.7976931348623157e+308],
+              [-0.009997241046708715, 0.04233495133402183, 0.028755288106698647, -1.7976931348623157e+308],
+              [-0.005793770600203268, 0.07593553491809611, -0.025019131995387092, -1.7976931348623157e+308],
+              [0.007353763212934775, 0.09544152193036276, -0.024768105256870024, -1.7976931348623157e+308]
+            ],
+            [
+              [0.02412882206775517, 0.0009443231471936751, 0.0055317831495608595, -1.7976931348623157e+308],
+              [0.03092302143332186, 0.028621724290255814, -0.02514230540518435, -1.7976931348623157e+308],
+              [0.02625404416892918, 0.057500634293803636, -0.020588773612367096, -1.7976931348623157e+308],
+              [0.0376212505435147, 0.1076817895373214, 0.010687926525595876, -1.7976931348623157e+308]
+            ],
+            [
+              [0.0585426850651776, -0.0027843435544711694, -0.0072119510445107365, -1.7976931348623157e+308],
+              [0.060849265596792025, 0.04215990018652304, -0.024325785082994187, -1.7976931348623157e+308],
+              [0.0641260890544708, 0.061396519047262246, 0.015453100876453758, -1.7976931348623157e+308],
+              [0.061062153159866586, 0.10189797016926337, -0.01885000012073625, -1.7976931348623157e+308]
+            ],
+            [
+              [0.10310288064642653, 0.008553202490571496, -0.028757931517784496, -1.7976931348623157e+308],
+              [0.10557266573794499, 0.029033125451665143, 0.004430306402156192, -1.7976931348623157e+308],
+              [0.10926022616812453, 0.0695542508092544, 0.004208549113571236, -1.7976931348623157e+308],
+              [0.10843288867135166, 0.1045134456788388, -0.019413730920796447, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 2,
+          "q": 2,
+          "u": [0.0, 0.0, 0.0, 0.6908625854130463, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 1e-12, 1.0, 1.0, 1.0]
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_near_zero_v_knot_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_args",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#150 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf), SmBSplineSurface.cpp:203 (sm_FixupKnotVector); UB-166 (re-review of #147))",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "classify_face_point",
+        "pos": [-0.00046254832050541574, 0.000833246339155999, -9.804160194237284e+41],
+        "surface1": {
+          "net": [
+            [
+              [-0.0004996688004152705, -0.0006360728567838497, -0.0018747070202954437, 0.6108075320450408],
+              [-0.0006339931186644943, 0.0026892657380876697, 0.0026591037492139954, 1.6689543326601166],
+              [-0.00023492323787347585, 0.004278654043809246, -0.0014669386907473442, 1.9964537531417852],
+              [-0.0007250625332901738, 0.005537659737985071, -0.0002134519550987485, 1.8711607289216845],
+              [0.00016769443343634172, 0.008241758807582055, 0.0021276212712928694, 1.226375746222737],
+              [0.0005612216657539812, 0.009831608036360863, 0.0026910730176696934, 1.1099061069762468]
+            ],
+            [
+              [0.0017967760741510652, 0.000902863367467775, 0.0004986275798606122, 0.6407305738526864],
+              [0.0029020433238599297, 0.0022017684336655434, -0.0013873041631705298, 1.4568051191855256],
+              [0.0018141819808323834, 0.0031260246937061245, 0.0001268654680005682, 1.6264407882975083],
+              [0.0017932547185500129, 0.006410092077035792, 0.0025368038752643833, 1.4417951787850063],
+              [0.0013478193217899292, 0.007439755718715915, -0.0012612249025934156, 1.9512711016042679],
+              [0.002438591356237578, 0.010840707926966635, -0.002511466167857723, 0.8298447539341756]
+            ],
+            [
+              [0.003716525184534399, -0.0008730416298209508, 0.001854723576653639, 0.6880215972586031],
+              [0.0046417873689801725, 0.0018036652537504097, -0.002666809083045943, 0.7145878357193558],
+              [0.003028926660760906, 0.0031700103381045253, -0.0009554128851388133, 1.1873119911007088],
+              [0.003982763207383841, 0.0062124647353310886, 0.002785783307374819, 1.906617401054439],
+              [0.004868602989164344, 0.008595740424460005, 0.0019185251255122594, 1.2349694593010263],
+              [0.003485285017260485, 0.009661893063358785, -0.0022256940167220667, 0.9524095993900725]
+            ],
+            [
+              [0.005212258610707061, -0.0003908046675354067, -0.0012632078019157208, 1.3482139951942858],
+              [0.005159080617870062, 0.002300789560977417, -0.002139063113844387, 1.2396744003817748],
+              [0.006255886274667546, 0.0049163279701370305, 0.0005081219468462112, 1.88797050568779],
+              [0.006605712485303676, 0.005142645579222635, 0.0015622793085710936, 1.4423783346476575],
+              [0.006395921029786731, 0.008089324114033593, -0.002059467781954621, 0.6895733071171037],
+              [0.006467405720097745, 0.010314907762399515, -0.002857155366575321, 1.854514458855653]
+            ],
+            [
+              [0.007586436494696481, 0.0006588725455822647, 0.0018476254039767087, 1.846513195191429],
+              [0.00728638394205003, 0.0012912062802483784, 0.0017145852836074206, 1.197688703525551],
+              [0.008144637459773384, 0.004597251996292978, -0.0011351894918426506, 0.9239204519534404],
+              [0.008312378796917824, 0.006889865357307333, -0.0001674971792047253, 1.5147709433389358],
+              [0.007582209483714817, 0.007229431188561953, 0.0009723943044414807, 1.8163121501309056],
+              [0.007773822392611222, 0.010333597877044541, -0.0026008204946961185, 0.7864900998060675]
+            ],
+            [
+              [0.010493161817166315, -0.0008274419071159989, 0.0005282034818053072, 1.0334385141978164],
+              [0.009830486644332526, 0.0020208718411589325, -0.0014824612007081064, 1.4402767345815874],
+              [0.010753691932434441, 0.003959445275166149, 0.0024359207449042913, 0.8716538041076898],
+              [0.009823844845881849, 0.0067239594563471596, -0.0016665571348753838, 1.907367420170293],
+              [0.009577908900203614, 0.008277042842244555, 0.000020694674734806905, 0.7569789238732889],
+              [0.010076105732904675, 0.009453553452581436, -0.00028012467454953616, 1.39370560424243]
+            ]
+          ],
+          "p": 3,
+          "q": 3,
+          "u": [0.0, 0.0, 0.0, 0.0, 0.44339322374759277, 1.4985560885439326, 2.9237295328720334, 2.9237295328720334, 2.9237295328720334, 2.9237295328720334],
+          "v": [0.0, 0.0, 0.0, 0.0, 3.7831505367290725e-31, 9.19889350239028e-31, 1.0, 1.0, 1.0, 1.0]
+        },
+        "surface2": {
+          "net": [
+            [
+              [-0.0009772093079597787, 0.00009995467311055204, 0.0026305915756292325, -1.7976931348623157e+308],
+              [-0.0009742432231363295, 0.009076649222555955, -0.0006712393017537635, -1.7976931348623157e+308]
+            ],
+            [
+              [0.0035923257935497888, 0.00047068624675669884, 0.001624700922946668, -1.7976931348623157e+308],
+              [0.002561708034262687, 0.010063159313543592, 0.0008414656450063929, -1.7976931348623157e+308]
+            ],
+            [
+              [0.00701090352122387, -0.0008896725772545263, 0.0007450887272149387, -1.7976931348623157e+308],
+              [0.0067620695198783, 0.009066618171050709, 0.0011849408833385089, -1.7976931348623157e+308]
+            ],
+            [
+              [-0.011791498970768515, -0.000525653983932976, -0.0013531315250980282, -1.7976931348623157e+308],
+              [0.009278263140400428, 0.009895620927132668, -0.0001235297306465666, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 3,
+          "q": 1,
+          "u": [0.0, 0.0, 0.0, 0.0, 0.6919708874999051, 0.6919708874999051, 0.6919708874999051, 0.6919708874999051],
+          "v": [0.0, 0.0, 1.0, 1.0]
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "classify_face_point_near_zero_v_knots_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_args",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#151 (upstream source/SMLib/src/SmNurbsSrf.cpp:1524 (sm_DecomposeSrf), SmBSplineSurface.cpp:203 (sm_FixupKnotVector); UB-166 (re-review of #147))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "fb_cliff_near_zero_curve_knot",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#152 (upstream source/SMLib/src/SmNurbsCrv.cpp:478 (sm_CreateBezSegments skips a snapped start over-multiplicity); UB-166 curve probe)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "capping_near_zero_uv_knot",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#153 (upstream source/SMLib/src/SmNurbsCrv.cpp:478 (sm_CreateBezSegments skips a snapped start over-multiplicity); UB-166 curve probe)",
+      "values_compared": 107
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "model": {
+          "edges": [
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "uv_curve": {
+                    "cpts": [
+                      [0, 0, 0, -1.7976931348623157e+308],
+                      [1, 0, 0, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [0, 0, 1, 1]
+                  },
+                  "vu_uv": [0, 0]
+                },
+                {
+                  "geom": 0,
+                  "vu_uv": [1, 0]
+                }
+              ],
+              "fbe": [0, -1],
+              "interval": [0, 1],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [1, 0, 0, -1.7976931348623157e+308],
+                  [1, 1, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "vu_uv": [1, 0]
+                },
+                {
+                  "geom": 1,
+                  "uv_curve": {
+                    "cpts": [
+                      [1, 0, 0, -1.7976931348623157e+308],
+                      [1, 1, 0, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [0, 0, 1, 1]
+                  },
+                  "vu_uv": [1, 1]
+                }
+              ],
+              "fbe": [-1, -1],
+              "interval": [0, 1],
+              "status": 1,
+              "ve": 2,
+              "vs": 1
+            },
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [1, 1, 0, -1.7976931348623157e+308],
+                  [0.5, 1, 0, -1.7976931348623157e+308],
+                  [0, 0.5, 0, -1.7976931348623157e+308],
+                  [0, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1]
+              },
+              "etype": 2,
+              "eus": [
+                {
+                  "geom": 1,
+                  "vu_uv": [1, 1]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0, 0]
+                }
+              ],
+              "fbe": [3, 2],
+              "interval": [0.1, 0.9],
+              "status": 0,
+              "ve": 0,
+              "vs": 2
+            },
+            {
+              "corner": 1,
+              "etype": 1,
+              "eus": [
+                {
+                  "geom": -1,
+                  "vu_uv": [0.5, 0.5]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0.5, 0.5]
+                }
+              ],
+              "status": 5,
+              "ve": 0,
+              "vs": 0
+            }
+          ],
+          "faces": [
+            {
+              "net": [
+                [
+                  [0, 0, 0.0, -1.7976931348623157e+308],
+                  [0, 2.0, 0.0, -1.7976931348623157e+308]
+                ],
+                [
+                  [3.0, 0, 0.0, -1.7976931348623157e+308],
+                  [3.0, 2.0, 0.5, -1.7976931348623157e+308]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [0, 0, 1, 1],
+              "v": [0, 0, 1, 1]
+            }
+          ],
+          "fillet_brep": [
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 1e-9, -1.7976931348623157e+308],
+                  [1, 0, 1e-9, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0.5, -1.7976931348623157e+308],
+                  [1, 0, 0.5, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 1, 0, -1.7976931348623157e+308],
+                  [2, -1, 0, -1.7976931348623157e+308],
+                  [3, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1]
+              },
+              "tol": 0.001
+            }
+          ],
+          "geoms": [
+            {
+              "center": {
+                "cpts": [
+                  [0, 0, 1, -1.7976931348623157e+308],
+                  [1, 0, 1, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "gtype": 1,
+              "other1": [2],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [
+                [2, 0],
+                [2, 1]
+              ],
+              "status": 1,
+              "surface": {
+                "net": [
+                  [
+                    [0.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [0.3333333333333333, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [0.6666666666666666, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ]
+                ],
+                "p": 3,
+                "q": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1],
+                "v": [0, 0, 0, 0, 1, 1, 1, 1]
+              }
+            },
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [1, -1],
+              "sides": [],
+              "status": 0,
+              "surface": {
+                "net": [
+                  [
+                    [1.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.3333333333333333, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.6666666666666665, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [2.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [2.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [2.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [2.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ]
+                ],
+                "p": 3,
+                "q": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1],
+                "v": [0, 0, 0, 0, 1, 1, 1, 1]
+              }
+            },
+            {
+              "gtype": 6,
+              "rails": [-1, -1],
+              "status": 0
+            }
+          ],
+          "targets": [
+            {
+              "cpts": [
+                [0, 0, 0, -1.7976931348623157e+308],
+                [1, 0, 0, -1.7976931348623157e+308]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0, 0, 1, 1]
+            },
+            {
+              "cpts": [
+                [0, 0, 0, -1.7976931348623157e+308],
+                [1, 1, 0, -1.7976931348623157e+308],
+                [2, -1, 0, -1.7976931348623157e+308],
+                [3, 0, 0, -1.7976931348623157e+308]
+              ],
+              "dim": 3,
+              "p": 3,
+              "u": [0, 0, 0, 0, 1, 1, 1, 1]
+            }
+          ],
+          "vertices": [
+            {
+              "corner": 0,
+              "mates": [1, -1],
+              "pc_class": 104,
+              "pc_index": 1,
+              "pc_kind": 1,
+              "pc_sub": 1,
+              "point": [0, 0, 0],
+              "status": 0,
+              "t_param": 0.25,
+              "uv": [0.1, 0.2],
+              "vtype": 7
+            },
+            {
+              "corner": 0,
+              "mates": [0, -1],
+              "pc_class": 109,
+              "pc_face": 0,
+              "pc_index": 0,
+              "pc_kind": 2,
+              "point": [1, 0, 0],
+              "status": 1,
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 102,
+              "pc_face": 0,
+              "pc_index": 0,
+              "pc_kind": 3,
+              "point": [1, 1, 0],
+              "status": 0,
+              "vtype": 4
+            },
+            {
+              "corner": 2,
+              "mates": [-1, -1],
+              "point": [5, 5, 5],
+              "status": 9,
+              "vtype": 13
+            }
+          ]
+        },
+        "op": "fb",
+        "query": {
+          "q": "cliff",
+          "surface": {
+            "net": [
+              [
+                [-1.7976931348623157e+308, 0, 0.0, -1.7976931348623157e+308],
+                [0, 2.0, 0.0, -1.7976931348623157e+308]
+              ],
+              [
+                [3.0, 0, 0.0, -1.7976931348623157e+308],
+                [3.0, 2.0, 0.5, -1.7976931348623157e+308]
+              ]
+            ],
+            "p": 1,
+            "q": 1,
+            "u": [0, 0, 1, 1],
+            "v": [0, 0, 1, 1]
+          },
+          "tol": 1e-6,
+          "v": 1
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "fb_cliff_hang20_dbl_max_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "non-finite or oversized value",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#154 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "model": {
+          "edges": [
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "uv_curve": {
+                    "cpts": [
+                      [0, 0, 0, -1.7976931348623157e+308],
+                      [1, 0, 0, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [0, 0, 1, 1]
+                  },
+                  "vu_uv": [0, 0]
+                },
+                {
+                  "geom": 0,
+                  "vu_uv": [1, 0]
+                }
+              ],
+              "fbe": [0, -1],
+              "interval": [0, 1],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [1, 0, 0, -1.7976931348623157e+308],
+                  [1, 1, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "vu_uv": [1, 0]
+                },
+                {
+                  "geom": 1,
+                  "uv_curve": {
+                    "cpts": [
+                      [1, 0, 0, -1.7976931348623157e+308],
+                      [1, 1, 0, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [0, 0, 1, 1]
+                  },
+                  "vu_uv": [1, 1]
+                }
+              ],
+              "fbe": [-1, -1],
+              "interval": [0, 1],
+              "status": 1,
+              "ve": 2,
+              "vs": 1
+            },
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [1, 1, 0, -1.7976931348623157e+308],
+                  [0.5, 1, 0, -1.7976931348623157e+308],
+                  [0, 0.5, 0, -1.7976931348623157e+308],
+                  [0, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1]
+              },
+              "etype": 2,
+              "eus": [
+                {
+                  "geom": 1,
+                  "vu_uv": [1, 1]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0, 0]
+                }
+              ],
+              "fbe": [3, 2],
+              "interval": [0.1, 0.9],
+              "status": 0,
+              "ve": 0,
+              "vs": 2
+            },
+            {
+              "corner": 1,
+              "etype": 1,
+              "eus": [
+                {
+                  "geom": -1,
+                  "vu_uv": [0.5, 0.5]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0.5, 0.5]
+                }
+              ],
+              "status": 5,
+              "ve": 0,
+              "vs": 0
+            }
+          ],
+          "faces": [
+            {
+              "net": [
+                [
+                  [0, 0, 0.0, -1.7976931348623157e+308],
+                  [0, 2.0, 0.0, -1.7976931348623157e+308]
+                ],
+                [
+                  [3.0, 0, 0.0, -1.7976931348623157e+308],
+                  [3.0, 2.0, 0.5, -1.7976931348623157e+308]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [0, 0, 1, 1],
+              "v": [0, 0, 1, 1]
+            }
+          ],
+          "fillet_brep": [
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 1e-9, -1.7976931348623157e+308],
+                  [1, 0, 1e-9, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0.5, -1.7976931348623157e+308],
+                  [1, 0, 0.5, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "tol": 0.00001
+            },
+            {
+              "curve": {
+                "cpts": [
+                  [0, 0, 0, -1.7976931348623157e+308],
+                  [1, 1, 0, -1.7976931348623157e+308],
+                  [2, -1, 0, -1.7976931348623157e+308],
+                  [3, 0, 0, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1]
+              },
+              "tol": 0.001
+            }
+          ],
+          "geoms": [
+            {
+              "center": {
+                "cpts": [
+                  [0, 0, 1, -1.7976931348623157e+308],
+                  [1, 0, 1, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0, 0, 1, 1]
+              },
+              "gtype": 1,
+              "other1": [2],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [
+                [2, 0],
+                [2, 1]
+              ],
+              "status": 1,
+              "surface": {
+                "net": [
+                  [
+                    [0.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [0.3333333333333333, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.3333333333333333, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [0.6666666666666666, 0.0, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [0.6666666666666666, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ]
+                ],
+                "p": 3,
+                "q": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1],
+                "v": [0, 0, 0, 0, 1, 1, 1, 1]
+              }
+            },
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [1, -1],
+              "sides": [],
+              "status": 0,
+              "surface": {
+                "net": [
+                  [
+                    [1.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.3333333333333333, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.3333333333333333, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [1.6666666666666665, 0.0, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [1.6666666666666665, 1.0, 0.0, -1.7976931348623157e+308]
+                  ],
+                  [
+                    [2.0, 0.0, 0.0, -1.7976931348623157e+308],
+                    [2.0, 0.3333333333333333, 0.0, -1.7976931348623157e+308],
+                    [2.0, 0.6666666666666666, 0.0, -1.7976931348623157e+308],
+                    [2.0, 1.0, 0.0, -1.7976931348623157e+308]
+                  ]
+                ],
+                "p": 3,
+                "q": 3,
+                "u": [0, 0, 0, 0, 1, 1, 1, 1],
+                "v": [0, 0, 0, 0, 1, 1, 1, 1]
+              }
+            },
+            {
+              "gtype": 6,
+              "rails": [-1, -1],
+              "status": 0
+            }
+          ],
+          "targets": [
+            {
+              "cpts": [
+                [0, 0, 0, -1.7976931348623157e+308],
+                [1, 0, 0, -1.7976931348623157e+308]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0, 0, 1, 1]
+            },
+            {
+              "cpts": [
+                [0, 0, 0, -1.7976931348623157e+308],
+                [1, 1, 0, -1.7976931348623157e+308],
+                [2, -1, 0, -1.7976931348623157e+308],
+                [3, 0, 0, -1.7976931348623157e+308]
+              ],
+              "dim": 3,
+              "p": 3,
+              "u": [0, 0, 0, 0, 1, 1, 1, 1]
+            }
+          ],
+          "vertices": [
+            {
+              "corner": 0,
+              "mates": [1, -1],
+              "pc_class": 104,
+              "pc_index": 1,
+              "pc_kind": 1,
+              "pc_sub": 1,
+              "point": [0, 0, 0],
+              "status": 0,
+              "t_param": 0.25,
+              "uv": [0.1, 0.2],
+              "vtype": 7
+            },
+            {
+              "corner": 0,
+              "mates": [0, -1],
+              "pc_class": 109,
+              "pc_face": 0,
+              "pc_index": 0,
+              "pc_kind": 2,
+              "point": [1, 0, 0],
+              "status": 1,
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 102,
+              "pc_face": 0,
+              "pc_index": 0,
+              "pc_kind": 3,
+              "point": [1, 1, 0],
+              "status": 0,
+              "vtype": 4
+            },
+            {
+              "corner": 2,
+              "mates": [-1, -1],
+              "point": [5, 5, 5],
+              "status": 9,
+              "vtype": 13
+            }
+          ]
+        },
+        "op": "fb",
+        "query": {
+          "q": "cliff",
+          "surface": {
+            "net": [
+              [
+                [-8e+307, 0, 0.0, -1.7976931348623157e+308],
+                [0, 2.0, 0.0, -1.7976931348623157e+308]
+              ],
+              [
+                [3.0, 0, 0.0, -1.7976931348623157e+308],
+                [3.0, 2.0, 0.5, -1.7976931348623157e+308]
+              ]
+            ],
+            "p": 1,
+            "q": 1,
+            "u": [0, 0, 1, 1],
+            "v": [0, 0, 1, 1]
+          },
+          "tol": 1e-6,
+          "v": 1
+        }
+      },
+      "max_rel_err": 0.0,
+      "name": "fb_cliff_hang20_over_bound_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "non-finite or oversized value",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#155 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fb_cliff_hang20_boundary_1e307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#156 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 5
+    },
+    {
+      "inputs": {
+        "expected_rejection": true,
+        "op": "surface_drop_point",
+        "pnt": [-779.5709216485307, -583.5443597420365, -780.3105162238546],
+        "surface": {
+          "net": [
+            [
+              [-57.743174701692325, -4.790573515124977, -200.2412187271977, -1.7976931348623157e+308],
+              [-1.7976931348623157e+308, 369.0562716998971, -239.92583016746303, -1.7976931348623157e+308],
+              [55.67945974577998, 707.7027066566211, -222.45402404250981, -1.7976931348623157e+308],
+              [42.84327277318067, 1077.49459415234, -183.14125985626413, -1.7976931348623157e+308]
+            ],
+            [
+              [365.76901912898296, -73.35087829636116, -56.896451509219986, -1.7976931348623157e+308],
+              [-1.7976931348623157e+308, 403.7465413020048, -80.04459765404093, -1.7976931348623157e+308],
+              [351.6633648464131, 621.8562103879113, -255.62789760581524, -1.7976931348623157e+308],
+              [338.4662108252152, 1098.2592163089291, 62.10060938416439, -1.7976931348623157e+308]
+            ],
+            [
+              [612.9749698799012, -78.85643232665849, 296.73353695108057, -1.7976931348623157e+308],
+              [683.7620337182179, 425.4945642598728, 105.24447095175987, -1.7976931348623157e+308],
+              [677.4187000779929, 619.0301875360378, -172.9593330346823, -1.7976931348623157e+308],
+              [669.3824108354763, 922.1192346782431, -96.71628457453657, -1.7976931348623157e+308]
+            ],
+            [
+              [927.0729337599262, -29.854124121998503, -80.9508064164301, -1.7976931348623157e+308],
+              [1021.2669070003142, 380.9767457466369, -195.1565901982496, -1.7976931348623157e+308],
+              [1053.1603880723637, 593.3329155601285, 268.20523264674097, -1.7976931348623157e+308],
+              [1071.1596527351019, 978.3188591395455, -155.49433535379396, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 1,
+          "q": 1,
+          "u": [0.0, 0.0, 0.506671485643537, 0.7484192910726101, 1.0, 1.0],
+          "v": [0.0, 0.0, 2.0387839773156733, 2.225928330293457, 3.9686705681916097, 3.9686705681916097]
+        },
+        "tol": 1.0
+      },
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_hang20_dbl_max_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "non-finite or oversized value",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#157 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_hang20_boundary_1e307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#158 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 2
+    },
+    {
+      "inputs": {
+        "dir": [-0.3508705604468394, 0.46027857347369405, 0.046289712450947595],
+        "end": [694.9528318820196, -143.86578530487793, 961.3710810658647],
+        "expected_rejection": true,
+        "op": "two_pnts",
+        "start": [93.72339772672188, -65.27363048978907, 42.670052614962096],
+        "surface1": {
+          "net": [
+            [
+              [93.72339772672188, -65.27363048978907, 42.670052614962096, -1.7976931348623157e+308],
+              [-35.388008540373605, 328.1503520460174, -66.3506538096984, -1.7976931348623157e+308],
+              [13.601553962674817, 714.3442016266442, 89.20057175734387, -1.7976931348623157e+308],
+              [-86.67864948281208, 913.6669817385184, -87.03933541777262, -1.7976931348623157e+308]
+            ],
+            [
+              [300.52319739717245, 84.26145705466939, -46.07825631466611, -1.7976931348623157e+308],
+              [205.1175555883844, 249.6149271066076, -277.8706178268637, -1.7976931348623157e+308],
+              [224.5247543040741, 764.4238991526595, -223.70177850964018, -1.7976931348623157e+308],
+              [269.299794350916, 905.4181537917078, 18.311577228486474, -1.7976931348623157e+308]
+            ],
+            [
+              [540.9994296154761, 55.239980979250205, -61.34184279133703, -1.7976931348623157e+308],
+              [418.2083358540125, 382.12919537575453, 96.14500575859464, -1.7976931348623157e+308],
+              [599.9584268888622, 715.3534095885368, -173.96506238277973, -1.7976931348623157e+308],
+              [510.24947761181573, 1086.20862860722, -211.3303075031338, -1.7976931348623157e+308]
+            ],
+            [
+              [835.5102668644787, 82.1904607972711, -28.180372653067554, -1.7976931348623157e+308],
+              [715.3019900627557, 337.02937649740437, 12.122915511397103, -1.7976931348623157e+308],
+              [849.6376367905362, 706.1211033206698, 11.558355445408953, -1.7976931348623157e+308],
+              [738.517570948694, 1099.5327587213162, -192.19235769276582, -1.7976931348623157e+308]
+            ],
+            [
+              [1002.2964821954159, 46.29812335897385, 141.47276152533865, -1.7976931348623157e+308],
+              [1069.2135417046818, 359.68743282714854, -153.51411192990605, -1.7976931348623157e+308],
+              [1021.9096138589013, 685.4293038965017, 153.73297486970782, -1.7976931348623157e+308],
+              [1099.002434449149, 1038.2225306821153, -52.00256480902776, -1.7976931348623157e+308]
+            ]
+          ],
+          "p": 3,
+          "q": 1,
+          "u": [0.0, 0.0, 0.0, 0.0, 0.5089469066097909, 1.0, 1.0, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.3050361910327969, 0.3431439777588764, 1.0, 1.0]
+        },
+        "surface2": {
+          "net": [
+            [
+              [96.28667002503482, -4.144059220014637, -3.660338254803386, 0.6417144580506321],
+              [60.166782309639316, 593.2916805894384, 3.853599771352023, 1.3791729874012475],
+              [24.26153477937443, 934.8929092773761, 254.48029134727062, 1.5474115648320754]
+            ],
+            [
+              [276.9915198765156, -7e+307, 146.0529623134032, 1.509299285243232],
+              [325.0382123340128, 566.2826743942626, 274.73935176829605, 1.0104171565911853],
+              [256.4488915313665, 1058.094756994842, -257.7549102119657, 0.6202084690483443]
+            ],
+            [
+              [606.225907697325, 88.60973086595466, 149.27167696332876, 1.366203002341313],
+              [648.5387524419226, 487.267152099733, 216.04177453530798, 1.632019931978494],
+              [655.4849381481309, 1054.6938267187484, -116.55161053791058, 1.4956407975123651]
+            ],
+            [
+              [1081.3385949474632, -55.6582340655952, 78.23027685362266, 0.7503359448308865],
+              [902.7925304198645, 537.0349034267094, 112.94952680712528, 0.593817627556625],
+              [961.0156471314839, 1069.6739383686793, 187.13931059753602, 1.5854226743225803]
+            ]
+          ],
+          "p": 1,
+          "q": 2,
+          "u": [0.0, 0.0, 0.5320719549194177, 0.6284527510873664, 1.0, 1.0],
+          "v": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+        },
+        "tol": 1.0000000000000002e-6
+      },
+      "max_rel_err": 0.0,
+      "name": "two_pnts_hang20_over_bound_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "non-finite or oversized value",
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#159 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "two_pnts_hang20_boundary_1e307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#160 (upstream HANG-20 (re-review fuzz of #147): the global solvers never finish once a coordinate exceeds about 2e307..8e307; the FFI bounds the solver ops at 1e307)",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_negative_tol_cylinder",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#161 (upstream source/SMLib/src/SmFilletGeom.cpp:161 sm_SurfaceDropPoint -> GlobalPointSolve(SmZoneTol3d): the double tolerance converts through SmZoneTol3d(double) (SmTol.cpp:107) and fabs (SmTol.h:148); negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_negative_tol_bilinear_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#162 (upstream source/SMLib/src/SmFilletGeom.cpp:161 sm_SurfaceDropPoint -> GlobalPointSolve(SmZoneTol3d): the double tolerance converts through SmZoneTol3d(double) (SmTol.cpp:107) and fabs (SmTol.h:148); negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_negative_tol_cubic",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#163 (upstream source/SMLib/src/SmFilletGeom.cpp:161 sm_SurfaceDropPoint -> GlobalPointSolve(SmZoneTol3d): the double tolerance converts through SmZoneTol3d(double) (SmTol.cpp:107) and fabs (SmTol.h:148); negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_negative_tol_cubic_1e-5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#164 (upstream source/SMLib/src/SmFilletGeom.cpp:161 sm_SurfaceDropPoint -> GlobalPointSolve(SmZoneTol3d): the double tolerance converts through SmZoneTol3d(double) (SmTol.cpp:107) and fabs (SmTol.h:148); negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "surface_drop_point_negative_tol_cubic_far_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#165 (upstream source/SMLib/src/SmFilletGeom.cpp:161 sm_SurfaceDropPoint -> GlobalPointSolve(SmZoneTol3d): the double tolerance converts through SmZoneTol3d(double) (SmTol.cpp:107) and fabs (SmTol.h:148); negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_pnts_negative_tol_on_both",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#166 (upstream source/SMLib/src/SmFilletGeom.cpp:277-359 sm_TwoPntsIntersection: the negative tolerance reaches sm_SurfaceDropPoint (SmZoneTol3d conversion) and, raw through SM_CAST_APPROXTOL3D_PTR, PointBasedSurfaceIntersect; negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_pnts_negative_tol_with_end",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#167 (upstream source/SMLib/src/SmFilletGeom.cpp:277-359 sm_TwoPntsIntersection: the negative tolerance reaches sm_SurfaceDropPoint (SmZoneTol3d conversion) and, raw through SM_CAST_APPROXTOL3D_PTR, PointBasedSurfaceIntersect; negative-tolerance regression (maintainer review of #147))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "capping_gap_negative_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#168 (upstream source/SMLib/src/SmFilletGeom.cpp:8898-8949 JoinVertsByCapping -> LiftCurve(SmApproxTol3d): the double converts through SmApproxTol3d(double) (USE_DEFAULT -> half the zone tolerance, then fabs); regression (maintainer review of #147))",
+      "values_compared": 107
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "capping_gap_use_default_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#169 (upstream source/SMLib/src/SmFilletGeom.cpp:8898-8949 JoinVertsByCapping -> LiftCurve(SmApproxTol3d): the double converts through SmApproxTol3d(double) (USE_DEFAULT -> half the zone tolerance, then fabs); regression (maintainer review of #147))",
+      "values_compared": 107
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_plane_inside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#170 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_plane_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#171 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_plane_nurb_inside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#172 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_plane_nurb_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#173 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_plane_scaled_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#174 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_revolution_cylinder_inside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#175 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_revolution_cylinder_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#176 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_revolution_cylinder_outside_angle",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#177 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_revolution_cylinder_swapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#178 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "evaluate_mate_revolution_cone_outside",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#179 (upstream source/SMLib/src/SmFilletGeom.cpp:79-99 sm_EvaluateMate on a real SmPlane / SmSurfOfRevolution (maintainer review of #147: the Plane and SurfOfRevolution arms))",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331383",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331384",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331385",
+      "values_compared": 310
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331386",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331387",
+      "values_compared": 246
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331388",
+      "values_compared": 180
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331389",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331390",
+      "values_compared": 153
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331391",
+      "values_compared": 181
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331392",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331393",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331394",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331395",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331396",
+      "values_compared": 344
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331397",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331398",
+      "values_compared": 96
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331399",
+      "values_compared": 302
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331400",
+      "values_compared": 111
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331401",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331402",
+      "values_compared": 184
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331403",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331404",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331405",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331406",
+      "values_compared": 239
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331407",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331408",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331409",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331410",
+      "values_compared": 416
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331411",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331412",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331413",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331414",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331415",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331416",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331417",
+      "values_compared": 252
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331418",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331419",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331420",
+      "values_compared": 178
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331421",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331422",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331423",
+      "values_compared": 453
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331424",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331425",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331426",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331427",
+      "values_compared": 187
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331428",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331429",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331430",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331431",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331432",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331433",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331434",
+      "values_compared": 578
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331435",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331436",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331437",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331438",
+      "values_compared": 263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331439",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331440",
+      "values_compared": 262
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331441",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331442",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331443",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331444",
+      "values_compared": 328
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331445",
+      "values_compared": 423
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331446",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331447",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331448",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331449",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331450",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331451",
+      "values_compared": 120
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331452",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331453",
+      "values_compared": 268
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331454",
+      "values_compared": 271
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331455",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331456",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331457",
+      "values_compared": 310
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331458",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331459",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331460",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331461",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331462",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331463",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331464",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331465",
+      "values_compared": 530
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331466",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331467",
+      "values_compared": 134
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331468",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331469",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331470",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331471",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331472",
+      "values_compared": 176
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331473",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331474",
+      "values_compared": 4
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331475",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331476",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331477",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331478",
+      "values_compared": 273
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331479",
+      "values_compared": 206
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331480",
+      "values_compared": 325
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331481",
+      "values_compared": 288
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331482",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331483",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331484",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331485",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331486",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331487",
+      "values_compared": 248
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331488",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331489",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331490",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331491",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331492",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331493",
+      "values_compared": 359
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331494",
+      "values_compared": 535
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331495",
+      "values_compared": 29
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331496",
+      "values_compared": 400
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331497",
+      "values_compared": 128
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331498",
+      "values_compared": 495
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331499",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331500",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331501",
+      "values_compared": 149
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331502",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331503",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331504",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331505",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331506",
+      "values_compared": 447
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331507",
+      "values_compared": 327
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331508",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331509",
+      "values_compared": 451
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331510",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331511",
+      "values_compared": 697
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331512",
+      "values_compared": 602
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331513",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331514",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331515",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331516",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331517",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331518",
+      "values_compared": 176
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331519",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331520",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331521",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331522",
+      "values_compared": 239
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331523",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331524",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331525",
+      "values_compared": 587
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331526",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331527",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331528",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331529",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331530",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331531",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331532",
+      "values_compared": 344
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331533",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331534",
+      "values_compared": 153
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331535",
+      "values_compared": 134
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331536",
+      "values_compared": 389
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331537",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331538",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331539",
+      "values_compared": 156
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331540",
+      "values_compared": 129
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331541",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331542",
+      "values_compared": 117
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331543",
+      "values_compared": 111
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331544",
+      "values_compared": 283
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331545",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331546",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331547",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331548",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331549",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331550",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331551",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331552",
+      "values_compared": 449
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331553",
+      "values_compared": 381
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331554",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331555",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331556",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331557",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331558",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331559",
+      "values_compared": 423
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331560",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331561",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331562",
+      "values_compared": 217
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331563",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331564",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331565",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331566",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331567",
+      "values_compared": 302
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331568",
+      "values_compared": 453
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331569",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331570",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331571",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331572",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331573",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331574",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331575",
+      "values_compared": 2
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331576",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331577",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331578",
+      "values_compared": 432
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331579",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331580",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331581",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331582",
+      "values_compared": 513
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331583",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331584",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331585",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331586",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331587",
+      "values_compared": 28
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331588",
+      "values_compared": 228
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331589",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331590",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331591",
+      "values_compared": 235
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331592",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331593",
+      "values_compared": 189
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331594",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331595",
+      "values_compared": 201
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331596",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331597",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331598",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331599",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331600",
+      "values_compared": 122
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331601",
+      "values_compared": 235
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331602",
+      "values_compared": 272
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331603",
+      "values_compared": 316
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331604",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331605",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331606",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331607",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331608",
+      "values_compared": 384
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331609",
+      "values_compared": 283
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331610",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331611",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331612",
+      "values_compared": 176
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331613",
+      "values_compared": 525
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331614",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331615",
+      "values_compared": 452
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331616",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331617",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331618",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331619",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331620",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331621",
+      "values_compared": 88
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331622",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331623",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331624",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331625",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331626",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331627",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331628",
+      "values_compared": 461
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331629",
+      "values_compared": 240
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331630",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331631",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331632",
+      "values_compared": 261
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331633",
+      "values_compared": 374
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331634",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331635",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331636",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331637",
+      "values_compared": 371
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331638",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331639",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331640",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331641",
+      "values_compared": 324
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331642",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331643",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331644",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331645",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331646",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331647",
+      "values_compared": 116
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331648",
+      "values_compared": 113
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331649",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331650",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331651",
+      "values_compared": 302
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331652",
+      "values_compared": 269
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331653",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331654",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331655",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331656",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331657",
+      "values_compared": 550
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207377415692331658",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331659",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331660",
+      "values_compared": 119
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331661",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331662",
+      "values_compared": 129
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331663",
+      "values_compared": 171
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331664",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331665",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331666",
+      "values_compared": 152
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331667",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331668",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331669",
+      "values_compared": 213
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331670",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331671",
+      "values_compared": 496
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331672",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331673",
+      "values_compared": 338
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331674",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331675",
+      "values_compared": 248
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331676",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331677",
+      "values_compared": 134
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331678",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331679",
+      "values_compared": 107
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331680",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331681",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207377415692331682",
+      "values_compared": 462
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 21,
+  "cases_failed": 0,
+  "cases_passed": 446,
+  "cases_rejected": 13,
+  "cases_total": 480,
+  "deferred_by_unit": {
+    "intersect.surface_drop_curve": 2,
+    "intersect.surface_intersector_p4": 5,
+    "topology.face_p3": 14
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "blend.fillet_geom_p1"
+}

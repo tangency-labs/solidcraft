@@ -1145,8 +1145,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_find_sector_global",
@@ -1209,8 +1209,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_parallel_proj",
@@ -1529,8 +1529,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_bspline_parallel_proj",
@@ -1849,8 +1849,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_bspline_sub_parallel_proj",
@@ -4643,8 +4643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_parallel_proj_0",
@@ -4654,17 +4654,21 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_parallel_proj_1",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.brep_p1/upstream_files.json#272 (upstream TestFiles/pt_TestFiles/Endcap.smb (SmBrep::ReadFromFile))",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_parallel_proj_2",
@@ -4675,8 +4679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_parallel_proj_3",
@@ -4687,8 +4691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_parallel_proj_cubic",
@@ -5512,8 +5516,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_find_sector_0",
@@ -5524,8 +5528,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_find_sector_1",
@@ -7963,8 +7967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_find_sector_0",
@@ -7975,8 +7979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_find_sector_1",
@@ -8298,8 +8302,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_parallel_proj_0",
@@ -8310,8 +8314,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.surface_cache_p1"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_parallel_proj_1",
@@ -8322,8 +8326,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_parallel_proj_2",
@@ -8334,8 +8338,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_parallel_proj_3",
@@ -8346,8 +8350,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_parallel_proj_cubic",
@@ -9482,8 +9486,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_parallel_proj_0",
@@ -9494,8 +9498,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_parallel_proj_1",
@@ -9506,8 +9510,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_parallel_proj_2",
@@ -9518,8 +9522,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_parallel_proj_3",
@@ -9530,8 +9534,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_parallel_proj_cubic",
@@ -10359,8 +10363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_find_sector_0",
@@ -10371,8 +10375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_find_sector_1",
@@ -10686,8 +10690,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_parallel_proj_0",
@@ -10698,8 +10702,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.surface_cache_p1"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_parallel_proj_1",
@@ -10710,8 +10714,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_parallel_proj_2",
@@ -10722,8 +10726,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_parallel_proj_3",
@@ -10734,8 +10738,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_parallel_proj_cubic",
@@ -11555,8 +11559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_find_sector_0",
@@ -11567,8 +11571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::PointClassify",
-        "unit": "query.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_find_sector_1",
@@ -11882,8 +11886,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_parallel_proj_0",
@@ -11894,8 +11898,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.surface_cache_p1"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_parallel_proj_1",
@@ -11906,8 +11910,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_parallel_proj_2",
@@ -11918,8 +11922,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_parallel_proj_3",
@@ -11930,8 +11934,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_parallel_proj_cubic",
@@ -22883,9 +22887,9 @@
     }
   ],
   "cases_both_errored": 45,
-  "cases_deferred": 464,
+  "cases_deferred": 465,
   "cases_failed": 0,
-  "cases_passed": 2110,
+  "cases_passed": 2109,
   "cases_rejected": 15,
   "cases_total": 2589,
   "deferred_by_unit": {
@@ -22893,9 +22897,8 @@
     "harness:analytic-geometry-export": 217,
     "intersect.surface_drop_lib_p3": 10,
     "query.brep": 71,
-    "query.face_p2": 9,
-    "surface.surface_cache_p1": 3,
-    "topology.face_p2": 113,
+    "surface.surface_cache_p2": 37,
+    "topology.face_p2": 89,
     "topology.face_p3": 21,
     "topology.face_p4": 16
   },

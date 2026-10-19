@@ -29,8 +29,12 @@
 //!   `Option` (upstream: `pSurface` may be NULL); `sm_ComputeSurfConstants`'s NULL
 //!   check (`NER`) has no counterpart.
 //! - `sm_ComputeNetConstants` ignores the flags of its `N_SrfEvalPt` calls (the
-//!   output point then keeps its previous value); the port returns the error. It
-//!   only fails for surfaces upstream cannot evaluate (invalid knot vectors).
+//!   output point then keeps its previous value), and so does the port: its points are
+//!   function-scope as upstream's, and a failed evaluation leaves them unchanged. This
+//!   only happens for surfaces whose knot vector the constructor's fixup left
+//!   non-monotone (a Bezier patch with a reversed domain, PR #147 round 4); returning
+//!   the error there, as earlier, failed the whole surface-cache build where upstream
+//!   builds it.
 //! - The memory-layout helpers (`sm_ComputeNurbSurfaceSize`,
 //!   `sm_InitNurbSurfaceMemory`) have no counterpart: [`Surface`] owns its storage.
 //!   [`allocate_nurb_surface`] returns a zero-filled surface (upstream
@@ -206,23 +210,31 @@ pub fn compute_net_constants(
     let mut acc = Acc::default();
     let (n, m) = (sur.n(), sur.m());
 
+    // Upstream declares these points once for the whole function, and the surface
+    // evaluations of the UV section below ignore their status (`N_SrfEvalPt` leaves its
+    // output untouched on failure), so a failed evaluation reuses the value the earlier
+    // sections left: they are function-scope here too.
+    let mut line_pnt = Vec3::ZERO;
+    let mut last_point = Vec3::ZERO;
+    let mut try_point = Vec3::ZERO;
+    let mut next = Vec3::ZERO;
+    let mut line_vec = Vec3::ZERO;
+
     // Save time - quit when the turning angle exceeds a huge limit.
     let mut over_limit = false;
 
     // VDir chord height and VDir angle from the control polygon: for all u rows.
     for jj in 0..=n {
-        let mut line_pnt = Vec3::ZERO;
-        let mut line_vec = Vec3::ZERO;
         // For the chord height, get a base segment from the first to the last control
         // point on this net row.
         if req.v_chord_height {
             line_pnt = pt(sur, jj, 0)?;
-            let last_point = pt(sur, jj, m)?;
+            last_point = pt(sur, jj, m)?;
             line_vec = last_point - line_pnt;
             let mut try_index = m.wrapping_sub(1);
             while line_vec.length_squared() < EFF_ZERO_SQ {
                 // If first and last point coincide try a middle point.
-                let try_point = pt(sur, jj, try_index)?;
+                try_point = pt(sur, jj, try_index)?;
                 line_vec = try_point - line_pnt;
                 if try_index == 0 {
                     // Singular point: just continue on.
@@ -241,7 +253,7 @@ pub fn compute_net_constants(
         // Hold u constant and loop across the v points.
         let mut curr = pt(sur, jj, 0)?;
         for ii in 1..=m {
-            let next = pt(sur, jj, ii)?;
+            next = pt(sur, jj, ii)?;
 
             // V chord height.
             if req.v_chord_height {
@@ -298,16 +310,14 @@ pub fn compute_net_constants(
 
     // UDir chord height and UDir angle from the control polygon: for all v columns.
     for jj in 0..=m {
-        let mut line_pnt = Vec3::ZERO;
-        let mut line_vec = Vec3::ZERO;
         if req.u_chord_height {
             line_pnt = pt(sur, 0, jj)?;
-            let last_point = pt(sur, n, jj)?;
+            last_point = pt(sur, n, jj)?;
             line_vec = last_point - line_pnt;
             let mut try_index = n.wrapping_sub(1);
             while line_vec.length_squared() < EFF_ZERO_SQ {
                 // If first and last point coincide try a middle point.
-                let try_point = pt(sur, try_index, jj)?;
+                try_point = pt(sur, try_index, jj)?;
                 line_vec = try_point - line_pnt;
                 if try_index == 0 {
                     // Singular point: just continue on.
@@ -325,7 +335,7 @@ pub fn compute_net_constants(
 
         let mut curr = pt(sur, 0, jj)?;
         for ii in 1..=n {
-            let next = pt(sur, ii, jj)?;
+            next = pt(sur, ii, jj)?;
 
             // U chord height.
             if req.u_chord_height {
@@ -393,16 +403,22 @@ pub fn compute_net_constants(
             let mut dv = jjf;
 
             // Get a base segment from the first to the last corner of this diagonal.
-            let line_pnt = eval(0.0, dv)?;
-            let last_point = eval(1.0, 1.0 - dv)?;
+            if let Ok(pnt) = eval(0.0, dv) {
+                line_pnt = pnt;
+            }
+            if let Ok(pnt) = eval(1.0, 1.0 - dv) {
+                last_point = pnt;
+            }
 
-            let mut line_vec = last_point - line_pnt;
+            line_vec = last_point - line_pnt;
             let mut itr = 0_i32;
             while itr <= 3 && line_vec.length_squared() < EFF_ZERO_SQ {
                 // If first and last point coincide try a middle point.
                 let du = 1.0 - 0.25 * f64::from(itr);
                 dv = f64::from(1 - jj) + ds * f64::from(itr);
-                let try_point = eval(du, dv)?;
+                if let Ok(pnt) = eval(du, dv) {
+                    try_point = pnt;
+                }
                 line_vec = try_point - line_pnt;
                 itr += 1;
             }
@@ -416,7 +432,9 @@ pub fn compute_net_constants(
             for itr in 1..=3_i32 {
                 let du = 0.0 + 0.25 * f64::from(itr);
                 let dv = jjf - ds * f64::from(itr);
-                let next = eval(du, dv)?;
+                if let Ok(pnt) = eval(du, dv) {
+                    next = pnt;
+                }
                 let ch_sq = chord_sq(line_pnt, line_vec, next);
                 if ch_sq > acc.uv_ch {
                     acc.uv_ch = ch_sq;

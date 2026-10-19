@@ -7179,6 +7179,109 @@
    }
   },
   {
+   "name": "three_arcs_about_two_centres",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurface.cpp CreateSphereFromArcs (WR-103: rOrigin aliases sRefFrame, so the centre check is dead: three radius-5 arcs, a 120-degree generator about the origin, its 90-degree neighbour about (10,0,0) sharing its start point, a 60-degree arc about (10,0,0), build a sphere; a port with the check rejects them)",
+   "inputs": {
+    "op": "sphere",
+    "arcs": [
+     {
+      "cpts": [
+       [
+        5,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2.5,
+        4.330127018922193,
+        0.0,
+        0.5
+       ],
+       [
+        -2.5,
+        4.330127018922193,
+        0,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cpts": [
+       [
+        5,
+        0,
+        0,
+        1.0
+       ],
+       [
+        3.5355339059327378,
+        0.0,
+        3.5355339059327378,
+        0.7071067811865476
+       ],
+       [
+        10,
+        0,
+        5,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cpts": [
+       [
+        10,
+        5,
+        0,
+        1.0
+       ],
+       [
+        8.660254037844386,
+        4.330127018922193,
+        2.5,
+        0.8660254037844386
+       ],
+       [
+        10,
+        2.5,
+        4.330127018922193,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
    "name": "empty_swap",
    "upstream_ref": "edge: SwapUV without NURB (SM_ERR_NULL_POINTER)",
    "inputs": {
