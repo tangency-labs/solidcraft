@@ -90,6 +90,7 @@ mod loft_region_tests;
 mod loopblend;
 mod matchsurf;
 mod measure;
+#[allow(dead_code)] // the merge corner's geometry, until the fillet's rebuild uses it
 mod merge_corner;
 mod mesh_convert;
 mod meshbody;
