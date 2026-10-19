@@ -579,6 +579,254 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_to_apex_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#0 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_to_mid_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#1 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_mid_to_apex_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#2 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_coincident_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#3 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_to_apex_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#4 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_to_mid_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#5 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_mid_to_apex_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#6 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_coincident_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#7 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_to_apex_100000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#8 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_to_mid_100000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#9 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_mid_to_apex_100000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#10 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_spindle_apex_coincident_100000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#11 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_fan_apex_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#12 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_fan_apex_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#13 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_fan_apex_bigtol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#14 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_fan_apex_two",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#15 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_flat_diag_tol_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#16 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_flat_diag_tol_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#17 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_flat_off_tol_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#18 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_flat_outside_domain",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#19 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_flat_two_not_closed_bigtol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#20 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 37
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rev_flat_two_tol_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#21 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 5
+    },
+    {
+      "deferred": {
+        "symbol": "JoinTwoFilletVertsByCurves",
+        "unit": "blend.fillet_geom_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_join_negtol",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#22 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "JoinTwoFilletVertsByCurves",
+        "unit": "blend.fillet_geom_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_join_negtol_big",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#23 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "JoinTwoFilletVertsByCurves",
+        "unit": "blend.fillet_geom_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_join_usedefault",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#24 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "JoinTwoFilletVertsByCurves",
+        "unit": "blend.fillet_geom_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_cliff_join_negtol",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#25 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "JoinTwoFilletVertsByCurves",
+        "unit": "blend.fillet_geom_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_cliff_join_negtol_big",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#26 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "JoinTwoFilletVertsByCurves",
+        "unit": "blend.fillet_geom_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "make_face_cliff_join_usedefault",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#27 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -3083,12 +3331,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 30,
+  "cases_deferred": 36,
   "cases_failed": 0,
-  "cases_passed": 340,
-  "cases_total": 370,
+  "cases_passed": 362,
+  "cases_total": 398,
   "deferred_by_unit": {
-    "blend.fillet_geom_p6": 30
+    "blend.fillet_geom_p6": 36
   },
   "max_rel_err": 0.0,
   "pass": true,
