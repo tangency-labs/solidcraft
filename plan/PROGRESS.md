@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` and `reports/difftest/*.json` by `harness/plan/progress.py`; do not edit by hand.
 
-**222 / 261 units ported** (114 green, 108 partial), **321,181 / 387,903 upstream lines (82.8%)**. 38 claimed, 0 blocked, 1 todo.
+**222 / 261 units ported** (114 green, 108 partial), **321,181 / 387,903 upstream lines (82.8%)**. 39 claimed, 0 blocked, 0 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -14,7 +14,6 @@ _None right now; see the next section._
 
 Anything `todo` can be claimed. These need stubs for, or co-porting of, the listed dependencies (AGENTS.md section 4).
 
-- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `offset.offset_executive_p2`, `primitive.api_primitives`
 
 ## In progress
 
@@ -56,6 +55,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_geom_p2` (2077 lines) — in progress: #263 @bherbruck (ready for review)
 - [ ] 🔨 `blend.fillet_geom_p5` (1952 lines) — in progress: #264 @froglemonade2 (draft)
 - [ ] 🔨 `blend.fillet_corner_p2` (1892 lines) — in progress: #268 @bluecmd (draft)
+- [ ] 🔨 `audit.recursion` (0 lines) — in progress: #273 @Karl-VonRichter (draft)
 
 ## By module
 
@@ -363,4 +363,4 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 ### (crate-wide) (0/1)
 
-- [ ] ⏳ `audit.recursion` (0 lines) — waiting
+- [ ] 🔨 `audit.recursion` (0 lines) — in progress: #273 @Karl-VonRichter (draft)
