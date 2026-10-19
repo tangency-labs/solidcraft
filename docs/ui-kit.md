@@ -1056,3 +1056,4 @@ in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rend
 `preference_widgets_and_figures_board_in_both_themes`.
 
 Assistant permission cards accept an optional `SettingsChoice.icon`; Do everything uses the existing warning artwork, including its exclamation mark.
+Selection fields default to pointer-only `Sense::CLICK`; icon buttons and list remove actions default to focusable `Sense::click()`. The `selection_field_with_sense`, `icon_button_at_with_sense`, and `list_row_with_sense` variants let Pattern/Mirror include selection fields in Tab order while excluding auxiliary remove actions, preserving the same visuals and accessibility labels.

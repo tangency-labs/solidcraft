@@ -571,3 +571,88 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+#[test]
+fn dialog_tab_mirror_advances_from_canvas_and_reverses_without_changing_picks() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    pick(&mut h, [-15.0, 17.5], false);
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+    pick(&mut h, [0.0, 20.0], false);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+    step(&mut h, json!({"key":"Tab", "shift":true}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    pick(&mut h, [-22.5, 10.0], true);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+}
+
+#[test]
+fn dialog_tab_patterns_follow_display_order_in_both_directions() {
+    for command in ["sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        step(&mut h, json!({"call":"ui.camera","params":{"target":[-60,0,0],"distance":120}}));
+        step(&mut h, json!({"start":command}));
+        pick(&mut h, [-22.5, 10.0], false);
+        step(&mut h, json!({"key":"Tab"}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{command}");
+        step(&mut h, json!({"key":"Tab"}));
+        step(&mut h, json!({"key":"A", "cmd":true}));
+        step(&mut h, json!({"text":"4"}));
+        let d = h.app.dialog.as_ref().unwrap();
+        match &d.kind {
+            crate::dialogs::Kind::SketchModify(Mod::PatternRect { count, .. } | Mod::PatternCirc { count, .. }) => assert_eq!(count, "4"),
+            _ => panic!("pattern dialog"),
+        }
+        step(&mut h, json!({"key":"Tab", "shift":true}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+        step(&mut h, json!({"key":"Tab", "shift":true}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+        if command == "sketch.pattern.rectangular" {
+            // Entities, Direction, Quantity, Spacing, Direction 2, Quantity 2, Spacing 2.
+            for _ in 0..4 {
+                step(&mut h, json!({"key":"Tab"}));
+            }
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"key":"Tab"}));
+            step(&mut h, json!({"key":"A", "cmd":true}));
+            step(&mut h, json!({"text":"2"}));
+            let crate::dialogs::Kind::SketchModify(Mod::PatternRect { count2, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+                panic!("rectangular pattern dialog");
+            };
+            assert_eq!(count2, "2");
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            step(&mut h, json!({"key":"A", "cmd":true}));
+            step(&mut h, json!({"text":"25 mm"}));
+            let crate::dialogs::Kind::SketchModify(Mod::PatternRect { spacing, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+                panic!("rectangular pattern dialog");
+            };
+            assert_eq!(spacing, "25 mm");
+        }
+    }
+}
+
+#[test]
+fn dialog_tab_does_not_intercept_modified_tabs_or_collapsed_dialogs() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::ALT, egui::Modifiers::COMMAND] {
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers });
+        }
+        h.frames(3);
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    }
+    h.app.dialog.as_mut().unwrap().collapsed = true;
+    h.frames(3);
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    h.app.dialog.as_mut().unwrap().collapsed = false;
+    step(&mut h, json!({"key":"Escape"}));
+    assert!(h.app.dialog.is_none());
