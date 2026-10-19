@@ -3,6 +3,30 @@
   "cases": [
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_neg_zone_tol_network",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p1/fuzz_regressions.json#0 (upstream SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01490, gave 103 vs C++ 104))",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_neg_zone_tol_plane_square_torus",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p1/fuzz_regressions.json#1 (upstream SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01531, gave 103 vs C++ 104))",
+      "values_compared": 34
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_neg_zone_tol_box_with_large_fillet",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p1/fuzz_regressions.json#2 (upstream SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01875, gave 103 vs C++ 104))",
+      "values_compared": 37
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "topo_test_network_relate_mates",
       "outcome": "pass",
       "pass": true,
@@ -7172,8 +7196,8 @@
   "cases_both_errored": 3,
   "cases_deferred": 137,
   "cases_failed": 0,
-  "cases_passed": 690,
-  "cases_total": 827,
+  "cases_passed": 693,
+  "cases_total": 830,
   "deferred_by_unit": {
     "query.brep": 16,
     "query.face_p1": 7,

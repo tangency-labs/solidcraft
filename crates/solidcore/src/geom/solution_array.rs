@@ -944,13 +944,13 @@ impl<O: SolutionObject> Solution<O> {
         // pass the call along
         match self.object(index, OP)? {
             Some(_) => {
-                // UNPORTED(geom.solution_array): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
+                // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
                 // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
                 // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
                 // receives the owning B-rep
                 Err(SolidError::Unported {
                     upstream: "SmTol::GetZoneTol3d(const SmObject*)",
-                    unit: "geom.solution_array",
+                    unit: "geom.tol",
                 })
             }
             None => Ok(0.0),

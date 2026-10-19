@@ -2136,7 +2136,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "project_t0_Defeature_inset_cube",
@@ -2148,7 +2148,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "project_t1_Defeature_inset_cube",
@@ -2160,7 +2160,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "project_t2_Defeature_inset_cube",
@@ -2172,7 +2172,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "project_t0_Defeature_brep1",
@@ -2184,7 +2184,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "project_tols_inset_cube",
@@ -13500,10 +13500,10 @@
   "cases_passed": 839,
   "cases_total": 1404,
   "deferred_by_unit": {
+    "geom.tol": 5,
     "surface.cone_p1": 41,
     "surface.sphere": 328,
     "surface.surf_of_extrusion_p2": 10,
-    "surface.surface_cache_p2": 5,
     "surface.surface_p2": 96,
     "topology.brep_p2": 19,
     "topology.face_p2": 58,

@@ -383,11 +383,13 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
 
             // Find the distance from pEdge1->Curve to each face in sEFaces2.
             for &face2 in &faces2 {
-                let surface2 =
-                    fp2::surface(b, face2)?.ok_or_else(|| deref("face without surface"))?;
+                // (upstream reads the surface pointer first but dereferences it only in the
+                // distance call, after breaking on a null curve)
                 let Some(curve1) = edge::curve(b, edge1)? else {
                     break;
                 };
+                let surface2 =
+                    fp2::surface(b, face2)?.ok_or_else(|| deref("face without surface"))?;
                 // 0 samples: do a precise measurement; no max distance (status ignored)
                 if let Some(g) = ignored(curve1.surface_max_distance_between(
                     k,
@@ -409,11 +411,13 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
 
             // Find the distance from pEdge2->Curve to each face in sEFaces1.
             for &face1 in &faces1 {
-                let surface1 =
-                    fp2::surface(b, face1)?.ok_or_else(|| deref("face without surface"))?;
+                // (upstream reads the surface pointer first but dereferences it only in the
+                // distance call, after breaking on a null curve)
                 let Some(curve2) = edge::curve(b, edge2)? else {
                     break;
                 };
+                let surface1 =
+                    fp2::surface(b, face1)?.ok_or_else(|| deref("face without surface"))?;
                 if let Some(g) = ignored(curve2.surface_max_distance_between(
                     k,
                     &edge::interval(b, edge2)?,

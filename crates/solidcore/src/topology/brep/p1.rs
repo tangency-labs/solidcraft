@@ -96,10 +96,10 @@
 //!   `UnLockBoundingBox` (`query.brep`), `SmBSplineSurface::CreateCornerBlend` with a
 //!   non-B-spline neighbour surface (`nurbs.b_spline_surface_n_lib_p2`, whose port takes
 //!   B-spline neighbours only).
-//! - `CreateEdgeEdgeBlend` takes the B-rep mutably (the edge use evaluations of
-//!   `topology.edgeuse_p3` take it so); it ignores both `EvaluateBinormal` statuses as
-//!   upstream and goes on with the outputs upstream sees after a failure (undefined, or
-//!   zeroed point, tangent and normal).
+//! - `CreateEdgeEdgeBlend` takes each edge use's B-rep (the second `None` when both are
+//!   in one B-rep), mutably: the edge use evaluations of `topology.edgeuse_p3` take it so.
+//!   It ignores both `EvaluateBinormal` statuses as upstream and goes on with the outputs
+//!   upstream sees after a failure (undefined, or zeroed point, tangent and normal).
 //! - `GetShells` dedups with a shell mark record local to the call (upstream marks the
 //!   `SmShell` objects); `SetRegionIsVoidFlagsForNestedSolids` bounds its shell queue at
 //!   `4 * shells + 16` passes.
@@ -2431,7 +2431,7 @@ pub fn create_corner_blend(
 
     // SmSurface::CreateCornerBlend locals
     let mut ordered_uv: Vec<Option<BSplineCurve>> = Vec::new();
-    let mut ordered_3d: Vec<BSplineCurve> = Vec::new();
+    let mut ordered_3d: Vec<Curve> = Vec::new();
     let mut ordered_surfs: Vec<Option<BSplineSurface>> = Vec::new();
 
     // for every ordered Edgeuse - load a trimmed copy of Edgeuse->Edge->Curve to sOrdered3D
@@ -2450,11 +2450,8 @@ pub fn create_corner_blend(
         let mut e_ivl = edge::interval(b, e)?;
         copy.trim(k, &mut e_ivl, TrimMode::Notify)?;
 
-        // build the sOrdered3D array
-        ordered_3d.push(
-            bspline_part(&copy)
-                .ok_or_else(|| null("CreateCornerBlend: curve without NURBS data"))?,
-        );
+        // build the sOrdered3D array (any SmCurve, as upstream)
+        ordered_3d.push(copy);
 
         // When Needed, put in UVTrimCurve and Surface in sOrderedUV and sOrderedSurfs arrays
         let tangent = tangencies.get(i).copied().unwrap_or(true);
@@ -2511,7 +2508,7 @@ pub fn create_corner_blend(
         let top_curve = BSplineCurve::create_point_curve(pnt)?;
 
         // add it to the input arrays at the proper location
-        ordered_3d.insert(2 - ii, top_curve);
+        ordered_3d.insert(2 - ii, Curve::from(top_curve));
         eu_orients.insert(2 - ii, OrientType::Same);
         ordered_uv.insert(2 - ii, None);
         ordered_surfs.insert(2 - ii, None);
@@ -2525,6 +2522,7 @@ pub fn create_corner_blend(
 
     // pass the call along (FALSE = bicubic patch through curves and crossTangents)
     let surfs: Vec<Option<&BSplineSurface>> = ordered_surfs.iter().map(Option::as_ref).collect();
+    let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &surfs)?;
     BSplineSurface::create_corner_blend(
         &ordered_3d,
         &eu_orients,
@@ -2536,10 +2534,63 @@ pub fn create_corner_blend(
     )
 }
 
+/// The 3D curves `SmBSplineSurface::CreateCornerBlend` gets as `SmBSplineCurve`s (unit
+/// `nurbs.b_spline_surface_n_lib_p2`, whose port takes B-spline curves). Upstream passes
+/// any `SmCurve` and converts each, in order, with `sm_CreateNonRationalCurve`
+/// (SmBSplineSurfaceNLib.cpp:3100-3110), whose `SM_CAST_PTR(SmBSplineCurve, ..)` / `NER`
+/// returns `SM_ERR_NULL_POINTER` for the first curve of another kind. Its curve count
+/// check cannot fail here (the padding leaves at least 4 curves) and its earlier NULL UV
+/// curve / surface check (`:3078-3092`, bicubic patch) returns the same status. Before
+/// that curve only a rational curve's conversion can fail, so with one there (and the
+/// NULL check passing) the case is unported.
+fn corner_blend_bspline_curves(
+    curves: &[Curve],
+    uv_curves: &[Option<BSplineCurve>],
+    surfaces: &[Option<&BSplineSurface>],
+) -> Result<Vec<BSplineCurve>> {
+    let parts: Vec<Option<BSplineCurve>> = curves.iter().map(bspline_part).collect();
+    if parts.iter().all(Option::is_some) {
+        return Ok(parts.into_iter().flatten().collect());
+    }
+    // the NULL UV curve / surface check (bCreateBilinearPatch == FALSE)
+    let curve_cnt = curves.len();
+    let mut null_count = 0usize;
+    for (uv, srf) in uv_curves.iter().zip(surfaces).take(curve_cnt) {
+        if uv.is_none() || srf.is_none() {
+            null_count += 1;
+        }
+        if ((curve_cnt == 4 && null_count > 1) || (curve_cnt > 4 && null_count > 0))
+            && (uv.is_none() || srf.is_none())
+        {
+            return Err(SolidError::null_pointer(OP)); // NER(crUVCurves[ii]) / NER(crSurfaces[ii])
+        }
+    }
+    let mut converted = Vec::new();
+    for part in parts {
+        let Some(part) = part else {
+            if converted
+                .iter()
+                .any(|p: &BSplineCurve| p.is_rational().unwrap_or(true))
+            {
+                // UNPORTED(nurbs.b_spline_surface_n_lib_p2): SmBSplineSurface::CreateCornerBlend with a rational curve before a non-B-spline one
+                return Err(SolidError::unported(
+                    "SmBSplineSurface::CreateCornerBlend",
+                    "nurbs.b_spline_surface_n_lib_p2",
+                ));
+            }
+            return Err(SolidError::null_pointer(OP)); // NER(pNurb)
+        };
+        converted.push(part);
+    }
+    Ok(converted)
+}
+
 // ---- edge-to-edge blends (SmBrep::CreateEdgeEdgeBlend) ----------------------------------
 
 /// `CreateEdgeEdgeBlend`: a ruled (`blend_flag` 0) or G1/G2/G3 blend (`1`/`2`/`3`)
-/// surface between the trimmed NURBS curves of two edges. `curves_dir_flag`: `0`
+/// surface between the trimmed NURBS curves of two edges: `eu_1` in `b_1`, `eu_2` in
+/// `b_2` (`None`: also in `b_1`; upstream's edge uses may belong to two B-reps).
+/// `curves_dir_flag`: `0`
 /// guesses the pairing from the rail distances, `1` starts both at their curve starts,
 /// `2` pairs start with end. `opt_ds_def` (its curvature type is overwritten from
 /// `blend_flag`) tunes a blend.
@@ -2554,9 +2605,10 @@ pub fn create_corner_blend(
 #[allow(clippy::too_many_arguments)]
 pub fn create_edge_edge_blend(
     k: &Kernel,
-    b: &mut Brep,
     blend_flag: u64,
+    b_1: &mut Brep,
     eu_1: Option<EdgeuseId>,
+    b_2: Option<&mut Brep>,
     eu_2: Option<EdgeuseId>,
     curves_dir_flag: u64,
     opt_ds_def: Option<&mut DerivSurfDefinition<'_>>,
@@ -2564,17 +2616,37 @@ pub fn create_edge_edge_blend(
     let eu_1 = eu_1.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
     let eu_2 = eu_2.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
 
+    // eu_2's B-rep: `b_2`, or `b_1` when both edge uses are in one B-rep (each edge use's
+    // reads touch only its own B-rep, as upstream's)
+    let mut b_2 = b_2;
+    macro_rules! b2_mut {
+        () => {
+            match b_2.as_deref_mut() {
+                Some(other) => other,
+                None => &mut *b_1,
+            }
+        };
+    }
+    macro_rules! b2 {
+        () => {
+            match b_2.as_deref() {
+                Some(other) => other,
+                None => &*b_1,
+            }
+        };
+    }
+
     // locals
-    let (Some(edge1), Some(edge2)) = (eu1::edge(b, eu_1)?, eu1::edge(b, eu_2)?) else {
+    let (Some(edge1), Some(edge2)) = (eu1::edge(b_1, eu_1)?, eu1::edge(b2!(), eu_2)?) else {
         return Err(status(SM_ERR_INVALID_INPUT)); // Could not fetch Edge from Edgeuse
     };
 
     // edge locals
-    let ivl1 = edge::interval(b, edge1)?;
-    let mut ivl2 = edge::interval(b, edge2)?;
-    let rail1 = edge::create_trimmed_nurbs_curve(k, b, edge1)?;
-    let rail2 = edge::create_trimmed_nurbs_curve(k, b, edge2)?;
-    let tolerance = max2(edge::tolerance(b, edge1)?, edge::tolerance(b, edge2)?);
+    let ivl1 = edge::interval(b_1, edge1)?;
+    let mut ivl2 = edge::interval(b2!(), edge2)?;
+    let rail1 = edge::create_trimmed_nurbs_curve(k, b_1, edge1)?;
+    let rail2 = edge::create_trimmed_nurbs_curve(k, b2!(), edge2)?;
+    let tolerance = max2(edge::tolerance(b_1, edge1)?, edge::tolerance(b2!(), edge2)?);
     let (Some(rail1), Some(rail2)) = (rail1, rail2) else {
         return Err(status(SM_ERR_INVALID_INPUT)); // Could not build BSplineCurves from Edges
     };
@@ -2644,12 +2716,12 @@ pub fn create_edge_edge_blend(
 
     // face locals
     let face1 =
-        eu1::face(b, eu_1)?.ok_or_else(|| null("CreateEdgeEdgeBlend: edge use without face"))?;
-    let face2_ =
-        eu1::face(b, eu_2)?.ok_or_else(|| null("CreateEdgeEdgeBlend: edge use without face"))?;
+        eu1::face(b_1, eu_1)?.ok_or_else(|| null("CreateEdgeEdgeBlend: edge use without face"))?;
+    let face2_ = eu1::face(b2!(), eu_2)?
+        .ok_or_else(|| null("CreateEdgeEdgeBlend: edge use without face"))?;
     let surfaces_present = (
-        face2::surface(b, face1)?.is_some(),
-        face2::surface(b, face2_)?.is_some(),
+        face2::surface(b_1, face1)?.is_some(),
+        face2::surface(b2!(), face2_)?.is_some(),
     );
     if !(surfaces_present.0 && surfaces_present.1) {
         return Err(status(SM_ERR_INVALID_INPUT)); // Could not fetch Surface from Edgeuse
@@ -2662,28 +2734,28 @@ pub fn create_edge_edge_blend(
         tangent: mut edge1_tangent,
         face_normal: mut face1_normal,
         ..
-    } = evaluate_binormal_status_ignored(k, b, eu_1, ivl1.evaluate(0.5))?;
+    } = evaluate_binormal_status_ignored(k, b_1, eu_1, ivl1.evaluate(0.5))?;
     let BinormalEval {
         binormal: edge2_binormal,
         tangent: mut edge2_tangent,
         face_normal: mut face2_normal,
         ..
-    } = evaluate_binormal_status_ignored(k, b, eu_2, ivl2.evaluate(0.5))?;
-    if eu1::orientation(b, eu_1)? == OrientType::Opposite {
+    } = evaluate_binormal_status_ignored(k, b2_mut!(), eu_2, ivl2.evaluate(0.5))?;
+    if eu1::orientation(b_1, eu_1)? == OrientType::Opposite {
         edge1_tangent = -edge1_tangent;
     }
-    if eu1::orientation(b, eu_2)? == OrientType::Opposite {
+    if eu1::orientation(b2!(), eu_2)? == OrientType::Opposite {
         edge2_tangent = -edge2_tangent;
     }
-    let fu_orient = |eu: EdgeuseId| -> Result<OrientType> {
+    let fu_orient = |b: &Brep, eu: EdgeuseId| -> Result<OrientType> {
         let fu = eu1::faceuse(b, eu)?
             .ok_or_else(|| null("CreateEdgeEdgeBlend: edge use without face use"))?;
         eu1::faceuse_orientation(b, fu)
     };
-    if fu_orient(eu_1)? == OrientType::Opposite {
+    if fu_orient(b_1, eu_1)? == OrientType::Opposite {
         face1_normal = -face1_normal;
     }
-    if fu_orient(eu_2)? == OrientType::Opposite {
+    if fu_orient(b2!(), eu_2)? == OrientType::Opposite {
         face2_normal = -face2_normal;
     }
 
@@ -2742,8 +2814,8 @@ pub fn create_edge_edge_blend(
     let curve1 = Curve::from(rail1);
     let curve2 = Curve::from(rail2);
     // (the face surfaces fetched above; re-borrowed past the edge use evaluations)
-    let surface1 = face2::surface(b, face1)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let surface2 = face2::surface(b, face2_)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface1 = face2::surface(b_1, face1)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface2 = face2::surface(b2!(), face2_)?.ok_or_else(|| SolidError::null_pointer(OP))?;
     surface1.create_blend_surface(
         k,
         &curve1,

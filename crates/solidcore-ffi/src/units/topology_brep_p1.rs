@@ -36,8 +36,9 @@
 //! | `Redistribute` | `edge has_uv seam u0 v0 u1 v1`                   | `0 swapped`, or `-3` where the Rust side defers (`sm_RedistributeSeamUVTrimCurves`) |
 //! | `SplitUv`      | `eu_orig eu_new P[3] t scaled_zero orient for_tess` | `status`, both edge uses' states (as `topology.edgeuse_p1`'s `SetUv`), both edge tolerances (`sm_MakeVertexSplitUVTrimCurve`) |
 //! | `BrepIntersect`| `tol ang want_points`                            | `status n_curves n_points` (with itself; `-3` when the B-rep has faces) |
-//! | `CornerBlend`  | `n eu*n has_tan nt tan*nt tol ang`               | `status n_surfaces` (`-3` for two or more edge uses) |
-//! | `EdgeEdgeBlend`| `flag eu1 eu2 dir`                               | `status [surface block]` (ruled surfaces; `-3` for a blend) |
+//! | `CornerBlend`  | `n eu*n has_tan nt tan*nt tol ang`               | `status n_surfaces surface*n` (`-2` before an upstream null dereference) |
+//! | `EdgeEdgeBlend`| `flag eu1 eu2 dir`                               | `status [surface block]` |
+//! | `EdgeEdgeBlend2`| `[second B-rep block] eu1 eu2 dir`              | `status [surface block]` (ruled; `eu2` in the second B-rep) |
 //! | `ParallelProj` | `curve V[3] has_dist dist has_tol tol has_ang ang want_3d want_uv want_faces` | `status [n3d (curve id)*n3d nuv (curve id)*nuv nf face*nf]` |
 //! | `Heal`         | `op make_uv`                                     | `status [healed B-rep]` (`SmBrep::HealBrep` always returns `SM_SUCCESS`; the healed B-rep follows: the `Export` extras, then the shim's `put_healed` fields) |
 //!
@@ -82,6 +83,7 @@ pub enum Op {
     EdgeEdgeBlend = 24,
     ParallelProj = 25,
     Heal = 26,
+    EdgeEdgeBlend2 = 27,
 }
 
 impl Op {
@@ -192,7 +194,9 @@ fn attribute_id(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError> {
     let [n_r, _, _, n_f, _, n_l, n_eu, n_e, n_vu, n_v] = c;
     match op {
-        Op::Export | Op::LockBox => {}
+        // (EdgeEdgeBlend2's second B-rep block is checked in `eval`: it needs that B-rep's
+        // counts)
+        Op::Export | Op::LockBox | Op::EdgeEdgeBlend2 => {}
         Op::Lists => {
             rd.index(9)?;
             attribute_id(rd)?;
@@ -340,6 +344,8 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
                 return Err(bad("fewer tangency flags than edge uses"));
             }
             rd.finite()?;
+            // (HANG-34: the shim rejects a tangency tolerance below 1e-20 only where
+            // upstream reaches the cross-tangent approximation)
             rd.finite()?;
         }
         Op::EdgeEdgeBlend => {
@@ -354,13 +360,15 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
             rd.flag()?;
             rd.finite()?;
             // a used approximation or angle tolerance must be positive (the projector
-            // subdivides to it)
+            // subdivides to it); a subnormal approximation tolerance spins upstream (HANG-32)
             let has_tol = rd.flag()?;
             let tol = rd.finite()?;
             let has_ang = rd.flag()?;
             let ang = rd.finite()?;
-            if (has_tol && tol <= 0.0) || (has_ang && ang <= 0.0) {
-                return Err(bad("projection tolerances must be positive"));
+            if (has_tol && tol < f64::MIN_POSITIVE) || (has_ang && ang <= 0.0) {
+                return Err(bad(
+                    "projection tolerances must be positive (approximation: normal, HANG-32)",
+                ));
             }
             rd.flag()?;
             rd.flag()?;
@@ -407,6 +415,17 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let mut rd = Reader { input, at: 0 };
     brep_block(&mut rd, path)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
+    // HANG-29 (#147): building a face block whose surface has a value near the top of the
+    // double range (a control point at 1e300) never returns: SmFace::CreateUVTrimCurves ->
+    // DropAndTrimCurve -> SmCurve::GlobalCoincidenceChecker recurses without bound. Every
+    // op builds the block, so bound every block value (the +-f64::MAX entries are the
+    // no-weight / no-z sentinels)
+    if block
+        .iter()
+        .any(|v| v.abs() > MAX_BLOCK_COORD && v.abs() != f64::MAX)
+    {
+        return Err(bad("B-rep block value beyond 1e150 (HANG-29)"));
+    }
     let export = raw(Op::Export, path, block)?;
     if op == Op::Export {
         rd.done()?;
@@ -417,6 +436,29 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         return Ok(export);
     };
     brep_args(op, &mut rd, c)?;
+    if op == Op::EdgeEdgeBlend2 {
+        // a ruled CreateEdgeEdgeBlend with eu2 in a second B-rep (not a file block)
+        let at = rd.at;
+        brep_block(&mut rd, "")?;
+        let block2 = input.get(at..rd.at).ok_or_else(|| bad("input too short"))?;
+        if block2
+            .iter()
+            .any(|v| v.abs() > MAX_BLOCK_COORD && v.abs() != f64::MAX)
+        {
+            return Err(bad("second B-rep block value beyond 1e150 (HANG-29)"));
+        }
+        let export2 = raw(Op::Export, "", block2)?;
+        let Some((c2, _)) = counts(&export2) else {
+            return Err(bad("the second B-rep block does not build"));
+        };
+        rd.below(c[6])?;
+        rd.below(c2[6])?;
+        rd.index(2)?;
+    }
     rd.done()?;
     raw(op, path, input)
 }
+
+/// The largest B-rep block value the shim is given (HANG-29: face surfaces at 1e154 and
+/// beyond recurse without bound while their UV trim curves are built).
+pub const MAX_BLOCK_COORD: f64 = 1e150;

@@ -32,8 +32,9 @@
 //! `RemoveExcessFaces` borrows the original B-rep immutably (its arenas have no editing flag)
 //! and uses the existing canonical arena-identity cache adapter; custom geometry owner keys
 //! or indirect owner chains are explicitly unsupported rather than silently skipped.
-//! Result-edge enumeration uses arena order, not `SmBrep::GetEdges` linked-list order
-//! (owned by `topology.brep_p1`); nonempty queries still defer at `NormalizedEvaluate`.
+//! Result-edge enumeration uses `SmBrep::GetEdges` list order (`topology::brep::p1::edges`);
+//! nonempty queries still defer at `NormalizedEvaluate`. `BuildSideWallOfEdgeuse` takes
+//! the original B-rep as an argument (upstream reaches it through the edge use pointer).
 //! No new input-driven recursion; existing topology walks are cycle-bounded.
 
 use std::collections::BTreeMap;
@@ -475,26 +476,34 @@ impl OffsetExecutive {
     /// Builds a closing ruled side wall, or succeeds without work for null/ambiguous mappings.
     pub fn build_side_wall_of_edgeuse(
         &mut self,
-        _kernel: &Kernel,
+        kernel: &Kernel,
+        original_brep: &mut Brep,
         original: Option<EdgeuseId>,
     ) -> Result<()> {
         let Some(original) = original else {
             return Ok(());
         };
-        let Some(_offset) = self.offset_edgeuse(original) else {
+        let Some(offset) = self.offset_edgeuse(original) else {
             return Ok(());
         };
-        // Continuation cpp:2819–2823: CreateFaceFromSurface, then append closing face.
-        // Actual call arguments: ruled blend (0), same direction (1), no options.
-        // The static upstream call pairs an edge use of the original B-rep with one of
-        // the offset B-rep; topology.brep_p1's port (topology::brep::p1::
-        // create_edge_edge_blend) takes both edge uses in one B-rep, and this method has
-        // no original B-rep: the cross-B-rep form is topology.brep_p1's own unported part.
-        // UNPORTED(topology.brep_p1): SmBrep::CreateEdgeEdgeBlend
-        Err(SolidError::unported(
-            "SmBrep::CreateEdgeEdgeBlend",
-            "topology.brep_p1",
-        ))
+        let offset_brep = required(self.offset_brep.as_mut())?;
+        // cpp:2812: ruled blend (0) between the original edge use and its offset edge use
+        // (in the offset B-rep), curves in the same direction (1), no blend options
+        let new_surface = crate::topology::brep::p1::create_edge_edge_blend(
+            kernel,
+            0,
+            original_brep,
+            Some(original),
+            Some(offset_brep),
+            Some(offset),
+            1,
+            None,
+        )?;
+        // cpp:2819: m_pOffsetBrep->CreateFaceFromSurface(pNewSurface, natural domain)
+        let domain = new_surface.natural_uv_domain();
+        let new_face = create_face_from_surface(offset_brep, &new_surface, &domain)?;
+        self.closing_faces.push(new_face); // [B549]
+        Ok(())
     }
 
     /// Builds edge cap offsets. Notifications use distinct original/result object keys;
@@ -1017,6 +1026,17 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
     .unwrap_or_else(Extent3d::new))
 }
 
+/// `SmBrep::CreateFaceFromSurface(pSurface, sDomain, rpNewFace)` (unit
+/// `topology.brep_p8`): the new face.
+fn create_face_from_surface(b: &mut Brep, surface: &Surface, domain: &Extent2d) -> Result<FaceId> {
+    let _ = (b, surface, domain);
+    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
+    Err(SolidError::unported(
+        "SmBrep::CreateFaceFromSurface",
+        "topology.brep_p8",
+    ))
+}
+
 fn required<T>(value: Option<T>) -> Result<T> {
     value.ok_or_else(|| SolidError::null_pointer(OP))
 }
@@ -1336,6 +1356,29 @@ mod tests {
                 interval,
                 tolerance: 0.0,
                 curve: Some(Curve::from(curve)),
+            })
+            .unwrap();
+        let edgeuse = brep
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(edge),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        brep.edge_mut(edge).unwrap().edgeuses.push(edgeuse);
+        edgeuse
+    }
+
+    /// An edge use on a unit-length B-spline line at height `y`.
+    fn add_bspline_use(brep: &mut Brep, y: f64) -> EdgeuseId {
+        let line = Line::from_points(Vec3::new(0.0, y, 0.0), Vec3::new(1.0, y, 0.0), 3);
+        let curve = Curve::from(line.base_with_nurb().unwrap().into_owned());
+        let edge = brep
+            .add_edge_record(Edge {
+                vertices: [VertexId::from_index(0); 2],
+                edgeuses: Vec::new(),
+                interval: Extent1d::from_raw(0.0, 1.0),
+                tolerance: 0.0,
+                curve: Some(curve),
             })
             .unwrap();
         let edgeuse = brep
@@ -1865,20 +1908,28 @@ mod tests {
     fn sidewalls_handle_null_missing_ambiguous_and_single_mappings() {
         let kernel = Kernel::default();
         let mut executive = executive();
-        let original = EdgeuseId::from_index(0);
-        executive.build_side_wall_of_edgeuse(&kernel, None).unwrap();
+        // B-spline edge curves (a Line whose parameterisation was edited carries no NURB)
+        let mut original_brep = Brep::new();
+        let original = add_bspline_use(&mut original_brep, 0.0);
+        let mut offset_brep = Brep::new();
+        let offset = add_bspline_use(&mut offset_brep, 1.0);
+        executive.set_offset_brep(offset_brep);
         executive
-            .build_side_wall_of_edgeuse(&kernel, Some(original))
+            .build_side_wall_of_edgeuse(&kernel, &mut original_brep, None)
             .unwrap();
-        executive.relate_edgeuses(original, EdgeuseId::from_index(1));
+        executive
+            .build_side_wall_of_edgeuse(&kernel, &mut original_brep, Some(original))
+            .unwrap();
+        // the ruled blend across the two B-reps runs; the closing face is next
+        executive.relate_edgeuses(original, offset);
         assert_dependency(
-            executive.build_side_wall_of_edgeuse(&kernel, Some(original)),
-            "SmBrep::CreateEdgeEdgeBlend",
-            "topology.brep_p1",
+            executive.build_side_wall_of_edgeuse(&kernel, &mut original_brep, Some(original)),
+            "SmBrep::CreateFaceFromSurface",
+            "topology.brep_p8",
         );
         executive.relate_edgeuses(original, EdgeuseId::from_index(2));
         executive
-            .build_side_wall_of_edgeuse(&kernel, Some(original))
+            .build_side_wall_of_edgeuse(&kernel, &mut original_brep, Some(original))
             .unwrap();
     }
 

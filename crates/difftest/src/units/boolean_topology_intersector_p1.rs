@@ -84,6 +84,7 @@ use solidcore::surface::surface::p2::TsectCurveType;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
 use solidcore::topology::brep::p1 as bp1;
+use solidcore::topology::brep::p5 as bp5;
 use solidcore::topology::brep::p7;
 use solidcore::topology::brep_cache::{arena_identity, BrepCache, CacheObject, CacheSource};
 use solidcore::topology::edge as ed;
@@ -3389,7 +3390,7 @@ fn run_part2_op(
             // (a null B-rep where a combination would run, or a mate that is not a vertex
             // where upstream dereferences it, is the port's InvalidInput, reported as -2
             // like the shim's guard)
-            let Some(r) = status(ti.check_for_squeeze_vertices(two, bv, ov), o)? else {
+            let Some(r) = status(ti.check_for_squeeze_vertices(k, two, bv, ov), o)? else {
                 return Ok(());
             };
             o.push(r.deleted_vertices.len() as f64);
@@ -3423,7 +3424,7 @@ fn run_part2_op(
                 o.push(NULL_DEREF);
                 return Ok(());
             }
-            let Some(r) = status(ti.fix_gaps(two, &vs), o)? else {
+            let Some(r) = status(ti.fix_gaps(k, two, &vs), o)? else {
                 return Ok(());
             };
             o.push(flag(r.modified_topology));
@@ -3558,6 +3559,62 @@ fn run_part2_op(
 }
 
 impl IntersectorBrepP2<H> for Two {
+    fn brep_faces(&self, brep: H) -> solidcore::Result<Vec<H>> {
+        let b = self.brep_r(brep)?;
+        Ok(bp1::faces(b, None)?
+            .into_iter()
+            .map(|f| hd(brep.b, K_FACE, f.index()))
+            .collect())
+    }
+    fn brep_combine_coincident_vertices(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        surviving: H,
+        to_delete: H,
+    ) -> solidcore::Result<Option<H>> {
+        if brep.kind != K_BREP {
+            return Err(invalid("not a B-rep handle"));
+        }
+        let vertex = |h: H| -> solidcore::Result<VertexId> {
+            if h.kind == K_VERTEX && h.b == brep.b {
+                Ok(vid(h))
+            } else {
+                Err(invalid("not a vertex of this B-rep"))
+            }
+        };
+        let (surviving, to_delete) = (vertex(surviving)?, vertex(to_delete)?);
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        let (breps, envs) = (&mut self.breps, &mut self.env);
+        let b = breps
+            .get_mut(slot)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("handle names an absent B-rep"))?;
+        let env = envs.get_mut(slot).ok_or_else(|| invalid("bad B-rep"))?;
+        // (SmVertex::SetPoint notifies under the vertex environment's identities, as
+        // set_vertex_point)
+        let this = env.this;
+        let key_of = move |e: EntityRef| match e {
+            EntityRef::Vertex(_) => this,
+            e => glue_key_of(e),
+        };
+        let mut notify = ed::NotifyEnv {
+            records: &mut env.records,
+            attributes: &mut env.attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let mut deleted_edge = None;
+        bp5::combine_with_notifications(
+            k,
+            b,
+            surviving,
+            to_delete,
+            &mut deleted_edge,
+            Some(&mut notify),
+        )?;
+        Ok(deleted_edge.map(|e| hd(brep.b, K_EDGE, e.index())))
+    }
     fn vertex_edges(&self, vertex: H) -> solidcore::Result<Vec<H>> {
         let b = self.brep_r(vertex)?;
         Ok(vx::edges(b, vid(vertex), None)?

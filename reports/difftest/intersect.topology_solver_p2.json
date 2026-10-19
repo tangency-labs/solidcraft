@@ -2432,7 +2432,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "intersect.topology_solver_p1"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_3_0",
@@ -2444,7 +2444,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "intersect.topology_solver_p1"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_3_1",
@@ -2456,7 +2456,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "intersect.topology_solver_p1"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_4_0",
@@ -2468,7 +2468,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "intersect.topology_solver_p1"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_4_1",
@@ -2976,7 +2976,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.solution_array"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "static_operation_matrix_0_8_0_0",
@@ -2996,7 +2996,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.solution_array"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "static_operation_matrix_0_8_1_0",
@@ -19573,10 +19573,9 @@
   "cases_total": 2429,
   "deferred_by_unit": {
     "curve.iso_curve": 12,
-    "geom.solution_array": 2,
+    "geom.tol": 6,
     "intersect.curve_class_p2": 4,
     "intersect.surface_tracer": 8,
-    "intersect.topology_solver_p1": 4,
     "topology.edge": 3
   },
   "max_rel_err": 0.0,

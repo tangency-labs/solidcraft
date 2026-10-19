@@ -424,7 +424,13 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         double dist = rd.num();
         SmTopology* a = topo(g, t1, i1);
         SmTopology* c = topo(g, t2, i2);
-        // the edge branch dereferences the surfaces of both edges' faces
+        // the edge branch dereferences the surfaces of both edges' faces. The vertex branch
+        // reaches the edge branch too (its recursive calls, SmStitch.cpp:157, :222), unguarded:
+        // that is safe because no block of this harness builds a face without a surface. The
+        // face kinds, the sheets and SmApiCreateBox always attach one, and none of the 15
+        // upstream .smb files in topology.edgeuse_p1's FILES has a surface-less face (checked
+        // over every face after ReadFromFile; SmallBox.smb and Platform.smb are excluded because
+        // ReadFromFile itself crashes on them).
         if (t1 == TY_EDGE && t2 == TY_EDGE)
             for (SmFace* f : g.faces)
                 if (f->GetSurface() == NULL)

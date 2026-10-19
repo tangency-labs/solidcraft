@@ -696,7 +696,7 @@ fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError
             return Err(harness("export: CrvOnSurf base is not a B-spline surface"));
         };
         let k = Kernel::default();
-        let cos = CrvOnSurf::new(&k, uv_curve, base.clone(), None, 0)
+        let cos = CrvOnSurf::new(&k, uv_curve, base.clone(), None, 1)
             .map_err(|e| harness(format!("export CrvOnSurf: {e}")))?;
         return Ok(Some(SmCurve::from(cos)));
     }

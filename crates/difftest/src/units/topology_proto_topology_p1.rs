@@ -76,6 +76,7 @@ use solidcore::topology::proto_topology::p1::{
     VertexDefId,
     VertexDefinition,
 };
+use solidcore::topology::proto_topology::p3::NoMates;
 use solidcore::topology::topology::{Topology, TopologyRecords};
 use solidcore::SolidError;
 use solidcore_ffi::units::topology_proto_topology_p1::{
@@ -3700,7 +3701,10 @@ fn run_proto(
                     }
                     if !skip {
                         // (the shim's intersector relates nothing: GetOtherMate is always null)
-                        match st3(r.mgr.glue_coincident_brep_vertices(k, &r.pool, &mut solidcore::topology::proto_topology::p3::NoMates))? {
+                        let glued = r
+                            .mgr
+                            .glue_coincident_brep_vertices(k, &r.pool, &mut NoMates);
+                        match st3(glued)? {
                             Ok(deleted) => {
                                 let ids = r.kill_curves(deleted);
                                 out.push(ids.len() as f64);

@@ -1582,6 +1582,33 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 
 ### Healer target management
 
+#### HANG-32. `SmBrep::CreateParallelProjectionCurves` spins on a subnormal approximation tolerance
+- **Location:** `source/SMLib/src/SmBrep.cpp:4928`-`5012` (`SmBrep::CreateParallelProjectionCurves`, which calls `SmSurface::CreateParallelProjectionCurves` at `:4971`), then `SmSurfaceIntersector` / `SmSurface::LocalPointSolve`; the looping routine is not located.
+- **What happens:** With `dThisApproxTol3d = 5e-324` (the smallest subnormal double), the projection runs for more than 15 minutes without returning; `1e-100` returns at once.
+- **Trigger:** a caller-supplied subnormal approximation tolerance.
+- **How found:** the maintainer's adversarial run in the review of #145 (at `5b1b28ae`).
+- **Confirmed:** reported from the C++ reference run in that review; not re-run here (a 15-minute hang).
+- **Severity:** hang. Not file-reachable (a caller tolerance argument).
+- **Rust port:** unchanged. The `topology.brep_p1` difftest FFI refuses approximation tolerances below the smallest normal double (and the runner reports such cases as rejected on both sides).
+
+#### HANG-34. `SmBrep::CreateCornerBlend` takes tens of seconds or more with a tangency tolerance below what doubles resolve
+- **Location:** `source/SMLib/src/SmBrep.cpp:2488`-`2775` -> `SmBSplineSurface::CreateCornerBlend` -> `SmBSplineSurface::CreateCoonsPatch` -> `N_MakeSrfsCompatible` -> `N_SrfInsertKnots` (where a hung run sits).
+- **What happens:** The cross-tangent curves are approximated to `dTangencyTolRadians` (`SmTangentField::ApproximateCurve`), which refines towards a tolerance no double computation meets; the over-refined curves then make the Coons patch's surface compatibility insert knots for tens of seconds. Measured on `plane_circ.smb` (three edge uses): `1e-23` returns in 0.4 s, `1e-24` in 1 s, `1e-25` in 22 s, `1e-26` in 47 s; `1e-27` and below, `0` and negative tolerances do not return within 60 s.
+- **Trigger:** a corner blend with a tangency tolerance of `0` (difftest fuzz program of `topology.brep_p1`), negative, or below about `1e-24`.
+- **How found:** difftest fuzzing of `topology.brep_p1` (the follow-up to #145); located with gdb on the running C++ reference.
+- **Confirmed:** yes (C++ reference runs, timed).
+- **Severity:** hang (unbounded slowness). A caller argument: no [PSIRT].
+- **Rust port:** unchanged. The `topology.brep_p1` shim rejects a tangency tolerance below `1e-20` (four decades of margin above the measured knee) only where its replay of the call reaches the cross-tangent approximation; earlier statuses stay compared.
+
+#### UB-195. `sm_CreateNonRationalCurve` reads the first dropped curve of an empty array [PSIRT]
+- **Location:** `source/SMLib/src/SmBSplineSurfaceNLib.cpp:2938`-`2949` (`sm_CreateNonRationalCurve`, rational curve branch), reached from `SmBSplineSurface::CreateCornerBlend` (`:3100`-`3110`) and so from `SmBrep::CreateCornerBlend`.
+- **What happens:** For a rational B-spline boundary curve with a neighbour surface, the curve is approximated, reparametrised and dropped onto the surface with `DropCurve`. `DropCurve` can return `SM_SUCCESS` with no curve; `SM_ASSERT(sUVCurves.GetSize() == 1)` is a release no-op and `pNewUVTrimCurve = sUVCurves[0]` reads the array's NULL data (SIGSEGV).
+- **Trigger:** a corner blend whose ordered boundary curves include a rational B-spline edge curve of a tangent edge use whose drop onto its face surface yields no curve, with no earlier status stopping the call. The difftest met it on a face of a perturbed closed surface.
+- **How found:** difftest fuzzing of `topology.brep_p1` (the follow-up to #145); located with gdb on a `-g` build of the C++ reference.
+- **Confirmed:** yes (C++ reference run; the fault is at `:2949` with `m_lSize == 0`, `m_pData == NULL`).
+- **Severity:** crash/UB. **[PSIRT]:** reachable from a B-rep read from a `.smb` file through `SmBrep::CreateCornerBlend`.
+- **Rust port:** `nurbs::b_spline_surface_n_lib::p1::create_non_rational_curve` returns `InvalidInput` ("no dropped curve"). The `topology.brep_p1` shim refuses exactly those inputs by replaying `SmBrep::CreateCornerBlend` and the curve conversion on a copy of the B-rep up to the drop; the runner reports both sides as the null-dereference guard.
+
 #### UB-163. Uncached healer props removal leaves targets that resize into NULL props holes
 - **Location:** `source/SMLib/src/SmHealData.cpp:1332-1333` (`RemoveVertexProps_FromLists` and analogous edge/face helpers), `:1224-1226` (`UpdateTargetLists`); later `Cache_CoinVertices` / `Cache_DegenFaces`.
 - **What happens:** removing a props record whose topology pointer has never been cached removes the props but not its target. A later nonempty add list resizes every props array from the target count and initializes only the new-target tail, leaving NULL holes for the unmatched old targets. Native coincidence/degeneracy caching can then dereference invalid state. Even a null add causes that resize. A later `Get*Props_ForTgts` can also index past a props list shortened by an uncached removal.
