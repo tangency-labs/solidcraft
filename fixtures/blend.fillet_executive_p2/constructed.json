@@ -1,0 +1,4000 @@
+{
+ "cases": [
+  {
+   "name": "law_linear_0_0",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_linear_0_1",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_0_2",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": [
+     0.2,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "law_linear_0_3",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": [
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "law_linear_0_4",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": [
+     0.4,
+     0.4000000000001
+    ]
+   }
+  },
+  {
+   "name": "law_linear_0_5",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": [
+     -0.5,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "law_linear_0_6",
+   "inputs": {
+    "op": "law_linear",
+    "start": 1.0,
+    "end": 1.0,
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_1_0",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_linear_1_1",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_1_2",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": [
+     0.2,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "law_linear_1_3",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": [
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "law_linear_1_4",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": [
+     0.4,
+     0.4000000000001
+    ]
+   }
+  },
+  {
+   "name": "law_linear_1_5",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": [
+     -0.5,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "law_linear_1_6",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.5,
+    "end": 2.0,
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_2_0",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_linear_2_1",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_2_2",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": [
+     0.2,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "law_linear_2_3",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": [
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "law_linear_2_4",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": [
+     0.4,
+     0.4000000000001
+    ]
+   }
+  },
+  {
+   "name": "law_linear_2_5",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": [
+     -0.5,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "law_linear_2_6",
+   "inputs": {
+    "op": "law_linear",
+    "start": 3.0,
+    "end": 0.0,
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_3_0",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_linear_3_1",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_3_2",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": [
+     0.2,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "law_linear_3_3",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": [
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "law_linear_3_4",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": [
+     0.4,
+     0.4000000000001
+    ]
+   }
+  },
+  {
+   "name": "law_linear_3_5",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": [
+     -0.5,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "law_linear_3_6",
+   "inputs": {
+    "op": "law_linear",
+    "start": 0.0,
+    "end": 0.0,
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_4_0",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_linear_4_1",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "law_linear_4_2",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": [
+     0.2,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "law_linear_4_3",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": [
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "law_linear_4_4",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": [
+     0.4,
+     0.4000000000001
+    ]
+   }
+  },
+  {
+   "name": "law_linear_4_5",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": [
+     -0.5,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "law_linear_4_6",
+   "inputs": {
+    "op": "law_linear",
+    "start": -1.0,
+    "end": 2.0,
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_0",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_1",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_2",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_3",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_4",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_5",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_6",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_7",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_8",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_9",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_10",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_11",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_12",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_13",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_14",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_15",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_16",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_17",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_18",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_19",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_20",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_21",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_22",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_23",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_24",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_25",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_26",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_27",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_28",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_29",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_30",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_31",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_32",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_33",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_34",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_35",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_36",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_37",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_38",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_39",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_40",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_41",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_42",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_43",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_44",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_45",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_46",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_47",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_48",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_49",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_50",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_51",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_52",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_53",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_54",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_55",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_56",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_57",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_58",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_59",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.5,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_60",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_61",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_62",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_63",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_64",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_65",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_66",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_67",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_68",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_69",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_70",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_71",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_72",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_73",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_74",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_75",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_76",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_77",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_78",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_79",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_80",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_81",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_82",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_83",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_84",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_85",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_86",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_87",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_88",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_89",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_90",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_91",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_92",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_93",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_94",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_95",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_96",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_97",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_98",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_99",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_100",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_101",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_102",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_103",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_104",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_105",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_106",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_107",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_108",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_109",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_110",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_111",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_112",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_113",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_114",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_115",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_116",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_117",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_118",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_119",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_120",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_121",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_122",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_123",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_124",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_125",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_126",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_127",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_128",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_129",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_130",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_131",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_132",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_133",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_134",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_135",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_136",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_137",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_138",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_139",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 0.5,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_140",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_141",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_142",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_143",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_144",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_145",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_146",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_147",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_148",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_149",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_150",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_151",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_152",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_153",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_154",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_155",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_156",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_157",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_158",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_159",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 1.0,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_160",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_161",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_162",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_163",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_164",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 0.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_165",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_166",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_167",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_168",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_169",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 2.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_170",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_171",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_172",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_173",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_174",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 4.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_175",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 0.7853981633974483,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_176",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_177",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 1.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_178",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 2.0,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_179",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 2.0,
+    "end": 3.0,
+    "outer": 10.0,
+    "span": 0.1,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_map_0",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_map_1",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_map_2",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": [
+     0.2,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_map_3",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": [
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_map_4",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": [
+     0.4,
+     0.4000000000001
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_map_5",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": [
+     -0.5,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_map_6",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 1.0,
+    "end": 2.0,
+    "outer": 5.0,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.3,
+    "end_deriv": -0.7,
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "law_elliptic_tiny",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 0.0001,
+    "end": 0.0002,
+    "outer": 0.0005,
+    "span": 1.5707963267948966,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "law_elliptic_huge",
+   "inputs": {
+    "op": "law_elliptic",
+    "start": 10000.0,
+    "end": 30000.0,
+    "outer": 100000.0,
+    "span": 1.0471975511965976,
+    "start_deriv": 0.0,
+    "end_deriv": 0.0,
+    "map": null
+   }
+  },
+  {
+   "name": "set_params_empty",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_empty_null_brep",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": false,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_empty_no_lists",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [],
+    "xsect_types": [],
+    "radius_types": [],
+    "radius_values": [],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_empty_tols",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [],
+    "xsect_types": [
+     2
+    ],
+    "radius_types": [
+     3
+    ],
+    "radius_values": [
+     0.5
+    ],
+    "laws": null,
+    "approx": 0.001,
+    "ang": 30.0,
+    "tan": 5.0,
+    "xsect": 0.1,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_mismatch_x",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1,
+     2
+    ],
+    "xsect_types": [
+     1,
+     1
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_mismatch_r",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     2,
+     2,
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_mismatch_v",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0
+    ],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_null_brep",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": false,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0
+    ],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_single_fsg_0",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     3
+    ],
+    "xsect_types": [
+     0
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_single_fsg_1",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     3
+    ],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_single_fsg_2",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     3
+    ],
+    "xsect_types": [
+     2
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_single_fsg_3",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     3
+    ],
+    "xsect_types": [
+     3
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r0",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     0,
+     0
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r1",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     1,
+     1
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r2",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     2,
+     2
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r3",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     3,
+     3
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r4",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     4,
+     4
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r5",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     5,
+     5
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_per_edge_r6",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     2
+    ],
+    "radius_types": [
+     6,
+     6
+    ],
+    "radius_values": [
+     1.0,
+     2.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_vr_null_laws",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0
+    ],
+    "xsect_types": [
+     1
+    ],
+    "radius_types": [
+     3
+    ],
+    "radius_values": [
+     1.0
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_vr_laws",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "edges": [
+     0,
+     1
+    ],
+    "xsect_types": [
+     1,
+     1
+    ],
+    "radius_types": [
+     3,
+     3
+    ],
+    "radius_values": [
+     1.0,
+     1.0
+    ],
+    "laws": [
+     [
+      1,
+      1.0,
+      2.0
+     ],
+     [
+      0
+     ]
+    ],
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "set_params_box2",
+   "inputs": {
+    "op": "set_params",
+    "has_brep": true,
+    "box": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "size": [
+      5.0,
+      10.0,
+      15.0
+     ]
+    },
+    "edges": [
+     4,
+     5,
+     6
+    ],
+    "xsect_types": [
+     2
+    ],
+    "radius_types": [
+     2
+    ],
+    "radius_values": [
+     0.5
+    ],
+    "laws": null,
+    "approx": 0.0,
+    "ang": 0.0,
+    "tan": 0.0,
+    "xsect": 0.0,
+    "continuity": 1,
+    "thumbweight": 1.0
+   }
+  },
+  {
+   "name": "exec_edge_map_0",
+   "inputs": {
+    "op": "exec",
+    "sub": 0,
+    "solvers": 0,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_process_0",
+   "inputs": {
+    "op": "exec",
+    "sub": 1,
+    "solvers": 0,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_process_1",
+   "inputs": {
+    "op": "exec",
+    "sub": 1,
+    "solvers": 1,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_process_2",
+   "inputs": {
+    "op": "exec",
+    "sub": 1,
+    "solvers": 2,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_process_3",
+   "inputs": {
+    "op": "exec",
+    "sub": 1,
+    "solvers": 3,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_collect_0",
+   "inputs": {
+    "op": "exec",
+    "sub": 2,
+    "solvers": 0,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_collect_1",
+   "inputs": {
+    "op": "exec",
+    "sub": 2,
+    "solvers": 1,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_collect_2",
+   "inputs": {
+    "op": "exec",
+    "sub": 2,
+    "solvers": 2,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "exec_collect_3",
+   "inputs": {
+    "op": "exec",
+    "sub": 2,
+    "solvers": 3,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "temp_radius_const",
+   "inputs": {
+    "op": "temp_radius",
+    "variable": false,
+    "start": 1.0,
+    "end": 2.0,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "temp_radius_vr",
+   "inputs": {
+    "op": "temp_radius",
+    "variable": true,
+    "start": 1.0,
+    "end": 2.0,
+    "box": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "temp_radius_vr_flat",
+   "inputs": {
+    "op": "temp_radius",
+    "variable": true,
+    "start": 1.5,
+    "end": 1.5,
+    "box": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "size": [
+      5.0,
+      10.0,
+      15.0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1123,6 +1123,19 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         }
     }
 
+    /// Populate valid paired mate-map fixtures without exposing maps in production.
+    #[cfg(test)]
+    pub(crate) fn seed_mates_for_test(&mut self, pairs: &[(O, O)]) {
+        for &(primary, other) in pairs {
+            self.b_to_o
+                .get_or_insert_with(BTreeMap::new)
+                .insert(primary, Some(other));
+            self.o_to_b
+                .get_or_insert_with(BTreeMap::new)
+                .insert(Some(other), primary);
+        }
+    }
+
     /// `~SmTopologyIntersector`: deletes the intersection table (and its curves), the
     /// mate maps and the subset. Returns the curve handles deleted. The proto topology
     /// manager is not deleted by upstream's destructor (it is owned by
