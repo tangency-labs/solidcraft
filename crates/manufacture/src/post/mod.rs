@@ -7,6 +7,7 @@
 
 mod grbl;
 mod marlin;
+mod repetier;
 
 use crate::{GcodeDialect, LineEnding, PathSegment, PostProfile, Tool, ToolKind};
 
@@ -23,6 +24,7 @@ pub fn post_toolpath(segments: &[PathSegment], profile: &PostProfile, tool: &Too
     match profile.dialect {
         GcodeDialect::Grbl | GcodeDialect::Generic => grbl::write_header(&mut out, tool, eol),
         GcodeDialect::Marlin => marlin::write_header(&mut out, tool, eol),
+        GcodeDialect::Repetier => repetier::write_header(&mut out, tool, eol),
         // Remaining dialects share the GRBL-class header until their peel PRs land.
         _ => grbl::write_header(&mut out, tool, eol),
     }
@@ -83,6 +85,7 @@ fn write_move(out: &mut String, code: &str, to: [f64; 3], feed: Option<f64>, eol
 pub fn preset_posts() -> Vec<(&'static str, PostProfile)> {
     let mut out = vec![grbl::preset()];
     out.push(marlin::preset());
+    out.push(repetier::preset());
     out
 }
 
@@ -122,6 +125,6 @@ mod tests {
     #[test]
     fn presets_cover_landed_dialects() {
         let names: Vec<_> = preset_posts().iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["GRBL", "Marlin"]);
+        assert_eq!(names, ["GRBL", "Marlin", "Repetier"]);
     }
 }
