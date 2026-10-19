@@ -4112,7 +4112,7 @@ version = "0.40.0-rc.2"
 
 [[package]]
 name = "solidcraft-cam"
-version = "0.21.0-rc.2"
+version = "0.23.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4151,7 +4151,11 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+<<<<<<< HEAD
  "solidcore-record",
+=======
+ "solidcraft-cam",
+>>>>>>> f0e62322a (Lock solidcraft-cam into doc and engine dependency graphs.)
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4172,7 +4176,11 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+<<<<<<< HEAD
  "solidcore-record",
+=======
+ "solidcraft-cam",
+>>>>>>> f0e62322a (Lock solidcraft-cam into doc and engine dependency graphs.)
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
