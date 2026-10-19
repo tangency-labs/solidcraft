@@ -195,3 +195,61 @@ fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
         assert_eq!(after.selected, Some(true));
     }
 }
+
+#[test]
+fn checkbox_variants_use_space_to_toggle_and_enter_to_apply_the_dialog() {
+    for enabled in [false, true] {
+        use crate::{Action, Window};
+        for variant in 0..3 {
+            let ctx = crate::test_support::context();
+            crate::dialog_focus::configure(&ctx, enabled, None);
+            let value = std::cell::Cell::new(false);
+            let applied = std::cell::Cell::new(false);
+            let target = std::cell::Cell::new(Rect::NOTHING);
+            let mut draw = |ui: &mut Ui| {
+                crate::dialog_focus::prepare_active(ui.ctx());
+                let (_, action) = Window::new(egui::Id::unique("checkbox_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
+                    super::super::fields::with_feature_form(ui, |ui| {
+                        let mut on = value.get();
+                        match variant {
+                            0 => target.set(checkbox(ui, "Option", &mut on).rect),
+                            1 => {
+                                crate::checkbox_grid(ui, &mut [("Option", &mut on)], 1);
+                                target.set(solidcraft_ui_registry::rect_of("dialog:checkbox:Option").unwrap());
+                            }
+                            _ => {
+                                if crate::checkbox_row(ui, "option", "Option", on) {
+                                    on = !on;
+                                }
+                                target.set(solidcraft_ui_registry::rect_of("sketch_palette:toggle:option").unwrap());
+                            }
+                        }
+                        value.set(on);
+                    });
+                });
+                if action == Action::Ok {
+                    applied.set(true);
+                }
+            };
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            for _ in 0..6 {
+                frame(&ctx, key(egui::Key::Tab), &mut draw);
+                for _ in 0..3 {
+                    frame(&ctx, vec![], &mut draw);
+                }
+                if ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.rect == target.get()) {
+                    break;
+                }
+            }
+            assert_eq!(ctx.read_response(ctx.memory(|m| m.focused()).unwrap()).unwrap().rect, target.get());
+            frame(&ctx, key(egui::Key::Space), &mut draw);
+            assert!(value.get(), "Space toggles variant {variant}");
+            assert!(!applied.get());
+            frame(&ctx, key(egui::Key::Enter), &mut draw);
+            assert_eq!(value.get(), enabled, "Enter preserves variant {variant} only in dialog navigation mode");
+            assert_eq!(applied.get(), enabled, "Enter applies for variant {variant} only in dialog navigation mode");
+        }
+    }
+}

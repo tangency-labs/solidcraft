@@ -36,6 +36,7 @@ mod confirm;
 pub mod container;
 mod dash;
 mod details;
+pub mod dialog_focus;
 mod disclosure;
 mod drag;
 mod fields;

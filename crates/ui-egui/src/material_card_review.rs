@@ -71,7 +71,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let mut close = false;
-    panel.window(ctx).show(ctx, |ui| {
+    panel.show(ctx, None, |ui| {
         let (closed, action) = panel.feature(
             ui,
             ui_kit::FeatureOptions {

@@ -263,7 +263,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
     let mut resize = Resize::None;
-    let shown = panel.window(ctx).show(ctx, |ui| {
+    let shown = panel.show(ctx, None, |ui| {
         outcome = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -1169,6 +1169,10 @@ pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> 
 pub(crate) struct DocExpressions;
 
 impl ui_kit::Expressions for DocExpressions {
+    fn focus_selection(&self, text: &str) -> Option<std::ops::Range<usize>> {
+        crate::value_step::number_range(text)
+    }
+
     fn is_literal(&self, text: &str) -> bool {
         solidcraft_engine::doc::expr::is_literal(text)
     }
@@ -2382,5 +2386,179 @@ mod tests {
         h.frames(2);
         let short = crate::scenario::rect_of("param:width").unwrap();
         assert!(short.width() <= cell.width() + 0.5, "a formula that fits stays in its cell: {short:?} vs {cell:?}");
+    }
+
+    #[test]
+    fn dialog_tab_parameters_stays_inside_its_manager() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        let id = h.ctx.memory(|m| m.focused()).unwrap();
+        let layer = h.ctx.read_response(id).unwrap().layer_id;
+        for backwards in [false, true] {
+            for _ in 0..40 {
+                h.step(&json!({"key":"Tab", "shift":backwards})).unwrap();
+                let focused = h.ctx.memory(|m| m.focused()).unwrap();
+                let response = h.ctx.read_response(focused).unwrap();
+                assert_eq!(response.layer_id, layer);
+                assert!(response.rect.is_positive());
+            }
+        }
+    }
+    #[test]
+    fn tab_visits_expression_fields_in_row_order() {
+        use crate::ui_kit::test_support::{frame, key, pointer};
+        use crate::ui_kit::*;
+        use solidcraft_ui_registry as registry;
+        for enabled in [false, true] {
+            let ctx = crate::fonts::test_context();
+            crate::params_dialog::install_expressions(&ctx);
+            ui_kit::install_keyboard_focus(&ctx);
+            crate::dialog_focus::configure(&ctx, enabled, None);
+            let mut first = "1".to_string();
+            let mut second = "20 mm".to_string();
+            let second_id = std::cell::Cell::new(None);
+            let mut draw = |ui: &mut egui::Ui| {
+                crate::dialog_focus::scope(ui, egui::Id::unique("expression_fields"), |ui| {
+                    row(ui, "First value", |ui| {
+                        field(ui, &mut first);
+                    });
+                    section(ui, "direction2", "Direction 2", true, |ui| {
+                        row(ui, "Second value", |ui| {
+                            second_id.set(Some(checked_field(ui, &mut second, "", false).1.id));
+                        });
+                    });
+                });
+            };
+            frame(&ctx, vec![], &mut draw);
+            let first_pos = registry::handle_at("dialog:First value").unwrap();
+            frame(&ctx, pointer(first_pos, true), &mut draw);
+            frame(&ctx, pointer(first_pos, false), &mut draw);
+            let second_focused = || second_id.get().is_some_and(|id| ctx.memory(|m| m.has_focus(id)));
+            frame(&ctx, key(egui::Key::Tab), &mut draw);
+            if !enabled {
+                frame(&ctx, key(egui::Key::Tab), &mut draw);
+            }
+            frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
+            assert!(second_focused(), "the second editor owns focus after Tab with the preference set to {enabled}");
+            assert_eq!(first, "1");
+            assert_eq!(second, if enabled { "2 mm" } else { "2" });
+        }
+    }
+
+    #[test]
+    fn tab_skips_count_arrows_in_both_directions_and_pointer_still_steps() {
+        use crate::ui_kit::test_support::{frame, key, pointer};
+        use crate::ui_kit::*;
+        use solidcraft_ui_registry as registry;
+        let ctx = crate::fonts::test_context();
+        crate::params_dialog::install_expressions(&ctx);
+        ui_kit::install_keyboard_focus(&ctx);
+        let mut quantity = "123".to_string();
+        let mut spacing = "20 mm".to_string();
+        let mut draw = |ui: &mut egui::Ui| {
+            crate::dialog_focus::scope(ui, egui::Id::unique("count_fields"), |ui| {
+                count_row(ui, "Quantity", &mut quantity, &Count { min: 1, max: 1000, eval: &|text| text.parse().ok() });
+                row(ui, "Spacing", |ui| {
+                    field(ui, &mut spacing);
+                });
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let at = registry::handle_at("dialog:Quantity").unwrap();
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        let quantity_focus = ctx.memory(|m| m.focused());
+        frame(&ctx, key(egui::Key::Tab), &mut draw);
+        frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
+        let reverse = key(egui::Key::Tab)
+            .into_iter()
+            .map(|event| match event {
+                egui::Event::Key { key, physical_key, pressed, repeat, .. } => {
+                    egui::Event::Key { key, physical_key, pressed, repeat, modifiers: egui::Modifiers::SHIFT }
+                }
+                event => event,
+            })
+            .collect();
+        frame(&ctx, reverse, &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        assert_eq!(ctx.memory(|m| m.focused()), quantity_focus);
+        let range = egui::TextEdit::load_state(&ctx, quantity_focus.unwrap()).unwrap().cursor.char_range().unwrap();
+        assert_eq!((range.primary.index.min(range.secondary.index).0, range.primary.index.max(range.secondary.index).0), (0, 3));
+        let up = registry::handle_at("dialog:Quantity up").unwrap();
+        frame(&ctx, pointer(up, true), &mut draw);
+        frame(&ctx, pointer(up, false), &mut draw);
+        assert_eq!(spacing, "2 mm", "Tab must go directly from Quantity to Spacing and preserve its unit");
+        assert_eq!(quantity, "124", "the up arrow remains clickable");
+    }
+
+    #[test]
+    fn tab_selects_the_number_and_typing_preserves_units() {
+        use crate::ui_kit::test_support::{frame, key, pointer};
+        use crate::ui_kit::*;
+        use solidcraft_ui_registry as registry;
+        for (original, selected, replaced) in [
+            ("4 mm", "4", "7 mm"),
+            ("-2.5 cm", "-2.5", "7 cm"),
+            ("2,5 mm", "2,5", "7 mm"),
+            (" 4 mm", "4", " 7 mm"),
+            ("\u{2003}4 mm", "4", "\u{2003}7 mm"),
+            ("45 deg", "45", "7 deg"),
+            ("8\"", "8", "7\""),
+            ("width / 2", "width / 2", "7"),
+        ] {
+            let ctx = crate::fonts::test_context();
+            crate::params_dialog::install_expressions(&ctx);
+            ui_kit::install_keyboard_focus(&ctx);
+            let mut first = "1".to_string();
+            let mut value = original.to_string();
+            let mut draw = |ui: &mut egui::Ui| {
+                row(ui, "First", |ui| {
+                    field(ui, &mut first);
+                });
+                row(ui, "Value", |ui| {
+                    field(ui, &mut value);
+                });
+            };
+            frame(&ctx, vec![], &mut draw);
+            let at = registry::handle_at("dialog:First").unwrap();
+            frame(&ctx, pointer(at, true), &mut draw);
+            frame(&ctx, pointer(at, false), &mut draw);
+            frame(&ctx, key(egui::Key::Tab), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+            let id = ctx.memory(|m| m.focused()).unwrap();
+            let range = egui::TextEdit::load_state(&ctx, id).unwrap().cursor.char_range().unwrap();
+            let start = range.primary.index.min(range.secondary.index).0;
+            let end = range.primary.index.max(range.secondary.index).0;
+            assert_eq!(original.chars().skip(start).take(end - start).collect::<String>(), selected, "{original}");
+            frame(&ctx, vec![egui::Event::Text("7".to_string())], &mut draw);
+            assert_eq!(value, replaced, "{original}");
+        }
+    }
+    #[test]
+    fn page_sidebar_footer_stays_visible_when_the_page_list_scrolls() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.theme = theme.into();
+            h.call("ui.resize", serde_json::json!({"width":1200,"height":620}));
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+            h.frames(6);
+            let footer = crate::scenario::rect_of("dialog:pages_footer").unwrap();
+            let nav = crate::scenario::rect_of("dialog:pages").unwrap();
+            h.frame_with(vec![
+                egui::Event::PointerMoved(egui::pos2(nav.center().x, nav.top() + 30.0)),
+                egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -1000.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                },
+            ]);
+            h.frames(60);
+            assert_eq!(crate::scenario::rect_of("dialog:pages_footer"), Some(footer));
+            assert!(footer.contains_rect(crate::scenario::rect_of("prefs:profile").unwrap()));
+            assert!(nav.contains_rect(crate::scenario::rect_of("prefs:page:Plugins").unwrap()), "last page is reachable in {theme}");
+        }
     }
 }

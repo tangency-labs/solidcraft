@@ -35,7 +35,13 @@ fn focused_text_id() -> egui::Id {
 /// box draws through.
 pub(crate) fn note_focused_text(ctx: &egui::Context, id: egui::Id, chars: usize) {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|d| d.insert_temp(focused_text_id(), (pass, id, chars)));
+    ctx.data_mut(|d| d.insert_temp(focused_text_id(), (pass, id, 0..chars)));
+}
+
+/// A host expression field may select only its numeric character range on Tab.
+pub(crate) fn note_focused_selection(ctx: &egui::Context, id: egui::Id, range: std::ops::Range<usize>) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(focused_text_id(), (pass, id, range)));
 }
 
 /// Per viewport: the box that had the keyboard at the end of the last pass, and the frame Tab was
@@ -77,10 +83,10 @@ impl egui::Plugin for TabSelects {
             return;
         }
         let pass = ctx.cumulative_pass_nr();
-        let noted = ctx.data(|d| d.get_temp::<(u64, egui::Id, usize)>(focused_text_id()));
-        if let Some((_, _, chars)) = noted.filter(|(drawn, noted, _)| *drawn == pass && *noted == id) {
+        let noted = ctx.data(|d| d.get_temp::<(u64, egui::Id, std::ops::Range<usize>)>(focused_text_id()));
+        if let Some((_, _, range)) = noted.filter(|(drawn, noted, _)| *drawn == pass && *noted == id) {
             let mut state = egui::text_edit::TextEditState::load(&ctx, id).unwrap_or_default();
-            state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(chars))));
+            state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(range.start), CCursor::new(range.end))));
             state.store(&ctx, id);
         }
     }

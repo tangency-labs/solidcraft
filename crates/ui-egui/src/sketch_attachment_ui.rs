@@ -178,7 +178,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let title = solidcraft_ui_text::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
     let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
     let mut painted = false;
-    let response = panel.window(ctx).show(ctx, |ui| {
+    let response = panel.show(ctx, None, |ui| {
         painted = ui.is_visible() && !ui.is_sizing_pass();
         let (closed, action) = panel.feature(
             ui,
