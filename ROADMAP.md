@@ -489,9 +489,10 @@ completed drawings publish atomically. The browser still exports synchronously.
   connected equal-distance chamfers also trim each other across unequal sloped rim walls;
   curved chamfer chains with straight planar ends can terminate across two existing planar
   bevel faces, splitting their shared seam; picks on the same tangent chain are applied once (#1303);
-  curved fillet chains with straight planar ends likewise end across two planar end faces, the
-  round crossing their seam: two bevels at the end (convex), or the foot of a wall whose end
-  stands flush with the side of the plate beneath it, ending in the plate's slanted side (concave);
+  curved fillet chains with straight planar ends likewise end across two planar end faces: across
+  the seam between two end bevels, or meeting the seam's line past the vertex where it lies in a
+  side's plane (the foot of a wall whose end is flush with the plate's slanted side, concave; a
+  plate's top edge running into a wall standing on it, convex);
   whole smooth loops of a planar face, picked whole or by one edge (tangent
   chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
   plate outlines), loops with sharp corners between straight or mixed arc/line edges (straight

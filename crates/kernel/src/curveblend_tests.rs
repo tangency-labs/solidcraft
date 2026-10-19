@@ -768,13 +768,12 @@ fn round_an_open_rim_after_end_chamfers() {
         },
         holes: vec![],
     };
-    let mut body = crate::extrude(&Plane::XY, &[rim], 0.0, 13.0).unwrap().pop().unwrap();
-    body = crate::blend_corner::chamfer(
-        &body,
-        &[Vec3::new(31.0, 13.375, 13.0), Vec3::new(31.0, -13.375, 13.0), Vec3::new(31.0, 11.75, 8.0), Vec3::new(31.0, -11.75, 8.0)],
-        1.0,
-    )
-    .unwrap();
+    let plain = crate::extrude(&Plane::XY, &[rim], 0.0, 13.0).unwrap().pop().unwrap();
+    let bevelled = |size: f64| {
+        let ends = [Vec3::new(31.0, 13.375, 13.0), Vec3::new(31.0, -13.375, 13.0), Vec3::new(31.0, 11.75, 8.0), Vec3::new(31.0, -11.75, 8.0)];
+        crate::blend_corner::chamfer(&plain, &ends, size).unwrap()
+    };
+    let body = bevelled(1.0);
     let picks = [Vec3::new(-11.75, 0.0, 13.0), Vec3::new(15.0, 11.75, 13.0), Vec3::new(15.0, -11.75, 13.0)];
     let result = fillet(&body, &picks, 1.0).unwrap();
     assert!(result.validity().is_empty(), "{:?}", result.validity());
@@ -782,9 +781,13 @@ fn round_an_open_rim_after_end_chamfers() {
     // A point `s` from the inner wall and `h` below the top is taken away along the two lines
     // up to the nearer bevel (x + z = 43 above, x - y = 18.25 beside: x = 30 + min(s, h)) and
     // round the half ring at radius 11.75 + s.
+    // The mesh inside the round takes slightly more than the round does: measured on the same rim
+    // rounded without bevels, its square ends exact, and taken off.
     let along = round_section_integral(|s, h| 2.0 * (30.0 + s.min(h)) + std::f64::consts::PI * (11.75 + s));
-    let removed = planned_volume(&body) - planned_volume(&result);
-    assert!((removed - along).abs() < 0.01, "removed {removed}, expected {along}");
+    let square = round_section_integral(|s, _| 2.0 * 31.0 + std::f64::consts::PI * (11.75 + s));
+    let bias = planned_volume(&plain) - planned_volume(&fillet(&plain, &picks, 1.0).unwrap()) - square;
+    let removed = planned_volume(&body) - planned_volume(&result) - bias;
+    assert!((removed - along).abs() < 0.003, "removed {removed}, expected {along} (mesh bias {bias})");
     // Each end meets the seam between the bevels where the round crosses it.
     for side in [1.0, -1.0] {
         let crossing = result.solid.vertex_iter().map(|v| from_p3(v.point())).find(|p| {
@@ -797,6 +800,10 @@ fn round_an_open_rim_after_end_chamfers() {
         assert!(((1.0 - s).hypot(1.0 - h) - 1.0).abs() < 1e-5, "{crossing:?}");
     }
     assert!(fillet(&body, &picks, 4.0).is_err());
+    // Bevels narrower than where the round meets their seam (0.3 against 1 - 1/sqrt 2 of 1.5):
+    // the round would cross into the end face beyond them. Refused, not built across it.
+    let refused = fillet(&bevelled(0.3), &picks, 1.5).unwrap_err().to_string();
+    assert!(refused.contains("split round end"), "{refused}");
 }
 
 /// A plate (z 0 to 2) with an L-shaped wall standing on it (z 2 to 6), the wall's outer corner
@@ -865,7 +872,7 @@ fn round_the_plate_top_edge_up_to_the_wall_ends() {
     // seam between the wall's face and its end runs up from the chain's end, in the plane of the
     // plate's side: the round meets it at the side's contact, and the wall's face runs on down to
     // the round (the plate beneath the wall is kept).
-    let rounded = 2.0;
+    let rounded = 3.0;
     let mut body = wall_on_a_plate();
     let outline =
         [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
@@ -919,6 +926,7 @@ fn round_the_plate_top_edge_up_to_the_wall_ends() {
     for p in [Vec3::new(0.0, 2.0, 2.0), Vec3::new(20.0, -20.0, 2.0)] {
         assert!(!result.solid.vertex_iter().any(|v| from_p3(v.point()).dist(p) < 1e-6), "{p:?}");
     }
-    // Deeper than the plate is thick: refused.
-    assert!(fillet(&body, &picks, 2.5).is_err());
+    // Deeper than the plate is thick (its corners' rounds would take 3): refused at the ends.
+    let refused = fillet(&body, &picks, 2.1).unwrap_err().to_string();
+    assert!(refused.contains("larger than the neighbouring faces"), "{refused}");
 }
