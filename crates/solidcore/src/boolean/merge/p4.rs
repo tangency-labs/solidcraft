@@ -30,7 +30,6 @@ use crate::geom::attribute::{
 };
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::{MarkLock, MarkType};
-use crate::geom::object::ObjectRef;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
@@ -42,6 +41,7 @@ use crate::topology::topology_traverser::{self as traverser, Entity, Marks};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use crate::EntityRef;
 
+mod arena_pair;
 mod kernel_adapter;
 pub use kernel_adapter::KernelManifoldIntersector;
 
@@ -164,20 +164,25 @@ pub trait ManifoldIntersector {
     /// kernel from `other`; attributes are the same store used during the body.
     fn transform_brep(
         &mut self,
-        _kernels: &mut BooleanKernels<'_>,
-        _brep: &mut Brep,
-        _other: bool,
-        _attributes: &mut AttributeStore,
-        _rotate_n_move: &Axis2Placement,
-        _scale: Option<Vec3>,
-        _scale_tolerance: bool,
-    ) -> Result<()> {
-        // UNPORTED(topology.brep_p5): SmBrep::Transform
-        Err(SolidError::unported(
-            "SmBrep::Transform",
-            "topology.brep_p5",
-        ))
-    }
+        kernels: &mut BooleanKernels<'_>,
+        brep: &mut Brep,
+        other: bool,
+        attributes: &mut AttributeStore,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        scale_tolerance: bool,
+    ) -> Result<()>;
+
+    /// `CopyFaces` for extracted components, with native `use_merge=TRUE`.
+    fn copy_component_faces(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        source: &mut Brep,
+        other: bool,
+        faces: &[FaceId],
+        destination: &mut Brep,
+        attributes: &mut AttributeStore,
+    ) -> Result<()>;
 
     /// `GetMappedBrepObjects(SmEdge_TYPE)` before later topology copies.
     fn mapped_edges(&self) -> Result<Vec<EdgeId>>;
@@ -263,24 +268,13 @@ pub trait ManifoldIntersector {
     /// `IntersectInsertRelate()`; all subsequent orchestration remains after it.
     fn intersect_insert_relate(
         &mut self,
-        _kernels: &mut BooleanKernels<'_>,
-        _primary: &mut Brep,
-        _other: &mut Brep,
-    ) -> Result<()> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::IntersectInsertRelate
-        Err(SolidError::unported(
-            "SmTopologyIntersector::IntersectInsertRelate",
-            "boolean.topology_intersector_p2",
-        ))
-    }
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+    ) -> Result<()>;
     /// `RemoveRelationship(pFace,pOtherFace)`.
-    fn remove_relationship(&mut self, _face: FaceId, _other_face: FaceId) -> Result<()> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::RemoveRelationship
-        Err(SolidError::unported(
-            "SmTopologyIntersector::RemoveRelationship",
-            "boolean.topology_intersector_p2",
-        ))
-    }
+    fn remove_relationship(&mut self, face: FaceId, other_face: FaceId) -> Result<()>;
     /// Reset `m_bTopologyDeleted` before attempting to close a single vertex.
     fn clear_topology_deleted(&mut self);
     /// Current `m_bTopologyDeleted`, including changes during a failed close.
@@ -296,7 +290,7 @@ pub trait ManifoldIntersector {
         _vertex: VertexId,
         _made_new_topology: &mut bool,
     ) -> Result<()> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::CloseIntersectionLoop
+        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::CloseIntersectionLoop (absent from partial #203; overseer-owned follow-up)
         Err(SolidError::unported(
             "SmTopologyIntersector::CloseIntersectionLoop",
             "boolean.topology_intersector_p2",
@@ -305,17 +299,12 @@ pub trait ManifoldIntersector {
     /// `FixGaps(sSingleVertices,bModifiedTopology,sDelVerts,sDelEdges)`.
     fn fix_gaps(
         &mut self,
-        _kernels: &mut BooleanKernels<'_>,
-        _primary: &mut Brep,
-        _other: &mut Brep,
-        _single_vertices: &[VertexId],
-    ) -> Result<FixedGaps> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::FixGaps
-        Err(SolidError::unported(
-            "SmTopologyIntersector::FixGaps",
-            "boolean.topology_intersector_p2",
-        ))
-    }
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+        single_vertices: &[VertexId],
+    ) -> Result<FixedGaps>;
     /// `MakeFaceuse(pFU1,pOldRegion,pNewRegion,pOrigRegion,&NewFs)`.
     /// Its copy notifications use this same caller store, including when a face
     /// already has a mate. Build `TopologyCopy` with these attributes.
@@ -337,17 +326,12 @@ pub trait ManifoldIntersector {
     /// `DeleteFaces(sDelFaces,&sKeepAsWires)`; the wire list is non-null even empty.
     fn delete_faces(
         &mut self,
-        _kernels: &mut BooleanKernels<'_>,
-        _primary: &mut Brep,
-        _faces: &[FaceId],
-        _keep_wires: Option<&[EdgeId]>,
-    ) -> Result<()> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::DeleteFaces
-        Err(SolidError::unported(
-            "SmTopologyIntersector::DeleteFaces",
-            "boolean.topology_intersector_p2",
-        ))
-    }
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        attributes: &mut AttributeStore,
+        faces: &[FaceId],
+        keep_wires: Option<&[EdgeId]>,
+    ) -> Result<()>;
 }
 
 /// Typed entities used for attribute identities; ids stay operand-local.
@@ -477,6 +461,7 @@ fn mark_common(
     intersector: &mut impl ManifoldIntersector,
     lock: &MarkLock,
     manifold: bool,
+    attributes: &mut AttributeStore,
 ) -> Result<()> {
     let mark = lock.mark_type1();
     let other_mark = lock.mark_type2();
@@ -521,7 +506,7 @@ fn mark_common(
             single.push(v);
         }
         if done && single.len() > 1 && manifold {
-            let fixed = intersector.fix_gaps(kernels, primary, other, &single)?;
+            let fixed = intersector.fix_gaps(kernels, primary, other, attributes, &single)?;
             state
                 .intersection_vertices
                 .retain(|v| !fixed.deleted_vertices.contains(v));
@@ -1145,16 +1130,17 @@ fn result_solid(operation: BooleanOperation, data: &MergeRegionData, was_solid: 
 
 fn find_and_set_infinite(
     _kernels: &mut BooleanKernels<'_>,
-    _primary: &mut Brep,
-    _shell: Option<crate::topology::ShellId>,
-    _void_setting: bp::SetRegionVoidType,
-    _bounding_box: Option<&mut crate::geom::extent3d::Extent3d>,
+    primary: &mut Brep,
+    shell: Option<crate::topology::ShellId>,
+    void_setting: bp::SetRegionVoidType,
+    bounding_box: Option<&mut crate::geom::extent3d::Extent3d>,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::FindAndSetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::FindAndSetInfiniteRegion",
-        "topology.brep_p5",
-    ))
+    let code = match void_setting {
+        bp::SetRegionVoidType::NestedSolid => 0,
+        bp::SetRegionVoidType::InfiniteRegionOnly => 1,
+        bp::SetRegionVoidType::InfiniteRegionSwap => 2,
+    };
+    crate::topology::brep::p5::find_and_set_infinite_region(primary, shell, code, bounding_box)
 }
 
 fn is_sheet(_primary: &Brep) -> Result<bool> {
@@ -1171,16 +1157,13 @@ fn is_oriented_sheet(_primary: &Brep) -> Result<bool> {
 }
 
 fn orient_sheet_surfaces(
-    _kernels: &mut BooleanKernels<'_>,
-    _other: &mut Brep,
-    _face: FaceId,
-    _same: bool,
+    kernels: &mut BooleanKernels<'_>,
+    other: &mut Brep,
+    face: FaceId,
+    same: bool,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p9): SmBrep::OrientSheetSurfaces
-    Err(SolidError::unported(
-        "SmBrep::OrientSheetSurfaces",
-        "topology.brep_p9",
-    ))
+    let k = kernels.other.as_deref_mut().unwrap_or(kernels.primary);
+    crate::topology::brep::p9::orient_sheet_surfaces(k, other, Some(face), same)
 }
 
 fn new_component_brep(
@@ -1226,7 +1209,16 @@ fn editing_stages(
         faces.other_keep.clear();
         faces.delete.clear();
         faces.other_delete.clear();
-        mark_common(kernels, primary, other, state, intersector, lock, manifold)?;
+        mark_common(
+            kernels,
+            primary,
+            other,
+            state,
+            intersector,
+            lock,
+            manifold,
+            attributes,
+        )?;
         if operation == BooleanOperation::Imprint || options.imprinting {
             return Ok(true);
         }
@@ -1325,7 +1317,13 @@ fn editing_stages(
             }
         }
     }
-    intersector.delete_faces(kernels, primary, &faces.delete, Some(&keep_wires))?;
+    intersector.delete_faces(
+        kernels,
+        primary,
+        attributes,
+        &faces.delete,
+        Some(&keep_wires),
+    )?;
     for r in bp::regions(primary, None)? {
         if let Some(data) = merge_data(
             attributes,
@@ -1450,7 +1448,7 @@ fn manifold_boolean_translated(
     let second = usize::from(kernels.other.is_some());
     // Intersections precede binding the classification mark lock upstream.
     let intersect = intersector
-        .intersect_insert_relate(kernels, a, b)
+        .intersect_insert_relate(kernels, a, b, attributes)
         .and_then(|()| {
             state.intersection_edges.extend(intersector.mapped_edges()?);
             state
@@ -1539,24 +1537,14 @@ fn manifold_boolean_translated(
                     crate::geom::tol::USE_DEFAULT,
                     None,
                 )?;
-                let this_face = |face| ObjectRef {
-                    key: intersector.object_key(reverse, MergeEntity::Face(face)),
-                    type_code: 16002, // SmFace_TYPE
-                };
-                // CopyFaces(set, component): native defaults are new_faces=NULL,
-                // use_merge=TRUE, merge_object=NULL. The p7 merge branch creates
-                // its own merge object; discard its face outputs and status.
-                ignored(crate::topology::brep::p7::copy_faces(
-                    if reverse {
-                        kernels.other()
-                    } else {
-                        kernels.primary
-                    },
+                // Native defaults: new_faces=NULL, use_merge=TRUE, merge_object=NULL.
+                ignored(intersector.copy_component_faces(
+                    kernels,
                     source,
+                    reverse,
                     set,
                     &mut component,
-                    true,
-                    &this_face,
+                    attributes,
                 ))?;
                 components.push(component);
             }

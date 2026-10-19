@@ -7,35 +7,42 @@
 //! | [`KernelManifoldIntersector`] | `SmMerge::m_vTI` and shared merge-stage access |
 //!
 //! Deviations: the existing typed `Relations` is the sole mate store. Object
-//! keys encode a caller-reserved 28-bit namespace, operand, class and arena id;
+//! keys encode a caller-reserved 27-bit namespace, operand, class and arena id;
 //! reserve a different namespace for every pair sharing an attribute store.
 //! Source-list notification handles resolve back into that same attribute store.
 //! Surface identity follows the canonical B-rep cache convention: its owner,
 //! or its containing face when the owned surface has no explicit owner.
 //! No geometry, relationship algorithm or input-dependent recursion is added.
 
-use super::{manifold_boolean, BooleanKernels, ManifoldIntersector, ManifoldState, MergeEntity};
+use super::arena_pair::{self, ArenaPair, H};
+use super::{
+    manifold_boolean, BooleanKernels, FixedGaps, ManifoldIntersector, ManifoldState, MergeEntity,
+};
 use crate::boolean::merge::p1::{self, MergeState};
 use crate::boolean::merge::p5;
+use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::boolean::topology_intersector::p1::{set_subset_objects, Relations};
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::{BooleanOperation, REGION_TYPE};
 use crate::geom::attribute::{ids, AttributeStore, ObjectKey};
-use crate::geom::context::{MarkLock, MarkType};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::context::{Context, MarkLock, MarkType};
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
+use crate::math::Vec3;
 use crate::topology::brep::p1 as bp;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::shell::{RegionLookup, RegionRef};
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
+use crate::EntityRef;
 use std::collections::{BTreeMap, BTreeSet};
 
 const OP: &str = "boolean::merge::p4::kernel_adapter";
 
 fn key(namespace: u32, other: bool, kind: u64, index: u32) -> ObjectKey {
     ObjectKey(
-        (u64::from(namespace) << 36) | (u64::from(other) << 35) | (kind << 32) | u64::from(index),
+        (u64::from(namespace) << 37) | (u64::from(other) << 36) | (kind << 32) | u64::from(index),
     )
 }
 
@@ -49,7 +56,46 @@ fn entity_key(namespace: u32, other: bool, entity: MergeEntity) -> ObjectKey {
     key(namespace, other, kind, index)
 }
 
-/// The kernel implementation of all sixteen required manifold adapter methods.
+// Cache construction takes only &Kernel; preserve the caller's settings and
+// RNG state for that read-only work rather than evaluating under defaults.
+fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
+    Kernel {
+        tolerances: k.tolerances,
+        rng: k.rng.clone(),
+        caches: crate::kernel::Caches::default(),
+        context: context.metadata_copy(),
+    }
+}
+
+fn cache_kernels(k: &Kernel, other: Option<&Kernel>, context: &Context) -> [Kernel; 2] {
+    [
+        cache_kernel(k, context),
+        other.map_or_else(|| cache_kernel(k, context), |k| cache_kernel(k, &k.context)),
+    ]
+}
+
+// Every topology class has its own slot in the caller-reserved namespace.
+pub(super) fn notification_key(namespace: u32, other: bool, entity: EntityRef) -> ObjectRef {
+    let (kind, type_code, index) = match entity {
+        EntityRef::Region(v) => (1, 16012, v.index()),
+        EntityRef::Face(v) => (2, 16002, v.index()),
+        EntityRef::Edge(v) => (3, 16016, v.index()),
+        EntityRef::Vertex(v) => (4, 16021, v.index()),
+        EntityRef::Brep(v) => (0, 16011, v.index()),
+        EntityRef::Shell(v) => (7, 16013, v.index()),
+        EntityRef::Loop(v) => (8, 16003, v.index()),
+        EntityRef::Faceuse(v) => (9, 16022, v.index()),
+        EntityRef::Loopuse(v) => (10, 16004, v.index()),
+        EntityRef::Edgeuse(v) => (11, 16005, v.index()),
+        EntityRef::Vertexuse(v) => (12, 16006, v.index()),
+    };
+    ObjectRef {
+        key: key(namespace, other, kind, index),
+        type_code,
+    }
+}
+
+/// The kernel adapter for the ported merge and topology-intersector stages.
 /// The canonical merge state owns the single shared face/edge/vertex mate store;
 /// notifications use `records` and the attributes supplied to each operation.
 /// Missing dependency calls retain the trait's owner-tagged defaults.
@@ -61,22 +107,25 @@ pub struct KernelManifoldIntersector {
     pub records: BTreeMap<ObjectKey, Topology>,
     /// `m_bTopologyDeleted`; dependency editing stages update this same flag.
     pub topology_deleted: bool,
+    intersector: TopologyIntersector<H>,
+    curves: Vec<crate::curve::curve::Curve>,
+    extra_curves: Vec<crate::curve::curve::Curve>,
     namespace: u32,
     subset: Option<BTreeSet<ObjectRef>>,
 }
 
 impl KernelManifoldIntersector {
-    /// Create an adapter with upstream merge defaults and no relationships.
+    /// Create an adapter with default merge options and no relationships.
     /// The caller reserves `namespace` exclusively among all object keys in the
-    /// supplied attribute/notification stores; its complete block is `2^36` keys.
+    /// supplied attribute/notification stores; its complete block is `2^37` keys.
     ///
     /// # Errors
-    /// A namespace exceeding 28 bits.
+    /// A namespace exceeding 27 bits.
     pub fn new(namespace: u32) -> Result<Self> {
-        if namespace > 0x0fff_ffff {
+        if namespace > 0x07ff_ffff {
             return Err(SolidError::invalid_input(
                 OP,
-                "object namespace exceeds 28 bits",
+                "object namespace exceeds 27 bits",
             ));
         }
         Ok(Self {
@@ -85,7 +134,23 @@ impl KernelManifoldIntersector {
             topology_deleted: false,
             namespace,
             subset: None,
+            intersector: TopologyIntersector::new(
+                Some(arena_pair::brep_h(0)),
+                Some(arena_pair::brep_h(1)),
+                0.0,
+                0.0,
+            ),
+            curves: Vec::new(),
+            extra_curves: Vec::new(),
         })
+    }
+
+    /// Set the same explicit intersection tolerances supplied to `SmMerge`.
+    /// Leaving them at zero retains the context-only intersector defaults;
+    /// automatic tolerance selection belongs to the merge constructor's owner.
+    pub fn set_intersection_tolerances(&mut self, distance: f64, angle_radians: f64) {
+        self.intersector.set_this_approx_tol_3d(distance);
+        self.intersector.set_this_ang_tol_rad(angle_radians);
     }
 
     /// Run the orchestration with the options held in the canonical `MergeState`.
@@ -132,10 +197,10 @@ impl KernelManifoldIntersector {
         attributes: &'a AttributeStore,
         handle: ObjectRef,
     ) -> Result<&'a [ObjectKey]> {
-        let kind = (handle.key.0 >> 32) & 7;
+        let kind = (handle.key.0 >> 32) & 15;
         if handle.type_code != 0
-            || handle.key.0 >> 36 != u64::from(self.namespace)
-            || (handle.key.0 >> 35) & 1 != 0
+            || handle.key.0 >> 37 != u64::from(self.namespace)
+            || (handle.key.0 >> 36) & 1 != 0
             || !(kind == 5 || kind == 6)
         {
             return Err(SolidError::invalid_input(OP, "not a source-list handle"));
@@ -165,13 +230,13 @@ struct Regions<'a> {
 
 impl RegionLookup for Regions<'_> {
     fn resolve_region(&self, object: ObjectKey) -> Result<RegionRef<'_>> {
-        if object.0 >> 36 != u64::from(self.namespace) || (object.0 >> 32) & 7 != 1 {
+        if object.0 >> 37 != u64::from(self.namespace) || (object.0 >> 32) & 15 != 1 {
             return Err(SolidError::invalid_input(
                 OP,
                 "not an operand region identity",
             ));
         }
-        let other = (object.0 >> 35) & 1 != 0;
+        let other = (object.0 >> 36) & 1 != 0;
         let brep = if other { self.other } else { self.primary };
         let region_id = RegionId::from_index(object.0 as u32);
         brep.region(region_id)?;
@@ -184,6 +249,231 @@ impl RegionLookup for Regions<'_> {
 }
 
 impl ManifoldIntersector for KernelManifoldIntersector {
+    fn transform_brep(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        brep: &mut Brep,
+        other: bool,
+        attributes: &mut AttributeStore,
+        placement: &Axis2Placement,
+        scale: Option<Vec3>,
+        scale_tolerance: bool,
+    ) -> Result<()> {
+        let namespace = self.namespace;
+        let key_of = |e| notification_key(namespace, other, e);
+        let k = if other {
+            kernels.other.as_deref_mut().unwrap_or(kernels.primary)
+        } else {
+            &mut *kernels.primary
+        };
+        Context::with_notification_context(k, |k, context| {
+            let mut env = crate::topology::edge::NotifyEnv {
+                records: &mut self.records,
+                attributes,
+                context: Some(context),
+                key_of: &key_of,
+            };
+            crate::topology::brep::p5::transform_with_notifications(
+                k,
+                brep,
+                placement,
+                scale,
+                scale_tolerance,
+                Some(&mut env),
+            )
+        })
+    }
+
+    fn intersect_insert_relate(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+    ) -> Result<()> {
+        let mut subset = Vec::new();
+        if let Some(selected) = &self.subset {
+            for f in bp::faces(other, None)? {
+                if selected.contains(&Self::surface_identity(other, f)?) {
+                    subset.push(arena_pair::surface_handle(true, f));
+                }
+            }
+            if subset.is_empty() {
+                subset.push(arena_pair::unmatched_surface());
+            }
+        }
+        self.intersector.set_subset(&subset);
+        self.intersector.topology_deleted = self.topology_deleted;
+        Context::with_notification_context(kernels.primary, |k, context| {
+            let mut pair = ArenaPair::new(
+                primary,
+                Some(other),
+                &mut self.curves,
+                &mut self.extra_curves,
+                &mut self.records,
+                attributes,
+                cache_kernels(k, kernels.other.as_deref(), context),
+                context,
+                kernels.other.as_deref_mut().map(|k| &mut k.context),
+                self.namespace,
+            );
+            let result = self.merge.intersector.with_intersector(
+                &mut self.intersector,
+                arena_pair::encode,
+                arena_pair::decode,
+                |ti| ti.intersect_insert_relate(k, &mut pair, arena_pair::TI_HANDLE),
+            );
+            self.topology_deleted = self.intersector.topology_deleted;
+            // Deleted curve handles no longer appear in manager/table state. Storage
+            // remains stable so surviving handles keep their identities.
+            result.map(|_| ())
+        })
+    }
+
+    fn remove_relationship(&mut self, face: FaceId, other_face: FaceId) -> Result<()> {
+        self.merge.intersector.with_intersector(
+            &mut self.intersector,
+            arena_pair::encode,
+            arena_pair::decode,
+            |ti| {
+                ti.remove_relationship(
+                    Some(arena_pair::encode(EntityRef::Face(face), false)),
+                    Some(arena_pair::encode(EntityRef::Face(other_face), true)),
+                )
+            },
+        )
+    }
+
+    fn fix_gaps(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+        single_vertices: &[VertexId],
+    ) -> Result<FixedGaps> {
+        let vertices: Vec<_> = single_vertices
+            .iter()
+            .map(|&v| arena_pair::encode(EntityRef::Vertex(v), false))
+            .collect();
+        Context::with_notification_context(kernels.primary, |k, context| {
+            let mut pair = ArenaPair::new(
+                primary,
+                Some(other),
+                &mut self.curves,
+                &mut self.extra_curves,
+                &mut self.records,
+                attributes,
+                cache_kernels(k, kernels.other.as_deref(), context),
+                context,
+                kernels.other.as_deref_mut().map(|k| &mut k.context),
+                self.namespace,
+            );
+            self.merge
+                .intersector
+                .with_intersector(
+                    &mut self.intersector,
+                    arena_pair::encode,
+                    arena_pair::decode,
+                    |ti| ti.fix_gaps(&mut pair, &vertices),
+                )
+                .and_then(|out| {
+                    Ok(FixedGaps {
+                        modified_topology: out.modified_topology,
+                        deleted_vertices: out
+                            .deleted_vertices
+                            .into_iter()
+                            .map(arena_pair::deleted_vertex)
+                            .collect::<Result<_>>()?,
+                        deleted_edges: out
+                            .deleted_edges
+                            .into_iter()
+                            .flatten()
+                            .map(arena_pair::deleted_edge)
+                            .collect::<Result<_>>()?,
+                    })
+                })
+        })
+    }
+
+    fn delete_faces(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        attributes: &mut AttributeStore,
+        faces: &[FaceId],
+        keep_wires: Option<&[EdgeId]>,
+    ) -> Result<()> {
+        let faces: Vec<_> = faces
+            .iter()
+            .map(|&f| arena_pair::encode(EntityRef::Face(f), false))
+            .collect();
+        let keep = keep_wires.map(|edges| {
+            edges
+                .iter()
+                .map(|&e| arena_pair::encode(EntityRef::Edge(e), false))
+                .collect::<Vec<_>>()
+        });
+        Context::with_notification_context(kernels.primary, |k, context| {
+            let mut pair = ArenaPair::new(
+                primary,
+                None,
+                &mut self.curves,
+                &mut self.extra_curves,
+                &mut self.records,
+                attributes,
+                cache_kernels(k, kernels.other.as_deref(), context),
+                context,
+                None,
+                self.namespace,
+            );
+            self.merge.intersector.with_intersector(
+                &mut self.intersector,
+                arena_pair::encode,
+                arena_pair::decode,
+                |ti| ti.delete_faces(&mut pair, &faces, keep.as_deref()),
+            )
+        })
+    }
+
+    fn copy_component_faces(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        source: &mut Brep,
+        other: bool,
+        faces: &[FaceId],
+        destination: &mut Brep,
+        attributes: &mut AttributeStore,
+    ) -> Result<()> {
+        let namespace = self.namespace;
+        let face_key = |face| notification_key(namespace, other, EntityRef::Face(face));
+        let key_of = |e| notification_key(namespace, other, e);
+        let k = if other {
+            kernels.other.as_deref_mut().unwrap_or(kernels.primary)
+        } else {
+            &mut *kernels.primary
+        };
+        Context::with_notification_context(k, |k, context| {
+            let mut env = crate::topology::edge::NotifyEnv {
+                records: &mut self.records,
+                attributes,
+                context: Some(context),
+                key_of: &key_of,
+            };
+            // Native defaults: use_merge=TRUE, no supplied merge object.
+            crate::topology::brep::p7::copy_faces(
+                k,
+                source,
+                faces,
+                destination,
+                true,
+                &face_key,
+                &mut env,
+            )
+            .map(|_| ())
+        })
+    }
+
     fn mapped_edges(&self) -> Result<Vec<EdgeId>> {
         Ok(self.merge.intersector.edges.mapped_primary())
     }
@@ -267,10 +557,7 @@ impl ManifoldIntersector for KernelManifoldIntersector {
             key: entity_key(namespace, true, MergeEntity::Vertex(id)),
             type_code: crate::topology::vertex::TYPE,
         };
-        let destination_key = |id| ObjectRef {
-            key: entity_key(namespace, false, MergeEntity::Vertex(id)),
-            type_code: crate::topology::vertex::TYPE,
-        };
+        let destination_key = |e| notification_key(namespace, false, e);
         let mut copy = p1::VertexCopy {
             records: &mut self.records,
             attributes,
@@ -377,6 +664,7 @@ impl ManifoldIntersector for KernelManifoldIntersector {
 
     fn clear_topology_deleted(&mut self) {
         self.topology_deleted = false;
+        self.intersector.topology_deleted = false;
     }
 
     fn topology_deleted(&self) -> bool {
@@ -394,8 +682,8 @@ mod tests {
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::topology_traverser::Entity;
     use crate::topology::{
-        Edge, Edgeuse, EdgeuseOwner, Faceuse, Loopuse, LoopuseStart, Region, Vertexuse,
-        VertexuseOwner,
+        Edge, Edgeuse, EdgeuseId, EdgeuseOwner, Faceuse, Loopuse, LoopuseStart, Region, Vertexuse,
+        VertexuseId, VertexuseOwner,
     };
     use std::sync::{Arc, Mutex};
 
@@ -713,6 +1001,194 @@ mod tests {
         assert_eq!(primary_notices.lock().unwrap().len(), 2);
     }
 
+    #[test]
+    fn newly_partial_intersector_stages_restore_the_live_mates_on_error() {
+        let mut adapter = KernelManifoldIntersector::new(3).unwrap();
+        adapter.set_intersection_tolerances(1e-9, 0.3);
+        let mut a = Brep::default();
+        let mut b = Brep::default();
+        let f = face(&mut a);
+        let of = face(&mut b);
+        let v = a.add_vertex(Vec3::ZERO).unwrap();
+        let ov = b.add_vertex(Vec3::X).unwrap();
+        adapter.relate_faces(&mut a, f, &mut b, of).unwrap();
+        adapter.merge.intersector.vertices.record(v, ov).unwrap();
+        assert!(adapter
+            .remove_relationship(f, FaceId::from_index(of.index() + 1))
+            .is_err());
+        assert_eq!(adapter.face_mate(f), Some(of));
+        adapter.remove_relationship(f, of).unwrap();
+        assert_eq!(adapter.face_mate(f), None);
+        assert_eq!(adapter.merge.intersector.faces.primary(of), None);
+        assert_eq!(adapter.merge.intersector.vertices.primary(ov), Some(v));
+        let mut k = Kernel::default();
+        let mut attrs = AttributeStore::default();
+        let mut kernels = BooleanKernels {
+            primary: &mut k,
+            other: None,
+        };
+        let out = adapter
+            .fix_gaps(&mut kernels, &mut a, &mut b, &mut attrs, &[v])
+            .unwrap();
+        assert!(!out.modified_topology);
+        adapter
+            .delete_faces(&mut kernels, &mut a, &mut attrs, &[], Some(&[]))
+            .unwrap();
+        let err = adapter
+            .intersect_insert_relate(&mut kernels, &mut a, &mut b, &mut attrs)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SolidError::Unported {
+                unit: "topology.brep_p1",
+                upstream: "SmBrep::GetFaces"
+            }
+        ));
+        assert!(adapter.intersector.proto_topology_manager().is_some());
+        assert_eq!(adapter.merge.intersector.vertices.other(v), Some(ov));
+        assert_eq!(adapter.merge.intersector.vertices.primary(ov), Some(v));
+        assert_eq!(adapter.mapped_vertices().unwrap(), [v]);
+    }
+
+    #[test]
+    fn notification_scope_preserves_marks_and_both_operand_callbacks_on_error() {
+        use crate::boolean::topology_intersector::p1::IntersectorBrep;
+        let mut k = Kernel::default();
+        let mut other_k = Kernel::default();
+        k.context.set_doing_boolean(true);
+        let mut lock = MarkLock::new(
+            std::slice::from_mut(&mut k.context),
+            0,
+            crate::geom::context::ALL_MARKS,
+        )
+        .unwrap();
+        let mark = lock.mark_type();
+        let primary_events = Arc::new(Mutex::new(Vec::new()));
+        let other_events = Arc::new(Mutex::new(Vec::new()));
+        k.context
+            .set_user_notify_callback(Some(Box::new(Notices(primary_events.clone()))));
+        other_k
+            .context
+            .set_user_notify_callback(Some(Box::new(Notices(other_events.clone()))));
+        let mut a = Brep::default();
+        let mut b = Brep::default();
+        let v = a.add_vertex(Vec3::ZERO).unwrap();
+        let ov = b.add_vertex(Vec3::X).unwrap();
+        let mut records = BTreeMap::new();
+        records.insert(
+            notification_key(4, false, EntityRef::Vertex(v)).key,
+            Topology::new(),
+        );
+        records.insert(
+            notification_key(4, true, EntityRef::Vertex(ov)).key,
+            Topology::new(),
+        );
+        let mut attrs = AttributeStore::default();
+        let mut curves = Vec::new();
+        let mut extra = Vec::new();
+        let current_mark = k.context.current_mark(mark);
+        let error: Result<()> = Context::with_notification_context(&mut k, |k, context| {
+            assert!(k.context.is_mark_locked(mark));
+            assert_eq!(k.context.current_mark(mark), current_mark);
+            assert!(context.doing_boolean());
+            let settings = cache_kernels(k, Some(&other_k), context);
+            let mut pair = ArenaPair::new(
+                &mut a,
+                Some(&mut b),
+                &mut curves,
+                &mut extra,
+                &mut records,
+                &mut attrs,
+                settings,
+                context,
+                Some(&mut other_k.context),
+                4,
+            );
+            pair.set_vertex_point(k, arena_pair::encode(EntityRef::Vertex(v), false), Vec3::Y)?;
+            pair.set_vertex_point(k, arena_pair::encode(EntityRef::Vertex(ov), true), Vec3::Z)?;
+            Err(SolidError::sm_err(OP))
+        });
+        assert!(error.is_err());
+        assert!(k.context.user_notify_callback().is_some());
+        assert!(other_k.context.user_notify_callback().is_some());
+        assert!(k.context.is_mark_locked(mark));
+        assert_eq!(a.vertex(v).unwrap().point, Vec3::Y);
+        assert_eq!(b.vertex(ov).unwrap().point, Vec3::Z);
+        assert_eq!(primary_events.lock().unwrap().len(), 1);
+        assert_eq!(other_events.lock().unwrap().len(), 1);
+        assert_eq!(
+            primary_events.lock().unwrap()[0].1.key,
+            notification_key(4, false, EntityRef::Vertex(v)).key
+        );
+        assert_eq!(
+            other_events.lock().unwrap()[0].1.key,
+            notification_key(4, true, EntityRef::Vertex(ov)).key
+        );
+        lock.release(std::slice::from_mut(&mut k.context)).unwrap();
+    }
+
+    #[test]
+    fn transform_delegates_identity_and_reports_the_actual_notify_boundary() {
+        let mut adapter = KernelManifoldIntersector::new(5).unwrap();
+        let mut k = Kernel::default();
+        let mut b = Brep::default();
+        let mut attrs = AttributeStore::default();
+        let mut kernels = BooleanKernels {
+            primary: &mut k,
+            other: None,
+        };
+        adapter
+            .transform_brep(
+                &mut kernels,
+                &mut b,
+                false,
+                &mut attrs,
+                &Axis2Placement::default(),
+                None,
+                true,
+            )
+            .unwrap();
+        let mut placement = Axis2Placement::default();
+        placement.translate(Vec3::X);
+        let err = adapter
+            .transform_brep(
+                &mut kernels,
+                &mut b,
+                false,
+                &mut attrs,
+                &placement,
+                None,
+                true,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SolidError::Unported {
+                unit: "topology.brep_p2",
+                upstream: "SmBrep::Notify"
+            }
+        ));
+        let id = 17;
+        let entities = [
+            EntityRef::Region(RegionId::from_index(id)),
+            EntityRef::Face(FaceId::from_index(id)),
+            EntityRef::Edge(EdgeId::from_index(id)),
+            EntityRef::Vertex(VertexId::from_index(id)),
+            EntityRef::Edgeuse(EdgeuseId::from_index(id)),
+            EntityRef::Vertexuse(VertexuseId::from_index(id)),
+        ];
+        let keys: BTreeSet<_> = entities
+            .into_iter()
+            .flat_map(|e| {
+                [
+                    notification_key(5, false, e).key,
+                    notification_key(5, true, e).key,
+                ]
+            })
+            .collect();
+        assert_eq!(keys.len(), 12);
+    }
+
     fn wire(b: &mut Brep) -> EdgeId {
         let shell = b.add_shell().unwrap();
         let v = b.add_vertex(Vec3::ZERO).unwrap();
@@ -815,8 +1291,8 @@ mod tests {
     #[test]
     fn notification_key_blocks_never_alias_across_operands_or_classes() {
         let a = KernelManifoldIntersector::new(0).unwrap();
-        let b = KernelManifoldIntersector::new(0x0fff_ffff).unwrap();
-        assert!(KernelManifoldIntersector::new(0x1000_0000).is_err());
+        let b = KernelManifoldIntersector::new(0x07ff_ffff).unwrap();
+        assert!(KernelManifoldIntersector::new(0x0800_0000).is_err());
         let mut keys = BTreeSet::new();
         for adapter in [&a, &b] {
             for other in [false, true] {

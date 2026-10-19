@@ -201,6 +201,38 @@ impl Default for Context {
 }
 
 impl Context {
+    /// Borrow notification callbacks alongside the live kernel without moving
+    /// the kernel's traversal marks or tolerances. Notification APIs use mutable
+    /// Context while geometry APIs borrow Kernel; both refer to one upstream
+    /// context. Callback ownership is restored on every returned error as well.
+    pub(crate) fn with_notification_context<T>(
+        k: &mut Kernel,
+        action: impl FnOnce(&mut Kernel, &mut Context) -> T,
+    ) -> T {
+        let context = &mut k.context;
+        let mut notifications = context.metadata_copy();
+        notifications.user_notify_callback = context.user_notify_callback.take();
+        notifications.sys_notify_callback = context.sys_notify_callback.take();
+        let result = action(k, &mut notifications);
+        k.context.user_notify_callback = notifications.user_notify_callback;
+        k.context.sys_notify_callback = notifications.sys_notify_callback;
+        result
+    }
+
+    /// An immutable metadata snapshot, without copying callback ownership.
+    pub(crate) fn metadata_copy(&self) -> Self {
+        Self {
+            current_marks: self.current_marks,
+            mark_locks: self.mark_locks,
+            doing_boolean: self.doing_boolean,
+            model_size_estimate: self.model_size_estimate,
+            large_small_size_ratio: self.large_small_size_ratio,
+            zone_tol_3d: self.zone_tol_3d,
+            user_notify_callback: None,
+            sys_notify_callback: None,
+        }
+    }
+
     /// Creates a context (`SmContext::SmContext(double, double)`): every mark at 1 and
     /// unlocked, not in a Boolean, no callbacks; the zone tolerance follows from the
     /// model size estimate as in [`Context::set_this_model_size_estimate`]. Pass

@@ -220,14 +220,16 @@ pub(crate) fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessErr
             if b.net.iter().any(|r| r.len() != m + 1) {
                 return Err(harness("ragged net"));
             }
-            let last_u =
-                b.u.len()
-                    .checked_sub(1)
-                    .ok_or_else(|| harness("empty u knots"))?;
-            let last_v =
-                b.v.len()
-                    .checked_sub(1)
-                    .ok_or_else(|| harness("empty v knots"))?;
+            let mu = b
+                .u
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| harness("surface without u knots"))?;
+            let mv = b
+                .v
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| harness("surface without v knots"))?;
             v.extend([
                 0.0,
                 f64::from(u8::from(b.oob)),
@@ -236,8 +238,8 @@ pub(crate) fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessErr
                 m as f64,
                 b.p as f64,
                 b.q as f64,
-                last_u as f64,
-                last_v as f64,
+                mu as f64,
+                mv as f64,
             ]);
             for row in &b.net {
                 for p in row {
@@ -1546,5 +1548,44 @@ impl UnitDiff for Runner {
             op,
         };
         serde_json::to_value(i).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn surface_encoding_rejects_empty_knots_before_writing() {
+        for (u_empty, v_empty, message) in [
+            (true, false, "surface without u knots"),
+            (false, true, "surface without v knots"),
+            (true, true, "surface without u knots"),
+        ] {
+            let surface = SrfIn::Bspline(BssIn {
+                oob: false,
+                form: 0,
+                net: vec![
+                    vec![[0.0, 0.0, 0.0, NOW], [0.0, 1.0, 0.0, NOW]],
+                    vec![[1.0, 0.0, 0.0, NOW], [1.0, 1.0, 0.0, NOW]],
+                ],
+                p: 1,
+                q: 1,
+                u: if u_empty {
+                    vec![]
+                } else {
+                    vec![0.0, 0.0, 1.0, 1.0]
+                },
+                v: if v_empty {
+                    vec![]
+                } else {
+                    vec![0.0, 0.0, 1.0, 1.0]
+                },
+            });
+            let mut encoded = vec![42.0];
+            let error = push_surface(&mut encoded, &surface).unwrap_err();
+            assert_eq!(error.to_string(), message);
+            assert_eq!(encoded, vec![42.0]);
+        }
     }
 }

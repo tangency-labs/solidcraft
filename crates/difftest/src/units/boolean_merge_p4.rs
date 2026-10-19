@@ -220,6 +220,7 @@ impl UnitDiff for Runner {
         let mut state = ManifoldState::default();
         let mut attributes = AttributeStore::new();
         let mut adapter = KernelManifoldIntersector::new(0).map_err(|e| error(&e.to_string()))?;
+        adapter.set_intersection_tolerances(1e-9, 0.3);
         let mut lock = MarkLock::unbound();
         let [cookie_cutter, imprinting, boolean_post_process, imprint_and_classify_faces, keep_other_brep] =
             i.flags;

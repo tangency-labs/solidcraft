@@ -29,7 +29,7 @@ claim coverage of the higher-level list API's singleton/duplicate-list contracts
 Material census, BooleanLists, PiecewiseMerge and real solid volume results remain
 outside the tested surface until the missing dependencies are wired.
 
-`KernelManifoldIntersector` implements all sixteen required methods. It owns
+`KernelManifoldIntersector` implements the ported merge and intersector stages. It owns
 `MergeState<Relations>` and one notification-record store, and borrows the caller's
 AttributeStore. Face, edge and vertex mates live only in the canonical Relations;
 common lists use the same helper as TopologyIntersector, while mapped lists retain
@@ -38,12 +38,22 @@ processing are called directly. Paired wire processing uses each operand's mark
 context and the other operand's live context for vertex-copy notifications.
 Region propagation resolves source keys to the actual operand region records.
 
-A caller reserves one 28-bit namespace per operand pair in shared attribute and
+A caller reserves one 27-bit namespace per operand pair in shared attribute and
 notification stores. Keys distinguish equal arena ids by operand and entity class;
 source-list handles resolve to the lists in the same merge attributes. Partial
 surface subsets use the canonical B-rep-cache owner identity convention, including
 surfaces with a shared owner. No geometry or claimed dependency algorithm is copied.
-Only genuinely missing calls retain the trait's `UNPORTED(<owner>)` defaults.
+The batch #259 wiring calls the real intersector_p2 IntersectInsertRelate,
+RemoveRelationship, FixGaps and DeleteFaces methods. Typed mate maps are moved
+through that same generic intersector and restored after errors; proto state and
+curve handles persist in the adapter. The arena adapter borrows both operands,
+caller attributes and notification records. Primary notification callbacks are
+scoped separately from the live kernel's mark/tolerance state and restored on
+every Result exit; distinct other-context callbacks remain live.
+Transform delegates to brep_p5 with real notifications, FindAndSetInfiniteRegion
+to brep_p5, and OrientSheetSurfaces to brep_p9. CopyFaces and vertex-copy calls
+also use main's expanded notification interfaces. Only genuinely missing calls
+retain `UNPORTED(<owner>)` tags at their actual dependency boundary.
 The differential runner now instantiates this kernel adapter and reads its options
 from MergeState. Focused kernel tests exercise its ported fast paths, mate ordering,
 cleanup on errors, propagation/callback identity, distinct-context marks and subsets.
@@ -53,7 +63,8 @@ currently compares past the null checks**, because query.brep still blocks first
 `CloseIntersectionLoop` is listed as unused and absent from all unit assignments,
 although `SmMerge.cpp:2958` calls `SmTopologyIntersector.cpp:6108-6354`. Per overseer
 direction it is stubbed under its proposed owner `boolean.topology_intersector_p2`;
-the overseer will co-port it in that unit in a follow-up. No implementation is
+#203 landed without it and remains partial, so this is still that owner's
+missing part, pending the overseer's follow-up co-port. No implementation is
 duplicated here, and the caller's retry/cleanup tail is retained.
 
 Scope and ownership: the temporary transform now returns an inverse token whose
@@ -64,8 +75,10 @@ include every extracted component graph (record length, editing flag, graph),
 in primary-then-other component order. A plane-domain constructor rejection
 (width 2000000) exercises cleanup of geometry not yet owned by a face.
 
-The #203 coordination explicitly requires rechecking CloseIntersectionLoop when
-that unit lands/goes green; the proposed-owner tag must not outlive its co-port.
+The #203 landing was rechecked: CloseIntersectionLoop is absent. Its proposed
+owner tag must be replaced when that follow-up lands. IntersectInsertRelate now
+reaches intersector_p2's existing GetFaces boundary (tracked for that owner's
+follow-up in COORD); p4 no longer stubs the ported driver itself.
 The FFI supports coordinates/dimensions up to 1e100 via shared reader bounds.
 Its operand families avoid the closed-edge UB-175 path; adding closed curves
 requires a new guard review.
