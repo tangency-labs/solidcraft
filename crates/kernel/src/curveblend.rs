@@ -2371,7 +2371,9 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                         .iter()
                         .flat_map(|k| split_arcs.get(k).map(|x| x.0.clone()).unwrap_or_else(|| arcs.get(*k).cloned().flatten().into_iter().collect()))
                         .collect();
-                    let rebuilt = crate::blend::rebuild_face(f, &seam_subst, &connectors)?;
+                    // A seam the round used up (its contact at the seam's far end) is left out.
+                    let used_up: Vec<mt::EdgeID> = consumed.keys().copied().collect();
+                    let rebuilt = crate::blend::rebuild_face_dropping(f, &seam_subst, &used_up, &connectors)?;
                     rec.face(&rebuilt, f);
                     out.push(rebuilt);
                     continue;

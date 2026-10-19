@@ -930,3 +930,60 @@ fn round_the_plate_top_edge_up_to_the_wall_ends() {
     let refused = fillet(&body, &picks, 2.1).unwrap_err().to_string();
     assert!(refused.contains("larger than the neighbouring faces"), "{refused}");
 }
+
+/// The foot of the wall in [`wall_on_a_plate`] rounded `r` (line, the corner's round, line).
+fn round_the_foot(body: &Body, r: f64) -> crate::Result<Body> {
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    fillet(body, &[Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)], r)
+}
+
+#[test]
+fn round_the_foot_of_a_wall_as_high_as_its_end_edge() {
+    // The wall's end chamfered at the top: the edge between its face and its end runs from the
+    // plate up to 5. A round of 3 reaches its far end exactly there (the wall's end flush with the
+    // plate's side: the round meets that edge at its contact), using the edge up.
+    let body = crate::blend_corner::chamfer(&wall_on_a_plate(), &[Vec3::new(0.0, 1.0, 6.0)], 1.0).unwrap();
+    for r in [2.999, 3.0] {
+        let result = round_the_foot(&body, r).unwrap_or_else(|e| panic!("r {r}: {e}"));
+        assert!(result.validity().is_empty(), "r {r}: {:?}", result.validity());
+        assert_eq!(result.crossed_face_loops().unwrap(), 0, "r {r}");
+    }
+    assert!(round_the_foot(&body, 3.001).is_err());
+}
+
+/// [`wall_on_a_plate`] with the plate's sides drafted by `angle` (about the plate's top, leaning
+/// outward for a positive angle), the wall's corner rounded 1.
+fn wall_on_a_drafted_plate(angle: f64) -> Body {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)]);
+    let wall = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)]);
+    let mut plate = crate::extrude(&Plane::XY, &[plate], 0.0, 2.0).unwrap().pop().unwrap();
+    let neutral = Plane { origin: Vec3::new(0.0, 0.0, 2.0), x: Vec3::X, y: Vec3::Y };
+    plate = crate::draft(&plate, &[Vec3::new(6.0, 6.0, 1.0), Vec3::new(24.0, -12.0, 1.0)], &neutral, -Vec3::Z, angle).unwrap();
+    let wall = crate::extrude(&Plane::XY, &[wall], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap()
+}
+
+#[test]
+fn round_the_foot_of_a_wall_over_drafted_plate_sides() {
+    // Drafted 10 degrees, the plate's sides no longer hold the line of the seam up the wall's end:
+    // the round crosses it inside, past the vertex, and the seam runs on to it. Next to nothing
+    // (4e-5 degrees, a modelling error) and the seam is all but in the side's plane: still a
+    // round, at small radii and large.
+    for (degrees, radii) in [(10.0, [0.5, 2.0, 3.5]), (4e-5, [0.05, 0.5, 2.0])] {
+        let body = wall_on_a_drafted_plate(f64::to_radians(degrees));
+        for r in radii {
+            let result = round_the_foot(&body, r).unwrap_or_else(|e| panic!("draft {degrees} r {r}: {e}"));
+            assert!(result.validity().is_empty(), "draft {degrees} r {r}: {:?}", result.validity());
+            assert_eq!(result.crossed_face_loops().unwrap(), 0, "draft {degrees} r {r}");
+            assert!(planned_volume(&result) > planned_volume(&body), "draft {degrees} r {r}");
+        }
+    }
+}
