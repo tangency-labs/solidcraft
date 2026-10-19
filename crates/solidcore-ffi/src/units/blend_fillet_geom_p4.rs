@@ -19,7 +19,7 @@
 //! | `RailIntExtended`  | `SmFilletVertex::CalcRailIntExtendedEdgeuse` | `v`                 | `pnt[3] status` of the vertex |
 //! | `Int2Fillets`      | `SmFilletVertex::CalcFilletInt2Fillets`      | `v`                 | `pnt[3] status` of the vertex |
 //! | `Nx2`              | `sm_CalcNx2VertFilletXFillet`                | `v`                 | `pnt[3] status` of the vertex |
-//! | `MakeFace`         | `SmFilletGeom::MakeFaceBrep` (into a new `SmBrep`) | `g`           | `capped0 capped1` |
+//! | `MakeFace`         | `SmFilletGeom::MakeFaceBrep` (into a new `SmBrep`) | `g`           | (none) |
 //! | `Blending`         | `SmFilletGeom::CalcBlendingGeom`             | `g`                 | (none) |
 //!
 //! The `UvCurve` surface `kind` is `0` a B-spline surface (layout of
@@ -43,6 +43,13 @@
 //! `JoinTwoFilletVertsByCurves` would dereference a missing rail or side curve. The
 //! block's corners and solvers are never real enough for upstream to get further on
 //! those paths.
+//!
+//! Known gap, unreachable today: `RailIntExtended` of a vertex *without* a corner
+//! dereferences `NULL` `m_cpCorner` (`GetExtendedSurface`) as soon as the fillet edge
+//! has an original (side) face. The `blend.fillet_geom_p1` model cannot express an
+//! original face on a fillet edge, so upstream always stops earlier at
+//! `NER(pSideFace)`; once original faces become expressible this refusal must be
+//! added.
 
 use crate::{call_with_buffer, FfiError};
 

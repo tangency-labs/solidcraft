@@ -362,7 +362,7 @@ impl ConstantRadiusAssistedFs {
             .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))
     }
 
-    fn surface_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
+    pub(crate) fn surface_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
         self.solver
             .surface_mut(rail)?
             .map(|slot| &mut slot.surface)

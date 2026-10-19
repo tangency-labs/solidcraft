@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_solver::p1::OffsetSurfaceSlot;
 use solidcore::blend::fillet_standard_solver::p1::{
     constant_radius_from_edgeuse, constant_radius_is_kind_of, BlendCurveCrossSectionFsg, CircularCrossSectionFsg,
     ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs, FilletLaw, FilletLawKind,
@@ -983,6 +984,15 @@ fn offsets(s: &[Option<OffsetSurface>; 2]) -> [f64; 2] {
     })
 }
 
+/// [`offsets`] for the `SmFilletSolver` base of a `ConstantRadiusAssistedFs`.
+fn slot_offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
+    [0, 1].map(|i| {
+        s.get(i)
+            .and_then(Option::as_ref)
+            .map_or(f64::NAN, |slot| slot.surface.offset_distance())
+    })
+}
+
 #[allow(clippy::too_many_lines)]
 fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
     let k = Kernel::default();
@@ -1052,7 +1062,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 [true, true],
             )
             .map_err(|e| he(&e))?;
-            base.surface_extension_factor = *ext;
+            base.solver.surface_extension_factor = *ext;
             let fs = SurfaceSurfaceFs {
                 base,
                 uv_guesses: [Point2::new(0.5, 0.5), Point2::new(0.5, 0.5)],
@@ -1081,9 +1091,9 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
         } => {
             let mut fs = cr_of(&k, solver)?;
             if let Some([d0, d1]) = set {
-                for (s, d) in fs.surfaces.iter_mut().zip([d0, d1]) {
+                for (s, d) in fs.solver.surfaces.iter_mut().zip([d0, d1]) {
                     if let Some(s) = s {
-                        s.set_offset_distance(*d);
+                        s.surface.set_offset_distance(*d);
                     }
                 }
             }
@@ -1101,9 +1111,9 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             o.extend([st, dist]);
             let rad = |i| fs.fillet_radius(i).map_err(|e| harness(e.to_string()));
             o.extend([rad(0)?, rad(1)?]);
-            o.extend(fs.orientations);
-            o.extend(offsets(&fs.surfaces));
-            o.extend([fs.conversion_tol, fs.surface_extension_factor]);
+            o.extend(fs.solver.orientations);
+            o.extend(slot_offsets(&fs.solver.surfaces));
+            o.extend([fs.solver.conversion_tol, fs.solver.surface_extension_factor]);
             o.push(fs.jacobian_size() as f64);
             o.push(flag(fs.offset_radii_can_change()));
             o.push(f64::from(fs.constant_radius_solver_type() as i32));
@@ -1163,7 +1173,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                     }
                 }
             }
-            o.extend(offsets(&fs.surfaces));
+            o.extend(slot_offsets(&fs.solver.surfaces));
         }
         Inputs::CdSetup {
             solver,
@@ -1512,10 +1522,10 @@ fn rust_edgeuse_body(
         Ok(fs) => {
             v.push(0.0);
             for i in 0..2 {
-                let e = fs.edgeuses.get(i).copied().flatten();
+                let e = fs.solver.edgeuses.get(i).copied().flatten();
                 v.push(e.map_or(-1.0, |e| f64::from(e.index())));
                 v.push(fs.fillet_radius(i)?);
-                v.push(fs.orientations.get(i).copied().unwrap_or(f64::NAN));
+                v.push(fs.solver.orientations.get(i).copied().unwrap_or(f64::NAN));
                 let s = fs.surface(i)?;
                 v.push(s.offset_distance());
                 let face = match e {

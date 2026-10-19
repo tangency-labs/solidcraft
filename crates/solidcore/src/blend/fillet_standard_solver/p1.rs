@@ -605,15 +605,18 @@ impl ConstantRadiusAssistedFs {
     /// `GetSurface(i)->SetOffsetDistance(m_dFilletRadii[i]*m_dOrientations[i])`.
     fn set_offset_by_radius(&mut self, rail: usize) -> Result<()> {
         let o = self
+            .solver
             .orientations
             .get(rail)
             .copied()
             .ok_or_else(|| SolidError::invalid_input(OP, "rail index out of range"))?;
         let d = self.fillet_radius(rail)? * o;
         let s = self
+            .solver
             .surfaces
             .get_mut(rail)
             .and_then(Option::as_mut)
+            .map(|slot| &mut slot.surface)
             .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))?;
         s.set_offset_distance(d);
         Ok(())
@@ -739,7 +742,7 @@ impl ConstantRadiusAssistedFs {
         }
 
         // See if we have converged
-        let scaled_tol = self.conversion_tol * (1.0 + p_f.max_dimension());
+        let scaled_tol = self.solver.conversion_tol * (1.0 + p_f.max_dimension());
         if diff1.x.abs() < scaled_tol && diff1.y.abs() < scaled_tol && diff1.z.abs() < scaled_tol {
             found = true;
         }
@@ -804,7 +807,7 @@ impl SurfaceSurfaceFs {
         domain: &mut Extent2d,
     ) -> Result<()> {
         // get length of extensions
-        let mut size: Vec2 = self.base.surface_extension_factor * domain.size();
+        let mut size: Vec2 = self.base.solver.surface_extension_factor * domain.size();
 
         // Do not extend if periodic.
         let periodic_extension_factor = 0.0;
@@ -3179,15 +3182,16 @@ mod tests {
     #[test]
     fn constant_radius_from_surfaces_offsets_by_oriented_radius() {
         let mut fs = cr();
-        assert_eq!(fs.orientations, [1.0, -1.0]);
+        assert_eq!(fs.solver.orientations, [1.0, -1.0]);
         assert_eq!(fs.surface(0).expect("s0").offset_distance(), 1.0);
         assert_eq!(fs.surface(1).expect("s1").offset_distance(), -2.0);
         assert!(fs.surface(1).expect("s1").surface.allow_extension());
         assert_eq!(fs.jacobian_size(), 4);
         assert!(!fs.offset_radii_can_change());
-        fs.surfaces[0]
+        fs.solver.surfaces[0]
             .as_mut()
             .expect("s0")
+            .surface
             .set_offset_distance(7.0);
         let r = fs.setup_offset_values(&TsectPnt::new()).expect("setup");
         assert_eq!(r, 1.0);

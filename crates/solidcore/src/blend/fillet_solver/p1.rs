@@ -2850,11 +2850,15 @@ pub fn split_rail(
         "SmOwningTopology::Remove",
         "topology.proto_topology_p1",
     )?;
-    // UNPORTED(blend.fillet_geom_p2): SmFilletVertex::SmFilletVertex
+    // SmFilletVertex(pFG->..->GetFilletCorner()) is ported (blend.fillet_geom_p2,
+    // `FilletVertex::new`, with `FilletBrep::insert_fillet_vertex`), but this routine
+    // works on the bare pseudo `Brep`: it gets the `FilletBrep` when the
+    // blend.fillet_geom_p1 stubs above are wired.
+    // UNPORTED(blend.fillet_geom_p1): SmFilletVertex::SmFilletVertex (justified: findings.md "blend.fillet_geom_p2: sm_SplitRail's fillet vertex")
     let new_vert: VertexId = unported_on(
         fillet_geom,
         "SmFilletVertex::SmFilletVertex",
-        "blend.fillet_geom_p2",
+        "blend.fillet_geom_p1",
     )?;
     // UNPORTED(topology.proto_topology_p1): SmOwningTopology::PostInsert (justified: findings.md "blend.fillet_solver_p1: pseudo-B-rep mutations")
     unported_on::<_, ()>(
@@ -3005,12 +3009,19 @@ pub fn compute_support_edge(
     let surf2 = surf2.ok_or_else(nul)?;
 
     // the 3D curve of sm_SrfSrfIntersection (its UV curves are deleted unused)
-    // UNPORTED(blend.fillet_geom_p2): sm_SrfSrfIntersection
-    let xsect: Result<Option<BSplineCurve>> = unported_on(
-        (start_v, surf1, surf2, approx_tol_3d, angle_tolerance),
-        "sm_SrfSrfIntersection",
-        "blend.fillet_geom_p2",
-    );
+    let xsect = crate::blend::fillet_geom::p2::srf_srf_intersection(
+        k,
+        Some(start_pnt),
+        None,
+        None,
+        None,
+        &surf1,
+        &surf2,
+        approx_tol_3d,
+        angle_tolerance,
+        crate::blend::fillet_geom::p2::SrfSrfOptions::default(),
+    )
+    .map(|r| r.curve_3d);
     let curve_3d = match xsect {
         Err(e @ SolidError::Unported { .. }) => return Err(e),
         Ok(Some(c)) => c,
@@ -3026,7 +3037,7 @@ pub fn compute_support_edge(
     };
 
     // Intersect the curve with the fillet for the pNewV's geometry
-    let mut curve_3d = Curve::from(curve_3d);
+    let mut curve_3d = curve_3d;
     let mut trim_ivl = curve_3d.natural_interval();
     let solutions = fillet_surface.global_curve_intersect(
         k,

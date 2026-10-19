@@ -1657,3 +1657,10 @@ SC_EXPORT int32_t sc_blend_fillet_geom_p1_eval(int32_t op, const double* in, int
 
 // The difftest shim of unit blend.fillet_geom_p4 (it needs this file's statics and Model).
 #include "blend_fillet_geom_p4_static.inc"
+
+// The difftest shim of unit blend.fillet_geom_p2 (sm_SrfSrfIntersection is defined in this
+// translation unit; it needs this file's Model and the p4 shim's solvers and surfaces).
+#include "blend_fillet_geom_p2_static.inc"
+
+// The difftest shim of unit blend.fillet_corner_p3, corner operations (it needs this file's Model).
+#include "blend_fillet_corner_p3_static.inc"

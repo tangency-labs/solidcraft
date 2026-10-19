@@ -673,7 +673,13 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
         orient,
         [None, None],
     );
-    for srf in solver.surfaces.iter_mut().flatten() {
+    for srf in solver
+        .solver
+        .surfaces
+        .iter_mut()
+        .flatten()
+        .map(|slot| &mut slot.surface)
+    {
         srf.set_allow_extension(true);
     }
 
@@ -715,8 +721,11 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
         flag(fi.is_kind_of(ADV_TYPE)),
         flag(fi.is_kind_of(7)),
     ]);
-    for srf in &solver.surfaces {
-        o.push(srf.as_ref().map_or(ffi::UNSET, OffsetSurface::offset_distance));
+    for slot in &solver.solver.surfaces {
+        o.push(
+            slot.as_ref()
+                .map_or(ffi::UNSET, |slot| slot.surface.offset_distance()),
+        );
     }
     o.push(si.curve_points().len() as f64);
     o.push(si.points().len() as f64);
