@@ -3692,3 +3692,105 @@ fn plain_headless_adds_no_notice() {
     let r = raw_tool(&mut s, "list_commands", json!({}));
     assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1);
 }
+
+/// A design with one 720-point sketch extruded into Body1, on a server with these options.
+fn server_with_big_sketch(options: crate::Options) -> Server {
+    let mut s = Server::new(Box::new(Headless::default())).with_options(options);
+    let points: Vec<[f64; 2]> = (0..720)
+        .map(|i| {
+            let t = f64::from(i) / 720.0 * std::f64::consts::TAU;
+            [30.0 * t.cos(), 30.0 * t.sin()]
+        })
+        .collect();
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.line", "params": {"points": points, "closed": true}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    s
+}
+
+/// `inspect_design`'s text and error flag.
+fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
+    let r = raw_tool(s, "inspect_design", args);
+    (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
+}
+
+/// Off by default: `inspect_design` has its old arguments and returns every sketch in full,
+/// pretty-printed; `document.inspect` adds no sketch counts unless asked.
+#[test]
+fn inspect_design_is_unchanged_without_compact_output() {
+    let mut s = server_with_big_sketch(crate::Options::default());
+    let defs = tool_definitions();
+    let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
+    assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
+    assert!(def["inputSchema"]["properties"].get("bodies").is_none(), "{def}");
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
+
+    let (err, full) = inspect_text(&mut s, json!({"measure": false}));
+    assert!(!err && full.contains("\n  "), "pretty-printed");
+    let d: Value = serde_json::from_str(&full).unwrap();
+    assert_eq!(d["sketches"][0]["curves"].as_array().map(Vec::len), Some(720), "full sketch contents by default");
+    let (_, summary) = inspect_text(&mut s, json!({"measure": false, "sketches": false}));
+    let d: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(d["sketches"][0]["curves"], 720, "{d}");
+    assert!(d["sketches"][0].get("points").is_none() && d["sketches"][0].get("plane").is_none(), "{d}");
+
+    // The compact arguments are not there.
+    let r = raw_tool(&mut s, "inspect_design", json!({"bodies": ["Body1"]}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    let r = raw_tool(&mut s, "inspect_design", json!({"sketches": ["Sketch1"]}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+}
+
+/// With compact output (#15): sketch summaries, compact JSON; full sketch contents only for the
+/// sketches asked for; `bodies` keeps only those bodies.
+#[test]
+fn compact_inspect_design_summarises_sketches_unless_asked() {
+    let mut s = server_with_big_sketch(crate::Options { compact: true });
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
+    assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
+    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    // Arguments are checked against the tools as listed: `bodies` only with compact output.
+    let bodies = json!({"bodies": ["Body1"]});
+    assert!(crate::tools::check_arguments_with("inspect_design", &bodies, crate::Options { compact: true }).is_ok());
+    assert!(crate::tools::check_arguments("inspect_design", &bodies).is_err_and(|e| e.contains("bodies")));
+
+    let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
+    assert!(summary.len() < 4000, "{} bytes: {summary}", summary.len());
+    assert!(!summary.contains("\n "), "compact JSON");
+    let d: Value = serde_json::from_str(&summary).unwrap();
+    let sk = &d["sketches"][0];
+    assert!(sk["points"].as_u64().is_some_and(|n| n >= 720), "{sk}");
+    assert_eq!((&sk["curves"], &sk["profiles"]), (&json!(720), &json!(1)), "{sk}");
+    assert!(sk["constraints"].is_u64() && sk["dof"].is_number() && sk["plane"].is_object(), "{sk}");
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": false})).1, summary);
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": "summary"})).1, summary);
+    let name = sk["name"].as_str().unwrap().to_string();
+    let (_, full) = inspect_text(&mut s, json!({"measure": false, "sketches": [name]}));
+    assert!(full.len() > 50_000 && full.len() > 20 * summary.len(), "{} vs {}", full.len(), summary.len());
+    let f: Value = serde_json::from_str(&full).unwrap();
+    assert_eq!(f["sketches"][0]["curves"].as_array().map(Vec::len), Some(720));
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": true})).1.len(), full.len());
+    let (err, e) = inspect_text(&mut s, json!({"sketches": ["Nope"]}));
+    assert!(err && e.contains("no sketch") && e.contains(&name), "{e}");
+
+    let (_, one) = inspect_text(&mut s, json!({"bodies": ["Body1"]}));
+    let one: Value = serde_json::from_str(&one).unwrap();
+    assert_eq!(one["bodies"].as_array().map(Vec::len), Some(1), "{one}");
+    assert!(one["bodies"][0]["volume_mm3"].as_f64().is_some_and(|v| v > 0.0) && one["bodies"][0]["visible"] == true, "{one}");
+    let (err, e) = inspect_text(&mut s, json!({"bodies": ["Nope"]}));
+    assert!(err && e.contains("no body `Nope`") && e.contains("Body1"), "{e}");
+
+    // Other tools' JSON is compact too.
+    let r = raw_tool(&mut s, "measure", json!({}));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(!text.contains('\n') && serde_json::from_str::<Value>(text).is_ok(), "{text}");
+}
