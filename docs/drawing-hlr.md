@@ -117,7 +117,8 @@ pieces in the same order and the same statistics apart from the phase timings.
 - **Cancellation.** `cancel` is polled before every item, on whichever thread runs it, and
   inside long items: every 256 faces and before every face a silhouette is trimmed to, at
   every sampling pass, every 4096 chords and every 1024 boxes met when cutting at left-out
-  faces, every 1024 rays, every 65 536 crossing candidates and every 65 536 coverage checks.
+  faces, every 1024 rays, every 65 536 crossing candidates, and between the chords of a piece
+  once 65 536 coverage checks have passed since the last poll.
   The work between two polls is bounded by the input limits, not by a time: in ordinary
   scenes the longest step is tracing one surface's silhouette curves, a few tenths of a second
   for a torus, but a scene built at the limits can make one step take longer.
