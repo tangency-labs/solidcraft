@@ -9779,8 +9779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_20_seam",
@@ -10759,8 +10759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_13_seam",
@@ -11347,8 +11347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_0_seam",
@@ -11643,8 +11643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_3_seam",
@@ -11747,8 +11747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_6_seam",
@@ -11923,8 +11923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_9_seam",
@@ -12027,8 +12027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_12_seam",
@@ -12203,8 +12203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_15_seam",
@@ -12307,8 +12307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_18_seam",
@@ -12483,8 +12483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_21_seam",
@@ -12707,8 +12707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_2_seam",
@@ -12851,8 +12851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_5_seam",
@@ -13027,8 +13027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_8_seam",
@@ -13131,8 +13131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_11_seam",
@@ -13307,8 +13307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_14_seam",
@@ -13411,8 +13411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_17_seam",
@@ -13587,8 +13587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_20_seam",
@@ -13691,8 +13691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_23_seam",
@@ -23971,8 +23971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_2_seam",
@@ -24187,8 +24187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_5_seam",
@@ -24291,8 +24291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_8_seam",
@@ -24467,8 +24467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_11_seam",
@@ -24571,8 +24571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_14_seam",
@@ -24747,8 +24747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_17_seam",
@@ -24851,8 +24851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_20_seam",
@@ -25027,8 +25027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_23_seam",
@@ -25211,8 +25211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_1_seam",
@@ -25467,8 +25467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_4_seam",
@@ -25571,8 +25571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_7_seam",
@@ -25747,8 +25747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_10_seam",
@@ -25851,8 +25851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_13_seam",
@@ -26027,8 +26027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_16_seam",
@@ -26131,8 +26131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_19_seam",
@@ -26307,8 +26307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_22_seam",
@@ -31651,8 +31651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_2_seam",
@@ -31867,8 +31867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_5_seam",
@@ -31971,8 +31971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_8_seam",
@@ -32147,8 +32147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_11_seam",
@@ -32251,8 +32251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_14_seam",
@@ -32427,8 +32427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_17_seam",
@@ -32531,8 +32531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_20_seam",
@@ -32707,8 +32707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_23_seam",
@@ -32891,8 +32891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_1_seam",
@@ -33147,8 +33147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_4_seam",
@@ -33251,8 +33251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_7_seam",
@@ -33427,8 +33427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_10_seam",
@@ -33531,8 +33531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_13_seam",
@@ -33707,8 +33707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_16_seam",
@@ -33811,8 +33811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_19_seam",
@@ -33987,8 +33987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_22_seam",
@@ -60927,8 +60927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_002_missing_seam",
@@ -61011,8 +61011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_012_missing_seam",
@@ -61095,8 +61095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_022_missing_seam",
@@ -61179,8 +61179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_032_missing_seam",
@@ -61419,8 +61419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_002_missing_seam",
@@ -63987,8 +63987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_002_missing_seam",
@@ -64071,8 +64071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_012_missing_seam",
@@ -64155,8 +64155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_022_missing_seam",
@@ -64239,8 +64239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_032_missing_seam",
@@ -64479,8 +64479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_rebuilt_002_missing_seam",
@@ -65871,8 +65871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_002_missing_seam",
@@ -65955,8 +65955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_012_missing_seam",
@@ -66039,8 +66039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_022_missing_seam",
@@ -66123,8 +66123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_032_missing_seam",
@@ -66363,8 +66363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_rebuilt_002_missing_seam",
@@ -69590,8 +69590,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00129",
@@ -70321,8 +70321,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00214",
@@ -70540,8 +70540,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00239",
@@ -72027,8 +72027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00415",
@@ -72335,8 +72335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00451",
@@ -73590,9 +73590,8 @@
   "cases_total": 8854,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 48,
-    "surface.cone_p1": 25,
-    "surface.sphere": 45,
     "surface.surf_of_extrusion_p2": 33,
+    "surface.surface_p2": 70,
     "topology.brep_p10": 87,
     "topology.face_p4": 366
   },

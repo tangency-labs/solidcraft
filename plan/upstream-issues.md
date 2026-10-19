@@ -205,11 +205,11 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 #### UB-13. `N_MakeKnotsCompatible` / `N_GetCompatibleKnotArrayMult` read past `U[m]`
 - **Location:** `NL_BasisBasic.cpp:3665` `N_MakeKnotsCompatible`, `NL_BasisAdv.cpp:119` `N_GetCompatibleKnotArrayMult`.
 - **What happens:** Both read past `U[m]` on several inputs. Their output buffers are caller-allocated and unbounded.
-- **Trigger:** Degree-0 vectors whose ends differ by less than `NL_PTOL`; inner knots within `NL_PTOL` of an end; unclamped vectors.
-- **How found:** read during porting.
-- **Confirmed:** no. The shim pads with `+inf` so that upstream stays in bounds.
+- **Trigger:** Degree-0 vectors whose ends differ by less than `NL_PTOL`; inner knots within `NL_PTOL` of an end; unclamped vectors. For `N_GetCompatibleKnotArrayMult` also: degree 0 on vectors whose end knots repeat (`R[mr-1] == R[mr]` matched against `S[j]` advances both indices past the ends), an inner knot above the end knot, and an end knot replaced by a smaller value.
+- **How found:** read during porting; `N_GetCompatibleKnotArrayMult` also by `difftest --fuzz` (issue #182: 55 of 3000 fuzz cases, 501 of 30000, where the C++ ran on the shim's `+inf` padding and Rust reported the read).
+- **Confirmed:** no. For `N_GetCompatibleKnotArrayMult` the ffi now rejects exactly these inputs: the shim replays the routine's rescale (`N_BasisReparam` itself) and index walk and checks each index before the read (`sc_nlib_basis_adv_compat_mult_walk`), so upstream never runs on them. `N_MakeKnotsCompatible` still relies on the `+inf` padding.
 - **Severity:** crash/UB.
-- **Rust port:** Returns `InvalidInput` for the out-of-range reads.
+- **Rust port:** Returns `InvalidInput` for the out-of-range reads. The `nlib.basis_adv` difftest compares this with the shim's walk check (`read_past_end` on both sides).
 
 #### UB-14. `NL_PascalTri[18][18]` is indexed past its end
 - **Location:** `source/SMLib/inc/NL_Globals.h:67` (the table); users include `NL_Bezier.cpp:105`, `:118` (elevation / product matrices) and `:5417` `N_BezCrvExtend` (hence `N_BezSrfExtend4D`).
@@ -237,6 +237,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB (use after free).
 - **Rust port:** Builds a local matrix when the caller's is null. Callers wanting reuse build it first.
+
+#### UB-191. `N_BasisInsertKnots` writes past its output for knot vectors shorter than `2p+2`
+- **Location:** `NL_BasisAdv.cpp:253`, `N_BasisInsertKnots` (copies at `:275-276` and `:302-303`).
+- **What happens:** The routine always copies `R[0..=p]` and `R[mr-p..=mr]` into `S`. With fewer than `2p+2` knots these ranges overlap, so it writes `2p+2+mx+1` knots instead of the documented `mr+mx+2` and overruns a caller buffer of that size (heap corruption).
+- **Trigger:** `mr < 2p+1` with `X[0] > R[p]` and `X[mx] < R[mr-p]`, which needs an unsorted `R` (e.g. `p = 1`, `R = [4294967296, 0]`, `X = [1e300, 1.5, 2.5, 3.5]`). The range check rejects such `R` when it is sorted.
+- **How found:** crash in the C++ reference run (`difftest --fuzz 30000` on `nlib.basis_adv`, issue #182: two cases aborted in `malloc` with a corrupted heap).
+- **Confirmed:** yes, by those two aborts (fixtures `fuzz_insert_short_unsorted_r`, `fuzz_insert_short_r_four_new_knots` in `fixtures/nlib.basis_adv/fuzz_regressions.json`). The shim now sizes `S` for every knot written, so the reference runs them and the results are compared.
+- **Severity:** crash/UB.
+- **Rust port:** Returns all `2p+2+mx+1` knots (a `Vec` grown as written), as upstream computes them.
 
 ### NLib: matrices and polynomials
 

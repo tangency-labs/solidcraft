@@ -11,8 +11,12 @@
 //! | `inc_mult`       | `increase_knot_mult`         | `N_BasisIncreaseKnotMult`      |
 //! | `derivs_array`   | `basis_derivs_array`         | `N_BasisDerivsArray`           |
 //!
-//! Errors are normalised to `nlib_<NL_*_ERR number>` on both sides. Every run has at
-//! least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
+//! Errors are normalised to `nlib_<NL_*_ERR number>` on both sides. `compat_mult` inputs
+//! on which upstream would read past a knot vector's end (upstream-issues UB-13) are
+//! [`PAST_END`] on both sides: the C++ side from the ffi's exact walk check (the routine
+//! is not called), the Rust side from its out-of-range error, so the two detections are
+//! compared. Every run has at least [`MIN_GENERATED`] generated inputs (more with
+//! `--seeds`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,6 +33,12 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
+
+/// Error output of a `compat_mult` case on which upstream reads past `R[mr]` or `S[ms]`.
+pub const PAST_END: &str = "read_past_end";
+
+/// Operation of the Rust out-of-range error that [`PAST_END`] stands for.
+const COMPAT_OP: &str = "nurbs::basis_adv::compatible_knot_array_mult";
 
 /// `nlib.basis_adv` runner.
 pub struct Runner;
@@ -123,13 +133,21 @@ fn cube(out: Output, nd: &[Vec<Vec<f64>>]) -> Output {
 
 fn cpp(i: Inputs) -> Result<Output, HarnessError> {
     let out = match i {
-        Inputs::CompatMult { r, s, p } => ffi::compat_mult(&r, &s, i32_of(p)?).map(|m| {
-            Output::new()
-                .values("r", m.r)
-                .values("s", m.s)
-                .values("xr", m.xr)
-                .values("xs", m.xs)
-        }),
+        Inputs::CompatMult { r, s, p } => {
+            let p = i32_of(p)?;
+            ffi::compat_mult_reads_in_bounds(&r, &s, p).and_then(|in_bounds| {
+                if !in_bounds {
+                    return Ok(Output::err(PAST_END));
+                }
+                ffi::compat_mult(&r, &s, p).map(|m| {
+                    Output::new()
+                        .values("r", m.r)
+                        .values("s", m.s)
+                        .values("xr", m.xr)
+                        .values("xs", m.xs)
+                })
+            })
+        }
         Inputs::Insert { r, p, x } => {
             ffi::insert(&r, i32_of(p)?, &x).map(|s| Output::new().values("s", s))
         }
@@ -156,14 +174,21 @@ fn cpp(i: Inputs) -> Result<Output, HarnessError> {
 
 fn rust(i: Inputs) -> Result<Output, HarnessError> {
     let out: Result<Output, SolidError> = match i {
-        Inputs::CompatMult { mut r, mut s, p } => ba::compatible_knot_array_mult(&mut r, &mut s, p)
-            .map(|(xr, xs)| {
-                Output::new()
+        Inputs::CompatMult { mut r, mut s, p } => {
+            match ba::compatible_knot_array_mult(&mut r, &mut s, p) {
+                Ok((xr, xs)) => Ok(Output::new()
                     .values("r", r)
                     .values("s", s)
                     .values("xr", xr)
-                    .values("xs", xs)
-            }),
+                    .values("xs", xs)),
+                Err(SolidError::InvalidInput { operation, reason })
+                    if operation == COMPAT_OP && reason.starts_with("index out of range") =>
+                {
+                    return Ok(Output::err(PAST_END));
+                }
+                Err(e) => Err(e),
+            }
+        }
         Inputs::Insert { r, p, x } => {
             ba::insert_knots(&r, p, &x).map(|s| Output::new().values("s", s))
         }
@@ -480,6 +505,9 @@ fn gen_compat_mult(rng: &mut Rng) -> Inputs {
             &mapped,
         ),
     );
+    // Degree 0 on vectors clamped for degree p: upstream mostly reads past the ends
+    // (UB-13, PAST_END on both sides), sometimes stays in bounds.
+    let p = if rng.chance(0.04) { 0 } else { p };
     if rng.chance(0.5) {
         Inputs::CompatMult { r, s, p }
     } else {

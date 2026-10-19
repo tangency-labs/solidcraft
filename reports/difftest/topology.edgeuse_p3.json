@@ -29543,8 +29543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu26_f0_uv",
@@ -29555,8 +29555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu26_f0_3d",
@@ -29567,8 +29567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu26_f0.5_uv",
@@ -29579,8 +29579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu26_f0.5_3d",
@@ -29591,8 +29591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu27_f0_uv",
@@ -29603,8 +29603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu27_f0_3d",
@@ -29615,8 +29615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu27_f0.5_uv",
@@ -29627,8 +29627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu27_f0.5_3d",
@@ -29639,8 +29639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu28_f0_uv",
@@ -29651,8 +29651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu28_f0_3d",
@@ -29663,8 +29663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu28_f0.5_uv",
@@ -29675,8 +29675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu28_f0.5_3d",
@@ -29687,8 +29687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu29_f0_uv",
@@ -29699,8 +29699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu29_f0_3d",
@@ -29711,8 +29711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu29_f0.5_uv",
@@ -29723,8 +29723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb0_eu29_f0.5_3d",
@@ -31191,8 +31191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu26_f0_uv",
@@ -31203,8 +31203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu26_f0_3d",
@@ -31215,8 +31215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu26_f0.5_uv",
@@ -31227,8 +31227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu26_f0.5_3d",
@@ -31239,8 +31239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu27_f0_uv",
@@ -31251,8 +31251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu27_f0_3d",
@@ -31263,8 +31263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu27_f0.5_uv",
@@ -31275,8 +31275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu27_f0.5_3d",
@@ -31287,8 +31287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu28_f0_uv",
@@ -31299,8 +31299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu28_f0_3d",
@@ -31311,8 +31311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu28_f0.5_uv",
@@ -31323,8 +31323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu28_f0.5_3d",
@@ -31335,8 +31335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu29_f0_uv",
@@ -31347,8 +31347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu29_f0_3d",
@@ -31359,8 +31359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu29_f0.5_uv",
@@ -31371,8 +31371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_bwlf_sweep_rb1_eu29_f0.5_3d",
@@ -32471,8 +32471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu0_uv",
@@ -32483,8 +32483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu0_3d",
@@ -32495,8 +32495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu1_uv",
@@ -32507,8 +32507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu1_3d",
@@ -32519,8 +32519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu2_uv",
@@ -32531,8 +32531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu2_3d",
@@ -32543,8 +32543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu3_uv",
@@ -32555,8 +32555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu3_3d",
@@ -32567,8 +32567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu4_uv",
@@ -32579,8 +32579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu4_3d",
@@ -32591,8 +32591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu5_uv",
@@ -32603,8 +32603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu5_3d",
@@ -32615,8 +32615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu6_uv",
@@ -32627,8 +32627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu6_3d",
@@ -32639,8 +32639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu7_uv",
@@ -32651,8 +32651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_cone_eu7_3d",
@@ -33175,8 +33175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu0_uv",
@@ -33187,8 +33187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu0_3d",
@@ -33199,8 +33199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu1_uv",
@@ -33211,8 +33211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu1_3d",
@@ -33223,8 +33223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu2_uv",
@@ -33235,8 +33235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu2_3d",
@@ -33247,8 +33247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu3_uv",
@@ -33259,8 +33259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu3_3d",
@@ -33271,8 +33271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu4_uv",
@@ -33283,8 +33283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu4_3d",
@@ -33295,8 +33295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu5_uv",
@@ -33307,8 +33307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu5_3d",
@@ -33319,8 +33319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu6_uv",
@@ -33331,8 +33331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu6_3d",
@@ -33343,8 +33343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu7_uv",
@@ -33355,8 +33355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_sphere_eu7_3d",
@@ -33751,8 +33751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu0_uv",
@@ -33763,8 +33763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu0_3d",
@@ -33775,8 +33775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu1_uv",
@@ -33787,8 +33787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu1_3d",
@@ -33799,8 +33799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu2_uv",
@@ -33811,8 +33811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu2_3d",
@@ -33823,8 +33823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu3_uv",
@@ -33835,8 +33835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu3_3d",
@@ -33847,8 +33847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu4_uv",
@@ -33859,8 +33859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu4_3d",
@@ -33871,8 +33871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu5_uv",
@@ -33883,8 +33883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu5_3d",
@@ -33895,8 +33895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu6_uv",
@@ -33907,8 +33907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu6_3d",
@@ -33919,8 +33919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu7_uv",
@@ -33931,8 +33931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_surf_sphere150_eu7_3d",
@@ -36923,8 +36923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_norm_3d_start",
@@ -36935,8 +36935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_norm_3d_mid",
@@ -36947,8 +36947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_norm_uv_mid",
@@ -36959,8 +36959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_norm_uv_nomake",
@@ -36971,8 +36971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_norm_uv_end",
@@ -36983,8 +36983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_binormal_uv",
@@ -36995,8 +36995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_binormal_3d",
@@ -37007,8 +37007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_binormal_start",
@@ -37019,8 +37019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_binormal_out",
@@ -37031,8 +37031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_getcreate_all",
@@ -37043,8 +37043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_getcreate_nomake",
@@ -37055,8 +37055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_create_dev",
@@ -37067,8 +37067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu0_create_plain",
@@ -37079,8 +37079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_norm_3d_start",
@@ -37091,8 +37091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_norm_3d_mid",
@@ -37103,8 +37103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_norm_uv_mid",
@@ -37115,8 +37115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_norm_uv_nomake",
@@ -37127,8 +37127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_norm_uv_end",
@@ -37139,8 +37139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_binormal_uv",
@@ -37151,8 +37151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_binormal_3d",
@@ -37163,8 +37163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_binormal_start",
@@ -37175,8 +37175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_binormal_out",
@@ -37187,8 +37187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_getcreate_all",
@@ -37199,8 +37199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_getcreate_nomake",
@@ -37211,8 +37211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_create_dev",
@@ -37223,8 +37223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu1_create_plain",
@@ -37235,8 +37235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_norm_3d_start",
@@ -37247,8 +37247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_norm_3d_mid",
@@ -37259,8 +37259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_norm_uv_mid",
@@ -37271,8 +37271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_norm_uv_nomake",
@@ -37283,8 +37283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_norm_uv_end",
@@ -37295,8 +37295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_binormal_uv",
@@ -37307,8 +37307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_binormal_3d",
@@ -37319,8 +37319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_binormal_start",
@@ -37331,8 +37331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_binormal_out",
@@ -37343,8 +37343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_getcreate_all",
@@ -37355,8 +37355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_getcreate_nomake",
@@ -37367,8 +37367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_create_dev",
@@ -37379,8 +37379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu5_create_plain",
@@ -37391,8 +37391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_norm_3d_start",
@@ -37403,8 +37403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_norm_3d_mid",
@@ -37415,8 +37415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_norm_uv_mid",
@@ -37427,8 +37427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_norm_uv_nomake",
@@ -37439,8 +37439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_norm_uv_end",
@@ -37451,8 +37451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_binormal_uv",
@@ -37463,8 +37463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_binormal_3d",
@@ -37475,8 +37475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_binormal_start",
@@ -37487,8 +37487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_binormal_out",
@@ -37499,8 +37499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_getcreate_all",
@@ -37511,8 +37511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_getcreate_nomake",
@@ -37523,8 +37523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_create_dev",
@@ -37535,8 +37535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b6_eu9_create_plain",
@@ -37547,8 +37547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_norm_3d_start",
@@ -37559,8 +37559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_norm_3d_mid",
@@ -37571,8 +37571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_norm_uv_mid",
@@ -37583,8 +37583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_norm_uv_nomake",
@@ -37595,8 +37595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_norm_uv_end",
@@ -37607,8 +37607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_binormal_uv",
@@ -37619,8 +37619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_binormal_3d",
@@ -37631,8 +37631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_binormal_start",
@@ -37643,8 +37643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_binormal_out",
@@ -37655,8 +37655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_getcreate_all",
@@ -37667,8 +37667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_getcreate_nomake",
@@ -37679,8 +37679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_create_dev",
@@ -37691,8 +37691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu2_create_plain",
@@ -37703,8 +37703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_norm_3d_start",
@@ -37715,8 +37715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_norm_3d_mid",
@@ -37727,8 +37727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_norm_uv_mid",
@@ -37739,8 +37739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_norm_uv_nomake",
@@ -37751,8 +37751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_norm_uv_end",
@@ -37763,8 +37763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_binormal_uv",
@@ -37775,8 +37775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_binormal_3d",
@@ -37787,8 +37787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_binormal_start",
@@ -37799,8 +37799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_binormal_out",
@@ -37811,8 +37811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_getcreate_all",
@@ -37823,8 +37823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_getcreate_nomake",
@@ -37835,8 +37835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_create_dev",
@@ -37847,8 +37847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b7_eu7_create_plain",
@@ -40547,8 +40547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_norm_3d_start",
@@ -40559,8 +40559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_norm_3d_mid",
@@ -40571,8 +40571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_norm_uv_mid",
@@ -40583,8 +40583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_norm_uv_nomake",
@@ -40595,8 +40595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_norm_uv_end",
@@ -40607,8 +40607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_binormal_uv",
@@ -40619,8 +40619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_binormal_3d",
@@ -40631,8 +40631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_binormal_start",
@@ -40643,8 +40643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_binormal_out",
@@ -40655,8 +40655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_getcreate_all",
@@ -40667,8 +40667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_getcreate_nomake",
@@ -40679,8 +40679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_create_dev",
@@ -40691,8 +40691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu0_create_plain",
@@ -40703,8 +40703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_norm_3d_start",
@@ -40715,8 +40715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_norm_3d_mid",
@@ -40727,8 +40727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_norm_uv_mid",
@@ -40739,8 +40739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_norm_uv_nomake",
@@ -40751,8 +40751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_norm_uv_end",
@@ -40763,8 +40763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_binormal_uv",
@@ -40775,8 +40775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_binormal_3d",
@@ -40787,8 +40787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_binormal_start",
@@ -40799,8 +40799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_binormal_out",
@@ -40811,8 +40811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_getcreate_all",
@@ -40823,8 +40823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_getcreate_nomake",
@@ -40835,8 +40835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_create_dev",
@@ -40847,8 +40847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu1_create_plain",
@@ -40859,8 +40859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_norm_3d_start",
@@ -40871,8 +40871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_norm_3d_mid",
@@ -40883,8 +40883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_norm_uv_mid",
@@ -40895,8 +40895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_norm_uv_nomake",
@@ -40907,8 +40907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_norm_uv_end",
@@ -40919,8 +40919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_binormal_uv",
@@ -40931,8 +40931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_binormal_3d",
@@ -40943,8 +40943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_binormal_start",
@@ -40955,8 +40955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_binormal_out",
@@ -40967,8 +40967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_getcreate_all",
@@ -40979,8 +40979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_getcreate_nomake",
@@ -40991,8 +40991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_create_dev",
@@ -41003,8 +41003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu5_create_plain",
@@ -41015,8 +41015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_norm_3d_start",
@@ -41027,8 +41027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_norm_3d_mid",
@@ -41039,8 +41039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_norm_uv_mid",
@@ -41051,8 +41051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_norm_uv_nomake",
@@ -41063,8 +41063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_norm_uv_end",
@@ -41075,8 +41075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_binormal_uv",
@@ -41087,8 +41087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_binormal_3d",
@@ -41099,8 +41099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_binormal_start",
@@ -41111,8 +41111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_binormal_out",
@@ -41123,8 +41123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_getcreate_all",
@@ -41135,8 +41135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_getcreate_nomake",
@@ -41147,8 +41147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_create_dev",
@@ -41159,8 +41159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b16_eu9_create_plain",
@@ -41171,8 +41171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_norm_3d_start",
@@ -41183,8 +41183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_norm_3d_mid",
@@ -41195,8 +41195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_norm_uv_mid",
@@ -41207,8 +41207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_norm_uv_nomake",
@@ -41219,8 +41219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_norm_uv_end",
@@ -41231,8 +41231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_binormal_uv",
@@ -41243,8 +41243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_binormal_3d",
@@ -41255,8 +41255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_binormal_start",
@@ -41267,8 +41267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_binormal_out",
@@ -41279,8 +41279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_getcreate_all",
@@ -41291,8 +41291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_getcreate_nomake",
@@ -41303,8 +41303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_create_dev",
@@ -41315,8 +41315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu2_create_plain",
@@ -41327,8 +41327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_norm_3d_start",
@@ -41339,8 +41339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_norm_3d_mid",
@@ -41351,8 +41351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_norm_uv_mid",
@@ -41363,8 +41363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_norm_uv_nomake",
@@ -41375,8 +41375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_norm_uv_end",
@@ -41387,8 +41387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_binormal_uv",
@@ -41399,8 +41399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_binormal_3d",
@@ -41411,8 +41411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_binormal_start",
@@ -41423,8 +41423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_binormal_out",
@@ -41435,8 +41435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_getcreate_all",
@@ -41447,8 +41447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_getcreate_nomake",
@@ -41459,8 +41459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_create_dev",
@@ -41471,8 +41471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b17_eu7_create_plain",
@@ -43355,8 +43355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_norm_3d_start",
@@ -43367,8 +43367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_norm_3d_mid",
@@ -43379,8 +43379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_norm_uv_mid",
@@ -43391,8 +43391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_norm_uv_nomake",
@@ -43403,8 +43403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_norm_uv_end",
@@ -43415,8 +43415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_binormal_uv",
@@ -43427,8 +43427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_binormal_3d",
@@ -43439,8 +43439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_binormal_start",
@@ -43451,8 +43451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_binormal_out",
@@ -43463,8 +43463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_getcreate_all",
@@ -43475,8 +43475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_getcreate_nomake",
@@ -43487,8 +43487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_create_dev",
@@ -43499,8 +43499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu0_create_plain",
@@ -43511,8 +43511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_norm_3d_start",
@@ -43523,8 +43523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_norm_3d_mid",
@@ -43535,8 +43535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_norm_uv_mid",
@@ -43547,8 +43547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_norm_uv_nomake",
@@ -43559,8 +43559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_norm_uv_end",
@@ -43571,8 +43571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_binormal_uv",
@@ -43583,8 +43583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_binormal_3d",
@@ -43595,8 +43595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_binormal_start",
@@ -43607,8 +43607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_binormal_out",
@@ -43619,8 +43619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_getcreate_all",
@@ -43631,8 +43631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_getcreate_nomake",
@@ -43643,8 +43643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_create_dev",
@@ -43655,8 +43655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu1_create_plain",
@@ -43667,8 +43667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_norm_3d_start",
@@ -43679,8 +43679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_norm_3d_mid",
@@ -43691,8 +43691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_norm_uv_mid",
@@ -43703,8 +43703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_norm_uv_nomake",
@@ -43715,8 +43715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_norm_uv_end",
@@ -43727,8 +43727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_binormal_uv",
@@ -43739,8 +43739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_binormal_3d",
@@ -43751,8 +43751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_binormal_start",
@@ -43763,8 +43763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_binormal_out",
@@ -43775,8 +43775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_getcreate_all",
@@ -43787,8 +43787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_getcreate_nomake",
@@ -43799,8 +43799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_create_dev",
@@ -43811,8 +43811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu5_create_plain",
@@ -43823,8 +43823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_norm_3d_start",
@@ -43835,8 +43835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_norm_3d_mid",
@@ -43847,8 +43847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_norm_uv_mid",
@@ -43859,8 +43859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_norm_uv_nomake",
@@ -43871,8 +43871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_norm_uv_end",
@@ -43883,8 +43883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_binormal_uv",
@@ -43895,8 +43895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_binormal_3d",
@@ -43907,8 +43907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_binormal_start",
@@ -43919,8 +43919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_binormal_out",
@@ -43931,8 +43931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_getcreate_all",
@@ -43943,8 +43943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_getcreate_nomake",
@@ -43955,8 +43955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_create_dev",
@@ -43967,8 +43967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b22_eu9_create_plain",
@@ -43979,8 +43979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_norm_3d_start",
@@ -43991,8 +43991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_norm_3d_mid",
@@ -44003,8 +44003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_norm_uv_mid",
@@ -44015,8 +44015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_norm_uv_nomake",
@@ -44027,8 +44027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_norm_uv_end",
@@ -44039,8 +44039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_binormal_uv",
@@ -44051,8 +44051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_binormal_3d",
@@ -44063,8 +44063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_binormal_start",
@@ -44075,8 +44075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_binormal_out",
@@ -44087,8 +44087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_getcreate_all",
@@ -44099,8 +44099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_getcreate_nomake",
@@ -44111,8 +44111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_create_dev",
@@ -44123,8 +44123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu2_create_plain",
@@ -44135,8 +44135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_norm_3d_start",
@@ -44147,8 +44147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_norm_3d_mid",
@@ -44159,8 +44159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_norm_uv_mid",
@@ -44171,8 +44171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_norm_uv_nomake",
@@ -44183,8 +44183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_norm_uv_end",
@@ -44195,8 +44195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_binormal_uv",
@@ -44207,8 +44207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_binormal_3d",
@@ -44219,8 +44219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_binormal_start",
@@ -44231,8 +44231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_binormal_out",
@@ -44243,8 +44243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_getcreate_all",
@@ -44255,8 +44255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_getcreate_nomake",
@@ -44267,8 +44267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_create_dev",
@@ -44279,8 +44279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b23_eu7_create_plain",
@@ -47507,8 +47507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_norm_3d_start",
@@ -47519,8 +47519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_norm_3d_mid",
@@ -47531,8 +47531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_norm_uv_mid",
@@ -47543,8 +47543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_norm_uv_nomake",
@@ -47555,8 +47555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_norm_uv_end",
@@ -47567,8 +47567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_binormal_uv",
@@ -47579,8 +47579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_binormal_3d",
@@ -47591,8 +47591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_binormal_start",
@@ -47603,8 +47603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_binormal_out",
@@ -47615,8 +47615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_getcreate_all",
@@ -47627,8 +47627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_getcreate_nomake",
@@ -47639,8 +47639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_create_dev",
@@ -47651,8 +47651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_b33_eu3_create_plain",
@@ -47775,8 +47775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0000",
@@ -47815,8 +47815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -47945,9 +47945,8 @@
   "cases_total": 4789,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 1227,
-    "surface.cone_p1": 140,
-    "surface.sphere": 189,
     "surface.surf_of_extrusion_p2": 189,
+    "surface.surface_p2": 329,
     "topology.brep_p10": 381,
     "topology.face_p3": 274
   },

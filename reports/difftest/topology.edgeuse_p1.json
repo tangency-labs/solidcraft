@@ -15254,8 +15254,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_0_0",
@@ -15274,8 +15274,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_0_2",
@@ -15294,8 +15294,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_2_0",
@@ -15314,8 +15314,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_2_2",
@@ -15334,8 +15334,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_4_0",
@@ -15354,8 +15354,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_4_2",
@@ -15374,8 +15374,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_6_0",
@@ -15394,8 +15394,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_6_2",
@@ -15414,8 +15414,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_8_0",
@@ -15434,8 +15434,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_8_2",
@@ -15454,8 +15454,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_10_0",
@@ -15474,8 +15474,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_10_2",
@@ -15494,8 +15494,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_12_0",
@@ -15514,8 +15514,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_12_2",
@@ -15534,8 +15534,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_14_0",
@@ -15554,8 +15554,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_14_2",
@@ -15574,8 +15574,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_16_0",
@@ -15594,8 +15594,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_16_2",
@@ -15614,8 +15614,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_18_0",
@@ -15634,8 +15634,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_18_2",
@@ -15654,8 +15654,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_20_0",
@@ -15674,8 +15674,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_20_2",
@@ -15694,8 +15694,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_22_0",
@@ -15714,8 +15714,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_0_22_2",
@@ -15798,8 +15798,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_0_0",
@@ -15818,8 +15818,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_0_2",
@@ -15838,8 +15838,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_2_0",
@@ -15858,8 +15858,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_2_2",
@@ -15878,8 +15878,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_4_0",
@@ -15898,8 +15898,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_4_2",
@@ -15918,8 +15918,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_6_0",
@@ -15938,8 +15938,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_6_2",
@@ -15958,8 +15958,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_8_0",
@@ -15978,8 +15978,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_8_2",
@@ -15998,8 +15998,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_10_0",
@@ -16018,8 +16018,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_10_2",
@@ -16038,8 +16038,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_12_0",
@@ -16058,8 +16058,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_12_2",
@@ -16078,8 +16078,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_14_0",
@@ -16098,8 +16098,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_14_2",
@@ -16118,8 +16118,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_16_0",
@@ -16138,8 +16138,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_16_2",
@@ -16158,8 +16158,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_18_0",
@@ -16178,8 +16178,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_18_2",
@@ -16198,8 +16198,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_20_0",
@@ -16218,8 +16218,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_20_2",
@@ -16238,8 +16238,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_22_0",
@@ -16258,8 +16258,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_cone.smb_1_22_2",
@@ -19926,8 +19926,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_0_0",
@@ -19946,8 +19946,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_0_2",
@@ -19966,8 +19966,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_2_0",
@@ -19986,8 +19986,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_2_2",
@@ -20006,8 +20006,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_4_0",
@@ -20026,8 +20026,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_4_2",
@@ -20046,8 +20046,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_6_0",
@@ -20066,8 +20066,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_6_2",
@@ -20086,8 +20086,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_8_0",
@@ -20106,8 +20106,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_8_2",
@@ -20126,8 +20126,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_10_0",
@@ -20146,8 +20146,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_10_2",
@@ -20166,8 +20166,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_12_0",
@@ -20186,8 +20186,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_12_2",
@@ -20206,8 +20206,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_14_0",
@@ -20226,8 +20226,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_14_2",
@@ -20246,8 +20246,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_16_0",
@@ -20266,8 +20266,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_16_2",
@@ -20286,8 +20286,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_18_0",
@@ -20306,8 +20306,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_18_2",
@@ -20326,8 +20326,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_20_0",
@@ -20346,8 +20346,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_20_2",
@@ -20366,8 +20366,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_22_0",
@@ -20386,8 +20386,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_0_22_2",
@@ -20470,8 +20470,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_0_0",
@@ -20490,8 +20490,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_0_2",
@@ -20510,8 +20510,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_2_0",
@@ -20530,8 +20530,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_2_2",
@@ -20550,8 +20550,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_4_0",
@@ -20570,8 +20570,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_4_2",
@@ -20590,8 +20590,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_6_0",
@@ -20610,8 +20610,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_6_2",
@@ -20630,8 +20630,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_8_0",
@@ -20650,8 +20650,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_8_2",
@@ -20670,8 +20670,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_10_0",
@@ -20690,8 +20690,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_10_2",
@@ -20710,8 +20710,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_12_0",
@@ -20730,8 +20730,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_12_2",
@@ -20750,8 +20750,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_14_0",
@@ -20770,8 +20770,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_14_2",
@@ -20790,8 +20790,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_16_0",
@@ -20810,8 +20810,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_16_2",
@@ -20830,8 +20830,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_18_0",
@@ -20850,8 +20850,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_18_2",
@@ -20870,8 +20870,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_20_0",
@@ -20890,8 +20890,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_20_2",
@@ -20910,8 +20910,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_22_0",
@@ -20930,8 +20930,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_sphere.smb_1_22_2",
@@ -23190,8 +23190,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_0_0",
@@ -23210,8 +23210,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_0_2",
@@ -23230,8 +23230,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_2_0",
@@ -23250,8 +23250,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_2_2",
@@ -23270,8 +23270,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_4_0",
@@ -23290,8 +23290,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_4_2",
@@ -23310,8 +23310,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_6_0",
@@ -23330,8 +23330,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_6_2",
@@ -23350,8 +23350,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_8_0",
@@ -23370,8 +23370,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_8_2",
@@ -23390,8 +23390,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_10_0",
@@ -23410,8 +23410,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_10_2",
@@ -23430,8 +23430,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_12_0",
@@ -23450,8 +23450,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_12_2",
@@ -23470,8 +23470,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_14_0",
@@ -23490,8 +23490,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_14_2",
@@ -23510,8 +23510,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_16_0",
@@ -23530,8 +23530,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_16_2",
@@ -23550,8 +23550,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_18_0",
@@ -23570,8 +23570,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_18_2",
@@ -23590,8 +23590,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_20_0",
@@ -23610,8 +23610,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_20_2",
@@ -23630,8 +23630,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_22_0",
@@ -23650,8 +23650,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_0_22_2",
@@ -23734,8 +23734,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_0_0",
@@ -23754,8 +23754,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_0_2",
@@ -23774,8 +23774,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_2_0",
@@ -23794,8 +23794,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_2_2",
@@ -23814,8 +23814,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_4_0",
@@ -23834,8 +23834,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_4_2",
@@ -23854,8 +23854,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_6_0",
@@ -23874,8 +23874,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_6_2",
@@ -23894,8 +23894,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_8_0",
@@ -23914,8 +23914,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_8_2",
@@ -23934,8 +23934,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_10_0",
@@ -23954,8 +23954,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_10_2",
@@ -23974,8 +23974,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_12_0",
@@ -23994,8 +23994,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_12_2",
@@ -24014,8 +24014,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_14_0",
@@ -24034,8 +24034,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_14_2",
@@ -24054,8 +24054,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_16_0",
@@ -24074,8 +24074,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_16_2",
@@ -24094,8 +24094,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_18_0",
@@ -24114,8 +24114,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_18_2",
@@ -24134,8 +24134,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_20_0",
@@ -24154,8 +24154,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_20_2",
@@ -24174,8 +24174,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_22_0",
@@ -24194,8 +24194,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_gapval_surf_sphere150.smb_1_22_2",
@@ -29814,8 +29814,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_gaps0",
@@ -29834,8 +29834,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone (no SurfaceKind)",
-        "unit": "surface.cone_p1"
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "cone_gaps2",
@@ -32902,8 +32902,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_gaps0",
@@ -32922,8 +32922,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "sphere_gaps2",
@@ -34774,8 +34774,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_gaps0",
@@ -34794,8 +34794,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere",
-        "unit": "surface.sphere"
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_gaps2",
@@ -36988,9 +36988,8 @@
   "cases_passed": 3968,
   "cases_total": 4402,
   "deferred_by_unit": {
-    "surface.cone_p1": 50,
-    "surface.sphere": 100,
     "surface.surf_of_extrusion_p2": 84,
+    "surface.surface_p2": 150,
     "topology.brep_p10": 200
   },
   "max_rel_err": 0.0,

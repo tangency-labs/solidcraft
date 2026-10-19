@@ -6,6 +6,7 @@
 //! | Rust              | shim                                | upstream                       |
 //! |-------------------|-------------------------------------|--------------------------------|
 //! | [`compat_mult`]   | `sc_nlib_basis_adv_compat_mult`     | `N_GetCompatibleKnotArrayMult` |
+//! | [`compat_mult_reads_in_bounds`] | `sc_nlib_basis_adv_compat_mult_walk` | (guard of [`compat_mult`]) |
 //! | [`insert`]        | `sc_nlib_basis_adv_insert`          | `N_BasisInsertKnots`           |
 //! | [`inc_mult`]      | `sc_nlib_basis_adv_inc_mult`        | `N_BasisIncreaseKnotMult`      |
 //! | [`derivs_array`]  | `sc_nlib_basis_adv_derivs_array`    | `N_BasisDerivsArray`           |
@@ -17,10 +18,17 @@
 //! upstream read or write out of bounds, overflow an `int`, or loop forever):
 //! - `compat_mult`: `0 <= p <= 32767`, at least `p + 1` knots per vector, finite knots
 //!   with `|knot| <= 1e100` and a positive range `U[m] - U[0] >= 1e-100` (so the
-//!   rescale stays finite and the loop terminates). The shim pads both vectors with
-//!   `+inf` entries and gives the new-knot vectors room for every write.
+//!   rescale stays finite and the loop terminates), and no read past `R[mr]` or `S[ms]`
+//!   (upstream-issues UB-13: degree 0 with ends of multiplicity > 1, unclamped or
+//!   unsorted vectors). That last check is exact: [`compat_mult_reads_in_bounds`] replays
+//!   upstream's rescale (with `N_BasisReparam` itself) and index walk in the shim. The
+//!   shim still pads both vectors with `+inf` entries and gives the new-knot vectors room
+//!   for every write.
 //! - `insert`: `0 <= p <= 32767`, at least `p + 1` knots, a non-empty insert vector,
-//!   every knot finite (NaN knots make upstream loop forever).
+//!   every knot finite (NaN knots make upstream loop forever). With fewer than
+//!   `2p + 2` knots (only an unsorted `R` passes the range check) upstream writes
+//!   `2p + 2 + mx + 1` knots, past the documented `m + mx + 2` (UB-191); the shim's
+//!   output buffer holds them, so the result is defined and compared.
 //! - `inc_mult`: `0 <= p <= 32767`, `0 <= t <= 1000`, a non-empty knot vector.
 //! - `derivs_array`: `0 <= degree <= 1000`, at least `2*degree + 2` finite knots (as
 //!   `nlib.knots`), a valid flag, `0 <= der <= 1000` with every factor `p!/(p-k)!`,
@@ -54,6 +62,14 @@ mod sys {
             out_xs: *mut f64,
             out_nxs: *mut i64,
             cap: i64,
+        ) -> i32;
+        pub fn sc_nlib_basis_adv_compat_mult_walk(
+            r: *const f64,
+            n_r: i64,
+            s: *const f64,
+            n_s: i64,
+            p: i32,
+            out_walk: *mut i32,
         ) -> i32;
         pub fn sc_nlib_basis_adv_insert(
             r: *const f64,
@@ -144,10 +160,45 @@ pub struct CompatMult {
     pub xs: Vec<f64>,
 }
 
-/// Upstream `N_GetCompatibleKnotArrayMult(r, s, p)`.
-pub fn compat_mult(r: &[f64], s: &[f64], p: i32) -> Result<CompatMult, FfiError> {
+/// Whether `N_GetCompatibleKnotArrayMult(r, s, p)` reads only `r[0..=mr]` and
+/// `s[0..=ms]` (`false`: it would read past an end, upstream-issues UB-13). The shim
+/// replays upstream's rescale and index walk on copies, without the routine itself.
+///
+/// Errors: the other [`compat_mult`] domain checks, and `InvalidArgument` where the walk
+/// would stop advancing (upstream loops forever; excluded by those checks).
+pub fn compat_mult_reads_in_bounds(r: &[f64], s: &[f64], p: i32) -> Result<bool, FfiError> {
     compat_vector(r, p)?;
     compat_vector(s, p)?;
+    let mut walk = -1i32;
+    // SAFETY: both vectors have >= p+1 finite knots of bounded magnitude and positive
+    // range; the shim reads them into copies and checks every index before reading it,
+    // and writes one value to `walk`.
+    let st = unsafe {
+        sys::sc_nlib_basis_adv_compat_mult_walk(
+            r.as_ptr(),
+            len_i64(r.len())?,
+            s.as_ptr(),
+            len_i64(s.len())?,
+            p,
+            &raw mut walk,
+        )
+    };
+    check(st)?;
+    match walk {
+        0 => Ok(true),
+        1 => Ok(false),
+        2 => Err(bad("upstream would loop forever".into())),
+        w => Err(bad(format!("walk status {w}"))),
+    }
+}
+
+/// Upstream `N_GetCompatibleKnotArrayMult(r, s, p)`.
+pub fn compat_mult(r: &[f64], s: &[f64], p: i32) -> Result<CompatMult, FfiError> {
+    if !compat_mult_reads_in_bounds(r, s, p)? {
+        return Err(bad(
+            "upstream would read past the knot vectors (UB-13)".into()
+        ));
+    }
     let cap = r.len() + s.len() + 2 * PAD;
     let mut out_r = vec![0.0; r.len()];
     let mut out_s = vec![0.0; s.len()];
@@ -155,8 +206,9 @@ pub fn compat_mult(r: &[f64], s: &[f64], p: i32) -> Result<CompatMult, FfiError>
     let mut xs = vec![0.0; cap];
     let (mut nxr, mut nxs) = (0i64, 0i64);
     // SAFETY: finite knots with bounded magnitude and positive ranges keep the rescale
-    // finite, so upstream terminates; the shim pads both vectors with +inf entries and
-    // gives upstream `cap` slots for each new-knot vector (more than it can write).
+    // finite, so upstream terminates; the walk check above keeps every knot read in
+    // bounds (the shim also pads both vectors with +inf entries) and the shim gives
+    // upstream `cap` slots for each new-knot vector (more than it can write).
     // Output buffers have r.len(), s.len(), cap and cap writable slots.
     let st = unsafe {
         sys::sc_nlib_basis_adv_compat_mult(
@@ -201,8 +253,9 @@ pub fn insert(r: &[f64], p: i32, x: &[f64]) -> Result<Vec<f64>, FfiError> {
     let (n_r, n_x) = (len_i64(r.len())?, len_i64(x.len())?);
     call_with_buffer(r.len() + x.len(), |buf, len| {
         // SAFETY: r has >= p+1 finite knots and x >= 1 finite knot, so upstream reads in
-        // bounds (the shim pads X for its X[mx+1] read) and terminates; the shim writes
-        // at most buf.len() entries to buf and one value to len.
+        // bounds (the shim pads X for its X[mx+1] read) and terminates; the shim sizes
+        // upstream's output for every knot it writes (UB-191), writes at most buf.len()
+        // entries to buf and one value to len.
         unsafe {
             sys::sc_nlib_basis_adv_insert(
                 r.as_ptr(),

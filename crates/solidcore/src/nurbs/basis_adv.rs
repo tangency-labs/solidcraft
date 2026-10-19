@@ -218,6 +218,9 @@ pub fn compatible_knot_array_mult(
 
 /// Refines the knot vector `r` (degree `p`) with the knots `x` (upstream
 /// `N_BasisInsertKnots`): returns the merged knot vector of `r.len() + x.len()` knots.
+/// When `r` has fewer than `2p + 2` knots (only an unsorted `r` passes the range check)
+/// it returns `2p + 2 + x.len()` knots, the ones upstream writes past its documented
+/// output size (upstream-issues UB-191).
 ///
 /// The new knots must fit into the old ones, `U[p] < X[0] <= ... <= X[mx] < U[m-p]`;
 /// a new knot equal to an old one is placed before it.

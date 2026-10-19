@@ -1998,6 +1998,66 @@
       "values_compared": 48
     },
     {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_compat_mult_deg0_double_ends",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#0 (upstream source/SMLib/src/NL_BasisAdv.cpp:151-204 (N_GetCompatibleKnotArrayMult reads R[mr+1], S[ms+1]: degree 0 with ends of multiplicity 2, upstream-issues UB-13); class found by difftest --fuzz 3000 (fuzz00065, /p = 0))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_compat_mult_deg0_double_ends_fuzz00065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#1 (upstream source/SMLib/src/NL_BasisAdv.cpp:151-204 (UB-13: degree 0 on vectors clamped for degree 6); found by difftest --fuzz 3000 (fuzz00065))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_compat_mult_deg0_single_ends_in_bounds",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#2 (upstream source/SMLib/src/NL_BasisAdv.cpp:119 (degree 0 with single end knots stays in bounds: the UB-13 walk check must accept it))",
+      "values_compared": 8
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_compat_mult_unsorted_inner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#3 (upstream source/SMLib/src/NL_BasisAdv.cpp:151-204 (UB-13: an inner knot of R raised to 0.0, above the end knot, walks i past mr); found by difftest --fuzz 3000 (fuzz00000, /r/13 = 0.0))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_compat_mult_unclamped_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#4 (upstream source/SMLib/src/NL_BasisAdv.cpp:131-204 (UB-13: R's last knot replaced by -1e-300, so R is rescaled and unclamped at its end); found by difftest --fuzz 3000 (fuzz01857, /r/8 = -1e-300))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_insert_short_unsorted_r",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#5 (upstream source/SMLib/src/NL_BasisAdv.cpp:269-305 (N_BasisInsertKnots writes 2p+2+mx+1 knots when R has fewer than 2p+2, upstream-issues UB-191; crashed the reference with a heap overflow before the shim sized its output); found by difftest --fuzz 30000 (fuzz14324))",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_insert_short_r_four_new_knots",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_adv/fuzz_regressions.json#6 (upstream source/SMLib/src/NL_BasisAdv.cpp:269-305 (UB-191: two knots of degree 1 with R[0] > R[1] pass the range check, eight knots written); found by difftest --fuzz 30000 (fuzz20524))",
+      "values_compared": 8
+    },
+    {
       "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
@@ -2295,7 +2355,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970462",
-      "values_compared": 62
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -3095,12 +3155,13 @@
       "values_compared": 10
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0135",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970561",
-      "values_compared": 30
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3844,7 +3905,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970652",
-      "values_compared": 36
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -4299,12 +4360,13 @@
       "values_compared": 16
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0282",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970708",
-      "values_compared": 52
+      "values_compared": 0
     },
     {
       "both_errored": true,
@@ -4717,7 +4779,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970759",
-      "values_compared": 68
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -5401,12 +5463,13 @@
       "values_compared": 15
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0418",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970844",
-      "values_compared": 84
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -6142,7 +6205,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947970935",
-      "values_compared": 58
+      "values_compared": 60
     },
     {
       "both_errored": true,
@@ -6892,7 +6955,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971027",
-      "values_compared": 52
+      "values_compared": 50
     },
     {
       "both_errored": true,
@@ -6960,12 +7023,13 @@
       "values_compared": 72
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0610",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971036",
-      "values_compared": 58
+      "values_compared": 0
     },
     {
       "both_errored": true,
@@ -7398,12 +7462,13 @@
       "values_compared": 25
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0664",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971090",
-      "values_compared": 38
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -7998,15 +8063,16 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971163",
-      "values_compared": 56
+      "values_compared": 57
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0738",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971164",
-      "values_compared": 76
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -8089,7 +8155,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971174",
-      "values_compared": 14
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -8468,7 +8534,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971221",
-      "values_compared": 72
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -9180,7 +9246,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971309",
-      "values_compared": 79
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -9778,12 +9844,13 @@
       "values_compared": 48
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0957",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971383",
-      "values_compared": 48
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -9794,12 +9861,13 @@
       "values_compared": 18
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0959",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971385",
-      "values_compared": 16
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -9888,7 +9956,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971396",
-      "values_compared": 32
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -10249,7 +10317,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971441",
-      "values_compared": 70
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -10276,12 +10344,13 @@
       "values_compared": 44
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1019",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971445",
-      "values_compared": 44
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -10397,12 +10466,13 @@
       "values_compared": 52
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1034",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971460",
-      "values_compared": 28
+      "values_compared": 0
     },
     {
       "both_errored": true,
@@ -10567,12 +10637,13 @@
       "values_compared": 17
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1055",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971481",
-      "values_compared": 86
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -10660,7 +10731,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971492",
-      "values_compared": 76
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -11201,7 +11272,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971559",
-      "values_compared": 22
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -11908,7 +11979,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971646",
-      "values_compared": 16
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -12201,12 +12272,13 @@
       "values_compared": 48
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1257",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971683",
-      "values_compared": 48
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -12502,7 +12574,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971719",
-      "values_compared": 46
+      "values_compared": 44
     },
     {
       "max_rel_err": 0.0,
@@ -12719,7 +12791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971746",
-      "values_compared": 68
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -12783,7 +12855,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971754",
-      "values_compared": 34
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -12966,7 +13038,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971776",
-      "values_compared": 26
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -13277,7 +13349,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971814",
-      "values_compared": 88
+      "values_compared": 86
     },
     {
       "max_rel_err": 0.0,
@@ -13680,12 +13752,13 @@
       "values_compared": 72
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1438",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971864",
-      "values_compared": 40
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -13867,12 +13940,13 @@
       "values_compared": 396
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1461",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971887",
-      "values_compared": 20
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -13957,12 +14031,13 @@
       "values_compared": 24
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1472",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971898",
-      "values_compared": 32
+      "values_compared": 0
     },
     {
       "both_errored": true,
@@ -14084,7 +14159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971913",
-      "values_compared": 40
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -14156,7 +14231,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=11566731812947971922",
-      "values_compared": 41
+      "values_compared": 40
     },
     {
       "both_errored": true,
@@ -14184,11 +14259,11 @@
       "values_compared": 15
     }
   ],
-  "cases_both_errored": 230,
+  "cases_both_errored": 249,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 1744,
-  "cases_total": 1744,
+  "cases_passed": 1751,
+  "cases_total": 1751,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

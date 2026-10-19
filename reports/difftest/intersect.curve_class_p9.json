@@ -11,6 +11,30 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_degenerate_source_no_curve_cache_empty_vertices",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#1 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC) when the source curve cache cannot be built); found by difftest --fuzz 30000 (fuzz02411))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_degenerate_source_no_curve_cache_state1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#2 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz14891))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_degenerate_source_no_curve_cache_one_vertex",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#3 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz12956))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "isolated_vertex_uv",
       "outcome": "pass",
       "pass": true,
@@ -4014,9 +4038,9 @@
   "cases_both_errored": 0,
   "cases_deferred": 149,
   "cases_failed": 0,
-  "cases_passed": 274,
+  "cases_passed": 277,
   "cases_rejected": 2,
-  "cases_total": 425,
+  "cases_total": 428,
   "deferred_by_unit": {
     "curve.crv_on_surf": 24,
     "intersect.curve_class_p2": 10,

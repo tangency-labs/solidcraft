@@ -1196,9 +1196,12 @@ fn inexact_geometry(b: &Brep, types: &ImportTypes, op: &OpIn) -> Option<Output> 
     let st = if surface { surface_of(e) } else { -1 };
     if st >= 0 && !EXACT_SURFACES.contains(&st) {
         let (unit, symbol) = match st {
-            15012 | 15013 => ("surface.cone_p1", "SmCone (no SurfaceKind)"),
-            15014 => ("surface.sphere", "SmSphere"),
-            15015 => ("surface.torus", "SmTorus (no SurfaceKind)"),
+            // the DISPATCH GAP of `Surface::read_from_db` (issue #76) belongs to
+            // `surface.surface_p2`, not to the analytic surface units (all green)
+            15012 => ("surface.surface_p2", "SurfaceKind::Cone (SmCone dispatch)"),
+            15013 => ("surface.surface_p2", "SurfaceKind::Cone (SmCylinder dispatch)"),
+            15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere dispatch)"),
+            15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus dispatch)"),
             15030 => ("surface.surf_of_extrusion_p2", "SurfaceKind::SurfOfExtrusion"),
             _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
         };

@@ -16,6 +16,60 @@
         "vertices": [],
         "zone": 1e-7
       }
+    },
+    {
+      "name": "fuzz_degenerate_source_no_curve_cache_empty_vertices",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC) when the source curve cache cannot be built); found by difftest --fuzz 30000 (fuzz02411)",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": true,
+        "defaults": true,
+        "dim3": false,
+        "kind": 2,
+        "op": 1,
+        "scale": 1e-6,
+        "source": [[0.0, 0.75, 0.0], [1e-300, 0.75, 0.0]],
+        "state": 6,
+        "vertices": [],
+        "zone": 9.999999999999999e-14
+      }
+    },
+    {
+      "name": "fuzz_degenerate_source_no_curve_cache_state1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz14891)",
+      "inputs": {
+        "big": true,
+        "check3d": true,
+        "cross": true,
+        "defaults": false,
+        "dim3": false,
+        "kind": 2,
+        "op": 1,
+        "scale": 1.0,
+        "source": [[-0.0, 0.7, 0.0], [-1e-300, 0.7, 0.0]],
+        "state": 1,
+        "vertices": [],
+        "zone": 1e-7
+      }
+    },
+    {
+      "name": "fuzz_degenerate_source_no_curve_cache_one_vertex",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz12956)",
+      "inputs": {
+        "big": true,
+        "check3d": false,
+        "cross": false,
+        "defaults": true,
+        "dim3": false,
+        "kind": 2,
+        "op": 1,
+        "scale": 100000000.0,
+        "source": [[0.0, 0.75, 0.0], [-1e-300, 0.75, 0.0]],
+        "state": 6,
+        "vertices": [[0.0, 0.0, 0.0]],
+        "zone": 10.0
+      }
     }
   ]
 }
