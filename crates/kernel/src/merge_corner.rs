@@ -32,6 +32,9 @@ use crate::{KernelError, Result, guard};
 const RADII: (f64, f64) = (1e-6, 1e6);
 /// Largest coordinate taken.
 const REACH: f64 = 1e9;
+/// Smallest radius taken against the vertex's distance from the origin: below it the band's
+/// points carry more rounding than a part in 10⁶ of the radius.
+const SCALE: f64 = 1e-9;
 /// Largest cosine between directions that should be square (normals of the faces along `L`
 /// against `T`'s, the edges against their faces' normals).
 const SQUARE: f64 = 1e-8;
@@ -118,6 +121,9 @@ pub(crate) fn zone(faces: &Faces, ra: f64, rb: f64) -> Result<Zone> {
     if !finite_point(v) || ![top, wall, side, end, along_wall, along_side].iter().all(|d| d.is_finite()) {
         return Err(KernelError::Invalid("merge corner: point or direction not finite".into()));
     }
+    if ra.min(rb) < SCALE * v.len().max(1.0) {
+        return Err(unsupported("rounds meeting at an end that are too small for their distance from the origin"));
+    }
     let n = unit(top, "the top's normal")?;
     let (wall, side, end) = (unit(wall, "the wall's normal")?, unit(side, "the side's normal")?, unit(end, "the end's normal")?);
     let (along_wall, along_side) = (unit(along_wall, "the wall's edge")?, unit(along_side, "the side's edge")?);
@@ -143,9 +149,10 @@ pub(crate) fn zone(faces: &Faces, ra: f64, rb: f64) -> Result<Zone> {
     let r = ra + rb;
     let (sin, cot) = (theta.sin(), theta.cos() / theta.sin());
     let rho_star = r / (2.0 * (theta / 2.0).sin());
-    let p_star = v + w * (rb / sin + ra * cot) + m_w * ra;
+    let to_p_star = w * (rb / sin + ra * cot) + m_w * ra;
+    let p_star = v + to_p_star;
     // The band lies along the wall, not past its end.
-    if !((p_star - v).dot(end) < -SQUARE * r) {
+    if !(to_p_star.dot(end) < -SQUARE * r) {
         return Err(unsupported("rounds meeting at an end that reach past the wall's end"));
     }
     let zone = Zone {
@@ -215,10 +222,30 @@ impl Zone {
         self.rho_star / self.c()
     }
 
-    /// The straight run each round needs back from the vertex: along `W`'s trace and along `S`'s.
+    /// The straight run each round needs back from the vertex: how far `Γ_A` reaches along `W`'s
+    /// trace and `Γ_B` along `S`'s. That is `P*`'s distance (`rB/sin θ0 + rA·cot θ0`, and the same
+    /// swapped) unless the curve first runs on past `P*`: when its round's `r(1 − 2 cos θ0)` is
+    /// more than the other radius, so only at a corner over 60°.
     pub(crate) fn needed_run(&self) -> (f64, f64) {
-        let (sin, cot) = (self.theta.sin(), self.theta.cos() / self.theta.sin());
-        (self.rb / sin + self.ra * cot, self.ra / sin + self.rb * cot)
+        (self.reach(self.ra), self.reach(self.rb))
+    }
+
+    /// How far the edge on the round of radius `r` reaches along that round's trace. Both edges
+    /// run `g(t) = k(1 − t) − tan(θ0/2)·r(1 − t)²/(1 + t²)` along their traces; `g` is concave on
+    /// `[0, 1]` (`g′ = −k + 2 tan(θ0/2)·r·(1 − t²)/(1 + t²)²`, the fraction falling from 1 to 0),
+    /// so it peaks at `t = 0` or where `g′` is zero: `(1 − t²)/(1 + t²)² = α`, a quadratic in `t²`.
+    fn reach(&self, r: f64) -> f64 {
+        let (k, half) = (self.k(), (self.theta / 2.0).tan());
+        let g = |t: f64| k * (1.0 - t) - half * r * (1.0 - t).powi(2) / (1.0 + t * t);
+        let steep = 2.0 * half * r;
+        let t = if steep <= k {
+            0.0
+        } else {
+            // α t⁴ + (2α + 1) t² + α − 1 = 0, its root in [0, 1] in the form that keeps its digits.
+            let alpha = k / steep;
+            (2.0 * (1.0 - alpha) / (2.0 * alpha + 1.0 + (8.0 * alpha + 1.0).sqrt())).clamp(0.0, 1.0).sqrt()
+        };
+        g(t).max(0.0)
     }
 
     /// Where the section at `t` cuts `W`'s trace (`ρ = ρ*(1 − t)`).
