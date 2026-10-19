@@ -419,12 +419,97 @@ fn segment(from: Vec3, to: Vec3) -> Result<mt::NurbsCurve<mt::Vector4>> {
 // Recognition
 // ---------------------------------------------------------------------------------------------
 
-/// A chain's end at an earlier round's end that the round meets there.
-#[derive(Clone, Copy, Debug)]
+/// A chain's end at an earlier round's end that the round meets there: the chain runs between
+/// `T` and the face `X2` beside it, and ends at the vertex `v` where the earlier round `g` (between
+/// `T` and `Y`) leaves `T`.
+#[derive(Clone, Debug)]
 pub(crate) struct MixedEnd {
     /// Whether the earlier round adds material (it rises off `T` to the outside, a wall's foot)
     /// rather than taking it away.
     pub(crate) earlier_adds: bool,
+    /// The earlier round's radius.
+    pub(crate) radius: f64,
+    /// `V`: where the planes `T`, `X2` and `Y` meet, on `L`.
+    pub(crate) corner: Vec3,
+    /// The outward normals of `T`, `X2`, `Y` and `E`.
+    pub(crate) n_top: Vec3,
+    pub(crate) n_side: Vec3,
+    pub(crate) n_other: Vec3,
+    pub(crate) n_end: Vec3,
+    /// The earlier round's contact with `T`, from `v`, and its end on `X2`, from `v` to `u`.
+    pub(crate) contact: mt::Edge,
+    pub(crate) cap: mt::Edge,
+    /// Where the earlier round's end meets `L`: its contact with `Y` there.
+    pub(crate) u: mt::Vertex,
+    /// The end face `E`, and its edge with `X2` from `u` along `L`.
+    pub(crate) end: mt::FaceID,
+    pub(crate) end_side: mt::Edge,
+}
+
+/// The far end of `e` from `v`.
+fn far_end(e: &mt::Edge, v: Vec3) -> Vec3 {
+    let (a, b) = (from_p3(e.front().point()), from_p3(e.back().point()));
+    if a.dist(v) > b.dist(v) { a } else { b }
+}
+
+impl MixedEnd {
+    /// The faces at `V` as [`zone`] takes them, for the chain ending at `v`: each trace leaving `V`
+    /// along the round on it (`X2`'s through `v`, `Y`'s along the earlier round's contact).
+    pub(crate) fn faces(&self, v: Vec3) -> Result<Faces> {
+        let n = self.n_top;
+        let trace = |normal: Vec3, toward: Vec3, what: &str| -> Result<Vec3> {
+            let d = unit(n.cross(normal), what)?;
+            let along = d.dot(toward);
+            if !(along.abs() > 0.0) {
+                return Err(unsupported("rounds meeting at an end whose edges do not leave it"));
+            }
+            Ok(if along > 0.0 { d } else { -d })
+        };
+        let d_side = trace(self.n_side, v - self.corner, "the side's trace")?;
+        let d_other = trace(self.n_other, far_end(&self.contact, v) - v, "the earlier round's trace")?;
+        let (wall, along_wall, side, along_side) =
+            if self.earlier_adds { (self.n_other, d_other, self.n_side, d_side) } else { (self.n_side, d_side, self.n_other, d_other) };
+        Ok(Faces { v: self.corner, top: n, wall, side, end: self.n_end, along_wall, along_side })
+    }
+
+    /// The merge corner of this end with the later round of radius `r`, its chain ending at `v`
+    /// and running straight back to `reach` (the far end of its last edge where that is straight;
+    /// else `v`). Refused, decisively, where it does not fit: the rounds need more straight run
+    /// along a trace than it has, or the later round's contact with `X2` meets `L` past the far
+    /// end of `E`'s edge with `X2` (a round as deep as the face beside it).
+    pub(crate) fn plan(&self, v: Vec3, r: f64, reach: Vec3) -> Result<Zone> {
+        let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END));
+        let faces = self.faces(v)?;
+        let (ra, rb) = if self.earlier_adds { (self.radius, r) } else { (r, self.radius) };
+        let zone = zone(&faces, ra, rb).map_err(|e| refuse(&e.to_string()))?;
+        // The straight run each trace has from `V`: the earlier round's contact to its far end,
+        // the later round's chain to `reach`.
+        let (d_side, d_other) = if self.earlier_adds { (zone.s, zone.w) } else { (zone.w, zone.s) };
+        let have_other = (far_end(&self.contact, v) - zone.v).dot(d_other);
+        let have_side = (reach - zone.v).dot(d_side);
+        let (need_w, need_s) = zone.needed_run();
+        let (need_side, need_other) = if self.earlier_adds { (need_s, need_w) } else { (need_w, need_s) };
+        let short = [(need_side, have_side), (need_other, have_other)]
+            .into_iter()
+            .filter(|(need, have)| !(need < have))
+            .max_by(|x, y| (x.0 - x.1).total_cmp(&(y.0 - y.1)));
+        if let Some((need, have)) = short {
+            return Err(refuse(&format!(
+                "the rounds meeting at the end of the edge need {need:.3} mm of straight edge before it, {:.3} mm available",
+                have.max(0.0)
+            )));
+        }
+        // The later round's contact with `X2` meets `L` inside `E`'s edge with `X2`.
+        let q_x = if self.earlier_adds { zone.q_s } else { zone.q_w };
+        let u = from_p3(self.u.point());
+        let far_l = far_end(&self.end_side, u);
+        let length = far_l.dist(u);
+        let along = (far_l - u).normalized().map_or(f64::NAN, |d| (q_x - u).dot(d));
+        if !(along > length * 1e-6 && along < length * (1.0 - 1e-6)) {
+            return Err(refuse("the later round reaches past the far end of the face beside it"));
+        }
+        Ok(zone)
+    }
 }
 
 /// The earlier round at vertex `v` of a chain between planes `top` and `side`, when `round` (the
@@ -473,7 +558,7 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         return None;
     }
     let n_y = plane_normal(y)?;
-    plane_normal(e)?;
+    let n_e = plane_normal(e)?;
     // `L`: the edges of `E` with `side` and with `Y`, on one line square to the top.
     let away = |edge: &mt::Edge| -> Option<Vec3> {
         if !crate::curveblend::straight(edge, tolerance) {
@@ -518,7 +603,21 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         let x = from_p3(c.subs(t0 + (t1 - t0) * f64::from(i) / 16.0));
         (flat(x - centre).len() - r).abs() <= tolerance * 10.0
     });
-    on_cylinder.then_some(MixedEnd { earlier_adds: rise > 0.0 })
+    let end_side = shared(e, side, &u)?;
+    on_cylinder.then(|| MixedEnd {
+        earlier_adds: rise > 0.0,
+        radius: r,
+        corner,
+        n_top: n_t,
+        n_side: n_x,
+        n_other: n_y,
+        n_end: n_e,
+        contact: contact.clone(),
+        cap: cap.clone(),
+        u: u.clone(),
+        end: e.id(),
+        end_side,
+    })
 }
 
 #[cfg(test)]

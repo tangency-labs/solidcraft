@@ -1165,3 +1165,20 @@ fn a_chain_runs_on_round_a_tilted_slot_and_a_boss_on_a_tilted_plate() {
     let boss = boolean(&plate, &rounded_bar(), BoolOp::Union).unwrap().unwrap();
     chain_and_round_kept(&boss, Vec3::new(0.0, 2.0, 0.0), 8, &[0.5]);
 }
+
+#[test]
+fn probe_merge() {
+    let (body, outline) = plate_with_round_corners();
+    for (ra, rb) in [(1.0, 0.5), (0.5, 1.0), (0.5, 0.5)] {
+        let footed = round_the_foot(&body, ra).unwrap();
+        match fillet(&footed, &outline, rb) {
+            Ok(b) => eprintln!("A {ra} then B {rb}: ok validity {:?} crossed {:?} vol {}", b.validity(), b.crossed_face_loops(), planned_volume(&b)),
+            Err(e) => eprintln!("A {ra} then B {rb}: {e}"),
+        }
+        let edged = fillet(&body, &outline, rb).unwrap();
+        match round_the_foot(&edged, ra) {
+            Ok(b) => eprintln!("B {rb} then A {ra}: ok validity {:?} crossed {:?} vol {}", b.validity(), b.crossed_face_loops(), planned_volume(&b)),
+            Err(e) => eprintln!("B {rb} then A {ra}: {e}"),
+        }
+    }
+}
