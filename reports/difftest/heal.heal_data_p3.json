@@ -1179,8 +1179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0006",
@@ -1443,8 +1443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -1683,8 +1683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0056",
@@ -2179,8 +2179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0112",
@@ -2507,8 +2507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -2567,8 +2567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0153",
@@ -2579,8 +2579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0154",
@@ -2607,8 +2607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0157",
@@ -2767,8 +2767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0175",
@@ -2911,8 +2911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0190",
@@ -2963,8 +2963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0195",
@@ -3223,8 +3223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0220",
@@ -3339,8 +3339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0231",
@@ -3419,8 +3419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -3683,8 +3683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0267",
@@ -3707,8 +3707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0269",
@@ -3739,8 +3739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0272",
@@ -4179,8 +4179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0317",
@@ -4207,8 +4207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0320",
@@ -4351,8 +4351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::IsDegenerate",
-        "unit": "topology.face_p3"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0335",
@@ -4580,9 +4580,9 @@
   "cases_passed": 279,
   "cases_total": 474,
   "deferred_by_unit": {
+    "intersect.curve_class_p4": 20,
     "topology.brep_p2": 50,
     "topology.face_p2": 123,
-    "topology.face_p3": 20,
     "topology.face_p4": 2
   },
   "max_rel_err": 0.0,

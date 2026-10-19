@@ -76,8 +76,7 @@
 //!   copy of the face's surface (the edge use UV extremes need the B-rep mutably).
 //! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::SetTolerance`
 //!   (`topology.brep_p2`), `SmBrep::MakeFaceWithCurves` (`topology.brep_p7`),
-//!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`), `SmFace::CreateUVTrimCurves`
-//!   and `SmFace::ComputeLoopOrientation` (`topology.face_p3`),
+//!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`),
 //!   `SmFace::FlipFaceOrientation` and `SmFace::SplitAtSeam` (`topology.face_p1`),
 //!   `SmFace::GetEdges` and `SmFace::HasSeamProblem` (`topology.face_p4`).
 //! - The other members of the class (`FindLoopCurveOrientations`,
@@ -303,27 +302,20 @@ fn make_faces_with_curves(_b: &mut Brep, _input: TrimInput) -> Result<Vec<FaceId
     ))
 }
 
-/// `SmFace::CreateUVTrimCurves(FALSE, NULL, NULL, ...)` (unit `topology.face_p3`).
-fn face_create_uv_trim_curves(_k: &Kernel, _b: &mut Brep, _f: FaceId) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves
-    Err(SolidError::unported(
-        "SmFace::CreateUVTrimCurves",
-        "topology.face_p3",
-    ))
+/// `SmFace::CreateUVTrimCurves(FALSE, NULL, NULL, ...)`.
+fn face_create_uv_trim_curves(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    crate::topology::face::p3::create_uv_trim_curves(k, b, f, false, None).map(|_| ())
 }
 
-/// `SmFace::ComputeLoopOrientation(loop, orientation)` (unit `topology.face_p3`).
+/// `SmFace::ComputeLoopOrientation(loop, orientation)` (default arguments: no UV
+/// bounds, `bDo3DLoopComputation = FALSE`).
 fn face_compute_loop_orientation(
-    _k: &Kernel,
-    _b: &Brep,
-    _f: FaceId,
-    _l: LoopId,
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    l: LoopId,
 ) -> Result<OrientType> {
-    // UNPORTED(topology.face_p3): SmFace::ComputeLoopOrientation
-    Err(SolidError::unported(
-        "SmFace::ComputeLoopOrientation",
-        "topology.face_p3",
-    ))
+    crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false)
 }
 
 /// `SmFace::FlipFaceOrientation` (unit `topology.face_p1`).
@@ -572,7 +564,8 @@ pub fn face_uv_curves_present(b: &Brep, f: FaceId) -> Result<bool> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`topology.face_p3`).
+/// Those of [`crate::topology::face::p3::create_uv_trim_curves`] ([`SolidError::Unported`]
+/// at `SmFace::GetUpwardLoopuses`, `topology.face_p4`).
 pub fn create_uv_trim_curves(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
     face_create_uv_trim_curves(k, b, f)
 }
@@ -1038,8 +1031,8 @@ pub fn fix_backwards_outer_loop_on_seam(k: &Kernel, b: &mut Brep, f: FaceId) -> 
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmFace::ComputeLoopOrientation`, `topology.face_p3`;
-/// `SmFace::FlipFaceOrientation`, `topology.face_p1`); those of
+/// [`SolidError::Unported`] (`SmFace::FlipFaceOrientation`, `topology.face_p1`); those
+/// of `SmFace::ComputeLoopOrientation` and
 /// [`lu1::flip_loop_orientation`].
 pub fn fix_loop_orientation(
     k: &Kernel,
@@ -1128,8 +1121,8 @@ fn move_loopuse_first(
 ///
 /// `SM_ERR` for a face without loops; [`SolidError::InvalidInput`] for an edge without
 /// UV trim curve on the face's surface (upstream dereferences it); `SM_ERR_NULL_POINTER`
-/// for a loop use without face use; [`SolidError::Unported`]
-/// (`SmFace::ComputeLoopOrientation`, `topology.face_p3`); those of the callees.
+/// for a loop use without face use; those of the callees
+/// (`SmFace::ComputeLoopOrientation`, `topology.face_p3`).
 pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
     let mut loops_reordered = false;
 
@@ -1760,8 +1753,8 @@ pub fn find_outer_loops(
 /// # Errors
 ///
 /// `SM_ERR` as described; [`SolidError::InvalidInput`] for a face without surface (with
-/// a loop to check); [`SolidError::Unported`] (`SmFace::ComputeLoopOrientation`,
-/// `topology.face_p3`); those of [`check_loop`].
+/// a loop to check); those of `SmFace::ComputeLoopOrientation` (`topology.face_p3`) and
+/// [`check_loop`].
 pub fn check_face(
     k: &Kernel,
     b: &mut Brep,

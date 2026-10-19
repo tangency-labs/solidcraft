@@ -25,13 +25,15 @@
 //! Rust side reports [`SolidError::InvalidInput`] or fails the same guard), `-3` a call
 //! the shim skips because the Rust side defers it to an unported unit.
 //!
-//! Deferred: everything past `SmFace::ComputeLoopOrientation` (`topology.face_p3`:
-//! `CheckFace` after its first loop check, `FixTrimLoopOrientation`, `FixTrimLoopOrder`),
+//! Deferred: `SmFace::ComputeLoopOrientation` (`CheckFace` after its first loop check,
+//! `FixTrimLoopOrientation`, `FixTrimLoopOrder`) at its `sm_AreConnected` /
+//! `GetOrCreateUVTrimCurve` / `NormalizedEvaluate` calls (`topology.edgeuse_p3`),
 //! `SplitAtSeams`, `ClearUVTrimCurves`, `CreateUVTrimCurves` (`topology.face_p1` /
-//! `topology.face_p3` / `topology.face_p4`), `SmEdgeuse::GetOrCreateUVTrimCurve`
+//! `topology.face_p4`, and the face-owned surface's `SmFace::GetTolerance` stub of
+//! `GetSingularities`, `topology.face_p2`), `SmEdgeuse::GetOrCreateUVTrimCurve`
 //! (`topology.edgeuse_p3`), and the vertex-use UV points some B-reps need
 //! (`ComputeUVPoint`'s own deferrals). Last run: 3263 cases, 2842 pass, 421 deferred
-//! (`topology.edgeuse_p3` 193, `topology.face_p3` 219, `topology.face_p4` 9).
+//! (`topology.edgeuse_p3` 409, `topology.face_p2` 3, `topology.face_p4` 9).
 //!
 //! The UV curve ops (`mirror`, `iso_at`, `iso`, `iso_seam`) take every curve kind: an
 //! `SmLine` or `SmEllipse` is an `SmBSplineCurve` (`rv_ellipse.json`).

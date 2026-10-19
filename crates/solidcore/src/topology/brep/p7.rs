@@ -62,8 +62,8 @@
 //!   `RebuildUVTrimCurves` (`topology.brep_p2`); `MakeWireEdge`, `MakeWireEdgeVertex`
 //!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `GlueVertices`
 //!   (`topology.brep_p5`); `MakeShellVertex` (`topology.brep_p9`);
-//!   `SmFace::Notify`, `SetTolerance`,
-//!   `CreateUVTrimCurves` (`topology.face_p3`); `SmFace::GetBrep`, `GetEdges`
+//!   `MakeTopologyFromData`, `TestClosureSplitRegion(edge)` (`topology.brep_p10`);
+//!   `SmFace::GetBrep`, `GetEdges`
 //!   (`topology.face_p4`); `SmMerge` (`boolean.merge_p2`); the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), which
 //!   `MergeSelfIntersectionCurves` reaches first. Its classification of a UV curve
@@ -289,44 +289,50 @@ fn make_topology_from_data(
 /// `SmFace::Notify(op, data1, data2, data3)` on face `f` (`None` for a null datum or for
 /// the B-rep, which has no identity here).
 fn face_notify(
-    _b: &mut Brep,
-    _f: FaceId,
-    _op: NotifyOperation,
-    _data: [Option<EntityRef>; 3],
+    b: &mut Brep,
+    f: FaceId,
+    op: NotifyOperation,
+    data: [Option<EntityRef>; 3],
 ) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::Notify
-    Err(SolidError::unported("SmFace::Notify", "topology.face_p3"))
+    crate::topology::loopuse::face_notify_data(b, f, op, data)
 }
 
 /// `SmFace::SetTolerance(tol, bUpdateOnlyIfLarger, bCascadeToBndries)` (`SM_USE_OLDTOL`).
 fn face_set_tolerance(
-    _b: &mut Brep,
-    _f: FaceId,
-    _tol: f64,
-    _update_only_if_larger: bool,
-    _cascade_to_boundaries: bool,
+    b: &mut Brep,
+    f: FaceId,
+    tol: f64,
+    update_only_if_larger: bool,
+    cascade_to_boundaries: bool,
 ) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::SetTolerance
-    Err(SolidError::unported(
-        "SmFace::SetTolerance",
-        "topology.face_p3",
-    ))
+    crate::topology::face::p3::set_tolerance(
+        b,
+        f,
+        tol,
+        update_only_if_larger,
+        cascade_to_boundaries,
+    )
 }
 
 /// `pNewFace->CreateUVTrimCurves(bAdjustTolerances, &uvCurves, &orients, ..)`.
 fn face_create_uv_trim_curves(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _f: FaceId,
-    _adjust_tolerances: bool,
-    _uv: Vec<Curve>,
-    _orients: &[OrientType],
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    adjust_tolerances: bool,
+    uv: Vec<Curve>,
+    orients: &[OrientType],
 ) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves
-    Err(SolidError::unported(
-        "SmFace::CreateUVTrimCurves",
-        "topology.face_p3",
-    ))
+    let mut curves: Vec<Option<Curve>> = uv.into_iter().map(Some).collect();
+    // the gap statistics (the NULL out-parameters) are not read
+    crate::topology::face::p3::create_uv_trim_curves(
+        k,
+        b,
+        f,
+        adjust_tolerances,
+        Some((&mut curves, orients)),
+    )
+    .map(|_| ())
 }
 
 /// `pFace->GetBrep() == this`.

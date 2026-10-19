@@ -22,7 +22,8 @@
 //!   vertex's vertex use order from the shim.
 //!
 //! Deferred: `Fix_TolSizes` (`SmBrep::GetThisModelSizeEstimate`, `topology.brep_p1`),
-//! `Cache_DegenFaces` with a face (`SmFace::IsDegenerate`, `topology.face_p3`), and the
+//! `Cache_DegenFaces` with a face (`SmFace::IsDegenerate` classifies its edges with
+//! `SmCurveClassification`, `intersect.curve_class_p4`), and the
 //! gap computations whose surface drops are not ported yet.
 
 use serde::{Deserialize, Serialize};
@@ -1278,7 +1279,7 @@ fn rust_heal(
             Step::CacheCoinVertices => {
                 h.cache_coin_vertices(&k, &b, HealerOpType::CacheCoinVertices)
             }
-            Step::CacheDegenFaces => h.cache_degen_faces(&k, &b, HealerOpType::CacheDegenFaces),
+            Step::CacheDegenFaces => h.cache_degen_faces(&k, &mut b, HealerOpType::CacheDegenFaces),
             Step::CacheCoinEdges => Ok(h.cache_coin_edges(HealerOpType::CacheCoinEdges)),
             Step::FixCoinEdges => h.fix_coin_edges(HealerOpType::FixCoinEdges).map(|()| false),
             Step::CacheMissedEdgeXsects => {

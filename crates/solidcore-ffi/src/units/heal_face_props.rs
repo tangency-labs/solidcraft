@@ -431,8 +431,27 @@ fn simulate(ops: &[Op]) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// The range check of one seed (op `5`) value.
-fn seed_ok(field: i64, v: f64) -> bool {
+/// Whether `SetProps_Stage2(face, index, SM_HO_ALL)` on an `SmFaceProps` seeded with `seeds`
+/// (`(field, value)` in order, as the op `5` seeds) would dereference a null `m_pFace`
+/// (UB-131). Only the stage (field `0`) and the face pointer (field `24`) matter.
+#[must_use]
+pub fn stage2_derefs_null_face(seeds: &[(i64, f64)]) -> bool {
+    let mut s: State = (0, false);
+    for &(field, v) in seeds {
+        match field {
+            0 => s.0 = v as i64,
+            24 => s.1 = v != 0.0,
+            _ => {}
+        }
+    }
+    // SM_HO_ALL is past every threshold the simulation tests
+    sim_stage2(s, 1000.0).is_none()
+}
+
+/// The range check of one seed (op `5`) value of field `field` (the field id is checked by
+/// the caller: `0..SEED_FIELDS`).
+#[must_use]
+pub fn seed_ok(field: i64, v: f64) -> bool {
     match field {
         // m_ePropStage
         0 => (0.0..=6.0).contains(&v),
@@ -510,17 +529,17 @@ fn push_vec(input: &mut Vec<f64>, v: &[f64]) {
     input.extend_from_slice(v);
 }
 
-/// Runs the script; returns `[result, snapshot..]` per op.
-pub fn run(face: &FaceSpec, ops: &[Op]) -> Result<Vec<f64>, FfiError> {
-    validate(face, ops)?;
-    let mut input = vec![face.tol];
+/// Appends the face block the shim reads (`face_tol`, the surface block, the loops block; see
+/// the module docs) to `input`.
+pub fn encode_face(face: &FaceSpec, input: &mut Vec<f64>) {
+    input.push(face.tol);
     match &face.surf {
         Surf::Plane { o, x, y, domain } => {
             input.push(0.0);
-            push_vec(&mut input, o);
-            push_vec(&mut input, x);
-            push_vec(&mut input, y);
-            push_vec(&mut input, domain);
+            push_vec(input, o);
+            push_vec(input, x);
+            push_vec(input, y);
+            push_vec(input, domain);
         }
         Surf::Revolution {
             gen,
@@ -533,20 +552,20 @@ pub fn run(face: &FaceSpec, ops: &[Op]) -> Result<Vec<f64>, FfiError> {
             match gen {
                 Gen::Line { a, b } => {
                     input.push(0.0);
-                    push_vec(&mut input, a);
-                    push_vec(&mut input, b);
+                    push_vec(input, a);
+                    push_vec(input, b);
                 }
                 Gen::Circle { c, x, y, d, r } => {
                     input.push(1.0);
-                    push_vec(&mut input, c);
-                    push_vec(&mut input, x);
-                    push_vec(&mut input, y);
-                    push_vec(&mut input, d);
+                    push_vec(input, c);
+                    push_vec(input, x);
+                    push_vec(input, y);
+                    push_vec(input, d);
                     input.push(*r);
                 }
             }
-            push_vec(&mut input, point);
-            push_vec(&mut input, axis);
+            push_vec(input, point);
+            push_vec(input, axis);
             input.push(f64::from(u8::from(*swap)));
             input.push(*sweep);
         }
@@ -554,7 +573,7 @@ pub fn run(face: &FaceSpec, ops: &[Op]) -> Result<Vec<f64>, FfiError> {
     match &face.loops {
         Loops::Vertex(p) => {
             input.push(0.0);
-            push_vec(&mut input, p);
+            push_vec(input, p);
         }
         Loops::Edges(loops) => {
             input.push(1.0);
@@ -562,11 +581,18 @@ pub fn run(face: &FaceSpec, ops: &[Op]) -> Result<Vec<f64>, FfiError> {
             for l in loops {
                 input.push(l.len() as f64);
                 for p in l {
-                    push_vec(&mut input, p);
+                    push_vec(input, p);
                 }
             }
         }
     }
+}
+
+/// Runs the script; returns `[result, snapshot..]` per op.
+pub fn run(face: &FaceSpec, ops: &[Op]) -> Result<Vec<f64>, FfiError> {
+    validate(face, ops)?;
+    let mut input = Vec::new();
+    encode_face(face, &mut input);
     input.push(ops.len() as f64);
     for o in ops {
         input.push(o.op as f64);

@@ -4827,8 +4827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_Mouse.smb_1",
@@ -4839,8 +4839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_Mouse.smb_2",
@@ -4867,8 +4867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_box_with_large_fillet.smb_1",
@@ -4879,8 +4879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_box_with_large_fillet.smb_2",
@@ -7383,7 +7383,7 @@
   "deferred_by_unit": {
     "query.brep": 11,
     "query.face_p1": 4,
-    "topology.face_p3": 4
+    "topology.face_p4": 4
   },
   "max_rel_err": 0.0,
   "pass": true,

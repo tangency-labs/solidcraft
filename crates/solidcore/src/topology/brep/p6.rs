@@ -183,7 +183,9 @@ pub fn make_face_topology(
     record.uv_domain = domain;
     // This call precedes primary-faceuse assignment, list insertion, loop
     // allocation, radial sectors, trims and TestClosureSplitRegion upstream.
-    // UNPORTED(topology.face_p3): SmFace::SetTolerance
+    // UNPORTED(topology.face_p3): SmFace::SetTolerance -- justified: findings.md topology.face_p3 "Stubs left for this unit"
+    // (`topology::face::p3::set_tolerance` is ported; this is the stop point of the
+    // unported remainder of MakeFaceTopology, owned by topology.brep_p6)
     Err(SolidError::unported(
         "SmFace::SetTolerance",
         "topology.face_p3",

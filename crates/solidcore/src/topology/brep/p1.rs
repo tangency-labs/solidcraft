@@ -2213,7 +2213,8 @@ pub fn make_vertex_split_uv_trim_curve(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from `SmFace::FaceIntersect` (unit `topology.face_p3`) when
+/// [`SolidError::Unported`] from `SmFace::FaceIntersect` (unit `topology.face_p3`, a
+/// justified stub: the two faces are in different B-reps) when
 /// both B-reps have faces (upstream's `NER` on the faces never fires from arenas);
 /// those of the duplicate removal.
 pub fn brep_intersect(
@@ -2282,7 +2283,8 @@ fn face_intersect(
         approx_tol_3d,
         crv_angle_tolerance_deg,
     );
-    // UNPORTED(topology.face_p3): SmFace::FaceIntersect
+    // UNPORTED(topology.face_p3): SmFace::FaceIntersect -- justified: findings.md topology.face_p3 "Stubs left for this unit"
+    // (the two faces belong to different B-reps; the ported routine takes both from one)
     Err(SolidError::unported(
         "SmFace::FaceIntersect",
         "topology.face_p3",

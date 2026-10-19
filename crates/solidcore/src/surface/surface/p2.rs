@@ -2675,7 +2675,7 @@ fn is_contained(c: f64, a: f64, b: f64) -> bool {
 }
 
 /// `smos_Max` of two doubles.
-fn smos_max(a: f64, b: f64) -> f64 {
+pub(crate) fn smos_max(a: f64, b: f64) -> f64 {
     if a > b {
         a
     } else {

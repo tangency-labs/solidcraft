@@ -68,11 +68,13 @@
 //!   of a loop without loop use returns `None` (closed, outputs not written).
 //! - **`IsMissingSeamAtVertices`** ignores `ComputeUVSector`'s status, as upstream, and
 //!   reads the missing-seam flags of the sector it returns.
-//! - **Unported callees.** `SmFace::Notify` (`topology.face_p3`, the `PRE_EDIT` /
-//!   `POST_EDIT` around `FlipLoopOrientation` of a loop on a face),
-//!   and `SmSurface::DropPoint` (`surface.surface_p5`) return
-//!   [`SolidError::Unported`]; `SmEdgeuse::GetOrCreateUVTrimCurve` is wired
-//!   (`topology.edgeuse_p3`, whose own deferred callees still return it). `SmShell::GetRegion` is the co-port
+//! - **`SmFace::Notify`** (the `PRE_EDIT` / `POST_EDIT` around `FlipLoopOrientation` of
+//!   a loop on a face) runs with an empty attribute store and topology records and no
+//!   context or trimmed surface cache: the B-rep keeps none of them.
+//! - **Unported callees.** The `POST_EDIT` notification's `SmFace::GetUpwardEdgeuses`
+//!   (`topology.face_p4`) returns [`SolidError::Unported`]; `SmEdgeuse::GetOrCreateUVTrimCurve`
+//!   is wired (`topology.edgeuse_p3`, whose own deferred callees still return it).
+//!   `SmShell::GetRegion` is the co-port
 //!   [`eu1::shell_region`].
 //! - The `std::unordered_set` overloads of `GetEdges` / `GetVertices`,
 //!   `GetEdgeusesAndVertexuses`, `CalculateBoundingBox`, `GetTurningAngDeg`,
@@ -80,10 +82,14 @@
 //!   `IsEmbedded`, `ContainsUVPoint`, `RebuildFromEdgeCurves`, `AssertValid`, `Draw`
 //!   and `Dump` are not part of this unit.
 
+use std::collections::BTreeMap;
+
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_NONE};
+use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
@@ -91,7 +97,9 @@ use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::Surface;
+use crate::topology::edge::NotifyEnv;
 use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::face::p3 as face3;
 use crate::topology::topology as topo;
 use crate::topology::vertexuse as vu1;
 use crate::topology::{
@@ -873,10 +881,82 @@ pub fn loop_edgeuses(b: &Brep, l: LoopId) -> Result<Vec<EdgeuseId>> {
     edgeuses(b, primary(b, l)?, None, None)
 }
 
-/// `SmFace::Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT)` (unit `topology.face_p3`).
-fn face_notify_edit(_b: &mut Brep, _f: FaceId) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::Notify
-    Err(SolidError::unported("SmFace::Notify", "topology.face_p3"))
+/// The identity a topology entity is notified under by [`face_notify_edit`]: its type
+/// code and arena index (the B-rep keeps no attributes for it to select).
+fn notify_ref(e: EntityRef) -> ObjectRef {
+    let (type_code, kind, index) = match e {
+        EntityRef::Brep(x) => (16011, 0u64, x.index()),
+        EntityRef::Region(x) => (16012, 1, x.index()),
+        EntityRef::Shell(x) => (16013, 2, x.index()),
+        EntityRef::Faceuse(x) => (16022, 3, x.index()),
+        EntityRef::Face(x) => (16002, 4, x.index()),
+        EntityRef::Loopuse(x) => (16004, 5, x.index()),
+        EntityRef::Loop(x) => (16003, 6, x.index()),
+        EntityRef::Edgeuse(x) => (16005, 7, x.index()),
+        EntityRef::Edge(x) => (16016, 8, x.index()),
+        EntityRef::Vertexuse(x) => (16006, 9, x.index()),
+        EntityRef::Vertex(x) => (16021, 10, x.index()),
+    };
+    ObjectRef {
+        type_code,
+        key: ObjectKey(1 + (kind << 32) + u64::from(index)),
+    }
+}
+
+/// `SmFace::Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT, pFace, SM_NO_GET_BREP(pFace) (0), NULL)`: the
+/// face itself is the first argument. The B-rep
+/// carries no attribute store, topology records, context callbacks or trimmed surface
+/// caches, so the notification runs with empty ones (upstream on a face and uses
+/// without attributes or cache).
+pub(crate) fn face_notify_edit(b: &mut Brep, f: FaceId, operation: NotifyOperation) -> Result<()> {
+    face_notify_as(b, f, notify_ref(EntityRef::Face(f)), operation)
+}
+
+/// `SmFace::Notify(op, data1, data2, data3)` on face `f` with the entities as data
+/// (`None` for a null datum), under the same empty environment as [`face_notify_edit`].
+pub(crate) fn face_notify_data(
+    b: &mut Brep,
+    f: FaceId,
+    operation: NotifyOperation,
+    data: [Option<EntityRef>; 3],
+) -> Result<()> {
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = |e: EntityRef| notify_ref(e);
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let data = data.map(|d| d.map(notify_ref));
+    face3::notify(b, f, &mut env, None, operation, data)
+}
+
+/// [`face_notify_edit`] for a face notified under the identity `this` (the caller's
+/// `this` pointer, which is the notification's first data argument).
+pub(crate) fn face_notify_as(
+    b: &mut Brep,
+    f: FaceId,
+    this: ObjectRef,
+    operation: NotifyOperation,
+) -> Result<()> {
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = |e: EntityRef| {
+        if e == EntityRef::Face(f) {
+            this
+        } else {
+            notify_ref(e)
+        }
+    };
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    face3::notify(b, f, &mut env, None, operation, [Some(this), None, None])
 }
 
 /// `FlipLoopOrientation`: swaps the starts of the loop's two loop uses (the vertex
@@ -888,7 +968,8 @@ fn face_notify_edit(_b: &mut Brep, _f: FaceId) -> Result<()> {
 /// [`SolidError::InvalidInput`] for a loop without loop use or mates of different
 /// kinds (see the module docs); [`SolidError::Upstream`] `SM_ERR_NULL_POINTER` for a
 /// missing mate or start; those of [`collect_edgeuses`]; [`SolidError::Unported`] for
-/// a loop on a face; [`SolidError::NotFound`] for a dangling id.
+/// a loop on a face (the post-edit notification, `topology.face_p4`);
+/// [`SolidError::NotFound`] for a dangling id.
 pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let (lu1, lu2) = loop_loopuses(b, l)?;
     let lu2 = lu2.ok_or_else(|| SolidError::null_pointer(OP))?;
@@ -897,7 +978,7 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
         None => None,
     };
     if let Some(f) = face {
-        face_notify_edit(b, f)?;
+        face_notify_edit(b, f, NotifyOperation::PreEdit)?;
     }
 
     let start1 = b.loopuse(lu1)?.start;
@@ -950,7 +1031,7 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     }
 
     if let Some(f) = face {
-        face_notify_edit(b, f)?;
+        face_notify_edit(b, f, NotifyOperation::PostEdit)?;
     }
     Ok(())
 }
@@ -1523,12 +1604,14 @@ mod tests {
         assert_eq!(orientation(&b, lu(0)).unwrap(), OrientType::Opposite);
         set_loop(&mut b, lu(0), None).unwrap();
         assert_eq!(loop_(&b, lu(0)).unwrap(), None);
-        // flipping a loop on a face needs SmFace::Notify
+        // flipping a loop on a face needs SmFace::GetUpwardEdgeuses (post-edit notification)
         let mut b = square(0.0);
         assert!(flip_loop_orientation(&mut b, LoopId::from_index(0))
             .unwrap_err()
             .is_unported());
-        // without the face, the edge use lists swap loop uses
+        // without the face, the edge use lists swap loop uses (the failed flip above had
+        // already swapped them before its post-edit notification returned Unported)
+        let mut b = square(0.0);
         b.faceuse_mut(FaceuseId::from_index(0)).unwrap().face = None;
         flip_loop_orientation(&mut b, LoopId::from_index(0)).unwrap();
         assert_eq!(

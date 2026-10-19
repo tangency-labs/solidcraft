@@ -88,9 +88,9 @@
 //! - **`CreateCurvesByTrimming`** drops its unused `bForceUVClassify` argument; the
 //!   output arrays are asked for with `want_3d` / `want_uv`.
 //! - **Unported callees.** `sm_FaceClassifyUVLine` (`query.face_p3`),
-//!   `SmFace::CurveOnClassify` (`query.face_p2`), the `SmCurveClassification`
-//!   constructor of a curve (`intersect.curve_class_p4`),
-//!   `SmCurveInterval::GetIvlBound_EdgeuseObj` (`intersect.curve_class_p4`),
+//!   `SmCurveClassification::ReSet` in the constructor of a curve
+//!   (`intersect.curve_class_p2`; `SmFace::CurveOnClassify` follows it), the face member
+//!   `GetUpwardFaceuse` of an opaque handle in `SmCurveInterval::GetIvlBound_EdgeuseObj`,
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` (`topology.face_p1`),
 //!   `SmSurface::IsSingularity` of a non-plane
 //!   (`surface.surface_p5`) return [`SolidError::Unported`]. A thick face's temporary
@@ -99,15 +99,16 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
-use crate::geom::tol::are_same;
+use crate::geom::tol::{are_same, zone_tol3d};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
-use crate::intersect::point_class::{ClassObject, ClassObjectKind, PointClassType};
+use crate::intersect::curve_class::p4::ClassificationInit;
+use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -115,10 +116,12 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
+use crate::query::face::p2::{curve_on_classify, CurveOnClassifyObjects};
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::volume::Volume;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::topology as topo;
@@ -377,24 +380,204 @@ fn face_classify_uv_line(
     ))
 }
 
-/// `SmCurveClassification(curve, interval, uv_curve, tol, ...)` followed by
-/// `SmFace::CurveOnClassify` of a face.
-fn classify_curve_on_face(_curve: &Curve, _tol: f64) -> Result<Vec<CurveInterval<StubHandle>>> {
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
-    // (then UNPORTED(query.face_p2): SmFace::CurveOnClassify)
-    Err(SolidError::unported(
-        "SmCurveClassification::SmCurveClassification",
-        "intersect.curve_class_p4",
-    ))
+/// The handles of a curve classification of face `f` (`SmFace::CurveOnClassify`): the
+/// B-rep's topology (the face, its loops, edges, vertices and their uses), the face's
+/// surface, and the classified curve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClassHandle {
+    /// A face.
+    Face(FaceId),
+    /// A vertex.
+    Vertex(VertexId),
+    /// A loop.
+    Loop(LoopId),
+    /// An edge.
+    Edge(EdgeId),
+    /// A face use.
+    Faceuse(FaceuseId),
+    /// An edge use.
+    Edgeuse(EdgeuseId),
+    /// A vertex use.
+    Vertexuse(VertexuseId),
+    /// The surface of a face.
+    Surface(FaceId),
+    /// The 3D curve of an edge.
+    EdgeCurve(EdgeId),
+    /// The trim curve stored on an edge use.
+    Trim(EdgeuseId),
+    /// The classified curve (and its UV curve: upstream passes the same curve for both).
+    Curve,
 }
 
-/// `SmCurveInterval::GetIvlBound_EdgeuseObj(bMinEnd, pOptFaceProps)`.
-fn ivl_bound_edgeuse_obj<O>(_interval: &CurveInterval<O>, _min_end: bool) -> Result<Option<O>> {
-    // UNPORTED(intersect.curve_class_p4): SmCurveInterval::GetIvlBound_EdgeuseObj
-    Err(SolidError::unported(
-        "SmCurveInterval::GetIvlBound_EdgeuseObj",
-        "intersect.curve_class_p4",
-    ))
+impl ClassObject for ClassHandle {
+    fn class_kind(&self) -> ClassObjectKind {
+        match self {
+            Self::Face(_) => ClassObjectKind::Face,
+            Self::Vertex(_) => ClassObjectKind::Vertex,
+            Self::Loop(_) => ClassObjectKind::Loop,
+            Self::Edge(_) => ClassObjectKind::Edge,
+            Self::Faceuse(_) => ClassObjectKind::Faceuse,
+            Self::Edgeuse(_) => ClassObjectKind::Edgeuse,
+            Self::Vertexuse(_) => ClassObjectKind::Vertexuse,
+            Self::Surface(_) => ClassObjectKind::Surface,
+            Self::EdgeCurve(_) | Self::Trim(_) | Self::Curve => ClassObjectKind::Curve,
+        }
+    }
+}
+
+/// The objects behind the [`ClassHandle`]s of one `CurveOnClassify` call.
+struct FaceClassifyObjects<'c> {
+    /// The B-rep of the face.
+    brep: &'c Brep,
+    /// The classified curve.
+    curve: &'c Curve,
+}
+
+impl CurveOnClassifyObjects<ClassHandle> for FaceClassifyObjects<'_> {
+    fn face(&self, f: FaceId) -> ClassHandle {
+        ClassHandle::Face(f)
+    }
+    fn vertex(&self, v: VertexId) -> ClassHandle {
+        ClassHandle::Vertex(v)
+    }
+    fn face_surface(&self, f: FaceId) -> Option<ClassHandle> {
+        self.brep
+            .face(f)
+            .ok()
+            .and_then(|r| r.surface.as_ref())
+            .map(|_| ClassHandle::Surface(f))
+    }
+    fn edge(&self, e: EdgeId) -> ClassHandle {
+        ClassHandle::Edge(e)
+    }
+    fn vertexuse(&self, vu: VertexuseId) -> ClassHandle {
+        ClassHandle::Vertexuse(vu)
+    }
+    fn edgeuse(&self, eu: EdgeuseId) -> ClassHandle {
+        ClassHandle::Edgeuse(eu)
+    }
+    fn edge_curve(&self, e: EdgeId) -> ClassHandle {
+        ClassHandle::EdgeCurve(e)
+    }
+    fn trim_curve(&self, eu: EdgeuseId) -> ClassHandle {
+        ClassHandle::Trim(eu)
+    }
+    fn loop_id(&self, tgt_loop: ClassHandle) -> Option<LoopId> {
+        match tgt_loop {
+            ClassHandle::Loop(l) => Some(l),
+            _ => None,
+        }
+    }
+}
+
+impl ClassGeometry<ClassHandle> for FaceClassifyObjects<'_> {
+    fn classification_vertex_point(&self, o: ClassHandle) -> Option<Point3> {
+        match o {
+            ClassHandle::Vertex(v) => self.brep.vertex(v).ok().map(|v| v.point),
+            _ => None,
+        }
+    }
+    fn topology_zone_tol_3d(&self, o: ClassHandle) -> Option<f64> {
+        match o {
+            ClassHandle::Vertex(v) => self.brep.vertex(v).ok().map(|v| v.tolerance),
+            ClassHandle::Face(f) => self.brep.face(f).ok().map(|f| f.tolerance),
+            ClassHandle::Edge(e) => self.brep.edge(e).ok().map(|e| e.tolerance),
+            _ => None,
+        }
+    }
+    fn curve(&self, o: ClassHandle) -> Option<&Curve> {
+        match o {
+            ClassHandle::Curve => Some(self.curve),
+            ClassHandle::EdgeCurve(e) => self.brep.edge(e).ok()?.curve.as_ref(),
+            ClassHandle::Trim(eu) => eu1::uv_trim_curve(self.brep, eu).ok()?.0,
+            _ => None,
+        }
+    }
+    fn surface(&self, o: ClassHandle) -> Option<&Surface> {
+        match o {
+            ClassHandle::Surface(f) => self.brep.face(f).ok().and_then(|r| r.surface.as_ref()),
+            _ => None,
+        }
+    }
+    fn volume(&self, _o: ClassHandle) -> Option<&Volume> {
+        None
+    }
+    fn point(&self, _o: ClassHandle) -> Option<Point3> {
+        None
+    }
+    fn topology_entity(&self, o: ClassHandle) -> Option<(&Brep, EntityRef)> {
+        let e = match o {
+            ClassHandle::Face(f) => EntityRef::Face(f),
+            ClassHandle::Vertex(v) => EntityRef::Vertex(v),
+            ClassHandle::Loop(l) => EntityRef::Loop(l),
+            ClassHandle::Edge(e) => EntityRef::Edge(e),
+            ClassHandle::Faceuse(fu) => EntityRef::Faceuse(fu),
+            ClassHandle::Edgeuse(eu) => EntityRef::Edgeuse(eu),
+            ClassHandle::Vertexuse(vu) => EntityRef::Vertexuse(vu),
+            ClassHandle::Surface(_)
+            | ClassHandle::EdgeCurve(_)
+            | ClassHandle::Trim(_)
+            | ClassHandle::Curve => return None,
+        };
+        Some((self.brep, e))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<ClassHandle> {
+        match e {
+            EntityRef::Face(f) => Some(ClassHandle::Face(f)),
+            EntityRef::Vertex(v) => Some(ClassHandle::Vertex(v)),
+            EntityRef::Loop(l) => Some(ClassHandle::Loop(l)),
+            EntityRef::Edge(e) => Some(ClassHandle::Edge(e)),
+            EntityRef::Faceuse(fu) => Some(ClassHandle::Faceuse(fu)),
+            EntityRef::Edgeuse(eu) => Some(ClassHandle::Edgeuse(eu)),
+            EntityRef::Vertexuse(vu) => Some(ClassHandle::Vertexuse(vu)),
+            _ => None,
+        }
+    }
+}
+
+/// `SmCurveClassification(curve, curve->GetNaturalInterval(), uv_curve, tol, data_size,
+/// data, FALSE, TRUE, surface)` (the UV curve, when given, is the curve itself; the surface
+/// is the face's), followed by `SER(CurveOnClassify(TRUE, classification))` of face `f`:
+/// the intervals.
+#[allow(clippy::too_many_arguments)] // upstream's constructor arguments
+fn classify_curve_on_face(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    curve: &Curve,
+    with_uv_curve: bool,
+    tol: f64,
+    data_size: usize,
+) -> Result<Vec<CurveInterval<ClassHandle>>> {
+    let objects = FaceClassifyObjects { brep: b, curve };
+    let init = ClassificationInit {
+        curve: Some(ClassHandle::Curve),
+        interval: curve.natural_interval(),
+        uv_curve: with_uv_curve.then_some(ClassHandle::Curve),
+        src_zone_tol_3d: zone_tol3d(k, tol),
+        opt_data_size: data_size,
+        is_curve_owned: false,
+        is_curve_current: true,
+        // this->GetSurface()
+        surface1: CurveOnClassifyObjects::face_surface(&objects, f),
+        surface2: None,
+        uv_curve2: None,
+        ti: None,
+    };
+    let mut classification = CurveClassification::with_curve(k, &init)?;
+    // bHasBigGaps, bDoCheck3d: FALSE; bUVSpaceOkay: TRUE (the defaults)
+    curve_on_classify(
+        k,
+        b,
+        f,
+        &objects,
+        true,
+        &mut classification,
+        false,
+        false,
+        true,
+    )?;
+    Ok(classification.intervals().to_vec())
 }
 
 /// `SmFace::CalculateUVDomainFromUVTrimCurves(rTrimUVDomain)` (unit `topology.face_p1`),
@@ -719,6 +902,7 @@ pub struct SeamCrvReview<O> {
 /// [`SolidError::InvalidInput`] for an empty classification; those of
 /// `SmCurveInterval::GetIvlBound_EdgeuseObj`.
 pub fn review_start_and_stop_on_seam_crv_classifies<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
     classification: &mut CurveClassification<O>,
 ) -> Result<SeamCrvReview<O>> {
     // locals
@@ -728,8 +912,8 @@ pub fn review_start_and_stop_on_seam_crv_classifies<O: ClassObject>(
         .ok_or_else(|| null("ReviewStartAndStopOnSeamCrvClassifies: empty classification"))?;
 
     // init output
-    let edge_first_side = ivl_bound_edgeuse_obj(classification.at(0)?, true)?;
-    let edge_last_side = ivl_bound_edgeuse_obj(classification.at(last)?, false)?;
+    let edge_first_side = classification.ivl_bound_edgeuse_obj(geometry, 0, true)?;
+    let edge_last_side = classification.ivl_bound_edgeuse_obj(geometry, last, false)?;
     let mut out = SeamCrvReview {
         first_kept: true,
         last_kept: true,
@@ -951,7 +1135,7 @@ pub fn points_in_face(
         .map_err(|_| SolidError::sm_err(OP))?;
 
         // for all u values of interest - see if any map to inside the face
-        let mut classes: Vec<(f64, Vec<CurveInterval<StubHandle>>, Curve)> = Vec::new();
+        let mut classes: Vec<(f64, Vec<CurveInterval<ClassHandle>>, Curve)> = Vec::new();
         let mut ii: u64 = 0;
         while ii < trim_curve_cnt && (classes.len() as u64) < point_count {
             // start in the middle work our way out
@@ -975,7 +1159,7 @@ pub fn points_in_face(
             // classify the isoParameter UVTrimCurve against the face
             let tol = face.tolerance;
             let crv = Curve::from(uv_curve.clone());
-            let intervals = classify_curve_on_face(&crv, tol)?;
+            let intervals = classify_curve_on_face(k, b, f, &crv, true, tol, 0)?;
             if intervals
                 .iter()
                 .any(|ivl| ivl.mid.point_class() == PointClassType::Face)
@@ -1583,7 +1767,7 @@ pub fn create_curves_by_trimming(
             }
 
             // classify the UVCurve against the face
-            let intervals = classify_curve_on_face(curve, tol_uv)?;
+            let intervals = classify_curve_on_face(k, b, f, curve, true, tol_uv, 20)?;
 
             // for every curve classification
             for ivl in &intervals {
@@ -1642,7 +1826,7 @@ pub fn create_curves_by_trimming(
             }
 
             // Classify the curve against the face
-            let intervals = classify_curve_on_face(curve, tol_3d)?;
+            let intervals = classify_curve_on_face(k, b, f, curve, false, tol_3d, 20)?;
 
             for ivl in &intervals {
                 if ivl.mid.point_class() == PointClassType::Face
@@ -2551,10 +2735,27 @@ mod tests {
         }
     }
 
+    struct NoGeometry;
+
+    impl ClassGeometry<H> for NoGeometry {
+        fn curve(&self, _o: H) -> Option<&Curve> {
+            None
+        }
+        fn surface(&self, _o: H) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _o: H) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _o: H) -> Option<Point3> {
+            None
+        }
+    }
+
     #[test]
     fn review_of_an_empty_classification_is_rejected() {
         let k = Kernel::default();
         let mut cc: CurveClassification<H> = CurveClassification::new(&k);
-        assert!(review_start_and_stop_on_seam_crv_classifies(&mut cc).is_err());
+        assert!(review_start_and_stop_on_seam_crv_classifies(&NoGeometry, &mut cc).is_err());
     }
 }

@@ -70,8 +70,11 @@
 //! - **Object handles.** `m_pObject` and `m_cpFace` are caller-chosen handles `O`
 //!   ([`ClassObject`]): equal handles are the same object, and
 //!   [`ClassObject::class_kind`] answers `GetType` / `IsKindOf`. The geometry behind a
-//!   curve, surface, volume or point handle is reached through a [`ClassGeometry`].
-//!   `SM_PC_POINT` stores an `SmPoint3d*` cast to `SmObject*`; here it is a handle of
+//!   curve, surface, volume or point handle is reached through a [`ClassGeometry`];
+//!   a topology handle's B-rep entity through its defaulted hooks
+//!   [`ClassGeometry::topology_entity`] / [`ClassGeometry::topology_handle`]
+//!   (CO-PORTED by `intersect.curve_class_p4`, which calls the topology members
+//!   through them). `SM_PC_POINT` stores an `SmPoint3d*` cast to `SmObject*`; here it is a handle of
 //!   kind [`ClassObjectKind::Point`]. Upstream calls virtual `SmObject` methods on that
 //!   pointer in `ComputePointParameters` (`SmTol::GetZoneTol3d`), `IsConnectedTo` and
 //!   `MergeIntoObject` (`GetType`), which is undefined behaviour; the port treats a
@@ -108,7 +111,7 @@
 //!   (`harness/callgraph`) and not ported.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{ignored, Result, SolidError, SM_ERR};
+use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR};
 use crate::geom::assert_array::labels::{SPACE_BEND_TYPE, SPACE_UNBEND_TYPE};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -126,7 +129,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::Surface;
 use crate::surface::volume::Volume;
-use crate::topology::BrepId;
+use crate::topology::{Brep, BrepId};
 
 const OP_GAP: &str = "intersect::point_class::PointClassification::gap_3d";
 const OP_COMPUTE: &str = "intersect::point_class::PointClassification::compute_point_parameters";
@@ -276,6 +279,23 @@ pub trait ClassGeometry<O> {
         let _ = (vertex, surface, face);
         None
     }
+    /// The B-rep and topology entity behind a topology handle (a loop, face, face use,
+    /// edge, edge use, vertex or vertex use), through which part 4 of the curve
+    /// classification calls the topology members (`SmLoop::GetFace`,
+    /// `SmFace::GetUpwardFaceuse`, `SmEdge::GetEdgeuses`, ...). `None` (the default) is a
+    /// handle the adapter cannot resolve: a gap in the caller's adapter, reported as an
+    /// invalid-input error.
+    fn topology_entity(&self, object: O) -> Option<(&Brep, EntityRef)> {
+        let _ = object;
+        None
+    }
+    /// The handle of entity `entity` of the B-rep that [`ClassGeometry::topology_entity`]
+    /// resolved to; `None` (the default) when the adapter has none (an invalid-input
+    /// error for the caller).
+    fn topology_handle(&self, entity: EntityRef) -> Option<O> {
+        let _ = entity;
+        None
+    }
     /// The owner of an intermediate owner on a curve's owner chain (`GetOwner` of a
     /// generating curve or an edgeuse), for `SmCurve::GetEdge`
     /// ([`Curve::edge`]); `None` (the default) ends the chain.
@@ -337,6 +357,32 @@ pub struct PointClassification<O> {
 }
 
 impl<O: ClassObject> PointClassification<O> {
+    /// The same classification with every object handle (`m_pObject`, `m_cpFace`)
+    /// replaced by `f` of it: a change of handle type, no new state.
+    ///
+    /// # Errors
+    ///
+    /// Those of `f`.
+    pub fn map_objects<P: ClassObject>(
+        &self,
+        f: &mut dyn FnMut(O) -> Result<P>,
+    ) -> Result<PointClassification<P>> {
+        Ok(PointClassification {
+            src_zone_tol_3d: self.src_zone_tol_3d,
+            point_class: self.point_class,
+            object: self.object.map(&mut *f).transpose()?,
+            face: self.face.map(&mut *f).transpose()?,
+            gap_3d: self.gap_3d,
+            t_param: self.t_param,
+            uv_param: self.uv_param,
+            uvw_param: self.uvw_param,
+            param_set: self.param_set,
+            pre_snap_param: self.pre_snap_param,
+            sss_point_flag: self.sss_point_flag,
+            sss_point: self.sss_point,
+        })
+    }
+
     /// A cleared classification of something with zone tolerance `src_zone_tol_3d`
     /// (`SmPointClassification(SmZoneTol3d, const SmContext*)`). The argument is
     /// already an `SmZoneTol3d` and is stored as is; upstream's default,

@@ -2519,8 +2519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::SmCurveClassification",
-        "unit": "intersect.curve_class_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_0_0",
@@ -2531,8 +2531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::SmCurveClassification",
-        "unit": "intersect.curve_class_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_0_1",
@@ -2631,8 +2631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::SmCurveClassification",
-        "unit": "intersect.curve_class_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_0_0",
@@ -2643,8 +2643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::SmCurveClassification",
-        "unit": "intersect.curve_class_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_0_1",
@@ -19573,8 +19573,7 @@
   "cases_total": 2429,
   "deferred_by_unit": {
     "curve.iso_curve": 12,
-    "geom.solution_array": 2,
-    "intersect.curve_class_p4": 4,
+    "intersect.curve_class_p2": 4,
     "intersect.surface_tracer": 8,
     "intersect.topology_solver_p1": 4,
     "topology.edge": 3

@@ -2732,7 +2732,9 @@ impl PolyBrep {
         if x.original_face != original {
             x.original_face = original;
             if original.is_some() && propagate_attribs {
-                // UNPORTED(topology.face_p3): SmFace::Notify (SM_NO_COPY to this face)
+                // UNPORTED(topology.face_p3): SmFace::Notify -- justified: findings.md topology.face_p3 "Stubs left for this unit"
+                // (SM_NO_COPY to this poly face; the original face is an opaque key: no B-rep,
+                // no topology record)
                 return Err(SolidError::unported("SmFace::Notify", "topology.face_p3"));
             }
         }

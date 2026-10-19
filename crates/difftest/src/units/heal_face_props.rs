@@ -93,7 +93,7 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 /// The generator of a surface of revolution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum GenIn {
+pub(crate) enum GenIn {
     Line {
         a: [f64; 3],
         b: [f64; 3],
@@ -110,7 +110,7 @@ enum GenIn {
 /// The face's surface when it is not the plane `o`, `x`, `y`, `domain` of [`FaceIn`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum SurfIn {
+pub(crate) enum SurfIn {
     Revolution {
         gen: GenIn,
         point: [f64; 3],
@@ -125,24 +125,24 @@ enum SurfIn {
 /// The face's loops when they are not the one vertex loop at the origin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum LoopsIn {
+pub(crate) enum LoopsIn {
     Vertex { at: [f64; 3] },
     /// Edge loops (the first one outer, the others holes): corner points joined by lines.
     Edges { loops: Vec<Vec<[f64; 3]>> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct FaceIn {
-    tol: f64,
-    o: [f64; 3],
-    x: [f64; 3],
-    y: [f64; 3],
+pub(crate) struct FaceIn {
+    pub(crate) tol: f64,
+    pub(crate) o: [f64; 3],
+    pub(crate) x: [f64; 3],
+    pub(crate) y: [f64; 3],
     /// `[umin, vmin, umax, vmax]`.
-    domain: [f64; 4],
+    pub(crate) domain: [f64; 4],
     #[serde(default)]
-    surf: Option<SurfIn>,
+    pub(crate) surf: Option<SurfIn>,
     #[serde(default)]
-    loops: Option<LoopsIn>,
+    pub(crate) loops: Option<LoopsIn>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,7 +180,7 @@ fn ffi_gen(g: &GenIn) -> ffi::Gen {
     }
 }
 
-fn ffi_face(f: &FaceIn) -> ffi::FaceSpec {
+pub(crate) fn ffi_face(f: &FaceIn) -> ffi::FaceSpec {
     let surf = match &f.surf {
         None => ffi::Surf::Plane {
             o: f.o,
@@ -357,7 +357,7 @@ macro_rules! next_id {
 /// loop use whose edge use list starts at the first requested edge use, one `SmLine` edge per
 /// edge use, a vertex per edge use at its edge's start; the first loop use outer, the others
 /// inner), then `SetTolerance` of the face.
-fn rust_brep(k: &Kernel, f: &FaceIn) -> Result<(Brep, FaceId), HarnessError> {
+pub(crate) fn rust_brep(k: &Kernel, f: &FaceIn) -> Result<(Brep, FaceId), HarnessError> {
     let mut b = Brep::new();
     let e = |e: solidcore::SolidError| harness(e.to_string());
     let region = b
@@ -558,7 +558,7 @@ fn status(r: solidcore::Result<()>) -> Result<f64, solidcore::SolidError> {
     }
 }
 
-fn snapshot(p: &FaceProps<H>, face: FaceId) -> Vec<f64> {
+pub(crate) fn snapshot<O: LoopObject>(p: &FaceProps<O>, face: FaceId) -> Vec<f64> {
     let t = |x: solidcore::heal::face_props::Tri| x.code() as f64;
     let mut o: Vec<f64> = vec![p.prop_stage.code() as f64];
     o.push(p.not_yet_face_type.code() as f64);
@@ -664,7 +664,7 @@ fn loop_snapshot(
     Ok((loops.len() as f64, o))
 }
 
-fn seed(p: &mut FaceProps<H>, face: FaceId, field: i64, idx: i64, v: f64) {
+pub(crate) fn seed<O: LoopObject>(p: &mut FaceProps<O>, face: FaceId, field: i64, idx: i64, v: f64) {
     use solidcore::heal::face_props::{MixedLinkType as M, Tri};
     let tri = |x: f64| match x as i64 {
         0 => Tri::False,
@@ -991,7 +991,7 @@ fn gen_loops(rng: &mut Rng, poles: &[[f64; 3]]) -> Option<LoopsIn> {
     }
 }
 
-fn gen_face(rng: &mut Rng) -> FaceIn {
+pub(crate) fn gen_face(rng: &mut Rng) -> FaceIn {
     let tols = [
         1e-5,
         1e-6,

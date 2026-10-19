@@ -31,10 +31,12 @@
 //!   `m_bProcessBoundaryCurves`) have nothing to act on because the Rust surface
 //!   solvers build no surface cache. `EvaluateBinormal` first gets the surface cache of
 //!   the face's surface (`smsurf_GetSurfaceCache`), whose construction creates the UV
-//!   trim curves of the face's edge uses: that is `UNPORTED(topology.face_p3)`
-//!   (`SmFace::CreateUVTrimCurves`), so the paths that reach the global point solve are
-//!   deferred. The same side effect makes `CreateUVTrimCurve` clean up a UV trim curve
-//!   the cache attached; the clean-up is kept.
+//!   trim curves of the face's edge uses (`SmFace::CreateUVTrimCurves`). The Rust
+//!   trimmed surface cache holds its face as an opaque handle without the B-rep, so it
+//!   cannot make that call (a `justified:` stub, plan/findings.md `topology.face_p3`),
+//!   and the paths that reach the global point solve are deferred. The same side effect
+//!   makes `CreateUVTrimCurve` clean up a UV trim curve the cache attached; the clean-up
+//!   is kept.
 //! - **Out-params.** `CreateUVTrimCurve` returns a [`CreatedUvTrimCurve`]; its optional
 //!   `pdMaxDeviation` is `want_deviation`. `GetOrCreateUVTrimCurve` returns its status
 //!   as [`UvTrimCurveFetch::status`] (upstream's status can be a failure while the
@@ -256,12 +258,16 @@ fn status<T>(r: Result<T>) -> Result<Option<T>> {
     }
 }
 
-/// `smsurf_GetSurfaceCache(pSurface)` of the surface of a face, as `EvaluateBinormal`
-/// calls it before clearing the surface's owner: the face's trimmed surface cache,
-/// whose construction attaches a UV trim curve to every edge use of the face
-/// (`SmFace::CreateUVTrimCurves`, `topology.face_p3`).
+/// `smsurf_GetSurfaceCache(pSurface)` of the surface of a face (`NER`), as
+/// `EvaluateBinormal` calls it before clearing the surface's owner: the face's trimmed
+/// surface cache, whose construction attaches a UV trim curve to every edge use of the
+/// face (`SmFace::CreateUVTrimCurves`, `SmTrimSrfCache.cpp:209`). The Rust surface cache
+/// holds its face as an opaque handle without the B-rep, so it cannot make that call
+/// (`surface::trim_srf_cache`'s own `face_create_uv_trim_curves` stub); building the cache
+/// here without it would drop the side effect on the face's edge uses.
 fn face_surface_cache() -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves
+    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves -- justified: findings.md topology.face_p3 "Stubs left for this unit"
+    // (through the trimmed surface cache of the face's surface, which has no B-rep handle)
     Err(SolidError::unported(
         "SmFace::CreateUVTrimCurves",
         "topology.face_p3",

@@ -1300,6 +1300,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash.
 - **Rust port:** `SolidError::InvalidInput` for the null proto vertex and definition; definitions are ids (no double delete).
 
+#### UB-124. `GetIvlBound_EdgeuseObj` and `GetLoopCrossings` dereference the face, surface and curve before their NULL checks
+- **Location:** `source/SMLib/src/SmCurveClass.cpp:20480-20488`, `SmCurveInterval::GetIvlBound_EdgeuseObj` (def. `:20458`); `:11342-11360`, `SmCurveClassification::GetLoopCrossings` (def. `:11303`).
+- **What happens:** `GetIvlBound_EdgeuseObj` calls `pClassifyFace->GetUpwardFaceuse()` and `GetSurface()` in its locals, then tests `pClassifyFace == NULL` ("no work"); a classification without face reads `m_pFU` of `NULL`. It also needs the interval's back pointer (`GetCurveClassification()->GetCurve()`). `GetLoopCrossings` calls `pSurface->GetNaturalUVDomain()` (and, for a face without surface, `NULL->` through it) before `if(pFace == NULL || pSurface == NULL) return SM_SUCCESS`, and `pClassifyCrv->GetNaturalInterval()` before `if(pClassifyCrv == NULL ...)`; both early returns are dead.
+- **Trigger:** `GetIvlBound_EdgeuseObj` on a classification without `SetFace`; `GetLoopCrossings` over loops of a face without surface, or of a classification without curve.
+- **How found:** read during porting (unit `intersect.curve_class_p4`).
+- **Confirmed:** no (the difftest shim refuses those calls).
+- **Severity:** crash.
+- **Rust port:** `SolidError::InvalidInput` (the dead "no work" returns are not reached).
+
 #### UB-121. `SmSurface::IntersectSurfaceBoundaries` dereferences an optional NULL curve array
 - **Location:** `source/SMLib/src/SmSurface.cpp:21903` `SmSurface::IntersectSurfaceBoundaries` (`pOpt3DCurves->Add( pCrvCopy )` in the segment loop).
 - **What happens:** `pOpt3DCurves` is declared like the other optional outputs (the header calls it `pOpt...`, the comment "required") and is reset only when non-NULL, but a kept boundary segment is added through it unconditionally: a NULL array is dereferenced.
@@ -1374,23 +1383,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB.
 - **Rust port:** proto edges are arena ids that are never freed, so the repeat reads a deleted-edge slot and finds no group; nothing is read after free.
 
-#### UB-169. `SmHCR(.., crViewVector, ..)` builds the view transform from uninitialised vectors for a zero view vector
-- **Location:** `source/SMLib/src/SmHCR.cpp:144` `SmHCR::SmHCR` (view-vector constructor).
-- **What happens:** The status of `MakeUnitOrthoVectors` is ignored. When the view vector cannot be unitized (squared length below `SM_EFF_ZERO_SQ`), or when its squared length overflows to infinity (`Unitize` then yields `(0, 0, 0)`, both arbitrary-axis crosses are zero and `SER(SM_ERR)` returns, `SmVector3d.cpp:199-205`), `sPerp1` and `sPerp2` (`SmVector3d() = default`) stay uninitialised and `SetSTEPCanonical` reads them.
-- **Trigger:** `SmHCR(ctx, pBrep, SmVector3d(0, 0, 0), ..)`; `SmVector3d(1e200, 0, 0)`.
-- **How found:** read during porting (`blend.hcr`).
-- **Confirmed:** no (the difftest guard rejects such view vectors; generated cases use `[1e200, 0, 0]`).
-- **Severity:** crash/UB.
-- **Rust port:** `view_transform_for_vector` returns `InvalidInput`.
+#### UB-162. `SmFace::ComputeLoopOrientation` reads an empty array for an edge loop use without edge uses
+- **Location:** `source/SMLib/src/SmFace.cpp:1851` `SmFace::ComputeLoopOrientation` (`sEUs.GetLast()`), `source/SMLib/inc/SmTArray.h:1035`-`1037` (`GetLast` returns `m_pData[m_lSize-1]`).
+- **What happens:** for a loop use of edge type whose edge use array is empty, `GetLast()` reads `m_pData[-1]` (an out-of-bounds read of the array header's neighbour, or of a null array).
+- **Trigger:** an edge-type loop use with no edge uses. Looks unreachable from files: `SmBrepData` sets `SmEdgeuse_TYPE` for a loop use only together with its edge use array (`SmBrepData.cpp:706`-`712`), so a loaded loop use of edge type has edge uses; it needs a B-rep built or edited in memory by calling code.
+- **How found:** read during porting (unit `topology.face_p3`).
+- **Confirmed:** no (the difftest guard rejects such a B-rep on both sides).
+- **Severity:** crash/UB (out-of-bounds read).
+- **Rust port:** `SolidError::InvalidInput` for a loop use without edge uses. (The other `ComputeLoopOrientation` reads that looked undefined, `sVeryFirstUV`, are defined: `SmVector2d` has default member initialisers `SM_UNDEF_DOUBLE`, `SmVector2d.h:56`-`58`; the port starts from `Point2::UNDEF` and computes the closing span with it.)
 
-#### UB-170. `SmHCR::IntersectCurveWithSilhouettes` reads silhouette edges past the queried array [PSIRT]
-- **Location:** `source/SMLib/src/SmHCR.cpp:2121` `SmHCR::IntersectCurveWithSilhouettes`.
-- **What happens:** The loop that copies the silhouette edges found in the curve's box is bounded by the size of the vertex query (`sObjects`) instead of the edge query (`sObjectsInBox`). With more silhouette vertices than edges in the box it reads past the edge array (unchecked `operator[]` in release) and uses the values as edges; with fewer it skips edges.
-- **Trigger:** A curve whose box holds an open chain of silhouette edges (one more vertex than edges), for example any `ComputeGlobalVisibility` whose silhouettes are open curves.
-- **How found:** read during porting (`blend.hcr`).
-- **Confirmed:** no (the difftest shim skips the call when the vertex count exceeds the edge count; the skipped-edge behaviour is compared).
-- **Severity:** crash/UB.
-- **Rust port:** Reads the edges up to the vertex count as upstream and returns `InvalidInput` at the first index past the edge list.
+#### UB-165. `SmFace::FaceIntersect` hands out deleted curves through `pOptCC3DCrvs` when called without classification arrays
+- **Location:** `source/SMLib/src/SmFace.cpp:11669` `SmFace::FaceIntersect` (`pOptCC3DCrvs->Append( s3DCurves )`, `pOptThisCCUVCrvs`, `pOptOtherCCUVCrvs`), init block `:11325`-`11333`.
+- **What happens:** the surface/surface curves are owned by the cleaners `sClean1`..`sClean3`, which are cleared only when `pOptThisCrvClasses` or `pOptOtherCrvClasses` is given. With `pOptCC3DCrvs` (or the UV arrays) but neither classification array, the caller receives pointers the cleaners delete at return; with the classification arrays but without `pOptCC3DCrvs`, the curves the classifications reference leak. In the coincident branch a failing edge curve `Copy` makes the inner `sClean` delete the copies in `s3DCurves`; `SmObjsDelete::Delete` NULLs each slot and resets the array (`SmTArray.h:2107`-`2115`), so there is no double free, but `sUVCurves1`/`sUVCurves2` keep NULL entries and `sCurveTypes` keeps stale `SM_TC_REGION_BOUNDARY` entries when they reach the intersector (a wrong result at most).
+- **Quirk:** the init block resets `pOptThisUVCurves` and `pOptOtherUVCurves` twice and never resets `pOptThisCCUVCrvs` / `pOptOtherCCUVCrvs`, so those outputs append to whatever the caller passed.
+- **Trigger:** `FaceIntersect` with `pOptCC3DCrvs != NULL` and both classification arrays `NULL`. The only upstream caller (`SmFeatureExecutive.cpp:1838`) passes `pOptThisCrvClasses` together with `pOptCC3DCrvs` and `pOptThisCCUVCrvs`, which is safe.
+- **How found:** read during porting (unit `topology.face_p3`).
+- **Confirmed:** no (the difftest shim passes neither array).
+- **Severity:** misuse hazard (use after free for bad caller arguments), no file-reachable path.
+- **Rust port:** `FaceIntersection` owns all curves and returns fresh vectors; the `!have_curves` block of the coincident branch replaces all four vectors (`s3DCurves`, `sUVCurves1`, `sUVCurves2`, `sCurveTypes`) with the intersector's. Outputs are return values, so the append-to-caller quirk has no counterpart: callers append the returned vectors themselves.
 
 #### UB-137. `SmFace::SplitAtSeam` recurses on itself with another face's seam classifications
 - **Location:** `source/SMLib/src/SmFace.cpp:18098-18149` `SmFace::SplitAtSeam` (the `bMergeU && bMergeV` branch); the crash is in `SmCurveClassification::MergeInterval` (`MergeIntervals`).

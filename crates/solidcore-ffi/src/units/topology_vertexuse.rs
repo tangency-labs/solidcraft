@@ -278,7 +278,8 @@ fn curve(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
 
 /// A B-rep block.
 fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
-    match rd.index(3)? {
+    let kind = rd.index(4)?;
+    match kind {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -294,7 +295,7 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
                 return Err(bad("wire edge interval outside the curve's"));
             }
         }
-        2 => {
+        2 | 4 => {
             let dom = surface(rd)?;
             let d = rd.finites(4)?;
             let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
@@ -313,6 +314,15 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
                 None => {
                     if d.iter().any(|x| x.abs() > 1e4) {
                         return Err(bad("plane face domain too large"));
+                    }
+                }
+            }
+            if kind == 4 {
+                // kind 4 adds an inner vertex loop at these fractions of the domain
+                for _ in 0..2 {
+                    let t = rd.finite()?;
+                    if !(0.0..=1.0).contains(&t) {
+                        return Err(bad("vertex loop fraction outside [0, 1]"));
                     }
                 }
             }

@@ -611,8 +611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::SmCurveClassification",
-        "unit": "intersect.curve_class_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_subdiv_block",
@@ -7464,7 +7464,7 @@
   "cases_passed": 851,
   "cases_total": 905,
   "deferred_by_unit": {
-    "intersect.curve_class_p4": 1,
+    "intersect.curve_class_p2": 1,
     "surface.surface_cache_p1": 53
   },
   "max_rel_err": 0.0,

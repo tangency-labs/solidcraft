@@ -1132,7 +1132,8 @@ fn set_face_brep_editing_enabled<O>(_face: O, _editing: bool) -> Result<()> {
 /// When wiring, keep upstream's arguments exactly: `(TRUE, NULL, NULL, ..)`
 /// (`SmTrimSrfCache.cpp:209`).
 fn face_create_uv_trim_curves<O>(_face: O) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves(TRUE, NULL, NULL, ..)
+    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves -- justified: findings.md topology.face_p3 "Stubs left for this unit"
+    // (`(TRUE, NULL, NULL, ..)`; the face is an opaque handle with no B-rep)
     Err(SolidError::unported(
         "SmFace::CreateUVTrimCurves",
         "topology.face_p3",

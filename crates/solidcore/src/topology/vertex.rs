@@ -71,7 +71,7 @@
 //!   with the composite face code): it returns the first vertex use of any face whose
 //!   face use is that face's upward face use, else the last vertex use with a face use
 //!   (`plan/upstream-issues.md`). Ported as written.
-//! - **Unported callees.** `SmFace::SetTolerance` (`topology.face_p3`) and the gap evaluations reached through the vertex uses
+//! - **Unported callees.** The gap evaluations reached through the vertex uses
 //!   (`heal.gap`, surface units) return [`SolidError::Unported`].
 //! - **Co-ports.** The small `SmEdge` and `SmLoopuse` accessors this unit reaches are
 //!   ported here (table above) and recorded as CO-PORTED in `plan/modules.toml`; the
@@ -295,12 +295,8 @@ pub fn brep(b: &Brep, v: VertexId) -> Result<Option<&Brep>> {
 // ---- co-ported accessors of other units --------------------------------------------------
 
 /// `SmFace::SetTolerance(tol)` (default arguments).
-fn face_set_tolerance(_b: &mut Brep, _f: FaceId, _tol: f64) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::SetTolerance
-    Err(SolidError::unported(
-        "SmFace::SetTolerance",
-        "topology.face_p3",
-    ))
+fn face_set_tolerance(b: &mut Brep, f: FaceId, tol: f64) -> Result<()> {
+    crate::topology::face::p3::set_tolerance(b, f, tol, true, true)
 }
 
 /// `SmEdge::SetTolerance(tol)` (default arguments).
@@ -1154,8 +1150,8 @@ pub fn max_gap_3d(
 ///
 /// # Errors
 ///
-/// Those of [`edges`], [`faces`] and `SmEdge::SetTolerance`; [`SolidError::Unported`]
-/// for the face `SetTolerance` (unit `topology.face_p3`).
+/// Those of [`edges`], [`faces`], `SmEdge::SetTolerance` and `SmFace::SetTolerance`
+/// ([`crate::topology::face::p3::set_tolerance`]).
 pub fn refresh_tolerance(b: &mut Brep, v: VertexId, nested_refreshes: bool) -> Result<()> {
     // when asked
     if nested_refreshes {

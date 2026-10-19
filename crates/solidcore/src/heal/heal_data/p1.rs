@@ -62,6 +62,7 @@ use crate::kernel::Kernel;
 use crate::math::BIG_DOUBLE;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
+use crate::topology::face::p3 as face_p3;
 use crate::topology::topology_traverser::{closure_traversal, Entity, Marks};
 use crate::topology::{Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 
@@ -136,12 +137,9 @@ fn set_region_is_void(b: &mut Brep, r: RegionId, is_void: bool) -> Result<()> {
 
 /// `pFace->CreateUVTrimCurves(TRUE, NULL, NULL, ..)`: makes the face's UV trim curves
 /// and adjusts the edge and vertex tolerances to the measured gaps.
-fn face_create_uv_trim_curves(_k: &Kernel, _b: &mut Brep, _f: FaceId) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves
-    Err(SolidError::unported(
-        "SmFace::CreateUVTrimCurves",
-        "topology.face_p3",
-    ))
+fn face_create_uv_trim_curves(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    // `CreateUVTrimCurves(TRUE, NULL, NULL, ..)`: the gap statistics are not read.
+    face_p3::create_uv_trim_curves(k, b, f, true, None).map(|_| ())
 }
 
 /// `pBrep->HealBrep(SM_HO_ALL)` (default targets: every vertex, edge and face; no UV
@@ -701,8 +699,8 @@ impl<O: LoopObject> HealData<O> {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for a target props without a face (upstream
-    /// dereferences null); [`SolidError::Unported`] for `SmFace::CreateUVTrimCurves`
-    /// (`topology.face_p3`).
+    /// dereferences null); those of `SmFace::CreateUVTrimCurves`
+    /// (`topology::face::p3::create_uv_trim_curves`) except `SmStatus` failures, which are ignored.
     pub fn make_uv_trim_curves(
         &self,
         k: &Kernel,
@@ -948,14 +946,10 @@ mod tests {
         for (i, &id) in h.tgt_face_props.clone().iter().enumerate() {
             h.face_props.props_mut(id).unwrap().props.face = Some(FaceId::from_index(i as u32));
         }
+        // `CreateUVTrimCurves` is called for every target face; a dangling face id
+        // propagates (only the SmStatus failures are ignored)
         let r = h.make_uv_trim_curves(&k, &mut b, true, HealerOpType::MakeUvtrimcurves);
-        assert!(matches!(
-            r,
-            Err(SolidError::Unported {
-                unit: "topology.face_p3",
-                ..
-            })
-        ));
+        assert!(matches!(r, Err(SolidError::NotFound { .. })), "{r:?}");
     }
 
     #[test]

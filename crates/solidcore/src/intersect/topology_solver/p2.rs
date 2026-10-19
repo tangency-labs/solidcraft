@@ -48,8 +48,11 @@ use crate::geom::global_solver::{GlobalSolve, SolutionRequested, SolverOperation
 use crate::geom::object::{Shape, ShapeMember};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionType, SortKey};
-use crate::geom::tol::are_same;
+use crate::geom::tol::{are_same, zone_tol3d};
 use crate::geom::tree::{AuxDataType, Tree};
+use crate::intersect::curve_class::p1::CurveClassification;
+use crate::intersect::curve_class::p4::ClassificationInit;
+use crate::intersect::point_class::{ClassObject, ClassObjectKind};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec2};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
@@ -193,19 +196,49 @@ fn name_curve_face<O: Copy + PartialEq>(
     solution.num_variables = 3;
 }
 
+/// The classification handle of this solver's curve (`m_pCurve`): the curve itself is passed
+/// alongside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SolverCurveHandle;
+
+impl ClassObject for SolverCurveHandle {
+    fn class_kind(&self) -> ClassObjectKind {
+        ClassObjectKind::Curve
+    }
+}
+
+/// `SmCurveClassification sCurveClass(m_pCurve, interval, NULL, tol, 10, sCIData)` followed
+/// by `pFace->CurveOnClassify(TRUE, sCurveClass)`: the intervals and their interior point
+/// classes.
 fn classified_curve_intervals<O>(
+    kernel: &Kernel,
     _curve: &Curve,
-    _interval: &Extent1d,
+    interval: &Extent1d,
     _face: O,
-    _tol: f64,
+    tol: f64,
 ) -> Result<Vec<(Extent1d, i32)>> {
-    // The overload taking interval storage is owned by curve_class_p4, not the
-    // other constructor currently being ported in curve_class_p1.
-    // UNPORTED(query.face_p2): SmFace::CurveOnClassify (after construction)
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
+    let init = ClassificationInit {
+        curve: Some(SolverCurveHandle),
+        interval: *interval,
+        uv_curve: None,
+        // the double converts to the SmZoneTol3d parameter
+        src_zone_tol_3d: zone_tol3d(kernel, tol),
+        opt_data_size: 10,
+        is_curve_owned: false,
+        is_curve_current: true,
+        surface1: None,
+        surface2: None,
+        uv_curve2: None,
+        ti: None,
+    };
+    let _classification = CurveClassification::with_curve(kernel, &init)?;
+    // UNPORTED(query.face_p2): SmFace::CurveOnClassify -- justified: plan/findings.md
+    // "intersect.curve_class_p4" (the solver's object adapter has no face -> (Brep, FaceId) /
+    // CurveOnClassifyObjects resolution for its handle `O`, as for PointClassify in
+    // topology_solver::p1; unreachable today: the constructor above defers on ReSet first)
     Err(SolidError::unported(
-        "SmCurveClassification::SmCurveClassification",
-        "intersect.curve_class_p4",
+        "SmFace::CurveOnClassify",
+        "query.face_p2",
     ))
 }
 
@@ -415,6 +448,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                     let interval =
                         Extent1d::from_min_max(solution.start.param(0)?, solution.end.param(0)?);
                     let intervals = classified_curve_intervals(
+                        ts.kernel,
                         curve.curve,
                         &interval,
                         face,

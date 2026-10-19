@@ -370,9 +370,10 @@ fn brep_shells(k: &mut Kernel, brep: &Brep) -> Result<Vec<ShellId>> {
     crate::topology::brep::p1::shells(k, brep, None)
 }
 
-fn set_face_tolerance(_brep: &mut Brep, _face: FaceId, _tolerance: f64) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::SetTolerance
-    unavailable("SmFace::SetTolerance", "topology.face_p3")
+/// `pFace->SetTolerance(tol)` with the upstream defaults (update only if larger, cascade
+/// to the boundaries).
+fn set_face_tolerance(brep: &mut Brep, face: FaceId, tolerance: f64) -> Result<()> {
+    crate::topology::face::p3::set_tolerance(brep, face, tolerance, true, true)
 }
 
 /// Remove topological intersection edges and redundant vertices. `check_all_edges`

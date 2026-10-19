@@ -530,6 +530,54 @@ impl<O: ClassObject> CurveClassification<O> {
         result
     }
 
+    /// The same classification with every object handle (the curves, surfaces, face,
+    /// target loops, other classification and the intervals' point classifications'
+    /// objects) replaced by `f` of it: a change of handle type, no new state.
+    ///
+    /// # Errors
+    ///
+    /// Those of `f`.
+    pub fn map_objects<P: ClassObject>(
+        &self,
+        f: &mut dyn FnMut(O) -> Result<P>,
+    ) -> Result<CurveClassification<P>> {
+        let mut data = Vec::with_capacity(self.data.len());
+        for d in &self.data {
+            data.push(CurveInterval {
+                interval: d.interval,
+                start: d.start.map_objects(&mut *f)?,
+                mid: d.mid.map_objects(&mut *f)?,
+                end: d.end.map_objects(&mut *f)?,
+            });
+        }
+        let mut tgt_loops = Vec::with_capacity(self.tgt_loops.len());
+        for l in &self.tgt_loops {
+            tgt_loops.push(f(*l)?);
+        }
+        Ok(CurveClassification {
+            is_curve_owned: self.is_curve_owned,
+            curve: self.curve.map(&mut *f).transpose()?,
+            src_zone_tol_3d: self.src_zone_tol_3d,
+            uv_curve1: self.uv_curve1.map(&mut *f).transpose()?,
+            is_curve_current: self.is_curve_current,
+            surface1: self.surface1.map(&mut *f).transpose()?,
+            surface2: self.surface2.map(&mut *f).transpose()?,
+            doing_cross_hatch: self.doing_cross_hatch,
+            doing_fillets: self.doing_fillets,
+            ok_to_set_tolerance: self.ok_to_set_tolerance,
+            tgt_loops_only: self.tgt_loops_only,
+            tgt_loops,
+            other_classification: self.other_classification.map(&mut *f).transpose()?,
+            face: self.face.map(&mut *f).transpose()?,
+            uv_curve2: self.uv_curve2.map(&mut *f).transpose()?,
+            ti: self.ti.map(&mut *f).transpose()?,
+            interval: self.interval,
+            data,
+            allocated: self.allocated,
+            ignore_tangency: self.ignore_tangency,
+        })
+    }
+
     /// Sets the native cross-hatch tolerance mode (`SetDoingCrossHatch`).
     pub fn set_doing_cross_hatch(&mut self, enabled: bool) {
         self.doing_cross_hatch = enabled;

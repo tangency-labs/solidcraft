@@ -26,8 +26,8 @@ use super::p3::{
     Coincident,
 };
 use super::{
-    curve_is_degenerate, fix_problems_by_squeezing, CurveClassification, CurveInterval,
-    IntervalPosition,
+    curve_is_degenerate, fix_problems_by_squeezing, squeeze_out_smallest_interval,
+    CurveClassification, CurveInterval, IntervalPosition,
 };
 use crate::error::{Result, SolidError};
 use crate::geom::tol::ScaledZero;
@@ -89,14 +89,14 @@ impl<O: ClassObject> CurveClassification<O> {
         fix_problems_by_squeezing(k, geometry, other, self)?;
         while self.size() > other.size() {
             let count = self.size();
-            crate::error::ignore_status(squeeze_smallest(self))?;
+            crate::error::ignore_status(squeeze_out_smallest_interval(self))?;
             if self.size() >= count {
                 return Err(SolidError::sm_err(OP));
             }
         }
         while other.size() > self.size() {
             let count = other.size();
-            crate::error::ignore_status(squeeze_smallest(other))?;
+            crate::error::ignore_status(squeeze_out_smallest_interval(other))?;
             if other.size() >= count {
                 return Err(SolidError::sm_err(OP));
             }
@@ -458,15 +458,6 @@ fn homogenize_boundaries<O: ClassObject>(
         last = param;
     }
     Ok(())
-}
-
-fn squeeze_smallest<O: ClassObject>(cc: &mut CurveClassification<O>) -> Result<()> {
-    let _ = cc;
-    // UNPORTED(intersect.curve_class_p4): sm_SqueezeOutSmallestInterval
-    Err(SolidError::unported(
-        "sm_SqueezeOutSmallestInterval",
-        "intersect.curve_class_p4",
-    ))
 }
 
 #[cfg(test)]

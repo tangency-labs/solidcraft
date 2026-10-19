@@ -25,8 +25,8 @@
 //! `GetUVCornerBoundaries` of an edge loop runs `GetOrCreateUVTrimCurve` on both sides
 //! (`topology.edgeuse_p3`; creating a curve defers on its own callees).
 //!
-//! Deferred: `FlipLoopOrientation` of a loop on a face (`SmFace::Notify`,
-//! `topology.face_p3`), and `IsMissingSeamAtVertices` past
+//! Deferred: `FlipLoopOrientation` of a loop on a face (the post-edit `SmFace::Notify`
+//! reaches `SmFace::GetUpwardEdgeuses`, `topology.face_p4`), and `IsMissingSeamAtVertices` past
 //! the closure test (the sector computation's own deferrals). `IsClosed3d` on edges
 //! whose curve the export holds only as its B-spline part (ellipses and other
 //! `SmBSplineCurve` subclasses of the `.smb` files) and `IsMissingSeamAtVertices` on such

@@ -27,10 +27,11 @@
 //!   each tagged `UNPORTED(<unit>)`: `SmBrep::Point3DClassify` (`query.brep`),
 //!   `SmBrep::GlueVertices` /
 //!   `SqueezeEdge` / `DeleteEdge` (`topology.brep_p5` / `_p3` / `_p4`),
-//!   and the `SmCurveClassification`
-//!   constructor (`intersect.curve_class_p4`). The intersector's `GetOtherMate` /
-//!   `RemoveRelationship` are reached through [`Mates`] (ported in
-//!   `boolean.topology_intersector_p1` / `_p2`; [`NoMates`] for no intersector maps). `ExtractGeometry` calls part 5 and
+//!   `SmTopologyIntersector::RemoveRelationship` (`boolean.topology_intersector_p2`;
+//!   `GetOtherMate` is the `other_mate` closure the caller passes to
+//!   [`ProtoTopologyManager::glue_coincident_brep_vertices`]). The `SmCurveClassification`
+//!   constructor is part 4's ([`CurveClassification::with_curve`]; it defers on `ReSet`,
+//!   `intersect.curve_class_p2`). `ExtractGeometry` calls part 5 and
 //!   currently reaches part 6's `Homogenize` dependency. The code
 //!   after a stub is ported in full. The callees of `topology.proto_topology_p2` are
 //!   its methods on [`ProtoTopologyManager`].
@@ -57,7 +58,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::{xsect_tol3d, zone_tol3d, USE_DEFAULT};
 use crate::intersect::curve_class::p5::ExtractOptions;
-use crate::intersect::curve_class::{CurveClassification, CurveInterval};
+use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassification,
 };
@@ -152,17 +153,30 @@ fn brep_point3d_classify<O>(
     ))
 }
 
-/// `SmCurveClassification(pCurve, interval, NULL, tol)`.
+/// `SmCurveClassification(pCurve, interval, NULL, tol)` (the remaining arguments default:
+/// no interval storage, the curve not owned and current, no surfaces).
 fn new_curve_classification<O: ClassObject>(
-    _curve: O,
-    _interval: Extent1d,
-    _tol: f64,
+    k: &Kernel,
+    curve: O,
+    interval: Extent1d,
+    tol: f64,
 ) -> Result<CurveClassification<O>> {
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
-    Err(SolidError::unported(
-        "SmCurveClassification::SmCurveClassification",
-        "intersect.curve_class_p4",
-    ))
+    CurveClassification::with_curve(
+        k,
+        &ClassificationInit {
+            curve: Some(curve),
+            interval,
+            uv_curve: None,
+            src_zone_tol_3d: zone_tol3d(k, tol),
+            opt_data_size: 0,
+            is_curve_owned: false,
+            is_curve_current: true,
+            surface1: None,
+            surface2: None,
+            uv_curve2: None,
+            ti: None,
+        },
+    )
 }
 
 /// `SmBrep::GlueVertices` of B-rep `which`.
@@ -1482,8 +1496,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // PEs expect the same curve classified against each face
                         let ivl = Extent1d::from_min_max(sol.start.param(0)?, sol.end.param(0)?);
                         let c1h = h1.ok_or(dangling("edge has no curve"))?;
-                        let mut cc1 = new_curve_classification(c1h, ivl, tol)?;
-                        let mut cc2 = new_curve_classification(c1h, ivl, tol)?;
+                        let mut cc1 = new_curve_classification(k, c1h, ivl, tol)?;
+                        let mut cc2 = new_curve_classification(k, c1h, ivl, tol)?;
 
                         // Classify the coincident curves against their faces
                         let face1 = f1.ok_or(dangling("face is null"))?;
@@ -1517,8 +1531,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let ivl = geometry
                     .edge_interval(edge)
                     .ok_or(dangling("edge is unknown"))?;
-                let mut cc1 = new_curve_classification(handle, ivl, tol)?;
-                let mut cc2 = new_curve_classification(handle, ivl, tol)?;
+                let mut cc1 = new_curve_classification(k, handle, ivl, tol)?;
+                let mut cc2 = new_curve_classification(k, handle, ivl, tol)?;
 
                 // Pick a SrcFace object for the SrcEdge object
                 let faces = geometry.edge_faces(edge)?;

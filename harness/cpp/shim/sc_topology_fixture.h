@@ -695,12 +695,28 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
         SmEdge* pEdge = nullptr;
         status = brep->CreateWireEdgeFromCurve(c, SmExtent1d(t0, t1), pEdge);
     }
-    else if (kind == 2)
+    else if (kind == 2 || kind == 4)
     {
         SmSurface* s = read_surface(rd, ctx);
         SmPoint2d a = rd.uv(), b = rd.uv();
         SmFace* pFace = nullptr;
         status = brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
+        if (kind == 4)
+        {
+            // kind 4: the face of kind 2 plus an inner vertex loop at the surface point
+            // whose parameters are the given fractions of the face domain
+            double fu = rd.num(), fv = rd.num();
+            if (status == SM_SUCCESS && pFace)
+            {
+                SmPoint2d uv(a.x + fu * (b.x - a.x), a.y + fv * (b.y - a.y));
+                SmPoint3d pt(0.0, 0.0, 0.0);
+                status = pFace->GetSurface()->EvaluatePoint(uv, pt);
+                SmLoop* pLoop = nullptr;
+                SmVertex* pVertex = nullptr;
+                if (status == SM_SUCCESS)
+                    status = brep->MakeVertexLoop(pFace, pt, pLoop, pVertex);
+            }
+        }
     }
     else
     {
