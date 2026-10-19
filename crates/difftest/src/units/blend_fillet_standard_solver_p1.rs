@@ -93,10 +93,10 @@ const DEG: f64 = std::f64::consts::PI / 180.0;
 /// An inline 3D B-spline curve: control points as stored (`[x, y, z, w]`), degree,
 /// knots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct InlineCrv {
-    cpts: Vec<[f64; 4]>,
-    p: usize,
-    u: Vec<f64>,
+pub(crate) struct InlineCrv {
+    pub(crate) cpts: Vec<[f64; 4]>,
+    pub(crate) p: usize,
+    pub(crate) u: Vec<f64>,
 }
 
 /// A curve of any kind the shim builds.
@@ -336,7 +336,7 @@ fn flag(b: bool) -> f64 {
 
 // ---- C++ side -----------------------------------------------------------------------
 
-fn push_crv(o: &mut Vec<f64>, c: &InlineCrv) {
+pub(crate) fn push_crv(o: &mut Vec<f64>, c: &InlineCrv) {
     let n = c.cpts.len().saturating_sub(1);
     o.extend([n as f64, c.p as f64, c.u.len().saturating_sub(1) as f64]);
     for p in &c.cpts {
@@ -635,7 +635,7 @@ fn to_output(flat: &[f64]) -> Output {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-fn bcurve_of(c: &InlineCrv) -> Result<BSplineCurve, HarnessError> {
+pub(crate) fn bcurve_of(c: &InlineCrv) -> Result<BSplineCurve, HarnessError> {
     let pw = c
         .cpts
         .iter()
@@ -693,7 +693,7 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 }
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
@@ -701,7 +701,7 @@ fn status(e: &SolidError) -> f64 {
     }
 }
 
-fn dump_curve(o: &mut Vec<f64>, c: Option<&BSplineCurve>) {
+pub(crate) fn dump_curve(o: &mut Vec<f64>, c: Option<&BSplineCurve>) {
     let Some(cur) = c.and_then(BSplineCurve::gw_nurb) else {
         o.push(0.0);
         return;
@@ -951,18 +951,25 @@ fn vr_of(k: &Kernel, s: &VrIn) -> Result<VariableRadiusFs, HarnessError> {
         _ => FilletSurfaceGeneratorType::BlendCurve,
     });
     curve_based.original = Some(center);
-    let kind = match &s.law {
-        LawIn::Linear { r0, r1 } => FilletLawKind::Linear {
+    let law = match &s.law {
+        LawIn::Linear { r0, r1 } => FilletLaw::new(FilletLawKind::Linear {
             start_radius: *r0,
             end_radius: *r1,
-        },
-        LawIn::Bspline { c, .. } => FilletLawKind::BSpline {
-            law_curve: bcurve_of(c)?,
-        },
+        }),
+        LawIn::Bspline { c, map } => {
+            // SmBSplineFilletLaw(pCurve, crEdgeMap) (unit blend.fillet_executive_p2); the
+            // maps here are never degenerate, so its [0, 1] fallback is not needed
+            let mut law = FilletLaw::new(FilletLawKind::BSpline {
+                law_curve: bcurve_of(c)?,
+                extended_law: None,
+            });
+            law.edge_map = Extent1d::from_min_max(map[0], map[1]);
+            law
+        }
     };
     Ok(VariableRadiusFs {
         curve_based,
-        law: FilletLaw::new(kind),
+        law,
         law_orientation: s.orient,
         law_interval,
     })
@@ -1640,7 +1647,7 @@ fn perp(d: Vec3, rng: &mut Rng) -> Vec3 {
 }
 
 /// Clamped uniform knots for `n + 1` control points of degree `p` over `[a, b]`.
-fn uniform_knots(n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
+pub(crate) fn uniform_knots(n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
     let spans = n + 1 - p;
     let mut u = vec![a; p + 1];
     for i in 1..spans {

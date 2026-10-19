@@ -48,8 +48,8 @@
 //! | [`GuessSphereSolve::new`]                                | `SmGuessSphereSolveENFO::SmGuessSphereSolveENFO` (file-local class) |
 //! | [`FilletSolverData`] (CO-PORTED)                         | the `SmFilletSolver` members these solvers read       |
 //! | [`fillet_solver_is_kind_of`] (CO-PORTED)                 | `SmFilletSolver::IsKindOf`                            |
-//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`], [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
-//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read) |
+//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`], [`BoundaryTrimmingType`] (CO-PORTED) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
+//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read; `Evaluate` is unit `blend.fillet_executive_p1`'s, the constructors `blend.fillet_executive_p2`'s) |
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
@@ -1652,25 +1652,38 @@ pub enum FilletLawKind {
     BSpline {
         /// `GetLawCurve`.
         law_curve: BSplineCurve,
+        /// `m_pExtendedLaw` (`GetExtendedCurve`): the extension of `law_curve` the
+        /// evaluation creates once a parameter leaves the curve's domain
+        /// (`blend::fillet_executive::p1`).
+        extended_law: Option<BSplineCurve>,
     },
 }
 
-/// A fillet law (`SmFilletLaw`, CO-PORTED from unit `blend.fillet_executive_p1`): the
-/// radius along the filleted edge and the extended edge curve it keeps.
+/// A fillet law (`SmFilletLaw`, CO-PORTED from unit `blend.fillet_executive_p1`,
+/// whose [`FilletLaw::evaluate`](crate::blend::fillet_executive::p1) lives in that
+/// unit): the radius along the filleted edge and the extended edge curve it keeps.
 #[derive(Debug, Clone)]
 pub struct FilletLaw {
     /// The law's class and its data.
     pub kind: FilletLawKind,
+    /// `m_vEdgeMap`: the subset of the radius function that maps to the edge
+    /// (`[0, 1]` by default).
+    pub edge_map: Extent1d,
+    /// `m_dEdgeArcLength` (`SetEdgeArcLength`).
+    pub edge_arc_length: f64,
     /// `m_pExtended`: the extended edge curve.
     pub extended: Option<BSplineCurve>,
 }
 
 impl FilletLaw {
-    /// A law of `kind` without extended edge curve.
+    /// A law of `kind` with the default edge map `[0, 1]`, no arc length and no
+    /// extended edge curve (`SmFilletLaw::SmFilletLaw`).
     #[must_use]
     pub const fn new(kind: FilletLawKind) -> Self {
         Self {
             kind,
+            edge_map: Extent1d::from_raw(0.0, 1.0),
+            edge_arc_length: 0.0,
             extended: None,
         }
     }
@@ -1684,7 +1697,7 @@ impl FilletLaw {
         Ok(match &self.kind {
             FilletLawKind::Base => false,
             FilletLawKind::Linear { .. } => true,
-            FilletLawKind::BSpline { law_curve } => law_curve.degree()? == 1,
+            FilletLawKind::BSpline { law_curve, .. } => law_curve.degree()? == 1,
         })
     }
 
@@ -1706,7 +1719,7 @@ impl FilletLaw {
     ///
     /// [`SolidError::Unported`] (`blend.fillet_executive_p1`).
     pub fn evaluate(
-        &self,
+        &mut self,
         _parameter: f64,
         _interval: &Extent1d,
         _reverse: bool,
