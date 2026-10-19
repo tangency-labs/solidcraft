@@ -11471,12 +11471,11 @@
     }
   ],
   "cases_both_errored": 8,
-  "cases_deferred": 126,
+  "cases_deferred": 35,
   "cases_failed": 0,
-  "cases_passed": 1289,
+  "cases_passed": 1380,
   "cases_total": 1415,
   "deferred_by_unit": {
-    "surface.cone_p2": 91,
     "surface.surface_p2": 35
   },
   "max_rel_err": 0.0,

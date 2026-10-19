@@ -1780,12 +1780,10 @@ fn point_from_solution(_solution: &Solution<CacheObject>, _start: usize) -> Resu
     })
 }
 
-fn remove_faces(_k: &mut Kernel, _b: &mut Brep, _faces: &[FaceId]) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::RemoveFaces
-    Err(SolidError::Unported {
-        upstream: "SmBrep::RemoveFaces",
-        unit: "topology.brep_p5",
-    })
+fn remove_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
+    // SmBrep::RemoveFaces (topology.brep_p5) reads the B-rep's own m_bEditingEnabled
+    let editing = b.editing_enabled();
+    super::p5::remove_faces(k, b, editing, faces)
 }
 
 /// `SmBrep::ProjectAndTrim`: projects `curve` along `direction` onto the B-rep's faces
@@ -2105,12 +2103,10 @@ fn test_closure_split_region_at_faceuse(
     }
 }
 
-fn find_and_set_infinite_region(_k: &mut Kernel, _b: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::FindAndSetInfiniteRegion
-    Err(SolidError::Unported {
-        upstream: "SmBrep::FindAndSetInfiniteRegion",
-        unit: "topology.brep_p5",
-    })
+fn find_and_set_infinite_region(_k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    // SmBrep::FindAndSetInfiniteRegion() with its defaults (topology.brep_p5): no shell
+    // to test, SM_VS_INFINITEREGION_SWAP, no box
+    super::p5::find_and_set_infinite_region(b, None, 2, None)
 }
 
 /// `GetMate()->GetRadial()`: the next edge use pair around the edge in the same

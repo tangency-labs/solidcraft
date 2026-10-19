@@ -2125,14 +2125,13 @@ fn set_brep_model_size(_b: &mut Brep, _size: f64) -> Result<f64> {
     missing("SmBrep::SetThisModelSizeEstimate", "topology.brep_p1")
 }
 fn set_face_tolerance(
-    _b: &mut Brep,
-    _face: FaceId,
-    _tolerance: f64,
-    _only_larger: bool,
-    _cascade: bool,
+    b: &mut Brep,
+    face: FaceId,
+    tolerance: f64,
+    only_larger: bool,
+    cascade: bool,
 ) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::SetTolerance
-    missing("SmFace::SetTolerance", "topology.face_p3")
+    crate::topology::face::p3::set_tolerance(b, face, tolerance, only_larger, cascade)
 }
 
 #[cfg(test)]

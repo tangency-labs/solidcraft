@@ -100,7 +100,8 @@ use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, contains, dangling, eval_curve_point,
     face_brep, face_edges, face_face_intersect_curves, face_vertices, find_common_elements,
     ignore_soft, intersect_shell_vertices, intersect_wire_lamina_edges, surface_coincidence_check,
-    IntersectionCurves, IntersectionResults, IntersectorBrep, TopologyIntersector,
+    FaceIntersectOutputs, IntersectionCurves, IntersectionResults, IntersectorBrep,
+    TopologyIntersector,
 };
 
 const OP_REGISTER: &str = "boolean::topology_intersector::p2::register_existing_ssi";
@@ -309,12 +310,13 @@ impl<O> Default for FixGaps<O> {
 pub struct EdgeEdgeIntersect<O> {
     /// `rSplitEdges1`.
     pub split_edges1: Vec<O>,
-    /// `rNewEdges1`.
-    pub new_edges1: Vec<O>,
+    /// `rNewEdges1` (a null entry where `MakeVertexSplitEdge` returned no edge, as
+    /// upstream's list).
+    pub new_edges1: Vec<Option<O>>,
     /// `rSplitEdges2`.
     pub split_edges2: Vec<O>,
-    /// `rNewEdges2`.
-    pub new_edges2: Vec<O>,
+    /// `rNewEdges2` (null entries as in `new_edges1`).
+    pub new_edges2: Vec<Option<O>>,
     /// `rNewVerts`.
     pub new_verts: Vec<O>,
     /// `rdMaxEdgeGap`.
@@ -588,12 +590,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // iter every face saving all face vertices and edges and calling DeleteFace()
         for &f in faces {
             // Accumulate DeletedFace unique EdgeList for later
-            for e in face_edges(f)? {
+            for e in face_edges(f, None, false, None)? {
                 add_unique(&mut faces_edges, e);
             }
 
             // Accumulate DeletedFace unique VertexList for later
-            for v in face_vertices(f)? {
+            for v in face_vertices(f, None, false, None)? {
                 add_unique(&mut faces_vertices, v);
             }
 
@@ -923,6 +925,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let mut uv_curves2 = Vec::new();
                 let mut int_pts: Vec<Point3> = Vec::new();
                 let mut fi = face_face_intersect_curves(
+                    k,
                     f1,
                     f2,
                     tol,
@@ -930,6 +933,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     Some(&mut uv_curves1),
                     Some(&mut uv_curves2),
                     Some(&mut int_pts),
+                    &FaceIntersectOutputs {
+                        this_crv_classes: true,
+                        other_crv_classes: true,
+                        cc_3d_crvs: true,
+                        this_cc_uv_crvs: true,
+                        other_cc_uv_crvs: true,
+                    },
                     Some(are_coincident),
                 )?;
 
@@ -1495,9 +1505,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 // We also have to add new edges to the lists we're working on.
                 edges1.push(Some(e1));
-                edges1.extend(split.new_edges1.iter().map(|&e| Some(e)));
+                edges1.extend(split.new_edges1.iter().copied());
                 edges2.push(Some(e2));
-                edges2.extend(split.new_edges2.iter().map(|&e| Some(e)));
+                edges2.extend(split.new_edges2.iter().copied());
                 if edges1.len() > MAX_EDGE_LIST || edges2.len() > MAX_EDGE_LIST {
                     return Err(SolidError::sm_err(OP_EDGE_EDGE));
                 }
@@ -1509,11 +1519,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for &v in &split.new_verts {
                     ignore_soft(brep.update_object_tolerance(k, v, dist_to_edge, 0.0, check_gaps))?;
                 }
-                for &e in &split.new_edges1 {
+                // (UpdateObjectTolerance of a null topology returns SM_SUCCESS)
+                for &e in split.new_edges1.iter().flatten() {
                     let t = tol_of(brep, e1)?;
                     ignore_soft(brep.update_object_tolerance(k, e, dist_to_edge, t, false))?;
                 }
-                for &e in &split.new_edges2 {
+                for &e in split.new_edges2.iter().flatten() {
                     let t = tol_of(brep, e2)?;
                     ignore_soft(brep.update_object_tolerance(k, e, dist_to_edge, t, false))?;
                 }
@@ -1706,10 +1717,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         .ok_or(dangling("curve store is full"))?;
                     // (status unchecked: no new edge, loop or face on failure)
                     let made = ignore_soft(brep_make_edge_in_face(
-                        face_b, f, v, other_v, curve_copy, None, edge_dom, orient, edge_tol,
+                        brep,
+                        face_b,
+                        Some(f),
+                        Some(v),
+                        Some(other_v),
+                        curve_copy,
+                        None,
+                        edge_dom,
+                        orient,
+                        edge_tol,
                     ))?;
-                    let (new_edge, _new_loop, new_face) =
-                        made.map_or((None, None, None), |(e, l, f)| (Some(e), l, f));
+                    let (new_edge, _new_loop, new_face) = made.unwrap_or((None, None, None));
 
                     add_unique(&mut out.processed_faces, f);
                     let dev = sol.start.solution_value;

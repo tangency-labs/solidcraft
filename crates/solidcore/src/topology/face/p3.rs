@@ -190,17 +190,30 @@ fn brep_tolerance(_b: &Brep, _f: FaceId) -> Result<f64> {
 
 /// `new SmCurveClassification(pCurve, sInterval, pUVCurve, sSrcZoneTol3d)`.
 fn curve_classification<O: ClassObject>(
-    _k: &Kernel,
-    _curve: O,
-    _interval: &Extent1d,
-    _uv_curve: Option<O>,
-    _src_zone_tol_3d: f64,
+    k: &Kernel,
+    curve: O,
+    interval: &Extent1d,
+    uv_curve: Option<O>,
+    src_zone_tol_3d: f64,
 ) -> Result<CurveClassification<O>> {
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
-    Err(SolidError::unported(
-        "SmCurveClassification::SmCurveClassification",
-        "intersect.curve_class_p4",
-    ))
+    // the remaining constructor arguments default: no interval storage, the curve not
+    // owned and current, no surfaces, no topology intersector
+    CurveClassification::with_curve(
+        k,
+        &crate::intersect::curve_class::ClassificationInit {
+            curve: Some(curve),
+            interval: *interval,
+            uv_curve,
+            src_zone_tol_3d,
+            opt_data_size: 0,
+            is_curve_owned: false,
+            is_curve_current: true,
+            surface1: None,
+            surface2: None,
+            uv_curve2: None,
+            ti: None,
+        },
+    )
 }
 
 /// `GetSurface()->CoincidenceCheck(other, tol, rbAreCoincident, rdDist, FALSE, ..)`:

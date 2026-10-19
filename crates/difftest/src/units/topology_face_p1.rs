@@ -860,6 +860,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
                 &mut cv,
                 problem,
                 fp.as_ref(),
+                &NoGeometry,
                 &|_| None,
             );
             o.push(status(&r)?);

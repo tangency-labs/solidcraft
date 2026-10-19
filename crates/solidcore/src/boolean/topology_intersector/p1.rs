@@ -91,9 +91,9 @@
 //!   (`topology.brep_p9`), `GlueVertices` / `MakeEdgeInFace` (`topology.brep_p5`),
 //!   `DeleteFace` (`topology.brep_p3`),
 //!   `SmFace::GetVertices` / `GetEdges` / `GetBrep` (`topology.face_p4`),
-//!   `SmFace::FaceIntersect` (`topology.face_p3`),
-//!   `SmFace::CalculateBoundingBox` / `Point3DClassify` (`query.face_p1`),
-//!   and the `SmCurveClassification` constructor (`intersect.curve_class_p4`). The
+//!   `SmFace::FaceIntersect` with UV curve and point outputs (`topology.face_p3`; part
+//!   2's `face_face_intersect_curves`, which [`IntersectorBrep`] does not cover),
+//!   `SmFace::CalculateBoundingBox` / `Point3DClassify` (`query.face_p1`). The
 //!   code after a stub is ported in full. `SmSurface::GlobalCurveIntersect` /
 //!   `CoincidenceCheck` (`surface.surface_p8`), `SmCurveClassification::Homogenize`
 //!   (`intersect.curve_class_p6`), `InsertTopologyIntersections`
@@ -421,109 +421,110 @@ pub trait IntersectorBrep<O>: ProtoBrep<O> {
 
 // ---- unported callees -----------------------------------------------------------------------
 
-/// `SmBrep::GetEdges(rEdges)`.
-fn brep_edges<O>(_brep: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetEdges
-    Err(SolidError::unported("SmBrep::GetEdges", "topology.brep_p1"))
-}
-
-/// `SmBrep::GetVertices(rVertices)`.
-fn brep_vertices<O>(_brep: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetVertices
-    Err(SolidError::unported(
-        "SmBrep::GetVertices",
-        "topology.brep_p1",
-    ))
-}
-
-/// `SmBrep::MakeVertexLoop(pFace, crPoint, rpNewLoop, rpNewVertex, eOrient)` (`eOrient`
-/// is `SM_OT_OPPOSITE` by default): the new loop and vertex, either of which may stay
-/// null on success.
-fn brep_make_vertex_loop<O>(
-    _k: &Kernel,
-    _brep: O,
-    _face: O,
-    _point: Point3,
-    _orient: OrientType,
-) -> Result<(Option<O>, Option<O>)> {
-    // UNPORTED(topology.brep_p9): SmBrep::MakeVertexLoop
-    Err(SolidError::unported(
-        "SmBrep::MakeVertexLoop",
-        "topology.brep_p9",
-    ))
-}
-
-/// `SmBrep::MakeVertexSplitEdge(pEdge, dT, rpE1, rpE2, rpNewVertex)`: the two edges
-/// and the new vertex, any of which may stay null on success.
-fn brep_make_vertex_split_edge<O>(
-    _k: &Kernel,
-    _brep: O,
-    _edge: O,
-    _t: f64,
-) -> Result<(Option<O>, Option<O>, Option<O>)> {
-    // UNPORTED(topology.brep_p9): SmBrep::MakeVertexSplitEdge
-    Err(SolidError::unported(
-        "SmBrep::MakeVertexSplitEdge",
-        "topology.brep_p9",
-    ))
-}
-
 /// `SmBrep::GlueVertices(pV1, pV2, pOptWireEdgesInBrep)`; `opt_wire_edges_in_brep` is
 /// `pOptWireEdgesInBrep` (`NULL` by default: every shell edge is checked).
-fn brep_glue_vertices<O>(
+fn brep_glue_vertices<O: Copy + PartialEq>(
     _k: &Kernel,
     _brep: O,
-    _v1: O,
-    _v2: O,
+    v1: O,
+    v2: O,
     _opt_wire_edges_in_brep: Option<&[O]>,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::GlueVertices
-    Err(SolidError::unported(
-        "SmBrep::GlueVertices",
-        "topology.brep_p5",
-    ))
+    crate::topology::brep::p5::opaque_glue_preflight(v1 == v2)
 }
 
 /// `SmBrep::MakeEdgeInFace(pFace, pV1, pV2, pCurve, pOptUVCurve, ivl, eOrient, tol,
 /// rpNewEdge, rpNewLoop, rpNewFace)`: the new edge, loop and (when the face was
 /// split) face, each null when not made. The face and vertices may be null
 /// (`MakeEdgeInFace` checks them itself).
-fn brep_make_edge_in_face<O>(
-    _k: &Kernel,
-    _brep: O,
-    _face: Option<O>,
-    _v1: Option<O>,
-    _v2: Option<O>,
-    _curve: O,
-    _opt_uv_curve: Option<O>,
-    _interval: Extent1d,
-    _orientation: OrientType,
-    _tol: f64,
+pub(super) fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
+    backend: &mut B,
+    brep: O,
+    face: Option<O>,
+    v1: Option<O>,
+    v2: Option<O>,
+    curve: O,
+    uv_curve: Option<O>,
+    interval: Extent1d,
+    orientation: OrientType,
+    tol: f64,
 ) -> Result<(Option<O>, Option<O>, Option<O>)> {
-    // UNPORTED(topology.brep_p5): SmBrep::MakeEdgeInFace
-    Err(SolidError::unported(
-        "SmBrep::MakeEdgeInFace",
-        "topology.brep_p5",
-    ))
+    let editing = backend.editing_enabled(brep)?;
+    let mut out = None;
+    crate::topology::brep::p5::make_edge_with_backend(
+        &mut HandleFaceEdge { backend, brep },
+        editing,
+        face,
+        v1,
+        v2,
+        curve,
+        uv_curve,
+        interval,
+        orientation,
+        tol,
+        &mut out,
+    )?;
+    out.map(|(edge, new_loop, new_face)| (Some(edge), new_loop, new_face))
+        .ok_or_else(|| SolidError::null_pointer(OP))
 }
 
-/// `SmBrep::GlueEdgesGeneral(pEdge1, eRelOrient, dEdgeGap, bDoRegionNesting, pEdge2,
-/// pInsideFaceuses)`; `opt_inside_faceuses` is `pInsideFaceuses` (`NULL` by default).
-fn brep_glue_edges_general<O>(
-    _k: &Kernel,
-    _brep: O,
-    _edge1: O,
-    _orientation: OrientType,
-    _edge_gap: f64,
-    _do_region_nesting: bool,
-    _edge2: O,
-    _opt_inside_faceuses: Option<&[O]>,
-) -> Result<()> {
-    // UNPORTED(topology.brep_p7): SmBrep::GlueEdgesGeneral
-    Err(SolidError::unported(
-        "SmBrep::GlueEdgesGeneral",
-        "topology.brep_p7",
-    ))
+struct HandleFaceEdge<'a, O, B> {
+    backend: &'a mut B,
+    brep: O,
+}
+impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
+    for HandleFaceEdge<'_, O, B>
+{
+    type Face = O;
+    type Vertex = O;
+    type Curve = O;
+    type UvCurve = O;
+    type Vertexuse = O;
+    type Output = Option<(O, Option<O>, Option<O>)>;
+    fn validate_face(&self, _face: O) -> Result<()> {
+        // Upstream only checks the face pointer (`NER(pFace)`), never its surface;
+        // a handle is never null, and the caller has already rejected a missing face.
+        Ok(())
+    }
+    fn tolerance(&self) -> Result<f64> {
+        self.backend.brep_tolerance(self.brep)
+    }
+    fn sector(
+        &self,
+        _face: O,
+        _vertex: Option<O>,
+        _curve: &O,
+        _uv: Option<&O>,
+        _start: f64,
+        _end: f64,
+        _orientation: OrientType,
+        _tol: f64,
+        _all: bool,
+    ) -> Result<Option<O>> {
+        // UNPORTED(topology.face_p4): SmFace::FindVertexSector
+        Err(SolidError::unported(
+            "SmFace::FindVertexSector",
+            "topology.face_p4",
+        ))
+    }
+    fn insert(
+        &mut self,
+        _face: O,
+        _first: O,
+        _last: O,
+        _curve: O,
+        _uv: Option<O>,
+        _interval: Extent1d,
+        _orientation: OrientType,
+        _gap: f64,
+        _output: &mut Self::Output,
+    ) -> Result<()> {
+        // UNPORTED(topology.brep_p9): SmBrep::MakeEdgeInFaceWithVU
+        Err(SolidError::unported(
+            "SmBrep::MakeEdgeInFaceWithVU",
+            "topology.brep_p9",
+        ))
+    }
 }
 
 /// `SmBrep::DeleteFace(pFace, bDeleteEdgesVertices, bDoRegionNesting,
@@ -554,7 +555,7 @@ pub(super) fn face_brep<O>(_face: O) -> Result<Option<O>> {
 
 /// `SmFace::GetVertices(rVertices, pOptAttribId, bTgtLoopsOnly, pOptTgtLoops)`
 /// (`NULL`, `FALSE`, `NULL` by default).
-fn face_vertices<O>(
+pub(super) fn face_vertices<O>(
     _face: O,
     _opt_attrib_id: Option<u64>,
     _tgt_loops_only: bool,
@@ -569,7 +570,7 @@ fn face_vertices<O>(
 
 /// `SmFace::GetEdges(rEdges, pOptAttribId, bTgtLoopsOnly, pOptTgtLoops)` (`NULL`,
 /// `FALSE`, `NULL` by default).
-fn face_edges<O>(
+pub(super) fn face_edges<O>(
     _face: O,
     _opt_attrib_id: Option<u64>,
     _tgt_loops_only: bool,
@@ -647,17 +648,17 @@ pub struct FaceIntersection<O> {
 /// (non-`NULL`); each is `NULL` by default. The arrays given are returned in
 /// [`FaceIntersection`].
 #[allow(clippy::struct_excessive_bools)] // upstream's optional out-pointers
-struct FaceIntersectOutputs {
+pub(super) struct FaceIntersectOutputs {
     /// `pOptThisCrvClasses`.
-    this_crv_classes: bool,
+    pub(super) this_crv_classes: bool,
     /// `pOptOtherCrvClasses`.
-    other_crv_classes: bool,
+    pub(super) other_crv_classes: bool,
     /// `pOptCC3DCrvs`.
-    cc_3d_crvs: bool,
+    pub(super) cc_3d_crvs: bool,
     /// `pOptThisCCUVCrvs`.
-    this_cc_uv_crvs: bool,
+    pub(super) this_cc_uv_crvs: bool,
     /// `pOptOtherCCUVCrvs`.
-    other_cc_uv_crvs: bool,
+    pub(super) other_cc_uv_crvs: bool,
 }
 
 /// `SmFace::FaceIntersect(crContext, pFace2, tol, angTolDeg, r3DCurves,
@@ -667,7 +668,7 @@ struct FaceIntersectOutputs {
 /// `opt_other_uv_curves` and `opt_3d_points`, the other five are chosen by `outputs`.
 /// `opt_coincidence_flag` is `pbOptCoincidenceFlag`, an input ("known coincident or
 /// not") that makes `FaceIntersect` skip its own `CoincidenceCheck`.
-fn face_face_intersect_curves<O>(
+pub(super) fn face_face_intersect_curves<O>(
     _k: &Kernel,
     _face1: O,
     _face2: O,
@@ -686,7 +687,8 @@ fn face_face_intersect_curves<O>(
         outputs.this_cc_uv_crvs,
         outputs.other_cc_uv_crvs,
     );
-    // UNPORTED(topology.face_p3): SmFace::FaceIntersect
+    // UNPORTED(topology.face_p3): SmFace::FaceIntersect -- justified: part 2 needs the UV
+    // curve and point outputs, which IntersectorBrep::face_intersect does not return.
     Err(SolidError::unported(
         "SmFace::FaceIntersect",
         "topology.face_p3",
@@ -734,70 +736,32 @@ pub(super) fn surface_coincidence_check<O: ClassObject + SolutionObject>(
     Ok((c.are_coincident, c.max_distance))
 }
 
-/// The arguments of the `SmCurveClassification` constructor after `sSrcZoneTol3d`,
-/// with their upstream defaults in the doc of each field.
-#[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean arguments
-struct CurveClassificationArgs<O> {
-    /// `lOptDataSize` (0 by default).
-    opt_data_size: u64,
-    /// Whether `pOptBorrowedData` is given (`NULL` by default).
-    opt_borrowed_data: bool,
-    /// `bIsCurveOwned` (`FALSE` by default).
-    is_curve_owned: bool,
-    /// `bIsCurveCurrent` (`TRUE` by default).
-    is_curve_current: bool,
-    /// `cpSurface1` (`NULL` by default).
-    surface1: Option<O>,
-    /// `cpSurface2` (`NULL` by default).
-    surface2: Option<O>,
-    /// `cpUVCurve2` (`NULL` by default).
-    uv_curve2: Option<O>,
-    /// `cpTI` given (`NULL` by default: edges connect to faces of one B-rep only).
-    topology_intersector: bool,
-}
-
-impl<O> Default for CurveClassificationArgs<O> {
-    /// The upstream defaults.
-    fn default() -> Self {
-        Self {
+/// `SmCurveClassification(pCurve, interval, NULL, tol)` (`cpUVCurve = NULL`; the remaining
+/// arguments default: no interval storage, the curve not owned and current, no surfaces),
+/// unit `intersect.curve_class_p4`.
+fn new_curve_classification<O: ClassObject>(
+    k: &Kernel,
+    curve: O,
+    interval: &Extent1d,
+    uv_curve: Option<O>,
+    tol: f64,
+) -> Result<CurveClassification<O>> {
+    CurveClassification::with_curve(
+        k,
+        &ClassificationInit {
+            curve: Some(curve),
+            interval: *interval,
+            uv_curve,
+            src_zone_tol_3d: zone_tol3d(k, tol),
             opt_data_size: 0,
-            opt_borrowed_data: false,
             is_curve_owned: false,
             is_curve_current: true,
             surface1: None,
             surface2: None,
             uv_curve2: None,
-            topology_intersector: false,
-        }
-    }
-}
-
-/// `SmCurveClassification(cpCurve, crInterval, cpUVCurve, sSrcZoneTol3d,
-/// lOptDataSize, pOptBorrowedData, bIsCurveOwned, bIsCurveCurrent, cpSurface1,
-/// cpSurface2, cpUVCurve2, cpTI)`; the arguments after `sSrcZoneTol3d` are in `args`.
-fn new_curve_classification<O>(
-    _k: &Kernel,
-    _curve: O,
-    _interval: &Extent1d,
-    _uv_curve: Option<O>,
-    _src_zone_tol_3d: f64,
-    args: &CurveClassificationArgs<O>,
-) -> Result<CurveClassification<O>> {
-    let _ = (
-        args.opt_data_size,
-        args.opt_borrowed_data,
-        args.is_curve_owned,
-        args.is_curve_current,
-        &args.surface1,
-        &args.surface2,
-        &args.uv_curve2,
-        args.topology_intersector,
-    );
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
-    Err(SolidError::unported(
-        "SmCurveClassification::SmCurveClassification",
-        "intersect.curve_class_p4",
-    ))
+            ti: None,
+        },
+    )
 }
 
 /// `SmCurveClassification::InsertTopologyIntersections(solutions, 0)` (unit
@@ -2244,9 +2208,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             edges_split_from_this.push(edge);
 
             // Create a new Vertex in the Face.
-            // (pNewFaceVtx may stay null on success)
-            let made = brep_make_vertex_loop(k, f_brep, face, face_pt, OrientType::Opposite);
-            let new_face_vtx = match made {
+            let new_face_vtx = match brep
+                .make_vertex_loop(f_brep, face, face_pt)
+                .map(|(l, v)| (l, Some(v)))
+            {
                 Ok((_loop, v)) => v,
                 Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
                     return Err(e)
@@ -2288,9 +2253,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let e_brep = brep
                     .edge_brep_handle(this_split_edge)?
                     .ok_or(dangling("edge without B-rep"))?;
-                // (pE1, pE2 and pNewEdgeVtx may stay null on success)
-                let made = brep_make_vertex_split_edge(k, e_brep, this_split_edge, param);
-                let (e1, e2, v) = match made {
+                let (e1, e2, v) = match brep
+                    .make_vertex_split_edge(k, e_brep, this_split_edge, param)
+                    .map(|(e1, e2, v)| (Some(e1), Some(e2), Some(v)))
+                {
                     Ok(r) => r,
                     Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
                         return Err(e)
@@ -2300,7 +2266,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         if ignore_problems {
                             continue;
                         }
-                    };
+                        return Err(e);
+                    }
+                };
                 out.new_verts.push(v); // We'll keep this vertex.
 
                 let new_edge = if Some(this_split_edge) == e1 { e2 } else { e1 };
@@ -2531,22 +2499,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // If we arrive here, we are ready to intersect the faces
                 let ang_tol_deg = 180.0 / PI * self.this_ang_tol_rad;
                 // (the status is ignored: on failure the output arrays stay empty)
-                let mut fi = ignore_soft(face_face_intersect_curves(
+                let mut fi = ignore_soft(brep.face_intersect(
                     k,
                     face1,
                     face2,
                     self.this_approx_tol_3d,
                     ang_tol_deg,
-                    None,
-                    None,
-                    None,
-                    &FaceIntersectOutputs {
-                        this_crv_classes: true,
-                        other_crv_classes: true,
-                        cc_3d_crvs: true,
-                        this_cc_uv_crvs: true,
-                        other_cc_uv_crvs: true,
-                    },
                     Some(are_coincident),
                 ))?
                 .unwrap_or_else(|| FaceIntersection {
@@ -2720,14 +2678,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         // ignored; GlueEdgesGeneral returns SM_SUCCESS at once for a null
                         // edge, which MakeEdgeInFace leaves when it makes none)
                         if let (Some(e1), Some(e2)) = (new_edge1, new_edge2) {
-                            ignore_soft(brep_glue_edges_general(
+                            // m_pBrep->GlueEdgesGeneral(pNewEdge1, SM_OT_SAME, 0.0,
+                            // bDoRegionNesting, pNewEdge2) (pInsideFaceuses NULL)
+                            ignore_soft(brep.brep_glue_edges_general(
                                 k,
                                 this_brep,
                                 Some(e1),
                                 OrientType::Same,
                                 0.0,
                                 do_region_nesting,
-                                e2,
+                                Some(e2),
                                 None,
                             ))?;
                         }
@@ -2869,13 +2829,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // We have intersecting 3dcurves. Imprint the point as a vertex on each face.
         // Glue the vertices, then keep going
         if pc1.point_class() == PointClassType::Face {
-            // (a failed MakeVertexLoop leaves its vertex null, as may a successful one)
-            let made1 = brep_make_vertex_loop(k, this_brep, f1, pt, OrientType::Opposite);
-            let v1 = ignore_soft(made1)?.and_then(|(_loop1, v)| v);
+            let v1 = ignore_soft(brep.make_vertex_loop(this_brep, f1, pt))?.map(|(_loop1, v)| v);
 
             pt = ignore_soft(pc2.find_obj_point_3d(brep))?.unwrap_or(Point3::UNDEF);
-            let made2 = brep_make_vertex_loop(k, this_brep, f2, pt, OrientType::Opposite);
-            let v2 = ignore_soft(made2)?.and_then(|(_loop2, v)| v);
+            let v2 = ignore_soft(brep.make_vertex_loop(this_brep, f2, pt))?.map(|(_loop2, v)| v);
 
             // (two null vertices are equal: GlueVertices returns SM_SUCCESS at once; one
             // null vertex is dereferenced by GlueVertices)
@@ -2947,7 +2904,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // checks them itself. The status is ignored: a failed MakeEdgeInFace leaves the
         // edge and face null, and the curve copy stays in the store as upstream leaks it)
         let made = ignore_soft(brep_make_edge_in_face(
-            k,
+            brep,
             this_brep,
             old_face,
             v1,
@@ -3484,14 +3441,7 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
         }
 
         // Construct first CurveClassification for all of pEdge.
-        let mut crv_class1 = new_curve_classification(
-            k,
-            curve,
-            &interval,
-            None,
-            tolerance,
-            &CurveClassificationArgs::default(),
-        )?;
+        let mut crv_class1 = new_curve_classification(k, curve, &interval, None, tolerance)?;
 
         let vertex = geometry.edge_start_vertex(edge)?;
         {
@@ -3507,14 +3457,7 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
             .set_class_object(PointClassType::Vertex, vertex);
 
         // Construct second CurveClassification for pBrep2 intersections.
-        let mut crv_class2 = new_curve_classification(
-            k,
-            curve,
-            &interval,
-            None,
-            tolerance,
-            &CurveClassificationArgs::default(),
-        )?;
+        let mut crv_class2 = new_curve_classification(k, curve, &interval, None, tolerance)?;
 
         // Add curve/Brep intersections to CrvClass2.
         if ignore_soft(cc_insert_topology_intersections(
@@ -3888,7 +3831,10 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
             .edge_brep_handle(edge1)?
             .ok_or(SolidError::null_pointer(OP_SPLIT_TWO))?;
 
-        let (e1, e2, new_v1) = match brep_make_vertex_split_edge(k, brep, edge1, t1) {
+        let (e1, e2, new_v1) = match geometry
+            .make_vertex_split_edge(k, brep, edge1, t1)
+            .map(|(e1, e2, v)| (Some(e1), Some(e2), Some(v)))
+        {
             Ok(r) => r,
             Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
                 return Err(e)
@@ -3910,7 +3856,10 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
         let brep = geometry
             .edge_brep_handle(edge2)?
             .ok_or(dangling("edge without B-rep"))?; // Presumably the same... (dereferenced upstream)
-        let (e1, e2, new_v2) = match brep_make_vertex_split_edge(k, brep, edge2, t2) {
+        let (e1, e2, new_v2) = match geometry
+            .make_vertex_split_edge(k, brep, edge2, t2)
+            .map(|(e1, e2, v)| (Some(e1), Some(e2), Some(v)))
+        {
             Ok(r) => r,
             Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
                 return Err(e)
@@ -4017,7 +3966,10 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
 
     // Point is on the surface, within the face.
     let f_brep = face_brep(face)?.ok_or(dangling("face without B-rep"))?;
-    match brep_make_vertex_loop(k, f_brep, face, point, OrientType::Opposite) {
+    match geometry
+        .make_vertex_loop(f_brep, face, point)
+        .map(|(l, v)| (l, Some(v)))
+    {
         Ok((_new_loop, new_v)) => {
             let new_v = new_v.ok_or(SolidError::null_pointer(OP_IMPRINT_FACE))?;
             out.new_vertex = Some(new_v);

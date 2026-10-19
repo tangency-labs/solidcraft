@@ -2685,7 +2685,6 @@
     "query.brep": 7,
     "topology.brep_p2": 5,
     "topology.brep_p4": 1,
-    "topology.brep_p9": 26,
     "topology.face_p2": 49,
     "topology.face_p4": 2
   },
