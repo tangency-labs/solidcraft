@@ -7,6 +7,7 @@
 
 pub mod appearance;
 pub mod appearance_pack;
+pub mod cam;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
