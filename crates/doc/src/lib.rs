@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod appearance;
+pub mod cam;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
