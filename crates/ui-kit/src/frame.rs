@@ -68,7 +68,7 @@ pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applie
 /// so its band is published under its own scenario `handle` instead of the dialog's.
 pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
     solidcraft_ui_registry::publish_handle(handle, band.center());
-    let response = ui.interact(band, ui.scope_id().with("sc_dock_drag"), egui::Sense::drag());
+    let response = ui.interact(band, ui.scope_id().with("sc_dock_drag"), egui::Sense::DRAG);
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_dock_drag_frame"), frame));

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.dialog_tab_navigation": "Keep Tab inside dialogs",
+    "prefs.dialog_tab_navigation_help": "Tab and Shift+Tab cycle through the open dialog. Turn off to use native Tab navigation and cycle the floating Move values instead."
+  },
+  "de": {
+    "prefs.dialog_tab_navigation": "Tab-Navigation auf Dialoge beschränken",
+    "prefs.dialog_tab_navigation_help": "Tab und Umschalt+Tab wechseln zwischen den Feldern des geöffneten Dialogs. Deaktivieren, um die native Tab-Navigation zu verwenden und stattdessen die schwebenden Verschiebewerte durchzugehen."
+  },
+  "ja": {
+    "prefs.dialog_tab_navigation": "Tabキーの移動をダイアログ内に限定",
+    "prefs.dialog_tab_navigation_help": "TabとShift+Tabで開いているダイアログ内を順に移動します。オフにすると通常のTab移動に戻り、移動ツールのフローティング入力欄では各値を切り替えます。"
+  },
+  "zh": {
+    "prefs.dialog_tab_navigation": "将 Tab 导航限制在对话框内",
+    "prefs.dialog_tab_navigation_help": "使用 Tab 和 Shift+Tab 在打开的对话框内循环移动。关闭后恢复原生 Tab 导航，并在移动工具的浮动输入框中循环切换各个数值。"
+  },
+  "ko": {
+    "prefs.dialog_tab_navigation": "Tab 탐색을 대화 상자로 제한",
+    "prefs.dialog_tab_navigation_help": "Tab과 Shift+Tab으로 열린 대화 상자 안을 순환합니다. 끄면 기본 Tab 탐색을 사용하며 이동 도구의 떠 있는 입력란에서 각 값을 순환합니다."
+  },
+  "ar": {
+    "prefs.dialog_tab_navigation": "حصر التنقل بمفتاح Tab داخل مربعات الحوار",
+    "prefs.dialog_tab_navigation_help": "استخدم Tab وShift+Tab للتنقل داخل مربع الحوار المفتوح. عطّل هذا الخيار لاستخدام التنقل الافتراضي بمفتاح Tab والتنقل بين القيم العائمة لأداة التحريك."
+  },
+  "he": {
+    "prefs.dialog_tab_navigation": "הגבלת ניווט באמצעות Tab לתיבות דו־שיח",
+    "prefs.dialog_tab_navigation_help": "המקשים Tab ו־Shift+Tab עוברים בין השדות בתיבת הדו־שיח הפתוחה. כבו אפשרות זו כדי להשתמש בניווט הרגיל של Tab ולעבור בין הערכים הצפים של כלי ההזזה."
+  },
+  "vi": {
+    "prefs.dialog_tab_navigation": "Giữ điều hướng bằng Tab trong hộp thoại",
+    "prefs.dialog_tab_navigation_help": "Dùng Tab và Shift+Tab để di chuyển vòng quanh hộp thoại đang mở. Tắt tùy chọn này để dùng điều hướng Tab mặc định và chuyển qua các giá trị nổi của công cụ Di chuyển."
+  }
+}
