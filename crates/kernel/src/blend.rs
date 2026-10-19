@@ -33,6 +33,25 @@ pub(crate) fn too_large(msg: &str) -> KernelError {
     KernelError::TooLarge(msg.into())
 }
 
+/// A round running into the end of an earlier round of the other kind where it ends flush with a
+/// wall's end ([`crate::merge_corner::mixed_end`]): no other route builds it, so this refusal is
+/// reported over any other ([`decisive`]). Shown as not supported yet, as every size refusal is.
+pub(crate) const MIXED_END: &str = "a round meeting the end of an earlier round of the other kind";
+
+/// Whether a refusal says what no other route gets round: it outranks every other refusal.
+pub(crate) fn decisive(e: &KernelError) -> bool {
+    matches!(e, KernelError::TooLarge(m) if m.starts_with(MIXED_END))
+}
+
+/// How much a refusal says: a decisive one, then a size (a smaller blend may fit), then any other.
+fn rank(e: &KernelError) -> u8 {
+    match e {
+        _ if decisive(e) => 2,
+        KernelError::TooLarge(_) => 1,
+        _ => 0,
+    }
+}
+
 pub(crate) fn vtx(v: &mt::Vertex) -> Vec3 {
     from_p3(v.point())
 }
@@ -1186,12 +1205,21 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
         return first;
     }
     let mut fallback: Option<Body> = None;
+    // Refused in every order: the first order's refusal, unless another order's is decisive.
+    let mut other: Option<KernelError> = None;
     for order in orders(edges).into_iter().skip(1) {
-        if let Ok(done) = blend_in_order(body, &order, r, shape, what, curved_ends) {
-            if sound(&done) {
-                return Ok(done);
+        match blend_in_order(body, &order, r, shape, what, curved_ends) {
+            Ok(done) => {
+                if sound(&done) {
+                    return Ok(done);
+                }
+                fallback.get_or_insert(done);
             }
-            fallback.get_or_insert(done);
+            Err(e) => {
+                if other.is_none() && decisive(&e) {
+                    other = Some(e);
+                }
+            }
         }
     }
     match (first, fallback) {
@@ -1200,7 +1228,10 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
             let _ = e;
             Ok(done)
         }
-        (Err(e), None) => Err(e),
+        (Err(e), None) => Err(match other {
+            Some(e2) => keep_decisive(e, e2),
+            None => e,
+        }),
     }
 }
 
@@ -1347,7 +1378,7 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
         let mut done: Option<(Body, Vec<usize>, Aabb3)> = None;
         for (j, p) in todo.iter().enumerate() {
             if let Some((_, _, e)) = refused.iter().find(|(q, _, _)| q.dist(*p) < 1e-12) {
-                if first_err.is_none() || (matches!(e, KernelError::TooLarge(_)) && !matches!(first_err, Some(KernelError::TooLarge(_)))) {
+                if first_err.as_ref().is_none_or(|f| rank(e) > rank(f)) {
                     first_err = Some(e.clone());
                 }
                 continue;
@@ -1432,6 +1463,7 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
                             };
                             roll(ids).or_else(|first| if ids.len() > 1 { roll(&[edge.id()]).map_err(|_| first) } else { Err(first) }).map_err(|e2| {
                                 match e2 {
+                                    e2 if decisive(&e2) => e2,
                                     KernelError::TooLarge(m) => KernelError::TooLarge(format!("{m} ({e})")),
                                     e2 => KernelError::Failed(format!("{e2} ({e})")),
                                 }
@@ -1448,10 +1480,11 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
                     done = Some((b, js, reach));
                     break;
                 }
-                // Reported: the first refusal, unless a later one is a size a smaller radius may
-                // fit (the others may be refused only until that edge is blended).
+                // Reported: the first refusal, unless a later one says more ([`rank`]): decisive,
+                // or a size a smaller radius may fit (the others may be refused only until that
+                // edge is blended).
                 Err(e) => {
-                    if first_err.is_none() || (matches!(e, KernelError::TooLarge(_)) && !matches!(first_err, Some(KernelError::TooLarge(_)))) {
+                    if first_err.as_ref().is_none_or(|f| rank(&e) > rank(f)) {
                         first_err = Some(e.clone());
                     }
                     refused.push((*p, reach, e));
@@ -1659,6 +1692,7 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
     let mut ids = vec![edge.id()];
     // Walk on from one end of the edge (leaving vertex `v` in direction `d`).
     let walk = |mut v: mt::Vertex, mut d: Vec3, ids: &mut Vec<mt::EdgeID>, stop: &mt::Vertex| -> Option<bool> {
+        let mut cur = edge.clone();
         for _ in 0..200 {
             if v == *stop {
                 return Some(true);
@@ -1666,10 +1700,11 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
             let next = all.iter().filter(|e| !ids.contains(&e.id()) && (*e.front() == v || *e.back() == v)).find_map(|e| {
                 let fwd = *e.front() == v;
                 let t = if fwd { dir(e, false)? } else { -dir(e, true)? };
-                (t.dot(d) > 1.0 - 1e-4 && !smooth_seam(solid, e) && keep(e)).then(|| (e.clone(), fwd))
+                (t.dot(d) > 1.0 - 1e-4 && !smooth_seam(solid, e) && keep(e) && !onto_round_cap(solid, &cur, e, &v, d)).then(|| (e.clone(), fwd))
             });
             let Some((e, fwd)) = next else { return Some(false) };
             ids.push(e.id());
+            cur = e.clone();
             if fwd {
                 v = e.back().clone();
                 d = dir(&e, true)?;
@@ -1685,6 +1720,70 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
         walk(edge.front().clone(), -dir(edge, false)?, &mut ids, edge.back())?;
     }
     Some(ids)
+}
+
+/// Whether a chain at vertex `v`, leaving edge `cur` along `d`, would run on into `next` only over
+/// the end of an earlier round of the other kind: one face of `cur` (`old`, a plane) gives way at
+/// `v` to a round (`new`) tangent to it along a seam that crosses the chain obliquely, and the
+/// round bends to the far side of `old` from the ball rolling along `cur` (a round taking material
+/// away where an earlier one added it, or the other way round). The ball's contact with `old` does
+/// not run on along that seam, so the chain ends at `v`. A round of the same kind (an earlier
+/// round of the edge the chain runs into) and a round whose seam runs across the chain (a corner
+/// rounded square to the chain's faces) leave the chain as it was.
+fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex, d: Vec3) -> bool {
+    use mt::{BoundedCurve, ParametricCurve};
+    // Under about 3° from square to the chain: the seam runs across it.
+    const OBLIQUE: f64 = 0.05;
+    let faces_of = |e: &mt::Edge| solid.face_iter().filter(|f| f.edge_iter().any(|x| x.id() == e.id())).take(3).collect::<Vec<_>>();
+    let (fc, fx) = (faces_of(cur), faces_of(next));
+    let ([a, b], [c, e]) = (&fc[..], &fx[..]) else { return false };
+    let (shared, old, new) = if a.id() == c.id() {
+        (a, b, e)
+    } else if a.id() == e.id() {
+        (a, b, c)
+    } else if b.id() == c.id() {
+        (b, a, e)
+    } else if b.id() == e.id() {
+        (b, a, c)
+    } else {
+        return false;
+    };
+    if plane_normal(old).is_none() || plane_normal(new).is_some() {
+        return false;
+    }
+    let Some(seam) = old.edge_iter().find(|x| (x.front() == v || x.back() == v) && new.edge_iter().any(|y| y.id() == x.id())) else { return false };
+    if !smooth_seam(solid, &seam) {
+        return false;
+    }
+    let sc = seam.oriented_curve();
+    let (s0, s1) = sc.range_tuple();
+    let sd = sc.der(if seam.front() == v { s0 } else { s1 });
+    let Some(sd) = Vec3::new(sd.x, sd.y, sd.z).normalized() else { return false };
+    if sd.dot(d).abs() < OBLIQUE {
+        return false;
+    }
+    let p = from_p3(v.point());
+    // A face's outward normal at `v` and the direction into it across `cur` (a boundary runs
+    // counter-clockwise about the outward normal: the face lies to its left).
+    let side = |f: &mt::Face| -> Option<(Vec3, Vec3)> {
+        let used = f.boundary_iters().into_iter().flatten().find(|x| x.id() == cur.id())?;
+        let c = used.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let dd = c.der(if used.front() == v { t0 } else { t1 });
+        let along = Vec3::new(dd.x, dd.y, dd.z).normalized()?;
+        let (_, n, _) = crate::curveblend::project(f, p, None)?;
+        Some((n, n.cross(along).normalized()?))
+    };
+    let (Some((n1, t1)), Some((n2, t2))) = (side(old), side(shared)) else { return false };
+    // A convex `cur` rolls the ball inside the body (behind `old`), a concave one outside.
+    let convex = n1.dot(t2) < 0.0 && n2.dot(t1) < 0.0;
+    let concave = n1.dot(t2) > 0.0 && n2.dot(t1) > 0.0;
+    let Some(m) = edge_mid(next) else { return false };
+    // Which side of `old` the round's end runs to; level with it (pieces of one surface, a
+    // cylinder's two halves) is no round's end.
+    let bend = (m - p).dot(n1);
+    let tol = p.dist(m) * 1e-3;
+    (convex && bend > tol) || (concave && bend < -tol)
 }
 
 /// Whether the faces on either side of `e` meet smoothly there (a seam between pieces of one
@@ -1874,26 +1973,30 @@ fn fillet_built(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
                 // Three edges at a vertex of any faces end in a sphere.
                 .or_else(|e| {
                     if edges.len() >= 3 {
-                        crate::blend_vertex::fillet_ball_vertices(body, edges, radius).and_then(|b| closed(body, b)).map_err(|_| e)
+                        crate::blend_vertex::fillet_ball_vertices(body, edges, radius)
+                            .and_then(|b| closed(body, b))
+                            .map_err(|e2| keep_decisive(e, e2))
                     } else {
                         Err(e)
                     }
                 })
         })
         // Straight edges ending at a curved face that isn't an earlier round's: a rolling ball
-        // trimmed by the face. Refused, the refusal above stands.
-        .or_else(|e| blend_with(body, edges, radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b)).map_err(|_| e))
+        // trimmed by the face. Refused, the refusal above stands unless this one is decisive.
+        .or_else(|e| blend_with(body, edges, radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b)).map_err(|e2| keep_decisive(e, e2)))
         // Blends meeting at corners on curved faces: all at once.
         .or_else(|e| corners(body, edges, radius, Shape::Round, "fillet", false).and_then(|b| closed(body, b)).map_err(|e2| keep_size(e, e2)))
 }
 
-/// The first refusal, unless only the second found the blend too large (a smaller one may fit).
+/// The first refusal, unless the second says more ([`rank`]): a decisive one, or the blend too
+/// large where the first did not (a smaller one may fit).
 fn keep_size(e: KernelError, e2: KernelError) -> KernelError {
-    match (&e, e2) {
-        (KernelError::TooLarge(_), _) => e,
-        (_, e2 @ KernelError::TooLarge(_)) => e2,
-        _ => e,
-    }
+    if rank(&e2) > rank(&e) { e2 } else { e }
+}
+
+/// The first refusal, unless the second is decisive and the first is not.
+fn keep_decisive(e: KernelError, e2: KernelError) -> KernelError {
+    if decisive(&e2) && !decisive(&e) { e2 } else { e }
 }
 
 /// Blend the edges together, rebuilding the corners where they meet on faces of any surface
@@ -1937,7 +2040,8 @@ fn radius_step(radius: f64) -> f64 {
 /// The largest radius below `radius` (to three significant digits) at which the fillet of
 /// these edges works, with its result; `None` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
-/// them, so it is for an explicit request, not every refusal.
+/// them, so it is for an explicit request, not every refusal. A decisive refusal (no radius
+/// gets round it) ends the search.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
     if !(radius.is_finite() && radius > 1e-6) {
         return None;
@@ -1958,6 +2062,8 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
                 lo = mid;
                 best = Some(b);
             }
+            // Refused whatever the radius: no point searching on.
+            Err(e) if decisive(&e) => return None,
             Err(_) => hi = mid,
         }
     }
@@ -1969,7 +2075,7 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
 /// reduced for a tight edge elsewhere. The radius per edge (in `edges`' order) and the result;
 /// one radius for all (as [`fillet_max`]) when a group is refused for another reason than its
 /// size, the groups don't build together, or there are too many to search (each search is up
-/// to 16 fillets, and this runs in the live preview).
+/// to 16 fillets, and this runs in the live preview). `None` when a group's refusal is decisive.
 pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<f64>, Body)> {
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
@@ -1981,6 +2087,7 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
         let r = match fillet(body, &pts, radius) {
             Ok(_) => continue,
+            Err(e) if decisive(&e) => return None,
             Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
                 searches += 1;
                 match fillet_max(body, &pts, radius) {

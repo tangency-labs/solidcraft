@@ -493,8 +493,12 @@ fn check_in(sel: &Selection, size: Size) -> Result<()> {
     Err(KernelError::TooLarge(format!("{} mm is too large for this {what}: {into}{}", show(size.value()), fits_note(size, largest))))
 }
 
-/// A blend's refusal `e`, with the largest size that fits added when the size is why.
+/// A blend's refusal `e`, with the largest size that fits added when the size is why (a decisive
+/// refusal is not about the size: as it is).
 pub(crate) fn explain(body: &Body, edges: &[Vec3], size: Size, e: KernelError) -> KernelError {
+    if crate::blend::decisive(&e) {
+        return e;
+    }
     let note = match misfit(body, edges, size) {
         Ok(Some((_, largest @ Some(_)))) => fits_note(size, largest),
         _ => return e,
