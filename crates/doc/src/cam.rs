@@ -262,11 +262,7 @@ pub fn default_pocket_params(stepover: f64) -> PocketParams {
 
 /// Default cut: clearance 10, retract 2, top 0, bottom `bottom`, feeds 600/200, stepdown from depth.
 pub fn default_cut(bottom: f64, stepdown: f64) -> Cut {
-    Cut {
-        heights: Heights { clearance: 10.0, retract: 2.0, top: 0.0, bottom },
-        feeds: Feeds { cut: 600.0, plunge: 200.0 },
-        stepdown,
-    }
+    Cut { heights: Heights { clearance: 10.0, retract: 2.0, top: 0.0, bottom }, feeds: Feeds { cut: 600.0, plunge: 200.0 }, stepdown }
 }
 
 #[cfg(test)]

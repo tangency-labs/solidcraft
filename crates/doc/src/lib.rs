@@ -7,10 +7,10 @@
 
 pub mod appearance;
 pub mod appearance_pack;
-pub mod cam;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
+pub mod cam;
 pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
