@@ -1955,6 +1955,130 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
 
+    /// A full circle of radius 2 in the XY plane (rational quadratic B-spline).
+    fn circle_of_radius_two(start_deg: f64, end_deg: f64) -> Curve {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::NurbCircleParam;
+        Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::IDENTITY,
+                2.0,
+                start_deg,
+                end_deg,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The reuse path itself (PR #224): an end point drop answered from a cache slot an
+    /// earlier drop filled gives exactly the result of a fresh slot for that drop alone
+    /// (no reuse at all), and lands where it should. Points on and just off the circle
+    /// at 48 angles, so the global solve runs on the pre-filled slot.
+    #[test]
+    fn drop_with_prefilled_cache_slot_matches_fresh_slot_per_drop() {
+        let k = Kernel::default();
+        let full = circle_of_radius_two(0.0, 360.0);
+        let ivl = full.natural_interval();
+        let tol = 1e-6;
+        let drop_at = |p: Point3, slot: &mut Option<CurveCache<CurveHandle>>| {
+            full.drop_point_base_cached(
+                &k,
+                &ivl,
+                p,
+                None,
+                tol,
+                None,
+                SolverOperation::Intersect,
+                slot,
+            )
+            .unwrap()
+        };
+
+        let mut shared = None;
+        let _ = drop_at(Vec3::new(0.0, -2.0, 0.0), &mut shared);
+        assert!(shared.is_some());
+        for i in 0..48 {
+            let a = (f64::from(i) + 0.25) * std::f64::consts::TAU / 48.0;
+            let on = Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0);
+            for r in [2.0, 2.0 + 0.5 * tol] {
+                let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+                let fresh = drop_at(p, &mut None);
+                let reused = drop_at(p, &mut shared);
+                // `Debug` prints every float exactly: equal strings are equal bits
+                assert_eq!(format!("{fresh:?}"), format!("{reused:?}"), "angle {a}");
+                assert!(
+                    reused.success && reused.distance < tol,
+                    "angle {a}: {reused:?}"
+                );
+                let q = full.evaluate_point(reused.parameter).unwrap();
+                assert!(q.distance(on) < tol, "angle {a}: {q:?}");
+            }
+        }
+    }
+
+    /// A closed curve is split in three (recursively) and every end drop of the check
+    /// reuses one cache slot per curve (PR #224): checking again with the slots the
+    /// first check filled gives the same result, which covers exactly the upper half of
+    /// the circle.
+    #[test]
+    fn coincidence_with_prefilled_cache_slots_finds_the_half_circle() {
+        use crate::surface::surface::p4::NoObject;
+
+        let k = Kernel::default();
+        let full = circle_of_radius_two(0.0, 360.0);
+        let half = circle_of_radius_two(0.0, 180.0);
+        let (ivl, other_ivl) = (full.natural_interval(), half.natural_interval());
+        let tol = 1e-6;
+        let objects = [None::<NoObject>, None];
+        assert!(full.is_split_needed(&ivl, tol).unwrap());
+
+        let mut caches = [None, None];
+        let mut check = || {
+            full.global_coincidence_checker_at(
+                &k,
+                &ivl,
+                &half,
+                &other_ivl,
+                tol,
+                false,
+                objects,
+                0,
+                &mut caches,
+            )
+            .unwrap()
+        };
+        let filling = check();
+        let prefilled = check();
+        assert!(caches.iter().all(Option::is_some));
+        assert_eq!(format!("{filling:?}"), format!("{prefilled:?}"));
+
+        // every solution end is a point of the upper half on both curves, and the
+        // solutions' angular spans cover [0, pi] without a gap
+        assert!(!prefilled.solutions.is_empty());
+        let mut spans = Vec::new();
+        for s in &prefilled.solutions {
+            let mut angles = [0.0; 2];
+            for (angle, e) in angles.iter_mut().zip([&s.start, &s.end]) {
+                let p = full.evaluate_point(e.param(0).unwrap()).unwrap();
+                let q = half.evaluate_point(e.param(1).unwrap()).unwrap();
+                assert!(p.distance(q) < tol, "{p:?} vs {q:?}");
+                assert!(p.y > -tol && (p.length() - 2.0).abs() < tol, "{p:?}");
+                *angle = p.y.max(0.0).atan2(p.x);
+            }
+            let [a, b] = angles;
+            spans.push((a.min(b), a.max(b)));
+        }
+        spans.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut covered = 0.0_f64;
+        for &(lo, hi) in &spans {
+            assert!(lo <= covered + tol, "gap before {lo} in {spans:?}");
+            covered = covered.max(hi);
+        }
+        assert!(covered >= std::f64::consts::PI - tol, "{spans:?}");
+    }
+
     fn quarter_line() -> Curve {
         let c = BSplineCurve::create_line_segment(
             3,
