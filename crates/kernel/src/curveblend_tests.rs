@@ -729,3 +729,131 @@ fn round_along_long_lines_and_small_turns_measures_its_volume() {
     // Centred across the bar, as the part is.
     assert!(m.centroid.x.abs() < 1e-3, "centre of mass x {}", m.centroid.x);
 }
+
+/// The area and the first moments (about the corner's two faces) of a round's cross-section on a
+/// square corner, the unit square less the quarter disc of radius 1 about (1, 1), sampled on a
+/// fine grid: `f(s, h)` integrated over it, `s` the distance from one face and `h` from the other.
+fn round_section_integral(f: impl Fn(f64, f64) -> f64) -> f64 {
+    let n = 2000;
+    let step = 1.0 / n as f64;
+    let mut sum = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let (s, h) = ((i as f64 + 0.5) * step, (j as f64 + 0.5) * step);
+            if (1.0 - s).powi(2) + (1.0 - h).powi(2) >= 1.0 {
+                sum += f(s, h);
+            }
+        }
+    }
+    sum * step * step
+}
+
+#[test]
+fn round_an_open_rim_after_end_chamfers() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    // The rim of #1303, its inner top edge rounded where the chamfer was: each end of the chain
+    // meets two bevels at a four-face vertex, and the round crosses the seam between them.
+    let rim = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(31.0, -15.0), b: Vec2::new(31.0, -11.75) },
+                Seg2::Line { a: Vec2::new(31.0, -11.75), b: Vec2::new(0.0, -11.75) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 11.75, start: -std::f64::consts::FRAC_PI_2, sweep: -std::f64::consts::PI },
+                Seg2::Line { a: Vec2::new(0.0, 11.75), b: Vec2::new(31.0, 11.75) },
+                Seg2::Line { a: Vec2::new(31.0, 11.75), b: Vec2::new(31.0, 15.0) },
+                Seg2::Line { a: Vec2::new(31.0, 15.0), b: Vec2::new(0.0, 15.0) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 15.0, start: std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI },
+                Seg2::Line { a: Vec2::new(0.0, -15.0), b: Vec2::new(31.0, -15.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let mut body = crate::extrude(&Plane::XY, &[rim], 0.0, 13.0).unwrap().pop().unwrap();
+    body = crate::blend_corner::chamfer(
+        &body,
+        &[Vec3::new(31.0, 13.375, 13.0), Vec3::new(31.0, -13.375, 13.0), Vec3::new(31.0, 11.75, 8.0), Vec3::new(31.0, -11.75, 8.0)],
+        1.0,
+    )
+    .unwrap();
+    let picks = [Vec3::new(-11.75, 0.0, 13.0), Vec3::new(15.0, 11.75, 13.0), Vec3::new(15.0, -11.75, 13.0)];
+    let result = fillet(&body, &picks, 1.0).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    // A point `s` from the inner wall and `h` below the top is taken away along the two lines
+    // up to the nearer bevel (x + z = 43 above, x - y = 18.25 beside: x = 30 + min(s, h)) and
+    // round the half ring at radius 11.75 + s.
+    let along = round_section_integral(|s, h| 2.0 * (30.0 + s.min(h)) + std::f64::consts::PI * (11.75 + s));
+    let removed = planned_volume(&body) - planned_volume(&result);
+    assert!((removed - along).abs() < 0.01, "removed {removed}, expected {along}");
+    // Each end meets the seam between the bevels where the round crosses it.
+    for side in [1.0, -1.0] {
+        let crossing = result.solid.vertex_iter().map(|v| from_p3(v.point())).find(|p| {
+            let (s, h) = (p.y * side - 11.75, 13.0 - p.z);
+            (p.x - (30.0 + s)).abs() < 1e-6 && (h - s).abs() < 1e-6 && s > 0.0 && s < 1.0
+        });
+        let crossing = crossing.unwrap_or_else(|| panic!("no vertex where the round crosses the bevels' seam on the {side} side"));
+        // On the round: 1 from the axis through (y 12.75, z 12).
+        let (s, h) = (crossing.y * side - 11.75, 13.0 - crossing.z);
+        assert!(((1.0 - s).hypot(1.0 - h) - 1.0).abs() < 1e-5, "{crossing:?}");
+    }
+    assert!(fillet(&body, &picks, 4.0).is_err());
+}
+
+/// A plate (z 0 to 2) with an L-shaped wall standing on it (z 2 to 6), the wall's outer corner
+/// rounded to radius 1: the wall's ends are flush with the plate's sides beneath them, and the
+/// plate's sides run on slanted from there.
+fn wall_on_a_plate() -> Body {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (28.0, -4.0), (28.0, 10.0), (12.0, 10.0), (0.0, 2.0)]);
+    let wall = polygon(&[(0.0, 0.0), (18.0, 0.0), (18.0, -20.0), (20.0, -20.0), (20.0, 2.0), (0.0, 2.0)]);
+    let plate = crate::extrude(&Plane::XY, &[plate], 0.0, 2.0).unwrap().pop().unwrap();
+    let wall = crate::extrude(&Plane::XY, &[wall], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
+    fillet(&body, &[Vec3::new(20.0, 2.0, 4.0)], 1.0).unwrap()
+}
+
+#[test]
+fn round_the_foot_of_a_wall_flush_with_the_plate_sides() {
+    // The foot of the wall (a line, the round at its corner and a line) rounded where it meets
+    // the plate: each end of the chain is a vertex of four faces, the wall's end above the
+    // plate's side flush with it and the plate's slanted side beyond, and the round ends in the
+    // slanted side (the wall's end is where the round touches the wall).
+    let body = wall_on_a_plate();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let picks = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    let r = 0.5;
+    let result = fillet(&body, &picks, r).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    // A point `s` from the wall and `h` above the plate (in radii) is added along the lines from
+    // where the slanted side passes it (x = 1.5 s r at the first end, y = -20 + 2 s r at the
+    // other) to the corner's round, and round its quarter turn at radius 1 + s r.
+    let added = round_section_integral(|s, _| {
+        let (x0, y0) = (1.5 * s * r, -20.0 + 2.0 * s * r);
+        (19.0 - x0) + (1.0 - y0) + std::f64::consts::FRAC_PI_2 * (1.0 + s * r)
+    }) * r
+        * r;
+    let grown = planned_volume(&result) - planned_volume(&body);
+    assert!((grown - added).abs() < 0.002, "added {grown}, expected {added}");
+    // The round touches the wall's end at its edge with the plate's side beneath: one vertex
+    // there, at the contact (y 2, z 2 + r at x 0; x 20, z 2 + r at y -20).
+    for p in [Vec3::new(0.0, 2.0, 2.0 + r), Vec3::new(20.0, -20.0, 2.0 + r)] {
+        let ids: std::collections::HashSet<_> = result.solid.vertex_iter().filter(|v| from_p3(v.point()).dist(p) < 1e-6).map(|v| v.id()).collect();
+        assert_eq!(ids.len(), 1, "{p:?}");
+    }
+    // The old corner vertices are gone.
+    for p in [Vec3::new(0.0, 2.0, 2.0), Vec3::new(20.0, -20.0, 2.0)] {
+        assert!(!result.solid.vertex_iter().any(|v| from_p3(v.point()).dist(p) < 1e-6), "{p:?}");
+    }
+    // As wide as the wall is high less one: still a valid body. Higher than the wall: refused.
+    let wide = fillet(&body, &picks, 3.0).unwrap();
+    assert!(wide.validity().is_empty(), "{:?}", wide.validity());
+    assert_eq!(wide.crossed_face_loops().unwrap(), 0);
+    assert!(fillet(&body, &picks, 4.5).is_err());
+}
