@@ -921,22 +921,27 @@ pub fn hidden_lines(
 
 /// A body's silhouettes seen along `dl` (the direction of sight in its own frame), per set of
 /// supported curved faces on one surface: the set's first face, its largest face and the
-/// traced curves. Cancellation is polled before each set (one torus takes a few tenths of a
-/// second).
+/// traced curves. Cancellation is polled every 256 faces while the sets are formed and before
+/// every face a traced curve is trimmed to; tracing one surface (a few tenths of a second for
+/// a torus) is the longest step between polls.
 fn body_silhouettes(def: &Prepared, dl: Vec3, opts: &Options, ctx: &Ctx) -> Result<Vec<(usize, f64, Vec<silhouette::Sil>)>, HlrError> {
-    let supported = |f: &FaceData| !(f.freeform && !opts.freeform) && f.trim.unsupported.is_none();
+    let supported: Vec<bool> = def.faces.iter().map(|f| !(f.freeform && !opts.freeform) && f.trim.unsupported.is_none()).collect();
     // Faces on one surface (a sphere in two halves, say) share their silhouettes, keyed by
     // the set's first face: one curve along their seams, not one per face.
     let mut sets: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
     for (fi, f) in def.faces.iter().enumerate() {
-        if !supported(f) || matches!(f.analytic, Analytic::Plane) {
+        if fi % 256 == 255 && ctx.cancelled() {
+            return Err(HlrError::Cancelled);
+        }
+        if supported.get(fi) != Some(&true) || matches!(f.analytic, Analytic::Plane) {
             continue;
         }
         // The set's silhouette is traced on its first face's surface, so a face joins only
         // when its recognised surface is that one to rounding (1e-13); recognition groups
         // surfaces more loosely (1e-9), and two surfaces that close can still differ inside
         // the faces (two spherical caps through one circle).
-        let first = f.group.iter().copied().filter(|j| def.faces.get(*j).is_some_and(supported)).min().unwrap_or(fi);
+        // The group lists faces in order, so its first supported face is the smallest.
+        let first = f.group.iter().copied().find(|j| supported.get(*j) == Some(&true)).unwrap_or(fi);
         let fits = def.faces.get(first).is_some_and(|l| same_analytic(&l.analytic, &f.analytic, 1e-13));
         sets.entry(if fits { first } else { fi }).or_default().push(fi);
     }
@@ -949,7 +954,19 @@ fn body_silhouettes(def: &Prepared, dl: Vec3, opts: &Options, ctx: &Ctx) -> Resu
         let parts: Vec<(&S3, &Trim)> = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (&m.surface, &m.trim)).collect();
         let size = members.iter().filter_map(|j| def.faces.get(*j)).map(|m| (m.hi - m.lo).len()).fold(0., f64::max);
         let mut sils = Vec::new();
-        silhouette::silhouettes(&parts, f.analytic, dl, &mut sils);
+        // Once cancellation is seen the tracing stops and its partial curves are dropped, even
+        // if the callback would answer false later.
+        let stopped = std::cell::Cell::new(false);
+        let stop = || {
+            if !stopped.get() && ctx.cancelled() {
+                stopped.set(true);
+            }
+            stopped.get()
+        };
+        silhouette::silhouettes(&parts, f.analytic, dl, &mut sils, &stop);
+        if stopped.get() {
+            return Err(HlrError::Cancelled);
+        }
         out.push((fi, size, sils));
     }
     Ok(out)

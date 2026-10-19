@@ -115,9 +115,10 @@ pieces in the same order and the same statistics apart from the phase timings.
   own frame, not on its position, so placements that share both (repeated parts turned
   alike) share one tracing. This speeds up the browser build too.
 - **Cancellation.** `cancel` is polled before every item, on whichever thread runs it, and
-  inside long items: between the face sets of a silhouette tracing, at every sampling pass,
-  every 4096 chords cut at left-out faces, every 1024 rays, every 65 536 crossing candidates
-  and every 65 536 coverage checks. The longest uninterrupted step is one surface's tracing.
+  inside long items: every 256 faces and before every face a silhouette is trimmed to, at
+  every sampling pass, every 4096 chords cut at left-out faces, every 1024 rays, every 65 536
+  crossing candidates and every 65 536 coverage checks. The longest step between polls is
+  tracing one surface's silhouette curves, a few tenths of a second for a torus.
 - **Errors.** The first error, cancellation included, stops the other workers and is the one
   returned. When two different failures coincide on different threads (a cancellation while
   a budget is exceeded), the error returned may differ from a run on one thread; a successful

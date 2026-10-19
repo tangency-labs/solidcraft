@@ -3073,6 +3073,26 @@ fn long_items_poll_cancellation_inside_them() {
     let second = || polls.fetch_add(1, Ordering::Relaxed) >= 1;
     let ctx = context(&[], &[], &view, &o, &second).unwrap();
     assert!(matches!(body_silhouettes(&two, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+    // One surface in two faces: it asks again before each face its curves are trimmed to, and
+    // a cancellation seen there drops the partial curves even if the callback changes its mind.
+    let halves = prepare(&torus(5., 1.5), &o).unwrap();
+    let polls = AtomicUsize::new(0);
+    let counting = || {
+        polls.fetch_add(1, Ordering::Relaxed);
+        false
+    };
+    let ctx = context(&[], &[], &view, &o, &counting).unwrap();
+    assert_eq!(body_silhouettes(&halves, view.d, &o, &ctx).unwrap().len(), 1);
+    assert!(polls.load(Ordering::Relaxed) >= 3, "{polls:?} polls");
+    let polls = AtomicUsize::new(0);
+    let once = || polls.fetch_add(1, Ordering::Relaxed) == 1;
+    let ctx = context(&[], &[], &view, &o, &once).unwrap();
+    assert!(matches!(body_silhouettes(&halves, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+    // Many faces: forming the sets asks too, before any surface is traced.
+    let shells = (0..50).map(|k| cuboid([2. * k as f64, 0., 0.], [2. * k as f64 + 1., 1., 1.]).shells.remove(0)).collect();
+    let boxes = prepare(&Brep { version: crate::brep::VERSION, shells }, &o).unwrap();
+    let ctx = context(&[], &[], &view, &o, &|| true).unwrap();
+    assert!(matches!(body_silhouettes(&boxes, view.d, &o, &ctx), Err(HlrError::Cancelled)));
 }
 
 #[test]
