@@ -385,7 +385,8 @@ impl Zone {
         if placed.iter().any(|(v, at)| !(from_p3(v.point()).dist(*at) <= tolerance)) {
             return Err(KernelError::Failed("merge corner: a corner of the band is not where the band needs it".into()));
         }
-        let (a, b, surface) = (self.curve_a()?, self.curve_b()?, self.outward_patch()?);
+        let (a, b) = (self.curve_a()?, self.curve_b()?);
+        let surface = in_proportion(self.outward_patch()?, self.k())?;
         let l = mt::Curve::Line(mt::Line(p3(self.q_w), p3(self.q_s)));
         let faces_out = self.faces_out;
         guard("merge corner band", || {
@@ -404,6 +405,25 @@ impl Zone {
             Ok(Band { face, gamma_a, on_l, gamma_b })
         })
     }
+}
+
+/// The surface with both its parameters stretched by `by` (the trim keeps its shape in them): a
+/// band's own parameters run over [0, 1] whatever its size, and truck's searches on a surface,
+/// which work to fixed tolerances, settle short of the nearest point on a small one (a part in 50
+/// of the radius at a hundredth of the analogue). Stretched by `ρ*/c`, the band's speed along `t`,
+/// they move about as far as the point does.
+fn in_proportion(surface: mt::NurbsSurface<mt::Vector4>, by: f64) -> Result<mt::NurbsSurface<mt::Vector4>> {
+    if !(by.is_finite() && by > 0.0) {
+        return Err(KernelError::Invalid("merge corner: the band has no size".into()));
+    }
+    guard("merge corner patch", || {
+        let bs = surface.non_rationalized();
+        let (mut uk, mut vk) = bs.knot_vecs().clone();
+        uk.transform(by, 0.0);
+        vk.transform(by, 0.0);
+        let bs = mt::BSplineSurface::try_new((uk, vk), bs.control_points().clone()).map_err(|e| KernelError::Failed(format!("merge corner patch: {e}")))?;
+        Ok(mt::NurbsSurface::new(bs))
+    })
 }
 
 /// The straight edge from `from` to `to`, as a degree-1 NURBS.
