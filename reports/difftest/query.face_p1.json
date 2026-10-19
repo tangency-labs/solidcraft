@@ -8219,8 +8219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -8255,8 +8255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0006",
@@ -8383,8 +8383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0020",
@@ -8442,16 +8442,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439074",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -8491,8 +8487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0031",
@@ -8691,8 +8687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -8703,8 +8699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0051",
@@ -8743,8 +8739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0055",
@@ -9254,16 +9250,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0107",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439155",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -9311,8 +9303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0113",
@@ -9335,8 +9327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0115",
@@ -9478,16 +9470,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0130",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439178",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -9523,8 +9511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -9547,8 +9535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0136",
@@ -9662,16 +9650,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0147",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439195",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -9994,14 +9978,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0180",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439228",
       "values_compared": 0
     },
@@ -10027,8 +10007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0183",
@@ -10111,8 +10091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -10174,14 +10154,10 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0197",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439245",
       "values_compared": 0
     },
@@ -10211,8 +10187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0201",
@@ -10234,16 +10210,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439251",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10367,8 +10339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0215",
@@ -10450,16 +10422,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0223",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439271",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -10526,14 +10494,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0231",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439279",
       "values_compared": 0
     },
@@ -10863,8 +10827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0265",
@@ -10887,8 +10851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0267",
@@ -11226,14 +11190,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439349",
       "values_compared": 0
     },
@@ -11379,8 +11339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0315",
@@ -11402,14 +11362,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0317",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439365",
       "values_compared": 0
     },
@@ -11439,8 +11395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0320",
@@ -11582,14 +11538,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439381",
       "values_compared": 0
     },
@@ -11615,8 +11567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0336",
@@ -11959,8 +11911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0370",
@@ -11979,8 +11931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0372",
@@ -12054,14 +12006,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0380",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439428",
       "values_compared": 0
     },
@@ -12198,14 +12146,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0394",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439442",
       "values_compared": 0
     },
@@ -12263,8 +12207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0400",
@@ -12318,14 +12262,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0405",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439453",
       "values_compared": 0
     },
@@ -12495,8 +12435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0422",
@@ -12759,8 +12699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0447",
@@ -12771,8 +12711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0448",
@@ -13075,8 +13015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0477",
@@ -13359,8 +13299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0506",
@@ -13714,16 +13654,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0542",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439590",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -13918,14 +13854,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0562",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439610",
       "values_compared": 0
     },
@@ -14214,16 +14146,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0590",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439638",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -14291,8 +14219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0597",
@@ -14339,8 +14267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0602",
@@ -14463,8 +14391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0614",
@@ -14486,14 +14414,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0616",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439664",
       "values_compared": 0
     },
@@ -14506,21 +14430,17 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0618",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439666",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0619",
@@ -14614,14 +14534,10 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0628",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439676",
       "values_compared": 0
     },
@@ -14655,8 +14571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0632",
@@ -15018,16 +14934,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0667",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439715",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -15198,16 +15110,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0685",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439733",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -15311,8 +15219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0695",
@@ -15375,8 +15283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0701",
@@ -15411,8 +15319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0704",
@@ -15499,8 +15407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0712",
@@ -15523,8 +15431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0714",
@@ -15635,8 +15543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0724",
@@ -15675,8 +15583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0728",
@@ -15706,16 +15614,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439779",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -15799,8 +15703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0740",
@@ -15874,14 +15778,10 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0747",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439795",
       "values_compared": 0
     },
@@ -15931,8 +15831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0753",
@@ -16050,14 +15950,10 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439813",
       "values_compared": 0
     },
@@ -16235,8 +16131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0784",
@@ -16283,8 +16179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0789",
@@ -16295,8 +16191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0790",
@@ -16854,14 +16750,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0843",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439891",
       "values_compared": 0
     },
@@ -16935,8 +16827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0850",
@@ -17082,14 +16974,10 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0864",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439912",
       "values_compared": 0
     },
@@ -17135,8 +17023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0869",
@@ -17166,14 +17054,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0872",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399439920",
       "values_compared": 0
     },
@@ -17203,8 +17087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0875",
@@ -17703,8 +17587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0925",
@@ -17771,8 +17655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0932",
@@ -17863,8 +17747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0940",
@@ -18086,14 +17970,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0962",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399440010",
       "values_compared": 0
     },
@@ -18147,8 +18027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0968",
@@ -18207,8 +18087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0974",
@@ -18266,16 +18146,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0979",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399440027",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -18355,8 +18231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0988",
@@ -18398,16 +18274,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399440040",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -18438,14 +18310,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0996",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399440044",
       "values_compared": 0
     },
@@ -18555,8 +18423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1008",
@@ -19007,8 +18875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1051",
@@ -19031,8 +18899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1053",
@@ -19111,8 +18979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1060",
@@ -19131,8 +18999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1062",
@@ -19390,14 +19258,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1086",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399440134",
       "values_compared": 0
     },
@@ -19511,8 +19375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1098",
@@ -20247,8 +20111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateTightBoundingBox",
-        "unit": "query.face_p3"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1170",
@@ -20462,14 +20326,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1192",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634842130399440240",
       "values_compared": 0
     },
@@ -20531,8 +20391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::SectorClassifyCurveOn",
-        "unit": "query.face_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1198",
@@ -20551,19 +20411,20 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 689,
+  "cases_deferred": 654,
   "cases_failed": 0,
-  "cases_passed": 1535,
+  "cases_passed": 1570,
   "cases_total": 2224,
   "deferred_by_unit": {
     "curve.crv_on_surf": 19,
     "harness:analytic-geometry-export": 31,
-    "query.face_p3": 97,
+    "intersect.surface_drop_lib_p3": 36,
     "surface.cone_p1": 41,
     "surface.sphere": 12,
     "surface.surf_of_extrusion_p2": 59,
     "surface.surface_cache_p2": 57,
-    "topology.face_p2": 373
+    "topology.face_p2": 397,
+    "topology.face_p3": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

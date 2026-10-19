@@ -1,0 +1,2401 @@
+{
+ "cases": [
+  {
+   "name": "closed_sphere_properties_swap0_loops0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     }
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "closed_sphere_properties_swap0_loops1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     }
+    },
+    "props": 1,
+    "loops": 1
+   }
+  },
+  {
+   "name": "closed_sphere_properties_swap0_fresh",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (fresh props: rejected, they read the empty loop props)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     }
+    },
+    "props": 0,
+    "loops": 0
+   }
+  },
+  {
+   "name": "closed_sphere_properties_swap1_loops0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     }
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "closed_sphere_properties_swap1_loops1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     }
+    },
+    "props": 1,
+    "loops": 1
+   }
+  },
+  {
+   "name": "closed_sphere_properties_swap1_fresh",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (fresh props: rejected, they read the empty loop props)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     }
+    },
+    "props": 0,
+    "loops": 0
+   }
+  },
+  {
+   "name": "natural_torus",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 (as my_test_closed_sphere_properties, SmTorus)",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     }
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "tsurf_cyl_creation_loops_on_cone",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:690 my_test_tsurf_cyl_creation_fast (its three loops, on a real SmCone)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 0.1,
+        "d": 0,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.1,
+        "b": 0.05,
+        "c": 0.1,
+        "d": 0,
+        "rev": true
+       },
+       {
+        "t": "line",
+        "a": 0.1,
+        "b": 0.05,
+        "c": 0.05,
+        "d": 0.05,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.05,
+        "b": 0.05,
+        "c": 0.05,
+        "d": 0.1,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.05,
+        "b": 0.1,
+        "c": 0,
+        "d": 0.1,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.1,
+        "c": 0,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.01,
+        "b": 0.05,
+        "c": 0.01,
+        "d": 0.08,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.01,
+        "b": 0.08,
+        "c": 0.04,
+        "d": 0.05,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.04,
+        "b": 0.05,
+        "c": 0.01,
+        "d": 0.05,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "circle",
+        "a": 0.06,
+        "b": 0.025,
+        "r": 0.015,
+        "rev": true
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_two_circles_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); a cylinder face without seam edge (the healer's missing-seam case of SmFace::ClassifyLoops' notes)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_two_circles_reversed_loops_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "cylinder_four_circles_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.25,
+        "c": 0,
+        "d": 0.25,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.75,
+        "c": 0,
+        "d": 0.75,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_same_direction_circles_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.8,
+        "c": 1,
+        "d": 0.8,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_one_circle_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); one no-area loop on a surface without poles",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_band_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_low_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); pairs with the pole without vertex",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_high_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_pole_vertex_swap0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4590 my_test_heal_single_vertex_sphere (a vertex loop at the pole); source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.5,
+       1.0
+      ]
+     ]
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_near_pole_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); a cap 1e-6 from the pole",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1e-06,
+        "c": 1,
+        "d": 1e-06,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_band_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.6,
+        "c": 0,
+        "d": 0.6,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_band_other_seam_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0,
+        "c": 0.2,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.6,
+        "b": 1,
+        "c": 0.6,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cone_two_circles_swap0",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.1,
+        "c": 1,
+        "d": 0.1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.9,
+        "c": 0,
+        "d": 0.9,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_two_circles_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); a cylinder face without seam edge (the healer's missing-seam case of SmFace::ClassifyLoops' notes)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_two_circles_reversed_loops_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "cylinder_four_circles_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.25,
+        "b": 1,
+        "c": 0.25,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.75,
+        "b": 1,
+        "c": 0.75,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_same_direction_circles_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0,
+        "c": 0.2,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.8,
+        "b": 0,
+        "c": 0.8,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_one_circle_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); one no-area loop on a surface without poles",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_band_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0,
+        "c": 0.3,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 1,
+        "c": 0.7,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_low_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); pairs with the pole without vertex",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0,
+        "c": 0.3,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_high_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 1,
+        "c": 0.7,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_pole_vertex_swap1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4590 my_test_heal_single_vertex_sphere (a vertex loop at the pole); source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0,
+        "c": 0.3,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       1.0,
+       0.5
+      ]
+     ]
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_near_pole_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); a cap 1e-6 from the pole",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 1e-06,
+        "b": 0,
+        "c": 1e-06,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_band_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0,
+        "c": 0.2,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.6,
+        "b": 1,
+        "c": 0.6,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_band_other_seam_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.6,
+        "c": 0,
+        "d": 0.6,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cone_two_circles_swap1",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.1,
+        "b": 0,
+        "c": 0.1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.9,
+        "b": 1,
+        "c": 0.9,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_diagonal",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); a loop winding once about both seams",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_diagonal_and_band",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_straddling_outer",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); an area loop crossing the seam twice",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.8,
+        "c": 0,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.8,
+        "c": 0.7,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.8,
+        "c": 0.7,
+        "d": 0.2,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_straddling_outer_inner",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.8,
+        "c": 0,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.8,
+        "c": 0.7,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.8,
+        "c": 0.7,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.75,
+        "b": 0.3,
+        "c": 0.75,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.75,
+        "b": 0.7,
+        "c": 1,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.7,
+        "c": 0.25,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.25,
+        "b": 0.7,
+        "c": 0.25,
+        "d": 0.3,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.25,
+        "b": 0.3,
+        "c": 0,
+        "d": 0.3,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.3,
+        "c": 0.75,
+        "d": 0.3,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_straddling_nested",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); a ccw loop inside a ccw loop",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.8,
+        "c": 0,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.8,
+        "c": 0.7,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.8,
+        "c": 0.7,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.75,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 0.25,
+        "d": 0.3,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.25,
+        "b": 0.3,
+        "c": 0.25,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.25,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0.75,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.75,
+        "b": 0.7,
+        "c": 0.75,
+        "d": 0.3,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_straddling_three_deep",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.6,
+        "b": 0.1,
+        "c": 1,
+        "d": 0.1,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.1,
+        "c": 0.4,
+        "d": 0.1,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0.1,
+        "c": 0.4,
+        "d": 0.9,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0.9,
+        "c": 0,
+        "d": 0.9,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.9,
+        "c": 0.6,
+        "d": 0.9,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.6,
+        "b": 0.9,
+        "c": 0.6,
+        "d": 0.1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.65,
+        "b": 0.2,
+        "c": 0.65,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.65,
+        "b": 0.8,
+        "c": 1,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.8,
+        "c": 0.35,
+        "d": 0.8,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.35,
+        "b": 0.8,
+        "c": 0.35,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.35,
+        "b": 0.2,
+        "c": 0,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.2,
+        "c": 0.65,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 0.3,
+        "d": 0.3,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.3,
+        "c": 0.3,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0.7,
+        "d": 0.7,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.7,
+        "c": 0.7,
+        "d": 0.3,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "torus_straddling_with_band",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.2,
+        "c": 0.3,
+        "d": 0.6,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0.6,
+        "c": 0,
+        "d": 0.6,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.6,
+        "c": 0.7,
+        "d": 0.6,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 0.6,
+        "c": 0.7,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.9,
+        "c": 1,
+        "d": 0.9,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_band_and_rect",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call); the rectangle crosses no seam (sms_FindAndClassifyLoopBisector)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0.4,
+        "c": 0.4,
+        "d": 0.4,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0.4,
+        "c": 0.4,
+        "d": 0.6,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0.6,
+        "c": 0.2,
+        "d": 0.6,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0.6,
+        "c": 0.2,
+        "d": 0.4,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_two_circles_scale0.001",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 0.001,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_scale0.001",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 0.001,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.4,
+        "c": 1,
+        "d": 0.4,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "cylinder_two_circles_scale1000",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1000.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "sphere_cap_scale1000",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1000.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.4,
+        "c": 1,
+        "d": 0.4,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "foreign_first_loop",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp ClassifyLoops: AERN Given Loop not attached to this face",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 2,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 4
+   }
+  },
+  {
+   "name": "foreign_first_loop_sphere",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp ClassifyLoops: AERN",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 2,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 4
+   }
+  },
+  {
+   "name": "dropped_last_loop_rejected",
+   "upstream_ref": "FFI guard: a touch loop index outside the target loops",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 3
+   }
+  },
+  {
+   "name": "explicit_closed_loops",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 1
+   }
+  },
+  {
+   "name": "init_gaps_validate_only",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.7,
+        "c": 1,
+        "d": 0.7,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "init_gaps": true,
+    "validate_only": true
+   }
+  },
+  {
+   "name": "plane_face_fresh_props",
+   "upstream_ref": "SmFace::ClassifyLoops with fresh props on an open surface (SetProps_Stage2 runs inside)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "props": 0
+   }
+  },
+  {
+   "name": "file_sphere_staged",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "file_torus_staged",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "file_cone_staged",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "file_plane_square_staged",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "file_box_with_large_fillet_staged",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "file_box_fresh_foreign_loop",
+   "upstream_ref": "SmFace::ClassifyLoops AERN with fresh props (SetProps_Stage2 then the face check)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "props": 0,
+    "loops": 4
+   }
+  },
+  {
+   "name": "file_plane_square_fresh",
+   "upstream_ref": "fresh props on an open face",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "props": 0
+   }
+  }
+ ]
+}

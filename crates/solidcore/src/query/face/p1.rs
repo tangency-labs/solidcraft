@@ -13,7 +13,7 @@
 //! | [`calculate_region_bounding_box_into`], [`calculate_region_bounding_box`] | `SmRegion::CalculateBoundingBox` |
 //! | [`point_3d_classify`], [`Point3dClassifyOptions`] | `SmFace::Point3DClassify` |
 //! | [`edge_curve_on_classify`], [`EdgeCurveOnOptions`], [`CurveOnClassification`] | `SmFace::EdgeCurveOnClassify` |
-//! | [`ClassifyProblem`]                   | `SmClassifyProblem` (CO-PORTED; same discriminants as the copies in PR #132 `query.face_p3` and PR #239 `topology.face_p4`) |
+//! | [`ClassifyProblem`]                   | `SmClassifyProblem` (CO-PORTED; re-exported by `query::face::p3`) |
 //!
 //! Deviations: a nullable curve is `Option<&Curve>`; `SmApiEvaluateCurve`'s three
 //! optional output pointers become one returned `[position, d1, d2]` (all three are
@@ -105,12 +105,8 @@ pub fn evaluate_curve(curve: Option<&Curve>, parameter: f64) -> Result<[Vec3; 3]
 
 // ---- bounding boxes ------------------------------------------------------------------------
 
-fn tight_face_box(_k: &Kernel, _b: &Brep, _f: FaceId) -> Result<Extent3d> {
-    // UNPORTED(query.face_p3): SmFace::CalculateTightBoundingBox
-    Err(SolidError::unported(
-        "SmFace::CalculateTightBoundingBox",
-        "query.face_p3",
-    ))
+fn tight_face_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
+    crate::query::face::p3::calculate_tight_bounding_box(k, b, f)
 }
 
 const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
@@ -130,8 +126,8 @@ const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
 ///
 /// [`SolidError::InvalidInput`] for a face without surface (upstream dereferences null)
 /// or a vertex use without vertex; those of the curve and surface boxes and of the
-/// face's vertex and edge lists; [`SolidError::Unported`] for `tight`
-/// (`SmFace::CalculateTightBoundingBox`, `query.face_p3`).
+/// face's vertex and edge lists; with `tight`, those of
+/// [`crate::query::face::p3::calculate_tight_bounding_box`].
 pub fn calculate_bounding_box(k: &Kernel, b: &Brep, f: FaceId, tight: bool) -> Result<Extent3d> {
     // when asked - call expensive TightBoundingBox
     if tight {
@@ -603,19 +599,43 @@ impl EdgeCurveOnOptions {
 /// `SmFace::SectorClassifyCurveOn` with the same edge use as both sector bounds (in
 /// opposite directions), the edge's tolerance for both and no singularity.
 fn sector_classify_curve_on(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _f: FaceId,
-    _edgeuse: EdgeuseId,
-    _edge_tolerance: f64,
-    _curve: &Curve,
-    _opts: &EdgeCurveOnOptions,
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    edgeuse: EdgeuseId,
+    edge_tolerance: f64,
+    curve: &Curve,
+    opts: &EdgeCurveOnOptions,
 ) -> Result<CurveOnClassification> {
-    // UNPORTED(query.face_p3): SmFace::SectorClassifyCurveOn
-    Err(SolidError::unported(
-        "SmFace::SectorClassifyCurveOn",
-        "query.face_p3",
-    ))
+    use crate::query::face::p3::{SectorClassifyInput, SectorEdgeuse};
+    let eu = |orientation| SectorEdgeuse {
+        edgeuse,
+        param: opts.edge_param,
+        zone_tol_3d: edge_tolerance,
+        orientation,
+    };
+    // `lFaceIndx` only selects debug output upstream
+    let class = crate::query::face::p3::sector_classify_curve_on(
+        k,
+        b,
+        f,
+        &SectorClassifyInput {
+            eu1: eu(OrientType::Same),
+            eu2: eu(OrientType::Opposite),
+            curve,
+            curve_interval: opts.curve_interval,
+            curve_orientation: opts.curve_orientation,
+            curve_zone_tol_3d: opts.curve_tolerance,
+            on_singularity: false,
+            singularity_uv: Point2::new(0.0, 0.0),
+            uv_space_okay: opts.uv_space_okay,
+        },
+    )?;
+    Ok(CurveOnClassification {
+        inside: class.inside,
+        possible_problem: class.possible_problem,
+        problem: class.problem,
+    })
 }
 
 /// The 3D curve of a 2D `curve` on face `f`'s surface (`SmCrvOnSurf::SetAll`).
@@ -651,8 +671,8 @@ fn lift_to_face(k: &Kernel, b: &Brep, f: FaceId, curve: &Curve) -> Result<Curve>
 /// # Errors
 ///
 /// `SM_ERR_NULL_POINTER` for a null `edge`; those of the edge use list, the curve lift
-/// and the sector classification ([`SolidError::Unported`]:
-/// `SmFace::SectorClassifyCurveOn`, `query.face_p3`).
+/// and the sector classification
+/// ([`crate::query::face::p3::sector_classify_curve_on`]).
 pub fn edge_curve_on_classify(
     k: &Kernel,
     b: &mut Brep,

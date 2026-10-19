@@ -358,6 +358,20 @@ impl crate::heal::face_props::LoopObject for SeamObject {
     fn from_loop(l: LoopId) -> Self {
         Self::Loop(l)
     }
+
+    fn as_loop(&self) -> Option<LoopId> {
+        match self {
+            Self::Loop(l) => Some(*l),
+            Self::Vertex(_) => None,
+        }
+    }
+
+    fn as_vertex(&self) -> Option<crate::topology::VertexId> {
+        match self {
+            Self::Vertex(v) => Some(*v),
+            Self::Loop(_) => None,
+        }
+    }
 }
 
 /// Classification geometry for [`SeamObject`]s: loops and vertices name no curve,

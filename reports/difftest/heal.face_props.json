@@ -18,16 +18,12 @@
       "values_compared": 83
     },
     {
-      "deferred": {
-        "symbol": "SmFace::ClassifyLoops",
-        "unit": "query.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "stage3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.face_props/upstream.json#2 (upstream source/SMLib/src/SmFaceProps.cpp:SetProps)",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -5900,8 +5896,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::ClassifyLoops",
-        "unit": "query.face_p4"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0662",
@@ -7259,16 +7255,12 @@
       "values_compared": 249
     },
     {
-      "deferred": {
-        "symbol": "SmFace::ClassifyLoops",
-        "unit": "query.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0821",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16562362309779923764",
-      "values_compared": 0
+      "values_compared": 166
     },
     {
       "max_rel_err": 0.0,
@@ -8419,16 +8411,12 @@
       "values_compared": 166
     },
     {
-      "deferred": {
-        "symbol": "SmFace::ClassifyLoops",
-        "unit": "query.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0957",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16562362309779923900",
-      "values_compared": 0
+      "values_compared": 415
     },
     {
       "max_rel_err": 0.0,
@@ -13092,12 +13080,12 @@
     }
   ],
   "cases_both_errored": 9,
-  "cases_deferred": 214,
+  "cases_deferred": 211,
   "cases_failed": 0,
-  "cases_passed": 1314,
+  "cases_passed": 1317,
   "cases_total": 1528,
   "deferred_by_unit": {
-    "query.face_p4": 4,
+    "topology.face_p2": 1,
     "topology.face_p4": 210
   },
   "max_rel_err": 0.0,
