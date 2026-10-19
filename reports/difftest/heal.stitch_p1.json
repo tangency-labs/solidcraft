@@ -115,8 +115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::StitchAndOrient",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "box_stitch_and_orient",
@@ -231,8 +231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GlueVertices",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap0_vpairs",
@@ -243,8 +243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GlueVertices",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap0_vpairs_wide",
@@ -595,8 +595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GlueVertices",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap1e-4_vpairs",
@@ -607,8 +607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GlueVertices",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap1e-4_vpairs_wide",
@@ -967,8 +967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GlueVertices",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap5e-3_vpairs_wide",
@@ -2683,7 +2683,9 @@
     "harness:analytic-geometry-export": 1,
     "heal.stitch_p2": 3,
     "query.brep": 7,
-    "topology.brep_p5": 6,
+    "topology.brep_p2": 5,
+    "topology.brep_p4": 1,
+    "topology.brep_p9": 26,
     "topology.face_p2": 49,
     "topology.face_p4": 2
   },

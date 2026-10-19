@@ -201,7 +201,7 @@ impl UnitDiff for Runner {
                         .iter()
                         .map(|e| EdgeId::from_index(*e as u32))
                         .collect();
-                    p6::copy_edges(&k, &b, &edges, &mut destination).map(|copied| {
+                    p6::copy_edges(&mut k, &b, &edges, &mut destination).map(|copied| {
                         body = if i.flags & 2 != 0 {
                             vec![copied.len() as i64]
                         } else {

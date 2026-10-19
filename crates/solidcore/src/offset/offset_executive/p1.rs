@@ -450,10 +450,14 @@ impl OffsetExecutive {
         }
         // All candidate faces have been gathered in first-seen order, without duplicates.
         // Even an empty deletion list reaches RemoveFaces upstream (mark increment).
-        // UNPORTED(topology.brep_p5): SmBrep::RemoveFaces
+        // Part 5's remove_faces is available, but needs the actual editing flag
+        // and mutable caller Kernel for native traversal-mark updates. When the
+        // owning metadata lands, forward those and delete_faces to that body;
+        // do not assume editing is enabled or clone a substitute context.
+        // UNPORTED(topology.brep_p1): SmBrep::m_bEditingEnabled
         Err(SolidError::unported(
-            "SmBrep::RemoveFaces",
-            "topology.brep_p5",
+            "SmBrep::m_bEditingEnabled",
+            "topology.brep_p1",
         ))
     }
 
@@ -1869,8 +1873,8 @@ mod tests {
         executive.set_shell_faces(&[]);
         assert_dependency(
             executive.remove_excess_faces(&kernel, &original, &mut result),
-            "SmBrep::RemoveFaces",
-            "topology.brep_p5",
+            "SmBrep::m_bEditingEnabled",
+            "topology.brep_p1",
         );
         add_use(&mut result, 0.0, 1.0, 1.0);
         add_use(&mut result, 0.0, 1.0, 2.0);

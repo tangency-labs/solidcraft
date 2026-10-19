@@ -372,6 +372,11 @@ pub trait IntersectorBrep<O>: ProtoBrep<O> {
     ///
     /// [`SolidError::InvalidInput`] for an unknown B-rep.
     fn set_editing_enabled(&mut self, brep: O, enabled: bool) -> Result<bool>;
+    /// Reads the owning B-rep's actual editing flag (`SmBrep::GetEditingEnabled`).
+    fn editing_enabled(&self, brep: O) -> Result<bool>;
+    /// Reads `SmBrep::GetTolerance` for face sector classification.
+    fn brep_tolerance(&self, brep: O) -> Result<f64>;
+
     /// The adapter the topology solver reads the B-reps' cache trees and geometry
     /// through (`SmTopologySolver::BrepPointSolve` / `BrepCurveSolve`).
     fn topology_objects(&self) -> &dyn TopologyObjects<O>;
@@ -412,33 +417,100 @@ pub trait IntersectorBrep<O>: ProtoBrep<O> {
 // ---- unported callees -----------------------------------------------------------------------
 
 /// `SmBrep::GlueVertices(pV1, pV2)`.
-fn brep_glue_vertices<O>(_brep: O, _v1: O, _v2: O) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::GlueVertices
-    Err(SolidError::unported(
-        "SmBrep::GlueVertices",
-        "topology.brep_p5",
-    ))
+fn brep_glue_vertices<O: Copy + PartialEq>(_brep: O, v1: O, v2: O) -> Result<()> {
+    crate::topology::brep::p5::opaque_glue_preflight(v1 == v2)
 }
 
 /// `SmBrep::MakeEdgeInFace(pFace, pV1, pV2, pCurve, NULL, ivl, SM_OT_SAME, tol,
 /// rpNewEdge, rpNewLoop, rpNewFace)`: the new edge, loop and (when the face was
 /// split) face.
-pub(super) fn brep_make_edge_in_face<O>(
-    _brep: O,
-    _face: O,
-    _v1: O,
-    _v2: O,
-    _curve: O,
-    _uv_curve: Option<O>,
-    _interval: Extent1d,
-    _orientation: OrientType,
-    _tol: f64,
+fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
+    backend: &mut B,
+    brep: O,
+    face: O,
+    v1: O,
+    v2: O,
+    curve: O,
+    uv_curve: Option<O>,
+    interval: Extent1d,
+    orientation: OrientType,
+    tol: f64,
 ) -> Result<(O, Option<O>, Option<O>)> {
-    // UNPORTED(topology.brep_p5): SmBrep::MakeEdgeInFace
-    Err(SolidError::unported(
-        "SmBrep::MakeEdgeInFace",
-        "topology.brep_p5",
-    ))
+    let editing = backend.editing_enabled(brep)?;
+    let mut out = None;
+    crate::topology::brep::p5::make_edge_with_backend(
+        &mut HandleFaceEdge { backend, brep },
+        editing,
+        Some(face),
+        Some(v1),
+        Some(v2),
+        curve,
+        uv_curve,
+        interval,
+        orientation,
+        tol,
+        &mut out,
+    )?;
+    out.ok_or_else(|| SolidError::null_pointer(OP))
+}
+
+struct HandleFaceEdge<'a, O, B> {
+    backend: &'a mut B,
+    brep: O,
+}
+impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
+    for HandleFaceEdge<'_, O, B>
+{
+    type Face = O;
+    type Vertex = O;
+    type Curve = O;
+    type UvCurve = O;
+    type Vertexuse = O;
+    type Output = Option<(O, Option<O>, Option<O>)>;
+    fn validate_face(&self, _face: O) -> Result<()> {
+        // Upstream only checks the face pointer (`NER(pFace)`), never its surface;
+        // a handle is never null, and the caller has already rejected a missing face.
+        Ok(())
+    }
+    fn tolerance(&self) -> Result<f64> {
+        self.backend.brep_tolerance(self.brep)
+    }
+    fn sector(
+        &self,
+        _face: O,
+        _vertex: Option<O>,
+        _curve: &O,
+        _uv: Option<&O>,
+        _start: f64,
+        _end: f64,
+        _orientation: OrientType,
+        _tol: f64,
+        _all: bool,
+    ) -> Result<Option<O>> {
+        // UNPORTED(topology.face_p4): SmFace::FindVertexSector
+        Err(SolidError::unported(
+            "SmFace::FindVertexSector",
+            "topology.face_p4",
+        ))
+    }
+    fn insert(
+        &mut self,
+        _face: O,
+        _first: O,
+        _last: O,
+        _curve: O,
+        _uv: Option<O>,
+        _interval: Extent1d,
+        _orientation: OrientType,
+        _gap: f64,
+        _output: &mut Self::Output,
+    ) -> Result<()> {
+        // UNPORTED(topology.brep_p9): SmBrep::MakeEdgeInFaceWithVU
+        Err(SolidError::unported(
+            "SmBrep::MakeEdgeInFaceWithVU",
+            "topology.brep_p9",
+        ))
+    }
 }
 
 /// `SmBrep::DeleteFace(pFace)`.
@@ -2632,6 +2704,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // (the status is ignored: a failed MakeEdgeInFace leaves the edge and face null)
         let made = ignore_soft(brep_make_edge_in_face(
+            brep,
             this_brep,
             old_face,
             v1,

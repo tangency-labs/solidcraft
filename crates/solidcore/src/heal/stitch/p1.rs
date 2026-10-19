@@ -55,9 +55,10 @@
 //! - `UnifyNormals` ignores `NormalizedEvaluate`'s status and goes on with `sPnt` / `sDir`
 //!   as they were: `SmVector3d`'s default `SM_UNDEF_DOUBLE` (defined; the 3D evaluation
 //!   writes them only after its last status), [`Point3::UNDEF`] / [`Vec3::UNDEF`] here.
-//! - The calls into `SmBrep::GlueVertices`, `RemoveFaces`, `StitchAndOrient`
-//!   (`topology.brep_p5`), `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
-//!   (`topology.brep_p3`), `Notify`
+//! - `SmBrep::GlueVertices`, `RemoveFaces` (with the B-rep's own editing flag) and
+//!   `StitchAndOrient` call `topology.brep_p5`, which defers at its own barriers.
+//! - The calls into `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
+//!   (`topology.brep_p3`), `MakeVertexSplitEdge` (`topology.brep_p9`), `Notify`
 //!   (`topology.brep_p2`), `CalculateBoundingBox` (`query.brep`), `SmFace::GetBrep`,
 //!   `GetVertices`, `GetEdges` (`topology.face_p4`), `SmMerge::MergeAddedFace`
 //!   (`boolean.merge_p2`) and `SmStitch::DoStitching`, `StitchIntoSolid`,
@@ -964,7 +965,7 @@ impl<'c> Stitch<'c> {
                 ignore_status(brep_notify_pre_edit(b))?;
 
                 // glue the coincident vertices
-                let mut wire_edges = bp1::wire_edges(b, None)?;
+                let wire_edges = bp1::wire_edges(b, None)?;
                 for (&kv, &dv) in k_vertices.iter().zip(&d_vertices) {
                     let (v0, v1) = (kv, dv);
                     if making_manifold_solid
@@ -1020,7 +1021,7 @@ impl<'c> Stitch<'c> {
                     if do_squeeze {
                         squeeze_edge_to(b, squeeze_edge, keep)?;
                     } else if do_glue {
-                        glue_vertices(b, keep, other, Some(&mut wire_edges))?;
+                        glue_vertices(k, b, keep, other, Some(&wire_edges))?;
                     }
                 }
 
@@ -1580,7 +1581,7 @@ impl<'c> Stitch<'c> {
             let old_tol = vertex::tolerance(b, vtx2_to_glue)?;
             let s_lii = at1(&sorted1, lii_to_glue)?;
             let s_ljj = at1(&sorted2, ljj_to_glue)?;
-            match glue_vertices(b, vtx1, vtx2_to_glue, None) {
+            match glue_vertices(k, b, vtx1, vtx2_to_glue, None) {
                 Ok(()) => {}
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => {
@@ -1946,29 +1947,24 @@ pub(crate) fn update_object_tolerance(
     tol::update_object_tolerance(k, b, topo, gap, this_tol, check_gaps)
 }
 
-/// `SmBrep::GlueVertices(keep, delete, pOptWireEdges)` (unit `topology.brep_p5`).
+/// `SmBrep::GlueVertices(keep, delete, pOptWireEdges)` (unit `topology.brep_p5`):
+/// [`crate::topology::brep::p5::glue_vertices`]. Upstream only reads the wire list.
 pub(crate) fn glue_vertices(
+    k: &mut Kernel,
     b: &mut Brep,
     keep: VertexId,
     delete: VertexId,
-    wire_edges: Option<&mut Vec<EdgeId>>,
+    wire_edges: Option<&[EdgeId]>,
 ) -> Result<()> {
-    let _ = (b, keep, delete, wire_edges);
-    // UNPORTED(topology.brep_p5): SmBrep::GlueVertices
-    Err(SolidError::unported(
-        "SmBrep::GlueVertices",
-        "topology.brep_p5",
-    ))
+    crate::topology::brep::p5::glue_vertices(k, b, Some(keep), Some(delete), wire_edges)
 }
 
-/// `SmBrep::RemoveFaces` (unit `topology.brep_p5`).
+/// `SmBrep::RemoveFaces` (unit `topology.brep_p5`):
+/// [`crate::topology::brep::p5::remove_faces`], with the B-rep's own editing flag
+/// (`m_bEditingEnabled`).
 pub(crate) fn remove_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
-    let _ = (k, b, faces);
-    // UNPORTED(topology.brep_p5): SmBrep::RemoveFaces
-    Err(SolidError::unported(
-        "SmBrep::RemoveFaces",
-        "topology.brep_p5",
-    ))
+    let editing = b.editing_enabled();
+    crate::topology::brep::p5::remove_faces(k, b, editing, faces)
 }
 
 /// `SmBrep::StitchAndOrient(dStitchTol3d, bAllowSpineEdges, pOptFacesToSwap,
@@ -1981,19 +1977,17 @@ fn stitch_and_orient(
     faces_to_swap: Option<&[FaceId]>,
     just_unify: Option<bool>,
 ) -> Result<()> {
-    let _ = (
-        k,
+    // The part 5 body reaches no kernel state before its stitching dependency.
+    let _ = k;
+    crate::topology::brep::p5::stitch_and_orient(
         b,
-        stitch_tol_3d,
-        allow_spine_edges,
-        faces_to_swap,
-        just_unify,
-    );
-    // UNPORTED(topology.brep_p5): SmBrep::StitchAndOrient
-    Err(SolidError::unported(
-        "SmBrep::StitchAndOrient",
-        "topology.brep_p5",
-    ))
+        &crate::topology::brep::p5::StitchAndOrientOptions {
+            stitch_tolerance: stitch_tol_3d,
+            allow_spine_edges,
+            faces_to_swap: faces_to_swap.map(<[FaceId]>::to_vec),
+            just_unify,
+        },
+    )
 }
 
 /// `SmBrep::GlueEdgesGeneral(keep, orientation, dist, bDoRegionNesting, delete,

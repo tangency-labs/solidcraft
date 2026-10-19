@@ -1082,14 +1082,14 @@ behaviour worth knowing:
 657 difftest cases (57 fixtures + 600 generated) agree exactly. Upstream behaviour
 worth knowing:
 
-- **`SmTopologyChangeCallback::Execute` belongs to no unit.** The call graph never
-  reaches it (it is in `harness/callgraph/unused_functions.txt` with `AddUnique`,
-  `Remove` and both `Dump`s), so the tracker's lists are only ever reset. The Rust
-  callback that `TrackTopologyChanges` installs returns `SolidError::Unsupported`
-  from `execute`, which `SmObject::Notify` ignores. Upstream `Execute` only records
-  faces, edges and vertices, so with the bare `SmTopology` objects in the difftest
-  the C++ lists stay empty too. A future unit that needs real change tracking has to
-  port `Execute` (it walks surface/curve owners and edgeuse edges).
+- **Callback support added by PR #194.** The original call graph classified
+  `SmTopologyChangeCallback::{Execute, AddUnique, Remove}` as unused, so the
+  original unit compared only empty tracker arrays on bare `SmTopology` objects.
+  The B-rep part 5 healer integration now co-ports those methods and compares real
+  face/edge/vertex callback scripts separately. Geometry walks require actual
+  owner metadata, with a 64-link bound; missing metadata is a capture failure.
+  Tracker/callback state uses a private shared notification-array allocation so
+  active resets and foreign-callback replacement preserve native array lifetimes.
 - **Starting a tracker twice leaves its callback installed after it dies.** The
   second `StartTracking` sees the tracker's own callback in the slot and stores it in
   `m_pLastNotifyCallback`; `StopTracking` (and so the destructor) then does nothing,
@@ -7404,6 +7404,112 @@ independent p6 integration.
   take the other operand mutably; it stays unreached behind `MakeShellVertex`,
   `topology.brep_p9`.)
 
+## topology.brep_p5 — historical pre-review coverage (superseded)
+
+Historical evidence only (`95967da6` / `89a20913`); see the current review
+validation section below. These results do not certify the review fixes.
+
+- **Independent partial scope (PR #194).** Selected from official main `433e1b2c`:
+  no unclaimed todo unit had all required dependencies green/partial, and this
+  was the lowest-layer unclaimed unit (47). No open dependency PR is bundled.
+  The twelve editing entry points have explicit dependency barriers; continuations
+  after those barriers are **unimplemented and uncertified**, rather than a complete
+  port of all 2,193 estimated upstream lines.
+- **Numerical-stage oracle.** `coincident_vertex_target` factors the old-tolerance
+  position/tolerance calculation from `CombineCoincidentVertices`. Its native
+  oracle calls the real merge on shell vertices/wire stars and reads the surviving
+  point and tolerance. Rust computes only that stage; these comparisons do **not**
+  certify deletion, vertex-use transfer, shell merging or interval repair. Cases
+  cover different incident-edge counts, both argument orders, zero/coincident
+  positions, strict tolerance boundaries, negative raw tolerance conversion and
+  scales `1e-9..1e9`. The computed temporary-edge length threshold is source-traced;
+  its consumption in the common-edge squeeze decision remains uncertified.
+  Native `SmCurve::Length` writes its output only on successful returns, so an
+  ignored failed integration retains this caller's initialized zero.
+- **409 numerical-stage comparisons** and **269 whole-operation comparisons**
+  are reported separately. The latter cover editing-disabled refusals, null-face
+  insertion refusal, empty region selection, empty face removal and the identity
+  transformation exit. Status and initialized/preserved output state are compared
+  alongside the shared semantic topology/geometry snapshot. Empty face removal
+  also advances/releases a context traversal mark; the final review fix ports
+  that lifetime and adds native counter/lock comparisons, including an existing
+  outer mark lock. These operations do
+  not certify successful topology mutation. In particular, `SqueezeFace` resets
+  all output arrays *before* its editing check, whereas `MakeEdgeInFace` preserves
+  its outputs on the editing-disabled/null-face checks. Identity transformation
+  uses native placement tolerance and native vector equality, and exits before
+  tolerance scaling even when that flag is true.
+- **Actual blockers.** Owning-list traversal, infinite-region lookup and the
+  owning B-rep's editing member are `topology.brep_p1`; `SmBrep::Notify` is
+  `topology.brep_p2`; common-edge squeezing is `topology.brep_p3`;
+  `SmBrep::StitchFaces` is `topology.brep_p4` (not `heal.stitch_p1`);
+  `FindInfiniteRegion` is `topology.brep_p9`; face sector classification and
+  boundary collection are `topology.face_p4`. The void-setting flag remains a
+  raw code at the deferred boundary because part 1's active PR already owns its
+  common enum; that dependency type is not duplicated. Missing edit state is not replaced
+  with a hard-coded true value or arena allocation order.
+- **Back-edges.** The API transformation target now carries the actual mutable
+  arena. Healer parts 1/3, boolean post-processing and proto-topology parts 1/3
+  call part 5. The opaque glue entry stops at the real notification dependency
+  before dereferencing any handle; it constructs no substitute B-rep. The
+  handle-only proto-edge insertion path lacks owning B-rep editing metadata and
+  now defers on that part 1 record gap. These stores still need their actual
+  mutable-owner/notification adapters when mutation continuations are implemented.
+  Downstream mutation/change-tracking continuations are not certified by the
+  remaining deferrals; no dependency owner is recertified or promoted here.
+- **Native fixture boundaries.** The shim constructs actual `SmBrep`, wire stars,
+  the wire network from upstream `my_test_topology`, a plane face and a real
+  non-normalized `SmLine`. Null/aliased merge vertices and insertion with missing
+  required geometry are refused before native UB. Zero, tiny and parallel
+  placement axes remain accepted: `SetCanonical` initializes its members before
+  an error and has defined partial/fallback state. The context's default model
+  size is restored before each fixture so a scaling case cannot contaminate the
+  next fixture or a buffer retry. No extra absolute floors are used.
+- **Remaining handoffs.** Nonidentity transformations, NURB conversion/reflection,
+  tolerance scaling, general vertex/edge/face mutations, region nesting and ray
+  selection, stitching and its late-failure outputs, attributes/caches/callbacks
+  and successful downstream change tracking remain unimplemented or uncertified.
+  The call-graph's two `SmPendingTopologyDelete` entries are an internal reader
+  RAII helper, not an independently exposed editing API: owned Rust arguments
+  drop on failure, but borrowed-attribute detachment in `MakeTopologyFromData`
+  remains for that reader's owner. The high-level trimmed-surface/circle/API
+  intersection tests in the unit's call-graph list are not certified end to end.
+
+- **Validated subset and environment.** Functional source `89a20913` on runner 2,
+  Ubuntu 26.04 x86_64, Rust/rustdoc 1.98.0, GCC 15.2.0; one Cargo job under nice,
+  standard difftest profile and C++ `-O2 -ffp-contract=off -fno-fast-math`.
+  All 490 allowed upstream source/header files match `c9c5979`; existing reference
+  libraries are reused. Rustdoc 1.98 is selected through `RUSTDOC` because the
+  runner's system rustdoc is older; there are no repository platform/build changes.
+  The first native executable rebuild exhausted the runner's 8 GiB RAM (kernel OOM-killed
+  rustc). Retrying with a temporary 4 GiB swap file preserves the standard build
+  profile; no compiler or numerical settings change. The swap file was disabled and
+  removed after compilation.
+  Formatting, strict plain/native-enabled workspace Clippy, all 1,282 kernel
+  tests, WASM checking and two native safe-FFI tests pass. The eight affected
+  focused runs have no failures. The complete `--green --no-report` gate passes
+  across all 200 green/partial units; `--status-of topology.brep_p5` reports
+  `partial`. Exact summaries:
+
+  ```text
+  PARTIAL topology.brep_p5 cases=724 passed=678 failed=0 deferred=46 max_rel_err=0e0 blocked_by=topology.brep_p1(10),topology.brep_p2(32),topology.brep_p4(2),topology.brep_p9(2)
+  SENSITIVE topology.brep_p5 perturbed=678 detected=678 unperturbed=0 deferred=46
+  PARTIAL topology.brep_p5 cases=4308 passed=4136 failed=0 deferred=172 max_rel_err=0e0 (--seeds 4096 --no-report)
+  difftest: 200 unit(s), 108 passed, 92 partial, 0 failed
+  --status-of topology.brep_p5: partial
+  ```
+
+  There are 212 unique fixtures and a minimum of 512 generated cases. The report's
+  `seeds` field is the requested CLI value (16 by default), while the per-case source
+  entries enumerate the actual generated seeds. Six existing affected reports
+  regenerate byte-identical; proto-topology part 1 changes only its ten part 5
+  transform deferrals to the actual part 2 notification blocker. No other unit's
+  status changes. Port-pr-review checked the independent diff/ancestry, native
+  defaults/operation order, output lifecycle and empty-list context mark state,
+  real fixture paths/guards,
+  input/collection safety, ownership and revision-specific coverage. No confirmed
+  defect remains in the exercised subset; the handoffs above remain uncertified.
+
 ## topology.brep_p6 — dependency boundaries and coverage (PR #169)
 
 This port builds on the existing `topology.shell` PR #154, including its real
@@ -7950,305 +8056,157 @@ rejected: nothing runs on either side.
   faces. It is unreachable today (`MergeInterval` makes no topology until
   `intersect.curve_class_p2`); that unit's porter must give the healer a typed resolver.
 
-## topology.brep_p10 (`SmBrep::MakeTopologyFromData`, PR #130): review fixes
+## topology.brep_p5 — review validation (partial)
 
-- **UV trim curve cast.** Upstream stores an edge use's UV trim curve as
-  `pNewEU1->m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pNewUV)`, which is NULL for a
-  copy that is not an `SmBSplineCurve` (composite, offset, projected, curve-on-surface,
-  ...). The copy is still made, gets the attributes and gets its owner set, but is not
-  stored. The first port always stored it. A version-38 file whose UV curve 0 is an
-  `SmCompositeCurve` (`fixtures/topology.brep_p10/uv_composite_v38.smb`) showed the
-  difference in the exported value stream; fixed.
-- **Coverage.** The upstream `.smb` files contain no valid wire-edge shells, vertex
-  shells, vertex loops (loop type 1 with an eu_type 1 record) or analytic edge-curve
-  replacements. Crafted fixtures `wire_vertex{,_nm}.smb`, `wire_quad_{full,sub,rev_nm}.smb`
-  (a collinear quadratic edge curve with full / sub-range / reversed interval, so both
-  outcomes of the `CreateAnalyticCurve` end-point check run) and `uv_bspline.smb` cover
-  them (`review_cases.json`, 128 cases). They use axis-aligned planes, so the analytic
-  paths are compared instead of being deferred by `SmCone::IsNurbSurfaceCone`
-  (surface.cone_p2).
-- **Known harness limits.** The shim refuses the closure / remove-all / project ops
-  after a `Set` patch: its guard proves only that `MakeTopologyFromData`'s record
-  indexing is defined, not that the graph it builds is consistent enough for the later
-  walks (an inconsistent loop or radial list can make them loop or read freed
-  objects). The generator never emits `Op::Project`; add it once topology.brep_p1
-  (`CreateParallelProjectionCurves`) lands. An `SmConic` UV curve cannot reach the
-  cast: `SmConic` has no `Copy`, so both sides fail at the copy and agree.
-- **Second review (2026-10-19, after topology.brep_p1 #145 merged).** Main's `Brep` now
-  holds `m_bEditingEnabled`, `region_list_head` and the face/edge/vertex lists; this PR's
-  duplicate `editing_enabled` was dropped and `Brep::new_with_infinite_region` sets
-  `region_list_head` to the infinite region (`PreInsert`). The six
-  `UNPORTED(topology.brep_p1)` sites now call `p1::add_attributes` (new
-  `TopologyEnv::all_attributes` = `rAllAttributes`; the B-rep, loop uses and face uses
-  receive their own lists), `p1::heal_brep(.., HealerOpType::All, None, None, None,
-  bMakeUVTrimCurves)`, `p1::regions`, `p1::faces`, `p1::wire_edges`,
-  `p1::create_parallel_projection_curves` (approx tol `&dTol`, NULL projection distance,
-  all three outputs) and `p1::find_side_of_curve`. The HealBrep cases now defer at
-  `SmFace::GetTolerance` (topology.face_p2, 63). topology.brep_p7's two
-  `UNPORTED(topology.brep_p10)` sites are wired: `ReadFromFile` (now `&mut Kernel` plus a
-  `TopologyEnv`, with an empty `sAttributes` as upstream) and `GlueEdgesGeneral`'s
-  `TestClosureSplitRegion(TRUE, edge)`; its 30 brep_p10 deferrals now defer at
-  surface.cone_p2 (24) and topology.face_p2 (6), 0 failed. Unit totals: 1404 cases, 839
-  passed, 0 failed, 565 deferred, `--perturb` SENSITIVE 839/839.
-- **Open (not fixed here).** (1) Geometry attributes are not copied when a shared data
-  surface/curve or a borrowed geometry is copied (upstream's `SmAObject` copy constructor
-  copies them; `a_object::copy_construct(env.attributes, from, to)` would match). The
-  harness cannot see it (ReadFromFile reads no attributes, the shim exports none) and no
-  unit calls `copy_construct` yet, so this needs a codebase-wide decision. (2) The shim
-  export walks only from the regions: face uses on no shell and vertices with no uses are
-  never compared; exporting `m_pFaceListHead` / `m_pEdgeListHead` / `m_pVertexListHead`
-  in list order would close that. (3) The topology.vertex, topology.edgeuse_p1/p2 and
-  topology.loopuse runners still label their inexact `.smb` imports
-  `topology.brep_p10 SmBrep::MakeTopologyFromData` (harness deferrals, not code stubs);
-  they could now read the file through `p7::read_from_file`. (4) topology.brep_p7's
-  `cpp-guard:unvalidated-topology` read guard (UB-164) is still in place.
+PR #194 restores all twelve owned editing bodies and the internal pending-topology
+attribute cleanup. Source `a9f20328` includes functional official main `43e9e47a`; no open
+dependency PR is included. Final main `85a60e00` differs only in generated
+`PROGRESS.md`; build and fixture files remain identical to the tested source.
+The earlier pre-review evidence above is historical.
+All owned continuations are present with per-call missing-dependency barriers,
+including combine tails, shell/vertex-use cleanup, curve joins/UV cleanup,
+manifold/face cleanup, the second stitch pass and orientation override, squeeze
+output lifecycle, transformation/reflection and tolerance work.
 
-## topology.brep_p9: per-call continuations and coverage limits (PR #183)
+Review fixes include the declaration's infinite-region default
+`SM_VS_INFINITEREGION_SWAP` (2), same-input glue before notification (including two
+null inputs), and aliased combination on the native path. The second review round
+corrected the isolated-alias case: upstream deletes the aliased survivor and returns
+success without touching it again, so the whole combine is defined and compared.
+Only the target-stage op, whose shim reads the survivor afterwards, refuses it (a
+native incidence query). The caller-side hazard is recorded as UB-191 in
+`plan/upstream-issues.md` (source finding; no native reproduction).
 
-### After topology.brep_p1 (#145) merged (2026-10-19)
+The boolean intersector's insertion calls the shared part 5 control flow with
+actual editing/tolerance getters, then defers at `FindVertexSector` (face part 4)
+and `MakeEdgeInFaceWithVU` (B-rep part 9). Landed shell/region queries, list operations, wire traversal
+and child transfer are wired. Shell-record destruction still needs stable arena
+erasure and actual lifetime/key routing from B-rep part 4 (`SmBrep::~SmBrep`);
+the shared arena is append-only. This is not a missing `SmShell` destructor body.
+Opaque glue callers share the identity
+preflight; nonalias edits still need the mutable owning arena/kernel and part 2's
+notification routing. When that adapter lands, it must call the existing complete
+`glue_with_notifications` body, not just replace the preflight barrier with Notify.
 
-- **Part 1 wired.** Every former `UNPORTED(topology.brep_p1)` call in p9 is real.
-  Part 1's `add_*_record` appends faces, edges and vertices to their owning lists at
-  allocation, while native `PostInsert`s at the end of the operation. No same-kind
-  record is allocated in between, so the order matches; a record allocated before a
-  dependency error stays listed, where native would leak it unlisted. Deleted loops and
-  loop uses are reset in place, as part 1 deletes vertex uses.
-- **Editing state.** `MakeVertexSplitEdge`, `MakeEdgeInFaceWithVU` and point
-  classification read `Brep::editing_enabled`. The offset executive's
-  `sm_InsertBreaks` wiring had forced editing on; the native shim's offset B-rep keeps
-  the constructor's FALSE, so native refused those splits while Rust attempted them
-  and deferred. Reading the B-rep's flag makes the 11 cases compare (offset: 676 to
-  687 passed).
-- **New p9 callers from main.** `topology.brep_p7`'s `MakeShellVertex` and
-  `heal.stitch_p1`'s `MakeVertexSplitEdge` are wired. The stitch's 26 former p9
-  deferrals pass as matching refusals; no split mutation is compared there.
-- **Coverage.** 684 cases, 539 passed, 145 deferred, 0 failed (head `145e1693`),
-  including real-file fixtures and nonfinite point/tolerance cases, with no native
-  crash. `FindInfiniteRegion` compares 4 successful results, all through its
-  single-region early return. A wire split now runs to its final `SmBrep::Notify`
-  (`topology.brep_p2`); no topology mutation is certified yet.
+Healer adapters capture actual context notifications instead of inventing removed
+and added lists. Supporting co-port in topology.topology:
+`SmTopologyChangeCallback::{Execute, AddUnique, Remove}`. The tracker and callback
+share notification arrays (no topology graph pointers), preserving active reset
+and foreign-callback replacement lifetimes. Geometry owner and edgeuse-to-edge
+metadata must come from the actual object store; missing metadata is an explicit
+capture failure, and chains are bounded to 64 links. Nonempty arena-only healer
+captures still require part 2's actual key-to-id routing; no arena-index encoding
+is guessed. All 27 native callback scripts pass, including list order, event
+payload identities, destruction cleanup, curve-owner traversal, direct face
+notifications and tracker lifetimes. A preexisting system callback is preserved;
+the new native tracker leaves its own arrays empty. Three native cases and a
+healer regression cover this behavior without fabricating changes.
 
-### Issue #210 continuation revision (source `84ee130c`)
+Following [issue #210](https://github.com/tangency-labs/solidcore/issues/210),
+**meaningful successful topology-mutation paths certified: 0/12 operations**.
+All twelve source-level control flows are present; that source review is distinct
+from runtime certification behind missing calls. Part 1's canonical editing fields
+remain an integration handoff after its independent PR merges. Part 2's Notify
+remains the critical dependency; its open PR is not bundled here.
 
-All six owned bodies now continue after individual dependency calls. This replaces
-all previous `OMITTED` ranges: ray sampling and fallback, marked sheet walk,
-vertex-loop creation, split geometry/use rewiring, and edge/loop/face insertion and
-inner-loop redistribution. Only official main was merged; active dependency PRs
-remain independent. Official main through f30275bb is included; the final merge
-changes generated progress only.
+Coverage on source `a9f20328`, Linux runner 2 (Ubuntu 26.04 x86_64, Rust/rustdoc
+1.98.0, GCC 15.2.0; pinned `c9c5979` reference, C++17/O2 with
+`SM_USE_OLDTOL`, FP contraction and fast math disabled):
 
-Review fixes preserve the base-class DropCurve creating-UV default TRUE and call
-existing DropAndTrimCurve with tolerance * 100 and TRUE/TRUE. Defined NaN/Inf
-split inputs remain covered; the part-container guard runs before both native
-loaders. Explicit NER null-pointer statuses and Unitize status 1007 are retained;
-a focused zero-ray regression covers the latter. ComputeLoopOrientation's optional
-output and 3D flag are explicit at the dependency call.
+- **791 cases:** 279 fixtures + 512 generated; **737 pass, 54 deferred, 0 fail**,
+  max relative error 0, fixed relative tolerance 1e-9, no absolute floors.
+- **409** passes compare only the coincident-vertex numerical target against a
+  real native merge's survivor. They do not certify the topology edit or directly
+  compare the temporary-edge minimum-length threshold.
+- **301** compare whole-operation refusals/output lifecycle, empty selections,
+  identity transforms and aliased-glue no-ops (with unchanged semantic graphs).
+- **27** compare supporting notification algorithms; they do not mutate topology.
+- Deferred counts: B-rep part 1 **10**, part 2 **40**, part 4 **2**, part 9 **2**.
+- Sensitivity: **737/737** detected, 0 unperturbed, 54 deferred.
+- Extended 4096 generated: **4375 total, 4195 pass, 180 deferred, 0 fail**,
+  max relative error 0.
 
-Notification storage/identities and actual curve type identities are caller inputs.
-The Boolean intersector now invokes p9 through its mutable adapter; typed
-point-classification and merge vertex-copy adapters supply notification state.
-The opaque classification API lacks mutable owning-arena lookup and defers to
-that p1 integration boundary. Canonical editing state remains with p1 (PR #145),
-with native constructor default FALSE. No p9 algorithm `UNPORTED` call remains
-elsewhere in the kernel.
+Formatting, strict plain/native Clippy, all **1331** kernel tests, WASM and all
+**3** native FFI guard tests pass. Eleven affected differential units pass their gates
+(1 green, 10 partial, 0 failed). The full green/partial sweep also passes:
+**204 units: 113 green, 91 partial, 0 failed**. No additional unit needs promotion. Commands
+use `nice -n 10`, one Cargo job and sccache. The matching 1.98 rustdoc is selected
+explicitly. A worktree-owned temporary 4 GiB swap file supported compilation on the
+8 GiB runner and was removed after validation. No permanent runner configuration
+was changed.
 
-Source review found InsertManifoldEdgeEnd only setting each VU's vertex, while
-SmEdge.cpp:4641-4643 also appends both VUs to the vertex owning list. Both insertions
-are restored in order, with a focused start/end regression. Edge skeleton caches
-follow the existing importer primary/mate order. The edge differential rerun passes
-1715 cases, with 72 deferred and zero failures.
+Uncertified: successful topology mutations, nonidentity transformations,
+continuations behind dependency barriers, native geometry shared across separate
+owning records, longer/mixed geometry owner chains, and pending-reader integration
+(part 6). Separate Rust geometry slots own separate values; equal owner metadata
+is not proof of native pointer identity. Pending cleanup has focused Rust tests
+for attribute detachment versus release, with no standalone native reader oracle.
+No temporary records, attributes, keys or successful mutations substitute for
+caller state. This unit is **partial, never green** with these deferrals.
 
-Remaining barriers are individual calls to the active p1/p2 and face/query/drop
-owners. Append-only arena retirement is deferred to p1 rather than exposing deleted
-loops as live topology. Constructor/debug allocator notifications follow the shared
-arena model; constructed topology flag records are registered in caller storage.
-The shell retry has at most two passes. Inner-loop transfer must shrink its source
-list or return an error; undefined odd edgeuse pairs are rejected. These deviations
-and bounds are documented in the source header.
+## topology.brep_p5 — Claude review follow-up (#194)
 
-**Coverage limits:** 0/6 owned entrypoints have a compared successful completion;
-no p9 topology mutation is certified. Default passes comprise 477 split refusals,
-10 insertion guards/refusals, 8 point-class edge refusal paths, 8 point-class vertex
-updates and 2 projection helper probes. The 108 deferrals comprise 3 region queries,
-3 orientations, 6 shell vertices, 4 vertex loops, 85 splits, 2 insertions, 4 point-class
-edge merges and 1 projection probe. Op-5 setup vertex loops are native imports,
-not successful Rust MakeVertexLoop calls. UV attachment/redistribution,
-notification/attribute construction and the full new mutation tails remain
-uncertified until dependencies are wired. The graph oracle is demonstrated for
-refusals and vertex updates only; successful mutations still require audit of
-legacy caches, stable identity/order normalization and complete curve/UV geometry.
-No tolerance changes or p9 absolute floors were introduced.
+Claude Opus 5.5 independently reviewed head `24996494` against official base
+`85a60e00` and the pinned upstream. It confirmed the six earlier must-fix items
+were addressed, and found incorrect dependency tags and latent failure-lifecycle
+differences. Follow-up source `ecccb67b` also includes official main `9a7c1ec0`
+(the independently landed offset executive and shared reader/marker changes).
+No open dependency PR branch is included.
 
-Revision-specific evidence: Ubuntu 26.04.1 x86_64, GCC 15.2, Rust 1.98.0, pinned
-SMLib c9c5979; nice 10 and one Cargo job. The 1268-file source/config/fixture manifest
-has SHA-256 `96065a1d187c089bb7e207827f81ed5d2a6dd15492a582f7fcc34192bdad6017`.
-The final validation source audit differs only in the intentional modules.toml status
-change; final local metadata/report edits do not alter tested functional source.
-Passed fmt and direct include-file rustfmt, plain and native strict workspace
-Clippy, 1325 kernel tests (0 failed), WASM check and the native part-container guard
-(1 passed, 71 filtered). All 12 affected differential runners are partial with
-0 failures. P9 default: 613 cases, 505 passed, 108 deferred, max relative error 0;
-blockers surface_drop_curve 1, surface_drop_lib_p3 1, brep_p1 96, brep_p2 3,
-face_p3 7. Perturbation detects all 505/505 perturbed cases, with 108 deferred.
-4096 generated seeds: 4197 cases, 3479 passed, 718 deferred, 0 failed, max error 0.
-Full green/partial gate: `difftest: 204 unit(s), 113 passed, 91 partial, 0 failed`. `--status-of topology.brep_p9` returns `partial`.
+- Detached shell, vertex and vertex-use records now share one erasure barrier,
+  owned by `topology.brep_p4` / `SmBrep::~SmBrep`. These are plain deletes after
+  detachment, not `DeleteVertex`: calling that again would repeat notifications
+  and list removal, or delete a vertex in place of a vertex-use. The append-only
+  arenas still need stable erasure and real lifetime/key routing.
+- Squeeze's bounding-box barriers name the actual `SmLockBrepBox` constructor
+  and destructor (part 1). Pending cleanup's `Clear`/`release` co-port is recorded
+  in part 1's notes.
+- After face deletion, any ordinary stitch failure sets the accumulated failure
+  status and continues cleanup/output appends; only `Unported` defers. A Rust
+  regression checks typed failures, retained failure state and missing-code
+  propagation. Native mutation/late-failure execution remains uncertified.
+- Both unchecked native region-removal statuses in GlueVertices are ignored.
+  Wire traversal still propagates errors: pinned `SmShell::GetWireEdges`
+  (SmShell.cpp:130-229) always returns success; the Rust error boundaries are
+  missing code or invalid pointer/handle accesses. Turning those into an empty
+  wire list would fabricate output rather than preserve a defined native failure.
+- Proto-topology's handle adapter has no actual owning editing getter, unlike
+  the boolean intersector adapter. Its part 1 editing-metadata barrier remains
+  correct without assuming TRUE. The newly landed offset caller has the same
+  missing editing metadata and mutable-context routing. Its new part 5 stub now
+  identifies that actual part 1 gap and documents forwarding the real flag,
+  caller Kernel and gathered faces into the complete part 5 body when available.
 
-Native runtime Cargo commands use the CLI-only override
-`--config 'profile.difftest.package.difftest.opt-level=0'` with
-`run --profile difftest -p difftest --features cpp -- <args>`. Standard runner
-opt-level 1 compilation was killed by SIGKILL near the host's 8 GiB limit, even
-with one job; the override builds successfully. Kernel-crate and C++ profiles
-remain unchanged, though generic code instantiated in the runner may be affected.
-Standard-profile native Clippy passed; a standard opt-level 1 executable build
-did not complete on this host. Fixtures, comparison rules and tolerances are
-unchanged; no workflow/build/Cargo configuration changes are bundled. Earlier
-snapshots below are historical and do not certify the full continuation revision.
+The implementing agent checked these amendments against the review and pinned
+source. Both follow-up Claude review attempts hit the Claude API rate limit and did
+not complete; no independent approval of the amended revision is claimed.
+The previous `a9f20328` validation above remains historical for that source.
 
-### Previous c19c0db1 checkpoint (historical)
+Validation of functional source `ecccb67b` against integrated official main
+`9a7c1ec0` is complete on runner 2 (same pinned reference/toolchain/compiler flags
+as above). All **1,279** tracked build/fixture files match the local source;
+subsequent changes are reports and plan metadata only. Current results:
 
+- Formatting, explicit registered-module rustfmt, plain/native strict workspace
+  Clippy, **1,369** kernel tests, WASM and **3** native FFI guard tests pass.
+- All **12** affected differential units pass their gates: **1 green, 11 partial,
+  0 failed**, including the newly landed offset caller. All twelve report hashes
+  match the runner. Only that caller's blocker changes (`brep_p5` to `brep_p1`);
+  counts remain 693 total, 675 passed, 17 deferred, 1 rejected, 0 failed.
+- Part 5 remains **791 total, 737 passed, 54 deferred, 0 failed**, maximum relative
+  error 0, fixed relative tolerance 1e-9 and no absolute floors. The 409/301/27
+  coverage split and **0/12** meaningful successful topology-mutation paths
+  certified remain unchanged.
+- Sensitivity: **737/737** detected, 54 deferred. Extended 4096 generated:
+  **4375 total, 4195 passed, 180 deferred, 0 failed**, maximum relative error 0.
+- Full green/partial sweep: **205 units, 113 green, 92 partial, 0 failed**.
+  `--status-of topology.brep_p5` prints `partial`. No dependency unit is promoted.
 
-- **Review status correction (2026-10-18).** The following `47758e96` /
-  `c482d6fc` evidence is historical. At that checkpoint the unit was `todo`, because the code after
-  the first unavailable call was omitted rather than ported behind per-call
-  stubs. `OMITTED SmBrep.cpp:<range>` comments identify the remaining bodies at
-  each dependency return. Replacing an individual dependency stub does not finish
-  those functions. No successful p9 topology mutation has been compared. The
-  insertion fixtures' vertex loops are native setup imported into Rust; they do
-  not certify Rust `MakeVertexLoop`. The small PRE_EDIT path was not duplicated
-  from active `topology.face_p3` work (PR #139).
-- **Review behavior fixes.** The insertion projection prefix now calls the
-  existing `Surface::drop_and_trim_curve` with face tolerance times 100 and
-  `true, true`, after empty drops at factors 1, 10 and 300. The plane override
-  receives the base `SmSurface*` default `bCreatingUVTrimCurve=TRUE`. A separate
-  geometry-only prefix probe compares partial overlap over `[-3,7]`, a contained
-  drop and the empty-drop fallback without pretending that an edge was inserted.
-  The prefix helper is the same code used by insertion. NaN/positive/negative
-  infinity split parameters retain their defined native refusals and endpoint
-  outputs; six op-4/op-6 differential regressions exercise them. Opaque edge
-  handles defer to `topology.brep_p9` until mutable arena context is supplied;
-  production callers no longer mistake that gap for invalid input. A unit test
-  checks that this deferral preserves classification state. The FFI rejects UB-1
-  part-container headers before its shared native loader; `SmallBox.smb` is
-  tested only through that guard. Both new include-generated Rust modules are
-  checked directly with rustfmt in addition to `cargo fmt --all`.
-- **Integration follow-up.** Official main `f75223ad` is merged, preserving newer
-  point-classification and merge notes and all new findings. No open PR branch is
-  merged. Editing state remains an explicit argument until the canonical part-1
-  B-rep field (PR #145) lands; the module-index conflict with other B-rep parts is
-  documented for that integration. The initial merged main `f75223ad` failed
-  compilation at `sphere.rs:852` (missing `OffsetSurface` match arm). Preliminary
-  Linux checks used that one extra arm only in the runner copy. Official main
-  `a8958254` (PR #221) then landed the byte-identical arm and corrected the stale
-  reader test; it is now merged. The running native gate uses the same numerical
-  source as this official fix. Clean validation is complete, with no additional
-  source prerequisite remaining (final summaries below).
-- **Review-focused evidence.** Numerical source `12b60efa`, linked endpoint test
-  fixture `f52eeb29`, projection probe `6d200c86` and doc lint fix `8f11ed4a`:
-  `PARTIAL topology.brep_p9 cases=613 passed=505 failed=0 deferred=108 max_rel_err=0e0`.
-  All 505 perturbations are detected. The 4096-seed run has 4197 cases, 3479
-  comparisons, 718 deferrals and zero failures. All six nonfinite parameter
-  cases and both overlapping/contained projection probes pass. The empty-drop
-  probe reaches the real DropAndTrimCurve and defers at its deeper
-  `SmSurfaceDropCurve::DoTrace` boundary. Ten focused runners have zero failures:
-  p9; point class; curve class p3; proto-topology p1/p2/p3; merge p1/p5;
-  surface-drop-lib p1; plane p1. Proto p2 is 1247 pass / 286 deferred: its four
-  opaque-edge merges now defer instead of being counted as guard matches. The
-  other focused counts are unchanged. No successful mutation of the six owned
-  p9 entrypoints is compared; the two successful projection probes certify only
-  that extracted prefix. The native part-container guard regression passes.
-  Plain strict Clippy and WASM checks passed with the former runner prerequisite;
-  the pre-main-fix full test rerun was 1317 passed / 1 failed. That failure was main's
-  `surface::surface::p2::tests::read_from_db_unported_types`, which still asserts
-  that the newly ported OffsetSurface reader returns Unported. Both p9 regressions
-  pass. Native-enabled strict workspace Clippy also passed with that now-official
-  arm. The complete integration run is recorded below. Clean Clippy passes on
-  macOS. Its full test build hit a full disk; package-scoped Cargo cleanup removed
-  only this worktree's generated solidcore output. The clean test/WASM/formatting
-  rerun is on Linux, which has sufficient space.
-- **Clean reruns after main's fix.** No temporary source change remains. The
-  sphere source SHA-256 is identical locally and on the runner:
-  `8dc0b5917c3a337e07157cdf2774c2c2b433f3d2d7ed47bed31ef7bbb0a462b9`.
-  All 1318 kernel tests and documentation checking pass, as do WASM, formatting
-  (including direct rustfmt of both new include-generated modules), strict plain
-  and native-enabled workspace Clippy and the native part-container guard test.
-  The runner's default rustdoc was 1.93.1 while rustc was 1.98.0; the clean run
-  selects the installed 1.98.0 toolchain through task-local PATH, without a source
-  patch or global configuration change. Clean p9 default/perturbation/4096-seed
-  runs reproduce the 505/108 and 3479/718 counts above, bit-identical. The complete
-  native gate passes: `difftest: 202 unit(s), 112 passed, 90 partial, 0 failed`.
-  Final `--status-of topology.brep_p9` prints `partial`; that describes its tested
-  subset, while plan status remains `todo` for its omitted owned bodies.
-  A SHA-256 manifest verifies all 1234 tracked source/config/fixture files match
-  the runner byte for byte, with no extra source prerequisite:
-  `e9d25c655a4d9638e57861d1a6752c2df9664a775ac984ddd5b8807e95d0232a`.
-
-### Previous checkpoint `c482d6fc` (historical)
-
-- **Compared subset.** Numerical source `47758e96`: 604 default cases (92 fixed,
-  512 generated), 497 bit-identical comparisons, 107 dependency deferrals, no
-  failures and no absolute floors. All 497 perturbations are detected. With 4096
-  generated seeds: 4188 cases, 3471 comparisons, 717 deferrals, no failures and
-  `max_rel_err=0`. The default deterministic report is committed; the extended run
-  uses `--no-report`.
-- **Actual behavior covered.** `MakeVertexSplitEdge`'s editing-disabled,
-  out-of-domain and nearby-endpoint refusals preserve the returned vertex together
-  with `SM_ERR`. Tests cover the strict/scaled parameter boundary, start-before-end
-  precedence, real `SmLine`, B-spline and rational/constant curves, opposite primary
-  edge uses, non-normalized domains/subdomains and scales from `1e-6` to `1e6`.
-  A nonlinear curve with tolerances `[1.15,2]` distinguishes the 2-sample start
-  length from its 10-sample recheck and selects the end vertex. Refusal snapshots
-  include status/identity and unchanged semantic topology/geometry; these are
-  branch/status comparisons, not successful topology-mutation certification.
-- **Point classification.** `merge_into_brep` takes an explicit mutable arena,
-  resolved target, handle mapping and notification storage. A refused edge split
-  updates the class/object fields directly, retains an unset parameter flag and
-  returns before SSS relocation/tolerance adjustment. Native fixtures compare this
-  early return and vertex-merge positions/tolerances. The legacy opaque-handle API
-  cannot resolve an edge's arena and now reports missing caller data; region/face
-  owner lookups retain the actual owning units' deferrals. The merge helper with
-  existing arena ids calls the real p9 entrypoint.
-- **Unimplemented/uncertified continuation.** The missing owning-list operations
-  (`GetRegions`, `GetFaces` and default `GetInfiniteRegion`) and UV-trim splitter
-  are part 1. `MakeShellVertexTopology` is part 2. Face PRE_EDIT notifications are
-  `topology.face_p3`. Generic `DropCurve` is `intersect.surface_drop_lib_p3`, and
-  `DropAndTrimCurve` is part 1 of that family. Plane projection calls its existing
-  concrete override. These calls stop the owned functions before their remaining
-  construction/orientation/ray-selection bodies; those bodies remain integration
-  work, rather than being simulated. Interior splitting/insertion defer before
-  orphan allocations and native pre-barrier notifications. Owned Rust geometry
-  inputs are dropped on errors/deferrals. Supplied UV trims/drop-failure records,
-  seam copies, drop retries, optional-shell/bounding-box ray selection, attributed
-  and callback-driven construction, late-failure mutation state and successful
-  p9 topology mutations are not certified. This unit is partial, not green.
-- **Downstream evidence.** All eight affected runners pass with zero failures:
-  p9, point classification, curve-class p3, proto-topology p1/p2/p3 and merge p1/p5.
-  Proto-topology p2's four newly compared cases are the existing native refusal of
-  bare edges without B-rep owners; no native mutation executes there. Its 16 old
-  region p9 deferrals now stop at `topology.shell::SmRegion::GetBrep`. Merge p1's
-  three old p9 deferrals now stop at the default region (part 1, one case) or
-  shell-vertex topology (part 2, two cases). No other unit is promoted.
-- **Environment and review.** Clean pinned upstream `c9c5979`, Ubuntu 26.04.1
-  x86_64 / GCC 15.2.0 / Rust 1.98.0 on runner-codex-02. The standard optimized
-  `difftest` profile and C++ `-O2 -ffp-contract=off -fno-fast-math` are used without
-  platform/build/workflow patches or bundled open dependency PRs. Native-enabled
-  strict workspace Clippy passes with `--profile difftest`; two concurrent compiler
-  jobs exceeded this VM's 8 GiB, so final native checks use one job under nice.
-  Plain workspace Clippy, formatting, all 1269 kernel tests and WASM checking pass
-  on macOS aarch64 / Rust 1.98.0. Port-pr-review checked the full independent diff,
-  owned source prefixes, defaults, status/output lifecycle, guard coverage,
-  ownership tags, resource bounds and explicit remaining coverage. Source review
-  fixed the endpoint parameter-flag lifecycle and insertion output contract.
-  It also removed the FFI wrapper's unjustified sign restriction: finite negative
-  raw tolerances are defined because `SmZoneTol3d` applies `fabs`. Two native
-  regressions compare that conversion for a B-spline and real line.
-  Later source edits only clarify comments; reports/notes record the tested
-  numerical checkpoint.
-- **Final integration gate (PR #183).** The complete native `--green` run passes:
-  `difftest: 198 unit(s), 108 passed, 90 partial, 0 failed`. The final
-  `--status-of topology.brep_p9` reports `partial`. All eight affected reports
-  regenerate byte-identical to the committed focused reports. This gate uses the
-  independent branch through official main `b4765734` and the functional source
-  checkpoint above; the final commit adds validation documentation only.
+Commands run under `nice -n 10` with one Cargo job and sccache; no profile or
+numerical-tolerance override. Logs are `/tmp/p5-07925044-claude1-*.log` on runner 2
+and copied locally. The worktree-owned temporary 4 GiB swap file was removed
+following validation; no persistent runner configuration changed. All previously
+listed mutation, sharing, opaque-adapter and reader coverage limits still apply.
 
 ## topology.brep_p7 (`SmBrep.cpp` part 7: `ReadFromFile`, `MakeFace`, `MakeFaceWithCurves`, `GlueEdgesGeneral`, `CopyFaces`, `MergeSelfIntersectionCurves`; PR #155, 2026-10-16; partial, no disagreements)
 

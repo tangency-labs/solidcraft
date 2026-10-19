@@ -456,10 +456,13 @@ pub fn boolean_post_process(
             continue;
         }
         if vertex::is_topological_vertex(k, brep, v)? {
-            // UNPORTED(topology.brep_p5): SmBrep::DeleteTopologicalVertex
-            ignore_failure(unavailable::<()>(
-                "SmBrep::DeleteTopologicalVertex",
-                "topology.brep_p5",
+            let editing = crate::topology::brep::p5::editing_enabled(brep)?;
+            ignore_failure(crate::topology::brep::p5::delete_topological_vertex(
+                k,
+                brep,
+                editing,
+                Some(v),
+                None,
             ))?;
         }
     }

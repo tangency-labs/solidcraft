@@ -26,12 +26,11 @@
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`: `SmBrep::Point3DClassify` (`query.brep`),
 //!   `SmBrep::GlueVertices` /
-//!   `SqueezeEdge` / `DeleteEdge` (`topology.brep_p5` / `_p3` / `_p4`).
-//!   The intersector's `GetOtherMate` /
-//!   `RemoveRelationship` are reached through [`Mates`] (ported in
-//!   `boolean.topology_intersector_p1` / `_p2`; [`NoMates`] for no intersector maps). The
-//!   `SmCurveClassification` constructor is part 4's ([`CurveClassification::with_curve`];
-//!   it defers on `ReSet`, `intersect.curve_class_p2`). `ExtractGeometry` calls part 5 and
+//!   `SqueezeEdge` / `DeleteEdge` (`topology.brep_p2` via part 5 / `_p3` / `_p4`),
+//!   `SmTopologyIntersector::RemoveRelationship` (`boolean.topology_intersector_p2`;
+//!   `GetOtherMate` is the `other_mate` closure the caller passes to
+//!   [`ProtoTopologyManager::glue_coincident_brep_vertices`]) and the `SmCurveClassification`
+//!   constructor (`intersect.curve_class_p4`). `ExtractGeometry` calls part 5 and
 //!   currently reaches part 6's `Homogenize` dependency. The code
 //!   after a stub is ported in full. The callees of `topology.proto_topology_p2` are
 //!   its methods on [`ProtoTopologyManager`].
@@ -180,12 +179,8 @@ fn new_curve_classification<O: ClassObject>(
 }
 
 /// `SmBrep::GlueVertices` of B-rep `which`.
-fn brep_glue_vertices<O>(_which: i32, _v1: O, _v2: O) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::GlueVertices
-    Err(SolidError::unported(
-        "SmBrep::GlueVertices",
-        "topology.brep_p5",
-    ))
+fn brep_glue_vertices<O: Copy + PartialEq>(_which: i32, v1: O, v2: O) -> Result<()> {
+    crate::topology::brep::p5::opaque_glue_preflight(v1 == v2)
 }
 
 /// `SmBrep::SqueezeEdge` of B-rep `which`.

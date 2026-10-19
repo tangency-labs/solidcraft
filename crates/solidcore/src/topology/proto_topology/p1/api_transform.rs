@@ -28,7 +28,7 @@ const OP_ROTATE: &str = "topology::proto_topology::p1::api_rotate";
 /// `sm_TransformIndependentObject`, by kind).
 pub enum TransformObject<'a> {
     /// An `SmBrep`.
-    Brep,
+    Brep(&'a mut crate::topology::Brep),
     /// An `SmPolyBrep` (with what its notifications need; see [`PolyBrepTarget`]).
     PolyBrep(&'a mut dyn PolyBrepTransform),
     /// An `SmCurve`.
@@ -42,7 +42,7 @@ pub enum TransformObject<'a> {
 impl core::fmt::Debug for TransformObject<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Brep => f.write_str("Brep"),
+            Self::Brep(_) => f.write_str("Brep"),
             Self::PolyBrep(_) => f.write_str("PolyBrep"),
             Self::Curve(c) => f.debug_tuple("Curve").field(c).finish(),
             Self::Surface(s) => f.debug_tuple("Surface").field(s).finish(),
@@ -111,9 +111,9 @@ fn is_uniform_positive_scale(scale: Vec3) -> bool {
 /// a scale a specialised kind does not take, or any other object; those of
 /// [`Curve::transform`], [`Surface::transform`] and [`PolyBrep::transform`];
 /// [`SolidError::Unported`] for B-reps (`SmBrep::Transform`, unit
-/// `topology.brep_p5`).
+/// `topology.brep_p2` through part 5).
 pub fn transform_independent_object(
-    k: &Kernel,
+    k: &mut Kernel,
     obj: Option<TransformObject<'_>>,
     transform: &Axis2Placement,
     scale: Option<Vec3>,
@@ -129,12 +129,8 @@ pub fn transform_independent_object(
     }
 
     match obj {
-        TransformObject::Brep => {
-            // UNPORTED(topology.brep_p5): SmBrep::Transform
-            Err(SolidError::unported(
-                "SmBrep::Transform",
-                "topology.brep_p5",
-            ))
+        TransformObject::Brep(brep) => {
+            crate::topology::brep::p5::transform(k, brep, transform, scale, true)
         }
         TransformObject::PolyBrep(poly) => {
             // The stable API publishes only positive, non-degenerate PolyBrep scales.
@@ -213,7 +209,7 @@ pub fn transform_independent_object(
 ///
 /// Those of [`transform_independent_object`].
 pub fn api_transform(
-    k: &Kernel,
+    k: &mut Kernel,
     obj: Option<TransformObject<'_>>,
     rotate_move: &Axis2Placement,
 ) -> Result<()> {
@@ -225,7 +221,7 @@ pub fn api_transform(
 /// # Errors
 ///
 /// Those of [`transform_independent_object`].
-pub fn api_scale(k: &Kernel, obj: Option<TransformObject<'_>>, scale: Vec3) -> Result<()> {
+pub fn api_scale(k: &mut Kernel, obj: Option<TransformObject<'_>>, scale: Vec3) -> Result<()> {
     let matrix = Axis2Placement::default();
     transform_independent_object(k, obj, &matrix, Some(scale))
 }
@@ -238,7 +234,7 @@ pub fn api_scale(k: &Kernel, obj: Option<TransformObject<'_>>, scale: Vec3) -> R
 /// [`SolidError::InvalidInput`] for an undefined or near-zero scale; those of
 /// [`transform_independent_object`].
 pub fn api_scale_by_pt(
-    k: &Kernel,
+    k: &mut Kernel,
     obj: Option<TransformObject<'_>>,
     ref_pt: Point3,
     scale: Vec3,
@@ -265,7 +261,11 @@ pub fn api_scale_by_pt(
 /// # Errors
 ///
 /// Those of [`transform_independent_object`].
-pub fn api_translate(k: &Kernel, obj: Option<TransformObject<'_>>, translate: Vec3) -> Result<()> {
+pub fn api_translate(
+    k: &mut Kernel,
+    obj: Option<TransformObject<'_>>,
+    translate: Vec3,
+) -> Result<()> {
     let mut transform = Axis2Placement::default();
     transform.translate(translate);
     transform_independent_object(k, obj, &transform, None)
@@ -279,7 +279,7 @@ pub fn api_translate(k: &Kernel, obj: Option<TransformObject<'_>>, translate: Ve
 /// [`SolidError::InvalidInput`] for no object or a zero-length axis; those of
 /// [`transform_independent_object`].
 pub fn api_rotate(
-    k: &Kernel,
+    k: &mut Kernel,
     obj: Option<TransformObject<'_>>,
     ref_pt: Point3,
     axis: Vec3,

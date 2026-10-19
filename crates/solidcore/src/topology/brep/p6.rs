@@ -11,7 +11,8 @@
 //!
 //! Deviations: pointers become arena ids; optional outputs become return values.
 //! Edits preserve the upstream mutations preceding an error. Missing callees stop
-//! at their first call: copying stops at `CreateWireEdgeFromCurve` (`brep_p5`), face
+//! at their first call: copying stops at the copy `Notify` (`brep_p2`) after part 5's
+//! `CreateWireEdgeFromCurve`, face
 //! construction at `SetTolerance` (`face_p3`), and a closed-shell split at `Notify`
 //! (`brep_p2`). The dependent remainder of each algorithm is deferred, rather than
 //! approximating construction, attributes, radial sectors, trims or ray casting.
@@ -50,28 +51,34 @@ fn split_link<T>(value: Option<T>) -> Result<T> {
 }
 
 /// Copy edges to independent wires in `destination`, in input order.
-/// An empty list succeeds without inspecting the destination. Nonempty input
-/// trims a NURBS copy in the destination's context before reaching the unported
-/// wire constructor; copy notifications are not emitted before construction.
+/// An empty list succeeds without inspecting the destination. Each edge's trimmed
+/// NURBS copy is made into a wire edge by part 5's `CreateWireEdgeFromCurve` over the
+/// copy's natural interval; the copy notifications that follow need the caller's
+/// notification routing and defer at `SmBrep::Notify` (`brep_p2`).
 pub fn copy_edges(
-    destination_kernel: &Kernel,
+    destination_kernel: &mut Kernel,
     source: &Brep,
     edges: &[EdgeId],
     destination: &mut Brep,
 ) -> Result<Vec<EdgeId>> {
     let result = Vec::new();
     if let Some(&edge) = edges.first() {
-        let _curve = required(crate::topology::edge::create_trimmed_nurbs_curve(
+        let curve = required(crate::topology::edge::create_trimmed_nurbs_curve(
             destination_kernel,
             source,
             edge,
         )?)?;
-        let _ = destination;
-        // UNPORTED(topology.brep_p5): SmBrep::CreateWireEdgeFromCurve
-        return Err(SolidError::unported(
-            "SmBrep::CreateWireEdgeFromCurve",
-            "topology.brep_p5",
-        ));
+        let interval = curve.natural_interval();
+        let _new_edge = crate::topology::brep::p5::create_wire_edge_from_curve(
+            destination_kernel,
+            destination,
+            curve,
+            interval,
+        )?;
+        // Notify(SM_NO_COPY) on the edge and its vertices propagates attributes
+        // between the two B-reps' records.
+        // UNPORTED(topology.brep_p2): SmBrep::Notify
+        return Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"));
     }
     Ok(result)
 }

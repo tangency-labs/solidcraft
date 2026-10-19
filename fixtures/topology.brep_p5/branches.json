@@ -1,0 +1,4412 @@
+{
+  "cases": [
+    {
+      "name": "isolated_op1_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op1_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op3_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 3,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op3_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 3,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op4_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 4,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op4_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 4,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op5_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op5_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op7_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op7_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op8_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 8,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op8_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 8,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op9_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 9,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op9_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 9,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op10_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 10,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op10_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 10,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op11_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 11,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op12_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op12_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "isolated_op13_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 13,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "isolated_op13_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 13,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "identity_explicit_scale_kind0_scale_tols_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "scale_tolerances": false
+      }
+    },
+    {
+      "name": "identity_kind0_scale_tols_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_explicit_scale_kind0_scale_tols_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "manifold_kind0_mode1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 1
+      }
+    },
+    {
+      "name": "manifold_kind0_mode2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 2
+      }
+    },
+    {
+      "name": "make_edge_disabled_kind0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 6,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "make_edge_nullface_kind0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 6,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "translate_deferred_kind0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "origin": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "nonuniform_deferred_kind0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "reflection_deferred_kind0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          -1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "identity_kind1_scale_tols_False",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616 (my_test_topology)",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale_tolerances": false
+      }
+    },
+    {
+      "name": "identity_explicit_scale_kind1_scale_tols_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "scale_tolerances": false
+      }
+    },
+    {
+      "name": "identity_kind1_scale_tols_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_explicit_scale_kind1_scale_tols_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "remove_no_faces_kind1_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 9,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "remove_no_faces_kind1_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 9,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "manifold_kind1_mode0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 0
+      }
+    },
+    {
+      "name": "manifold_kind1_mode1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 1
+      }
+    },
+    {
+      "name": "manifold_kind1_mode2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 2
+      }
+    },
+    {
+      "name": "make_edge_disabled_kind1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 6,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "make_edge_nullface_kind1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 6,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "translate_deferred_kind1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "origin": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "nonuniform_deferred_kind1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "reflection_deferred_kind1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          -1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "squeeze_disabled_kind1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 11,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "identity_kind2_scale_tols_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale_tolerances": false
+      }
+    },
+    {
+      "name": "identity_explicit_scale_kind2_scale_tols_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "scale_tolerances": false
+      }
+    },
+    {
+      "name": "identity_kind2_scale_tols_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_explicit_scale_kind2_scale_tols_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "remove_no_faces_kind2_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 9,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "remove_no_faces_kind2_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 9,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "manifold_kind2_mode0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 0
+      }
+    },
+    {
+      "name": "manifold_kind2_mode1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 7,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "mode": 1
+      }
+    },
+    {
+      "name": "make_edge_disabled_kind2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 6,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "translate_deferred_kind2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "origin": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "nonuniform_deferred_kind2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "reflection_deferred_kind2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "scale": [
+          -1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "squeeze_disabled_kind2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 11,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "identity_scale_delta_1e-13",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "scale": [
+          1.0000000000001,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_placement_delta_1e-13",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "origin": [
+          1e-13,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "identity_scale_delta_5e-13",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "scale": [
+          1.0000000000005,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_placement_delta_5e-13",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "origin": [
+          5e-13,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "identity_scale_delta_1e-12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "scale": [
+          1.000000000001,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_placement_delta_1e-12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "origin": [
+          1e-12,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "identity_scale_delta_1e-11",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "scale": [
+          1.00000000001,
+          1,
+          1
+        ],
+        "scale_tolerances": true
+      }
+    },
+    {
+      "name": "identity_placement_delta_1e-11",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 12,
+        "origin": [
+          1e-11,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree0_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree0_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree0_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree0_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree0_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree1_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree1_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree1_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree1_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree1_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree1_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree1_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree1_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree1_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree1_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree2_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree2_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree2_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree2_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree2_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree2_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree2_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree2_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree2_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree2_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree3_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree3_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree3_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree3_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree3_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree3_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree3_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree3_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree3_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree3_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree4_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree4_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree4_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree4_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side0_degree4_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree4_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree4_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          3.5000000000000003e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree4_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree4_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          4.0000010000000006e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1e-09_side1_degree4_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3.0000000000000004e-09,
+          -2e-09,
+          1e-09,
+          5e-09,
+          -2e-09,
+          1e-09,
+          5e-10,
+          1e-09,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree0_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree0_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree0_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree0_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree0_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree1_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree1_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree1_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree1_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree1_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree1_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree1_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree1_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree1_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree1_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree2_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree2_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree2_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree2_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree2_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree2_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree2_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree2_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree2_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree2_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree3_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree3_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree3_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree3_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree3_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree3_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree3_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree3_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree3_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree3_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree4_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree4_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree4_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree4_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side0_degree4_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree4_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree4_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          3.5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree4_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree4_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          4.000001,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1_side1_degree4_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3,
+          -2,
+          1,
+          5,
+          -2,
+          1,
+          0.5,
+          1,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree0_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree0_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree0_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree0_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree0_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree1_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree1_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree1_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree1_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree1_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          1,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree1_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree1_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree1_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree1_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree1_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          1
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree2_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree2_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree2_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree2_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree2_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          2,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree2_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree2_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree2_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree2_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree2_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree3_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree3_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree3_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree3_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree3_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          3,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree3_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree3_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree3_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree3_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree3_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          3
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree4_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree4_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree4_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree4_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side0_degree4_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          4,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree4_ratio0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree4_ratio0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          3500000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree4_ratio1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree4_ratio1.000001",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          4000001000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_scale1000000000.0_side1_degree4_ratio2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          3000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          5000000000.0,
+          -2000000000.0,
+          1000000000.0,
+          500000000.0,
+          1000000000.0,
+          0,
+          4
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_raw_tolerances_0_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_raw_tolerances_-0.0001_-0.0002",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          -0.0001,
+          -0.0002,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_raw_tolerances_1000000000.0_1e-09",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1000000000.0,
+          1e-09,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "target_raw_tolerances_1e-09_1000000000.0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp",
+      "inputs": {
+        "op": 2,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-09,
+          1000000000.0,
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "defined_placement_zero_x",
+      "upstream_ref": "source/SMLib/src/SmAxis2Placement.cpp:SetCanonical",
+      "inputs": {
+        "op": 12,
+        "x": [
+          0,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "defined_placement_zero_y",
+      "upstream_ref": "source/SMLib/src/SmAxis2Placement.cpp:SetCanonical",
+      "inputs": {
+        "op": 12,
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "defined_placement_parallel",
+      "upstream_ref": "source/SMLib/src/SmAxis2Placement.cpp:SetCanonical",
+      "inputs": {
+        "op": 12,
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "defined_placement_tiny_axis",
+      "upstream_ref": "source/SMLib/src/SmAxis2Placement.cpp:SetCanonical",
+      "inputs": {
+        "op": 12,
+        "x": [
+          1e-150,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "remove_empty_faces_with_preexisting_mark_lock_editing_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:SmBrep::RemoveFaces (SmNewMarkAndLock lifetime)",
+      "inputs": {
+        "op": 9,
+        "editing": false,
+        "flag": true
+      }
+    },
+    {
+      "name": "remove_empty_faces_with_preexisting_mark_lock_editing_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:SmBrep::RemoveFaces (SmNewMarkAndLock lifetime)",
+      "inputs": {
+        "op": 9,
+        "editing": true,
+        "flag": true
+      }
+    }
+  ]
+}

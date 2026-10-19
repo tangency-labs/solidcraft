@@ -46,11 +46,12 @@
 //!   from the infinite region (`GetInfiniteRegion`, `GetNext`): the port takes
 //!   [`crate::topology::brep::p1::regions`] rotated to start at
 //!   [`crate::topology::Brep::infinite_region`] (empty without one).
-//! - **Unported callees** (`UNPORTED` stubs): `SmBrep::FindAndSetInfiniteRegion`
-//!   (`topology.brep_p5`) and `SmFace::CreateUVTrimCurves` (`topology.face_p3`), so
-//!   `Make_UVTrimCurves` stops at a stub when asked to make curves. `Fix_BadSheets` calls
-//!   `brep_p6` when it finds a sheet face between two closed shells; `HealBrep` and
-//!   `SmApiHealBrep` run the heal sequence of [`super::p3`].
+//! - **Unported callees** (`UNPORTED` stubs): `SmFace::CreateUVTrimCurves`
+//!   (`topology.face_p3`), so `Make_UVTrimCurves` stops at a stub when asked to make
+//!   curves. `SmBrep::FindAndSetInfiniteRegion` (`topology.brep_p5`) is wired with its
+//!   declared default `SM_VS_INFINITEREGION_SWAP` and defers at part 5's own barriers.
+//!   `Fix_BadSheets` calls `brep_p6` when it finds a sheet face between two closed
+//!   shells; `HealBrep` and `SmApiHealBrep` run the heal sequence of [`super::p3`].
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -116,12 +117,11 @@ fn brep_regions_from_infinite(b: &Brep) -> Result<Vec<RegionId>> {
 
 /// `pBrep->FindAndSetInfiniteRegion()`: ray casts for the infinite region and moves
 /// it to the head of the region list.
-fn brep_find_and_set_infinite_region(_b: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::FindAndSetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::FindAndSetInfiniteRegion",
-        "topology.brep_p5",
-    ))
+fn brep_find_and_set_infinite_region(b: &mut Brep) -> Result<()> {
+    crate::topology::brep::p5::find_and_set_infinite_region(
+        b, None, 2, // SM_VS_INFINITEREGION_SWAP: SmBrep.h's native default.
+        None,
+    )
 }
 
 /// `pRegion->IsVoid()` as a C++ condition (`UNSURE` is non-zero, so true).
@@ -742,7 +742,7 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// [`SolidError::Unported`] for
     /// `SmRegion::IsVoid` / `SetIsVoid` (`topology.shell`) and
-    /// `SmBrep::FindAndSetInfiniteRegion` (`topology.brep_p5`);
+    /// `SmBrep::FindInfiniteRegion` (`topology.brep_p9`, through part 5);
     /// [`SolidError::InvalidInput`] for a B-rep without regions (upstream dereferences
     /// null).
     pub fn fix_infinite_region(&self, b: &mut Brep, _this_healer_op: HealerOpType) -> Result<()> {

@@ -158,7 +158,7 @@
 //! - **Callees in units not ported yet** return [`SolidError::Unported`](crate::SolidError):
 //!   `SmBrep::GetTolerance` (`topology.brep_p1`) in the manager's fallback tolerance,
 //!   `SmFace::GetEdges` (`topology.face_p4`) for edges sharing a face in
-//!   `sm_FindEDOnDegenFace`, and `SmBrep::Transform` (`topology.brep_p5`).
+//!   `sm_FindEDOnDegenFace`, and part 5's `SmBrep::Transform` reaches `SmBrep::Notify` (`topology.brep_p2`).
 //!   `SmProtoVertex::ContainsPoint` / `DistanceTo` (unit `query.face_p2`) are
 //!   [`crate::query::face::p2`]'s.
 //! - **Copy map.** `SetAt` takes two objects and `GetAt` of an object without an entry
@@ -665,10 +665,10 @@ mod tests {
 
     #[test]
     fn api_transforms() {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let mut c = line([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
         api_transform::api_translate(
-            &k,
+            &mut k,
             Some(TransformObject::Curve(&mut c)),
             Vec3::new(0.0, 1.0, 0.0),
         )
@@ -677,7 +677,7 @@ mod tests {
         let p = c.evaluate_point(ivl.min()).unwrap();
         assert!((p - Point3::new(1.0, 1.0, 0.0)).length() < 1e-12);
         api_transform::api_scale_by_pt(
-            &k,
+            &mut k,
             Some(TransformObject::Curve(&mut c)),
             Point3::new(1.0, 1.0, 0.0),
             Vec3::new(2.0, 2.0, 2.0),
@@ -689,7 +689,7 @@ mod tests {
 
         assert!(matches!(
             api_transform::api_rotate(
-                &k,
+                &mut k,
                 Some(TransformObject::Curve(&mut c)),
                 Point3::new(0.0, 0.0, 0.0),
                 Vec3::new(0.0, 0.0, 0.0),
@@ -698,16 +698,20 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(matches!(
-            api_transform::api_scale(&k, None, Vec3::new(1.0, 1.0, 1.0)),
+            api_transform::api_scale(&mut k, None, Vec3::new(1.0, 1.0, 1.0)),
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(matches!(
-            api_transform::api_scale(&k, Some(TransformObject::Other), Vec3::new(0.0, 1.0, 1.0)),
+            api_transform::api_scale(
+                &mut k,
+                Some(TransformObject::Other),
+                Vec3::new(0.0, 1.0, 1.0)
+            ),
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(api_transform::api_translate(
-            &k,
-            Some(TransformObject::Brep),
+            &mut k,
+            Some(TransformObject::Brep(&mut crate::topology::Brep::new())),
             Vec3::new(1.0, 0.0, 0.0)
         )
         .is_err_and(|e| e.is_unported()));

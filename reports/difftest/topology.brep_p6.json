@@ -3491,8 +3491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[0]_0",
@@ -3503,8 +3503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[0]_2",
@@ -3515,8 +3515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[1]_0",
@@ -3527,8 +3527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[1]_2",
@@ -3539,8 +3539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[4]_0",
@@ -3551,8 +3551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[4]_2",
@@ -3563,8 +3563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[2, 0]_0",
@@ -3575,8 +3575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[2, 0]_2",
@@ -3587,8 +3587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[1, 1]_0",
@@ -3599,8 +3599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[1, 1]_2",
@@ -3611,8 +3611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[3, 1, 4]_0",
@@ -3623,8 +3623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_[3, 1, 4]_2",
@@ -3635,8 +3635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_real_geometry_disk.smb",
@@ -3647,8 +3647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_real_geometry_ellips_ts2.smb",
@@ -3659,8 +3659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_real_geometry_plane_circ.smb",
@@ -3671,8 +3671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_real_geometry_sphere.smb",
@@ -3683,8 +3683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "copy_real_geometry_torus.smb",
@@ -4031,8 +4031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0002",
@@ -4043,8 +4043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -4055,8 +4055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -4087,8 +4087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0007",
@@ -4099,8 +4099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -4139,8 +4139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CreateWireEdgeFromCurve",
-        "unit": "topology.brep_p5"
+        "symbol": "SmBrep::GetInfiniteRegion",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0012",
@@ -4184,8 +4184,8 @@
   "cases_passed": 450,
   "cases_total": 498,
   "deferred_by_unit": {
+    "topology.brep_p1": 23,
     "topology.brep_p2": 6,
-    "topology.brep_p5": 23,
     "topology.face_p3": 19
   },
   "max_rel_err": 0.0,

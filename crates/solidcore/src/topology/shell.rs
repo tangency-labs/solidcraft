@@ -670,7 +670,7 @@ fn clear_shell_members(brep: &mut Brep, id: ShellId) -> Result<()> {
     Ok(())
 }
 
-fn shell_list_size(brep: &Brep, id: ShellId) -> Result<usize> {
+pub(crate) fn shell_list_size(brep: &Brep, id: ShellId) -> Result<usize> {
     match &brep.shell(id)?.members {
         ShellMembers::Empty => Ok(0),
         ShellMembers::Faceuses(members) => Ok(members.len()),

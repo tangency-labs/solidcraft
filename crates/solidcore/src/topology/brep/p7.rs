@@ -60,13 +60,15 @@
 //! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
 //!   (`topology.brep_p1`); `SmBrep::Notify`, `SetTolerance`, `sm_CheckAndFixUVTrimCurves`,
 //!   `RebuildUVTrimCurves` (`topology.brep_p2`); `MakeWireEdge`, `MakeWireEdgeVertex`
-//!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `GlueVertices`
-//!   (`topology.brep_p5`); `MakeShellVertexTopology` (`topology.brep_p2`, reached
-//!   through `topology.brep_p9`'s `MakeShellVertex`);
-//!   `SmFace::GetBrep`, `GetEdges`
+//!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `MakeShellVertex`
+//!   (`topology.brep_p9`);
+//!   `MakeTopologyFromData`, `TestClosureSplitRegion(edge)` (`topology.brep_p10`);
+//!   `SmFace::Notify`, `SetTolerance`,
+//!   `CreateUVTrimCurves` (`topology.face_p3`); `SmFace::GetBrep`, `GetEdges`
 //!   (`topology.face_p4`); `SmMerge` (`boolean.merge_p2`); the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), which
-//!   `MergeSelfIntersectionCurves` reaches first. Its classification of a UV curve
+//!   `MergeSelfIntersectionCurves` reaches first. `GlueVertices` calls
+//!   `topology.brep_p5` with the caller's notification environment. Its classification of a UV curve
 //!   against the faces and the `SetCurve` + `MergeIntervals` that follows are two stubs
 //!   (`classify_on_faces`, `set_curve_and_merge`) over a stand-in interval type; the
 //!   upstream interval loop around them is ported (`GetSize() != 1` skips before the
@@ -225,13 +227,16 @@ fn delete_edge(_b: &mut Brep, _e: EdgeId) -> Result<()> {
     ))
 }
 
-/// `GlueVertices(survivor, other)`.
-fn glue_vertices(_b: &mut Brep, _v1: VertexId, _v2: VertexId) -> Result<()> {
-    // UNPORTED(topology.brep_p5): SmBrep::GlueVertices
-    Err(SolidError::unported(
-        "SmBrep::GlueVertices",
-        "topology.brep_p5",
-    ))
+/// `GlueVertices(survivor, other)` (default `pOptWireEdgesInBrep = NULL`), with the
+/// caller's notification environment.
+fn glue_vertices(
+    k: &mut Kernel,
+    b: &mut Brep,
+    v1: VertexId,
+    v2: VertexId,
+    env: &mut ed::NotifyEnv<'_>,
+) -> Result<()> {
+    super::p5::glue_with_notifications(k, b, Some(v1), Some(v2), None, Some(env))
 }
 
 /// `TestClosureSplitRegion(TRUE, edge, aNewShells, aNewRegions)` (unit
@@ -1515,10 +1520,10 @@ pub fn merge_self_intersection_curves(
             let end2 = ed::other_vertex(b, e2, st2)?;
             let v = |x: Option<VertexId>| x.ok_or_else(|| null("edge without vertex"));
             if st1 != st2 {
-                glue_vertices(b, v(st1)?, v(st2)?)?;
+                glue_vertices(k, b, v(st1)?, v(st2)?, env)?;
             }
             if st1 != end1 && end1 != end2 {
-                glue_vertices(b, v(end1)?, v(end2)?)?;
+                glue_vertices(k, b, v(end1)?, v(end2)?, env)?;
             }
             if e1 != e2 {
                 glue_edges_general(

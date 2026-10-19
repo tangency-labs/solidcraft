@@ -1396,86 +1396,18 @@ impl IntersectorBrep<H> for Two {
         }
         r
     }
-    fn face_intersect(
-        &mut self,
-        k: &Kernel,
-        face1: H,
-        face2: H,
-        approx_tol_3d: f64,
-        ang_tol_deg: f64,
-        opt_coincidence_flag: Option<bool>,
-    ) -> solidcore::Result<ti::FaceIntersection<H>> {
-        if face1.kind != K_FACE || face2.kind != K_FACE || face1.b != face2.b {
-            return Err(invalid("FaceIntersect needs two faces of one B-rep"));
+    fn editing_enabled(&self, brep: H) -> solidcore::Result<bool> {
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        if brep.kind != K_BREP || self.breps.get(slot).and_then(Option::as_ref).is_none() {
+            return Err(invalid("not a B-rep handle"));
         }
-        let options = FaceIntersectOptions {
-            want_this_classes: true,
-            want_other_classes: true,
-            want_cc_curves: true,
-            coincidence: opt_coincidence_flag,
-            ..FaceIntersectOptions::default()
-        };
-        let out = fp3::face_intersect(
-            k,
-            self.brep_r(face1)?,
-            fid(face1),
-            fid(face2),
-            approx_tol_3d,
-            ang_tol_deg,
-            &options,
-        )?;
-        let bi = face1.b;
-
-        // every curve the call made gets a handle in the curve store
-        let mut curves_3d = Vec::new();
-        for c in out.curves_3d {
-            curves_3d.push(self.register_curve(c)?);
-        }
-        let cc3d: Vec<Option<H>> = self.register_curves(
-            out.cc_curves_3d
-                .map(|v| v.into_iter().map(Some).collect())
-                .unwrap_or_default(),
-        )?;
-        let uv1 = self.register_curves(out.cc_this_uv_curves.unwrap_or_default())?;
-        let uv2 = self.register_curves(out.cc_other_uv_curves.unwrap_or_default())?;
-
-        // the classifications name their objects by handle
-        let mut map = |o: IntersectObject| -> solidcore::Result<H> {
-            let bad = || invalid("classification object without a handle");
-            match o {
-                IntersectObject::Curve(i) => cc3d.get(i).copied().flatten().ok_or_else(bad),
-                IntersectObject::UvCurve(i, false) => uv1.get(i).copied().flatten().ok_or_else(bad),
-                IntersectObject::UvCurve(i, true) => uv2.get(i).copied().flatten().ok_or_else(bad),
-                IntersectObject::Surface(f) => Ok(hd(bi, K_FACE_SURFACE, f.index())),
-                IntersectObject::EdgeCurve(e) => self
-                    .edge_curve_h(hd(bi, K_EDGE, e.index()))
-                    .flatten()
-                    .ok_or_else(bad),
-                IntersectObject::Trim(eu) => Ok(hd(bi, K_TRIM_CURVE, eu.index())),
-                IntersectObject::Topology(e) => match e {
-                    EntityRef::Vertexuse(vu) => Ok(hd(bi, K_VERTEXUSE, vu.index())),
-                    other => Self::entity_h(bi, other).ok_or_else(bad),
-                },
-            }
-        };
-        let mut cc1 = Vec::new();
-        for c in out.this_classes.unwrap_or_default() {
-            cc1.push(c.map_objects(&mut map)?);
-        }
-        let mut cc2 = Vec::new();
-        for c in out.other_classes.unwrap_or_default() {
-            cc2.push(c.map_objects(&mut map)?);
-        }
-        Ok(ti::FaceIntersection {
-            curves_3d,
-            cc1,
-            cc2,
-            cc_curves: [
-                cc3d.into_iter().flatten().collect(),
-                uv1.into_iter().flatten().collect(),
-                uv2.into_iter().flatten().collect(),
-            ],
-        })
+        self.editing
+            .get(slot)
+            .copied()
+            .ok_or_else(|| invalid("missing editing flag"))
+    }
+    fn brep_tolerance(&self, brep: H) -> solidcore::Result<f64> {
+        Ok(self.brep_r(brep)?.tolerance())
     }
     fn set_editing_enabled(&mut self, brep: H, enabled: bool) -> solidcore::Result<bool> {
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
