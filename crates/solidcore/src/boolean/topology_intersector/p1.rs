@@ -602,7 +602,10 @@ fn face_uv_domain_from_uv_trim_curves<O>(
 
 /// `SmFace::CalculateBoundingBox(rBox, bTight)` (`bTight` is `FALSE` by default).
 fn face_bounding_box<O>(_k: &Kernel, _face: O, _tight: bool) -> Result<Extent3d> {
-    // UNPORTED(query.face_p1): SmFace::CalculateBoundingBox
+    // DISPATCH GAP: SmFace::CalculateBoundingBox is ported
+    // (`query::face::p1::calculate_bounding_box`, query.face_p1 partial; no UNPORTED
+    // marker), but it takes the face's `Brep` and `FaceId`, which this caller's opaque face
+    // handle does not carry.
     Err(SolidError::unported(
         "SmFace::CalculateBoundingBox",
         "query.face_p1",
@@ -624,7 +627,9 @@ fn face_point_3d_classify<O>(
     _opt_tgt_loops: Option<&[O]>,
     _uv_space_okay: bool,
 ) -> Result<()> {
-    // UNPORTED(query.face_p1): SmFace::Point3DClassify
+    // DISPATCH GAP: SmFace::Point3DClassify is ported (`query::face::p1::point_3d_classify`,
+    // query.face_p1 partial; no UNPORTED marker), but it takes the face's `Brep` and
+    // `FaceId`, which this caller's opaque face handle does not carry.
     Err(SolidError::unported(
         "SmFace::Point3DClassify",
         "query.face_p1",

@@ -1275,8 +1275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateBoundingBox",
-        "unit": "query.face_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "face_api_dependency_2",
@@ -1287,8 +1287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CalculateBoundingBox",
-        "unit": "query.face_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "face_api_dependency_3",
@@ -12262,8 +12262,8 @@
   "deferred_by_unit": {
     "harness:mass.integrator-face-construction": 1,
     "query.brep": 3,
-    "query.face_p1": 2,
-    "topology.brep_p2": 1
+    "topology.brep_p2": 1,
+    "topology.brep_p8": 2
   },
   "max_rel_err": 4.979280456316938e-14,
   "pass": true,

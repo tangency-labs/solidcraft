@@ -355,12 +355,8 @@ fn brep_box(_b: &Brep) -> Result<Extent3d> {
         "query.brep",
     ))
 }
-fn face_box(_b: &Brep, _f: FaceId) -> Result<Extent3d> {
-    // UNPORTED(query.face_p1): SmFace::CalculateBoundingBox
-    Err(SolidError::unported(
-        "SmFace::CalculateBoundingBox",
-        "query.face_p1",
-    ))
+fn face_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
+    crate::query::face::p1::calculate_bounding_box(k, b, f, false)
 }
 fn faces(b: &Brep) -> Result<Vec<FaceId>> {
     crate::topology::brep::p1::faces(b, None)
@@ -551,7 +547,7 @@ fn area_estimate(bbox: &Extent3d) -> f64 {
 }
 /// `SmApiFaceComputeArea`: clamps accuracy and integrates only area.
 pub fn face_area(k: &Kernel, b: &Brep, f: FaceId, accuracy: f64) -> Result<f64> {
-    let bbox = face_box(b, f)?;
+    let bbox = face_box(k, b, f)?;
     Ok(face_properties(
         k,
         b,
@@ -568,7 +564,7 @@ pub fn face_area(k: &Kernel, b: &Brep, f: FaceId, accuracy: f64) -> Result<f64> 
 }
 /// `SmApiFaceComputeCentroid`: one area/first-moment integration.
 pub fn face_centroid(k: &Kernel, b: &Brep, f: FaceId, accuracy: f64) -> Result<(f64, Point3)> {
-    let bbox = face_box(b, f)?;
+    let bbox = face_box(k, b, f)?;
     let origin = bbox.mid();
     let p = face_properties(
         k,

@@ -2044,7 +2044,11 @@ fn point_3d_classify(
         outer_only,
         pc,
     );
-    // UNPORTED(query.face_p1): SmFace::Point3DClassify
+    // DISPATCH GAP: SmFace::Point3DClassify is ported
+    // (`query::face::p1::point_3d_classify`, query.face_p1 partial; no UNPORTED marker),
+    // but it takes `&mut Brep` (for `query::face::p2::point_classify`) and this caller's
+    // chain holds `&Brep`; wire it when the B-rep can be lent mutably here. Until
+    // then every such case would still defer inside it (topology.face_p2 / query.face_p2).
     Err(SolidError::unported(
         "SmFace::Point3DClassify",
         "query.face_p1",

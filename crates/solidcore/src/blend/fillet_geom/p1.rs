@@ -172,8 +172,9 @@
 //!   `SmSurfaceDropCurve::DoTrace` call of `intersect.surface_drop_lib_p1` (its stub
 //!   carries the label `intersect.surface_drop_curve`);
 //!   `SmFace::CreateUVTrimCurves` (`topology.face_p3`, reached through the wired
-//!   `SmFace::CalculateUVDomainFromUVTrimCurves` of `topology.face_p1`) and
-//!   `SmFace::Point3DClassify` (`query.face_p1`) in `sm_ClassifyFacePoint`;
+//!   `SmFace::CalculateUVDomainFromUVTrimCurves` of `topology.face_p1`) and the
+//!   unported callees of `SmFace::Point3DClassify` (wired to `query::face::p1`) in
+//!   `sm_ClassifyFacePoint`;
 //!   `SmFilletSolver::FindIndexOfRailOnFace` (`blend.fillet_solver_p1`) and
 //!   `SmFilletSolver::RailRailIntersect` (`blend.fillet_solver_p2`) in
 //!   `sm_CreateCubicRailRailInterpolant` (the cubic built from their result is ported
@@ -1700,7 +1701,8 @@ impl FilletBrep {
     ///
     /// # Errors
     ///
-    /// Those of [`classify_face_point`] (deferred: `topology.face_p3`, `query.face_p1`);
+    /// Those of [`classify_face_point`] (deferred: `topology.face_p3` and the unported
+    /// callees of `SmFace::Point3DClassify`);
     /// [`SolidError::NotFound`] for dangling ids.
     pub fn update_split_face(
         &mut self,
@@ -2553,27 +2555,47 @@ fn uv_domain_from_uv_trim_curves(
     }
 }
 
-/// `SmFace::Point3DClassify` (unit `query.face_p1`): the classification's point class
-/// and the call's status. `zone_tol_3d` is `SmTol::GetZoneTol3d(pOrigFace)` for both
-/// faces; the flags are upstream's `TRUE` (check boundaries first), `FALSE` (target
-/// loops only), `NULL` (target loops) and `TRUE` (okay to work in UV space).
+/// `SmFace::Point3DClassify` ([`crate::query::face::p1::point_3d_classify`]): the
+/// classification's point class and whether the call returned `SM_SUCCESS` (upstream
+/// compares the status and does not propagate it). `zone_tol_3d` is
+/// `SmTol::GetZoneTol3d(pOrigFace)` for both faces; the flags are upstream's `TRUE`
+/// (check boundaries first), `FALSE` (target loops only), `NULL` (target loops) and
+/// `TRUE` (okay to work in UV space). A failed call keeps the class written before the
+/// failure; an unported callee propagates.
+#[allow(clippy::too_many_arguments)]
 fn point_3d_classify(
-    _k: &Kernel,
-    _brep: &Brep,
-    _face: FaceId,
-    _pos: Point3,
-    _zone_tol_3d: f64,
-    _check_boundaries_first: bool,
-    _guess_uv: Option<Point2>,
-    _target_loops_only: bool,
-    _target_loops: Option<&[crate::topology::LoopId]>,
-    _ok_in_uv_space: bool,
+    k: &Kernel,
+    brep: &mut Brep,
+    face: FaceId,
+    pos: Point3,
+    zone_tol_3d: f64,
+    check_boundaries_first: bool,
+    guess_uv: Option<Point2>,
+    target_loops_only: bool,
+    target_loops: Option<&[crate::topology::LoopId]>,
+    ok_in_uv_space: bool,
 ) -> Result<(PointClassType, bool)> {
-    // UNPORTED(query.face_p1): SmFace::Point3DClassify
-    Err(SolidError::unported(
-        "SmFace::Point3DClassify",
-        "query.face_p1",
-    ))
+    let mut pc = PointClassification::<EntityRef>::new(zone_tol_3d);
+    let r = crate::query::face::p1::point_3d_classify(
+        k,
+        brep,
+        face,
+        pos,
+        zone_tol_3d,
+        check_boundaries_first,
+        &mut pc,
+        crate::query::face::p1::Point3dClassifyOptions {
+            guess_uv,
+            tgt_loops_only: target_loops_only,
+            tgt_loops: target_loops,
+            uv_space_okay: ok_in_uv_space,
+        },
+    );
+    match r {
+        Ok(()) => Ok((pc.point_class(), true)),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok((pc.point_class(), false)),
+    }
 }
 
 /// `sm_ClassifyFacePoint`: which of two faces that were one face before a split
@@ -2585,8 +2607,8 @@ fn point_3d_classify(
 /// # Errors
 ///
 /// [`SolidError::Unported`]: `SmFace::CreateUVTrimCurves` (`topology.face_p3`, through
-/// `SmFace::CalculateUVDomainFromUVTrimCurves`), `SmFace::Point3DClassify`
-/// (`query.face_p1`);
+/// `SmFace::CalculateUVDomainFromUVTrimCurves`), the unported callees of
+/// `SmFace::Point3DClassify` ([`crate::query::face::p1::point_3d_classify`]);
 /// [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`) for a face without a surface.
 pub fn classify_face_point(
     k: &Kernel,

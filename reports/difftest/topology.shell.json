@@ -986,38 +986,26 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateBoundingBox",
-        "unit": "query.face_p1"
-      },
       "max_rel_err": 0.0,
       "name": "degenerate_face_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.shell/degeneracy.json#123 (upstream source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateBoundingBox",
-        "unit": "query.face_p1"
-      },
       "max_rel_err": 0.0,
       "name": "degenerate_face_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.shell/degeneracy.json#124 (upstream source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateBoundingBox",
-        "unit": "query.face_p1"
-      },
       "max_rel_err": 0.0,
       "name": "degenerate_face_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.shell/degeneracy.json#125 (upstream source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox)",
       "values_compared": 0
     },
@@ -7331,14 +7319,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::CalculateBoundingBox",
-        "unit": "query.face_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0011",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=3399982753382270075",
       "values_compared": 0
     },
@@ -7376,13 +7360,12 @@
     }
   ],
   "cases_both_errored": 9,
-  "cases_deferred": 19,
+  "cases_deferred": 15,
   "cases_failed": 0,
-  "cases_passed": 892,
+  "cases_passed": 896,
   "cases_total": 911,
   "deferred_by_unit": {
     "query.brep": 11,
-    "query.face_p1": 4,
     "topology.face_p4": 4
   },
   "max_rel_err": 0.0,

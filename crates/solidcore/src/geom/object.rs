@@ -401,8 +401,10 @@ impl Shape {
             });
         }
         if !faces.is_empty() {
-            // UNPORTED(query.face_p1): SmFace::CalculateBoundingBox (then
-            // SmFace::GetEdges / GetVertices). GetSurface/GetFace are ported.
+            // DISPATCH GAP: SmFace::CalculateBoundingBox (then SmFace::GetEdges /
+            // GetVertices) is ported (`query::face::p1::calculate_bounding_box`,
+            // query.face_p1 partial; no UNPORTED marker), but it takes the face's `Brep`,
+            // which this object handle does not name. GetSurface/GetFace are ported.
             return Err(SolidError::Unported {
                 upstream: "SmFace::CalculateBoundingBox",
                 unit: "query.face_p1",

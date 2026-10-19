@@ -1744,7 +1744,10 @@ fn face_edge_curve_on_classify<O: ClassObject>(
         uv_space_okay,
         face_index,
     );
-    // UNPORTED(query.face_p1): SmFace::EdgeCurveOnClassify
+    // DISPATCH GAP: SmFace::EdgeCurveOnClassify is ported
+    // (`query::face::p1::edge_curve_on_classify`, query.face_p1 partial; no UNPORTED
+    // marker), but it takes the face's `Brep` and `FaceId`, which this caller's opaque face
+    // handle does not carry.
     Err(SolidError::unported(
         "SmFace::EdgeCurveOnClassify",
         "query.face_p1",
@@ -1777,7 +1780,9 @@ fn face_point_3d_classify<O: ClassObject>(
     point_class: &mut PointClassification<O>,
 ) -> Result<()> {
     let _ = (face, point, src_zone_tol_3d, do_xsects, point_class);
-    // UNPORTED(query.face_p1): SmFace::Point3DClassify
+    // DISPATCH GAP: SmFace::Point3DClassify is ported (`query::face::p1::point_3d_classify`,
+    // query.face_p1 partial; no UNPORTED marker), but it takes the face's `Brep` and
+    // `FaceId`, which this caller's opaque face handle does not carry.
     Err(SolidError::unported(
         "SmFace::Point3DClassify",
         "query.face_p1",
