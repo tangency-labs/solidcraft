@@ -351,6 +351,99 @@ struct SplitRound {
     on_b: Option<mt::Curve>,
 }
 
+/// Where the line through `p` along `w` crosses the round `surf` within its own part: `(u, v, λ)`
+/// with S(u, v) = p + w λ. First on the circle of the section `at` (exact for a straight edge
+/// between planes), then on the fitted surface by Newton; a crossing within a hair of a contact
+/// is that contact.
+fn crossing_on_round(surf: &mt::Surface, at: &Section, (p, t, w): (Vec3, Vec3, Vec3), tolerance: f64) -> Option<(f64, f64, f64)> {
+    use mt::{ParametricSurface, SearchNearestParameter};
+    // |perp(p + w λ - c)| = r, a point of the arc from q1 to q2.
+    let perp = |x: Vec3| x - t * x.dot(t);
+    let r = at.c.dist(at.q1);
+    let (d0, dw) = (perp(p - at.c), perp(w));
+    let (qa, qb, qc) = (dw.dot(dw), 2.0 * d0.dot(dw), d0.dot(d0) - r * r);
+    let disc = qb * qb - 4.0 * qa * qc;
+    if !(qa > 1e-300 && disc >= 0.0 && r > 0.0) {
+        return None;
+    }
+    let (a1, a2) = (perp(at.q1 - at.c), perp(at.q2 - at.c));
+    let angle = |x: Vec3, y: Vec3| (x.dot(y) / (x.len() * y.len()).max(1e-300)).clamp(-1.0, 1.0).acos();
+    let span = angle(a1, a2);
+    let guess = [(-qb - disc.sqrt()) / (2.0 * qa), (-qb + disc.sqrt()) / (2.0 * qa)]
+        .into_iter()
+        .map(|l| (l, perp(p + w * l - at.c)))
+        .map(|(l, y)| (l, angle(a1, y) + angle(y, a2) - span))
+        .filter(|(_, off)| *off <= 1e-6)
+        .min_by(|x, y| x.1.total_cmp(&y.1))
+        .map(|(l, _)| l)?;
+    let (mut u, mut v) = surf.search_nearest_parameter(p3(p + w * guess), None, 100)?;
+    let mut lambda = guess;
+    let mut found = false;
+    for _ in 0..60 {
+        let f = from_p3(surf.subs(u, v)) - (p + w * lambda);
+        if !f.is_finite() {
+            return None;
+        }
+        if f.len() <= tolerance * 1e-3 {
+            found = true;
+            break;
+        }
+        let (su, sv) = (surf.uder(u, v), surf.vder(u, v));
+        let m = [[su.x, sv.x, -w.x], [su.y, sv.y, -w.y], [su.z, sv.z, -w.z]];
+        let [du, dv, dl] = crate::polyhedron::solve3_pub(m, [-f.x, -f.y, -f.z])?;
+        let k = if du.abs().max(dv.abs()) > 0.1 { 0.1 / du.abs().max(dv.abs()) } else { 1.0 };
+        u += du * k;
+        v += dv * k;
+        lambda += dl * k;
+    }
+    let edge = (tolerance * 10.0 / (r * span).max(1e-300)).min(1e-3);
+    if !found || !(-edge..=1.0 + edge).contains(&u) || !(-1e-9..=1.0 + 1e-9).contains(&v) {
+        return None;
+    }
+    let u = if u < edge {
+        0.0
+    } else if u > 1.0 - edge {
+        1.0
+    } else {
+        u
+    };
+    Some((u, v, lambda))
+}
+
+/// Where the line through `p` along `w`, lying in the plane of the side whose contact runs at
+/// `u` (0 or 1), meets that contact: `(u, v, λ)` with S(u, v) = p + w λ, by Newton on `v` and `λ`
+/// from `q`, the contact at the end vertex.
+fn crossing_on_contact(surf: &mt::Surface, u: f64, q: Vec3, (p, w): (Vec3, Vec3), tolerance: f64) -> Option<(f64, f64, f64)> {
+    use mt::{ParametricSurface, SearchNearestParameter};
+    let (_, mut v) = surf.search_nearest_parameter(p3(q), None, 100)?;
+    let mut lambda = (q - p).dot(w) / w.len2().max(1e-300);
+    for _ in 0..60 {
+        let f = from_p3(surf.subs(u, v)) - (p + w * lambda);
+        if !f.is_finite() {
+            return None;
+        }
+        if f.len() <= tolerance * 1e-3 {
+            return (-1e-9..=1.0 + 1e-9).contains(&v).then_some((u, v.clamp(0.0, 1.0), lambda));
+        }
+        // Least squares on the two unknowns: the line and the contact lie in one plane.
+        let sv = surf.vder(u, v);
+        let a = Vec3::new(sv.x, sv.y, sv.z);
+        let b = -w;
+        let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
+        let det = aa * bb - ab * ab;
+        if !(det.abs() > 1e-300) {
+            return None;
+        }
+        let (ra, rb) = (-a.dot(f), -b.dot(f));
+        let dv = (ra * bb - rb * ab) / det;
+        let dl = (aa * rb - ab * ra) / det;
+        let k = if dv.abs() > 0.1 { 0.1 / dv.abs() } else { 1.0 };
+        v += dv * k;
+        lambda += dl * k;
+    }
+    None
+}
+
 /// [`SplitRound`] for the round `fit`, whose section at the end vertex is `at` (centre on the
 /// strip's axis along `t` there). The crossing is found on the section's circle and then on the
 /// fitted surface itself; each end is fitted through points where the strip's curves along it
@@ -366,59 +459,16 @@ fn split_round_cap(
     use mt::{ParametricSurface, SearchNearestParameter};
     let fail = || unsupported("the round does not cross the edge between the end faces");
     let surf = &fit.surface;
-    // On the section's circle: |perp(p + w λ - c)| = r, a point of the arc from q1 to q2.
-    let perp = |x: Vec3| x - t * x.dot(t);
-    let r = at.c.dist(at.q1);
-    let (d0, dw) = (perp(p - at.c), perp(w));
-    let (qa, qb, qc) = (dw.dot(dw), 2.0 * d0.dot(dw), d0.dot(d0) - r * r);
-    let disc = qb * qb - 4.0 * qa * qc;
-    if !(qa > 1e-300 && disc >= 0.0 && r > 0.0) {
-        return Err(fail());
-    }
-    let (a1, a2) = (perp(at.q1 - at.c), perp(at.q2 - at.c));
-    let angle = |x: Vec3, y: Vec3| (x.dot(y) / (x.len() * y.len()).max(1e-300)).clamp(-1.0, 1.0).acos();
-    let span = angle(a1, a2);
-    let guess = [(-qb - disc.sqrt()) / (2.0 * qa), (-qb + disc.sqrt()) / (2.0 * qa)]
-        .into_iter()
-        .map(|l| (l, perp(p + w * l - at.c)))
-        .map(|(l, y)| (l, angle(a1, y) + angle(y, a2) - span))
-        .filter(|(_, off)| *off <= 1e-6)
-        .min_by(|x, y| x.1.total_cmp(&y.1))
-        .map(|(l, _)| l)
-        .ok_or_else(fail)?;
-    // On the fitted surface: S(u, v) = p + w λ for u, v, λ by Newton.
-    let start = p + w * guess;
-    let (mut u, mut v) = surf.search_nearest_parameter(p3(start), None, 100).ok_or_else(fail)?;
-    let mut lambda = guess;
-    let mut found = false;
-    for _ in 0..60 {
-        let f = from_p3(surf.subs(u, v)) - (p + w * lambda);
-        if !f.is_finite() {
-            return Err(fail());
+    let along = w.normalized().ok_or_else(fail)?;
+    // A seam whose line lies in a side's plane (that side runs on into the end face along it: a
+    // plate's slanted side under a wall's end flush with it) touches the round at that side's
+    // contact instead of crossing it there.
+    let in_side = [at.q1, at.q2].iter().position(|q| (*q - at.c).normalized().is_some_and(|n| n.dot(along).abs() < 1e-6));
+    let (u, v, lambda) = match in_side {
+        Some(i) => {
+            crossing_on_contact(surf, if i == 0 { 0.0 } else { 1.0 }, if i == 0 { at.q1 } else { at.q2 }, (p, w), tolerance).ok_or_else(fail)?
         }
-        if f.len() <= tolerance * 1e-3 {
-            found = true;
-            break;
-        }
-        let (su, sv) = (surf.uder(u, v), surf.vder(u, v));
-        let m = [[su.x, sv.x, -w.x], [su.y, sv.y, -w.y], [su.z, sv.z, -w.z]];
-        let [du, dv, dl] = crate::polyhedron::solve3_pub(m, [-f.x, -f.y, -f.z]).ok_or_else(fail)?;
-        let k = if du.abs().max(dv.abs()) > 0.1 { 0.1 / du.abs().max(dv.abs()) } else { 1.0 };
-        u += du * k;
-        v += dv * k;
-        lambda += dl * k;
-    }
-    // A crossing within a hair of a contact is that contact.
-    let edge = (tolerance * 10.0 / (r * span).max(1e-300)).min(1e-3);
-    if !found || !(-edge..=1.0 + edge).contains(&u) || !(-1e-9..=1.0 + 1e-9).contains(&v) {
-        return Err(fail());
-    }
-    let u = if u < edge {
-        0.0
-    } else if u > 1.0 - edge {
-        1.0
-    } else {
-        u
+        None => crossing_on_round(surf, at, (p, t, w), tolerance).ok_or_else(fail)?,
     };
     let crossing = p + w * lambda;
     // One end, between the crossing at `u` and the contact at `to` (0 or 1) on face `g`, from
@@ -1496,8 +1546,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
     let mut end_faces: Vec<(usize, usize)> = Vec::new(); // (vertex index, face index)
     // A strip on planar sides can end across two planar faces (an earlier chamfer, or a wall's
     // end flush with the face beneath it). Their shared seam ends where the strip crosses it:
-    // shortened to it where the strip takes material away, run on to it past the vertex where
-    // a round adds material.
+    // shortened to it, or (a round) run on to it past the vertex.
     let mut split_ends: Vec<(usize, usize, usize, mt::Edge)> = Vec::new();
     // Chain ends whose end face is not a plane square to the edge: (vertex, face, point, tangent,
     // the side (1 or 2) the end face is tangent to when it lies along the edge there).
@@ -1985,9 +2034,11 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 let w = from_p3(far.point()) - p;
                 let (fa, fb) = (faces.get(*ga).ok_or_else(fail)?, faces.get(*gb).ok_or_else(fail)?);
                 let end = crate::guard("curve blend split end", || split_round_cap(fit, (fa, fb), &at, (p, t, w), both, fit_tolerance))?;
-                // A convex round takes material away: it crosses the seam short of its far end. A
-                // concave one adds material, and may cross the seam's line past the vertex.
-                let crosses = end.fraction < 1.0 - 1e-6 && if convex { end.fraction > 1e-6 } else { end.fraction.abs() > 1e-6 };
+                // The round crosses the seam short of its far end (two bevels at the end of a rim),
+                // or its line past the vertex, which the seam then runs on to: a round adding
+                // material at a wall's foot, or one taking it away along a plate's top edge that
+                // runs into a wall standing on the plate (the wall's face runs on down to it).
+                let crosses = end.fraction < 1.0 - 1e-6 && end.fraction.abs() > 1e-6;
                 if !crosses {
                     return Err(too_large("the blend is larger than the neighbouring faces (split round end)"));
                 }

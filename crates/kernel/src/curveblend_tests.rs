@@ -857,3 +857,68 @@ fn round_the_foot_of_a_wall_flush_with_the_plate_sides() {
     assert_eq!(wide.crossed_face_loops().unwrap(), 0);
     assert!(fillet(&body, &picks, 4.5).is_err());
 }
+
+#[test]
+fn round_the_plate_top_edge_up_to_the_wall_ends() {
+    // The plate's outer top edge, from one end of the wall to the other, rounded once its
+    // corners are round: a convex chain whose ends meet the wall standing on the plate. The
+    // seam between the wall's face and its end runs up from the chain's end, in the plane of the
+    // plate's side: the round meets it at the side's contact, and the wall's face runs on down to
+    // the round (the plate beneath the wall is kept).
+    let rounded = 2.0;
+    let mut body = wall_on_a_plate();
+    let outline =
+        [Vec3::new(0.0, 2.0, 0.0), Vec3::new(12.0, 10.0, 0.0), Vec3::new(28.0, 10.0, 0.0), Vec3::new(28.0, -4.0, 0.0), Vec3::new(20.0, -20.0, 0.0)];
+    body = fillet(&body, &outline[1..4].iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect::<Vec<_>>(), rounded).unwrap();
+    // Each corner: its turn, the setback of its round along both lines and the arc's middle.
+    let dir = |a: Vec3, b: Vec3| (b - a).normalized().unwrap();
+    let corners: Vec<(f64, f64, Vec3)> = (1..4)
+        .map(|i| {
+            let (a, b) = (dir(outline[i - 1], outline[i]), dir(outline[i], outline[i + 1]));
+            let turn = a.dot(b).clamp(-1.0, 1.0).acos();
+            let inward = (b - a).normalized().unwrap();
+            let centre = outline[i] + inward * (rounded / (std::f64::consts::FRAC_PI_2 - turn / 2.0).sin());
+            (turn, rounded * (turn / 2.0).tan(), centre - inward * rounded)
+        })
+        .collect();
+    let top = Vec3::new(0.0, 0.0, 2.0);
+    let mut picks: Vec<Vec3> = outline.windows(2).map(|w| (w[0] + w[1]) * 0.5 + top).collect();
+    picks.extend(corners.iter().map(|c| c.2 + top));
+    let r = 0.5;
+    let result = fillet(&body, &picks, r).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    // A point `s` in from the plate's side (and `h` below its top) is taken away along the lines
+    // between the corners' rounds and round each corner's turn at the radius `rounded - s`, less
+    // where the wall stands: the plane of its face cuts the run back by 1.5 s at the first end
+    // (the line along (12, 8) meeting y = 2) and 2 s at the other (along (8, 16) meeting x = 20).
+    let lines: f64 = outline
+        .windows(2)
+        .enumerate()
+        .map(|(i, w)| {
+            let back = |k: usize| if (1..4).contains(&k) { corners[k - 1].1 } else { 0.0 };
+            w[0].dist(w[1]) - back(i) - back(i + 1)
+        })
+        .sum();
+    let turns: f64 = corners.iter().map(|c| c.0).sum();
+    let removed = round_section_integral(|s, _| {
+        let s = s * r;
+        lines + turns * (rounded - s) - 3.5 * s
+    }) * r
+        * r;
+    // The mesh inside the round's curve takes a few thousandths more; ends not cut back by the
+    // wall at all would be 0.02 off.
+    let lost = planned_volume(&body) - planned_volume(&result);
+    assert!((lost - removed).abs() < 0.006, "removed {lost}, expected {removed}");
+    // The round meets the seam up the wall's corner at the plate side's contact, 0.5 below the
+    // plate's top: one vertex there at each end, and the old corners are gone.
+    for p in [Vec3::new(0.0, 2.0, 2.0 - r), Vec3::new(20.0, -20.0, 2.0 - r)] {
+        let ids: std::collections::HashSet<_> = result.solid.vertex_iter().filter(|v| from_p3(v.point()).dist(p) < 1e-6).map(|v| v.id()).collect();
+        assert_eq!(ids.len(), 1, "{p:?}");
+    }
+    for p in [Vec3::new(0.0, 2.0, 2.0), Vec3::new(20.0, -20.0, 2.0)] {
+        assert!(!result.solid.vertex_iter().any(|v| from_p3(v.point()).dist(p) < 1e-6), "{p:?}");
+    }
+    // Deeper than the plate is thick: refused.
+    assert!(fillet(&body, &picks, 2.5).is_err());
+}
