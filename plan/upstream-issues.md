@@ -1002,12 +1002,12 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 
 #### UB-154. `sm_GetEllipseTrimIntervals` reads the parameter of a failed line/plane intersection
 - **Location:** `source/SMLib/src/SmCone.cpp:5399`-`5405` and `:5463`-`5477`, `sm_GetEllipseTrimIntervals` (def. `:5282`, file static).
-- **What happens:** The statuses of `smgu_LinePlaneIntersect` for the two seam lines are ignored and `dParam[0]`, `dParam[1]` (uninitialised) are then compared and used. The same happens with the domain of a failed `ConvertDomainFromNURBSToSTEP` (default-constructed).
+- **What happens:** The statuses of `smgu_LinePlaneIntersect` for the two seam lines are ignored and `dParam[0]`, `dParam[1]` (uninitialised) are then compared and used. (The status of `ConvertDomainFromNURBSToSTEP` at `:5325` is ignored too, but that is defined: a failed corner conversion, e.g. of a cone without a polar curve, leaves the default-constructed domain, and a reversed one the NURB domain.)
 - **Trigger:** A seam line of the trimmed cone parallel to the ellipse plane (or of zero length, a zero-height trim domain).
 - **How found:** read during porting (`surface.cone_p2`, PR #153).
 - **Confirmed:** no. The shim runs the same calls first and refuses such inputs.
 - **Severity:** UB (uninitialised read).
-- **Rust port:** The errors are returned.
+- **Rust port:** The line/plane errors are returned. The ignored domain conversion is mirrored (fixture `surface.cone_p3/fuzz_trim_domain.json`).
 
 #### UB-202. `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` indexes past its cross sections in the second pass of a ruled or revolved surface
 - **Location:** `source/SMLib/src/SmFilletStandardSolver.cpp:3233` (`SmCircularCrossSectionFSG::CreateSurfaceFromCurves`): the first pass skips to the last knot for sweeps and revolves (`:3435`), so it stores three cross sections; the second pass (`m_bApproximateArcs` with differing unique knot counts) indexes `sCrossSections[lKnotIndex]` with `lKnotIndex` the knot index (`:3504`, `:3613`, `:3636`, `:3756`), which is at least 3 for the last knot.

@@ -879,9 +879,9 @@ enum Inside {
 /// # Errors
 ///
 /// Those of [`Ellipse::new`] and [`Cone::height`]; a seam line parallel to the
-/// ellipse plane or of zero length, and a failed NURB to STEP conversion of the domain
-/// corners (upstream then reads uninitialised values); a STEP inversion failing in the
-/// generator solve.
+/// ellipse plane or of zero length (upstream then reads uninitialised values); a STEP
+/// inversion failing in the generator solve. A failed NURB to STEP conversion of the
+/// domain corners is ignored as upstream does: the default-constructed domain is used.
 pub fn ellipse_trim_intervals(
     k: &Kernel,
     ellipse_origin: Point3,
@@ -924,21 +924,25 @@ pub fn ellipse_trim_intervals(
     let center_bot = cone.rev.position.origin() + cone.rev.anal_uv_domain.min().y * cone_axis;
     let center_top = center_bot + height * cone_axis;
 
-    // map given NurbDomain into StepDomain (SmSurface::ConvertDomainFromNURBSToSTEP:
-    // a reversed result is replaced by the NURB domain)
-    let min_step_uv = cone.convert_uv_from_nurbs_to_step(k, uv_domain.min())?;
-    let max_step_uv = cone.convert_uv_from_nurbs_to_step(k, uv_domain.max())?;
+    // map given NurbDomain into StepDomain (SmSurface::ConvertDomainFromNURBSToSTEP,
+    // status ignored: a failed corner conversion leaves the default-constructed
+    // domain, a reversed result is replaced by the NURB domain)
     let mut anal_uv_domain = Extent2d::new();
-    if anal_uv_domain
-        .set_min_max_coords(
-            min_step_uv.x,
-            min2(min_step_uv.y, max_step_uv.y),
-            max_step_uv.x,
-            max2(min_step_uv.y, max_step_uv.y),
-        )
-        .is_err()
-    {
-        anal_uv_domain = *uv_domain;
+    if let Some(min_step_uv) = ignored(cone.convert_uv_from_nurbs_to_step(k, uv_domain.min()))? {
+        if let Some(max_step_uv) = ignored(cone.convert_uv_from_nurbs_to_step(k, uv_domain.max()))?
+        {
+            if anal_uv_domain
+                .set_min_max_coords(
+                    min_step_uv.x,
+                    min2(min_step_uv.y, max_step_uv.y),
+                    max_step_uv.x,
+                    max2(min_step_uv.y, max_step_uv.y),
+                )
+                .is_err()
+            {
+                anal_uv_domain = *uv_domain;
+            }
+        }
     }
 
     // get cone corners [StartLine start, StartLine end, EndLine start EndLine end]

@@ -1590,6 +1590,14 @@
       "values_compared": 5
     },
     {
+      "max_rel_err": 0.0,
+      "name": "fuzz_trim_domain_02497",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.cone_p3/fuzz_trim_domain.json#0 (upstream source/SMLib/src/SmCone.cpp:5325 (sm_GetEllipseTrimIntervals ignores ConvertDomainFromNURBSToSTEP status; zero Y axis leaves no polar curve))",
+      "values_compared": 59
+    },
+    {
       "both_errored": true,
       "max_rel_err": 0.0,
       "name": "rejected_tiny_axis_0_cone",
@@ -11473,8 +11481,8 @@
   "cases_both_errored": 8,
   "cases_deferred": 35,
   "cases_failed": 0,
-  "cases_passed": 1380,
-  "cases_total": 1415,
+  "cases_passed": 1381,
+  "cases_total": 1416,
   "deferred_by_unit": {
     "surface.surface_p2": 35
   },
