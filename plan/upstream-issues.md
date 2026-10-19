@@ -1868,6 +1868,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB (null dereference). A crafted file with an old healer version reaches it through `ReadFromFile`.
 - **Rust port:** not reached; the `topology.brep_p10` runner rejects healing requests on such data (`crates/difftest/src/units/topology_brep_p10.rs:182` `heal_guard`).
 
+#### UB-175. `SmFilletVertex::CalcVertOnVert` dereferences a missing or non-vertex classification object
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:2337-2345` (`SmFilletVertex::CalcVertOnVert`), reached from `SmFilletVertex::CalcCornerVertGeom` (`:1434`) for an `SM_FV_ON_VERTEX` vertex.
+- **What happens:** `(SmVertex*)GetPointClassObject()` is used without a check: a vertex whose point classification has no object dereferences `NULL` in `pVert->GetPoint()`, and an object of another kind (an edge use or face) is cast blindly and read as a vertex. There is no `NER` as in the sibling calculators.
+- **Trigger:** `CalcCornerVertGeom()` on an `SM_FV_ON_VERTEX` fillet vertex whose classification object is `NULL` or not an `SmVertex`.
+- **How found:** read during porting (`blend.fillet_geom_p3`, PR #242).
+- **Confirmed:** no (the difftest shim refuses such models, `SC_ERR_ARG`).
+- **Severity:** crash (NULL dereference) / UB (wrong-type cast).
+- **Rust port:** `FilletBrep::calc_vert_on_vert` returns `SM_ERR_NULL_POINTER` without an object and `SolidError::InvalidInput` for an object that is not a vertex.
+
+#### UB-176. `SmFilletVertex::CalcMateGeom` recurses without bound through a cycle of mates
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:3480-3490` (`SmFilletVertex::CalcMateGeom`: `pMainFV->CalcCornerVertGeom()`), with `CalcCornerVertGeom` (`:1434`) calling `CalcMateGeom` for an `SM_FV_MATE` vertex.
+- **What happens:** A mate computes its main vertex (`GetMate(0)`) first, unprocessed, through `CalcCornerVertGeom`; when the main vertex is itself an unprocessed mate whose `GetMate(0)` leads back (a cycle of `SM_FV_MATE` vertices, including a vertex that is its own mate), the two calls recurse until the stack overflows. Nothing marks a vertex as in progress.
+- **Trigger:** two unprocessed `SM_FV_MATE` fillet vertices that are each other's `GetMate(0)`.
+- **How found:** read during porting (`blend.fillet_geom_p3`, PR #242).
+- **Confirmed:** no (the difftest shim refuses mate cycles, `SC_ERR_ARG`).
+- **Severity:** crash (stack overflow).
+- **Rust port:** the nesting is bounded by `blend::fillet_geom::p3::MAX_MATE_DEPTH` (64; upstream's corners nest it at most once); deeper nesting is `SolidError::InvalidInput`.
+
 ### Healer target management
 
 #### HANG-32. `SmBrep::CreateParallelProjectionCurves` spins on a subnormal approximation tolerance

@@ -7,6 +7,4 @@
 //! `blend.fillet_geom_p6`); each part is a submodule.
 
 pub mod p1;
-pub mod p2;
-pub mod p4;
-pub mod p5;
+pub mod p3;

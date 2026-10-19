@@ -1,0 +1,3353 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "mate_on_mouse_face",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#0 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "mate_direct_on_solid",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#1 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "mate_chain_unclassified_main",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#2 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "mate_not_on_rail_sm_err",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#3 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "on_vertex",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#4 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fillet_x_fillet_trim",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#5 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "corner_edge_fillet_x_fillet_trim",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#6 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "corner_edge_rail_noop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#7 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "corner_edge_no_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#8 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "recalc_rollover_missing_rail",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#9 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "recalc_setup_fails",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#10 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 98
+    },
+    {
+      "inputs": {
+        "brep": {
+          "file": "Endcap.smb",
+          "kind": "file",
+          "rebuild": false
+        },
+        "expected_rejection": true,
+        "model": {
+          "edges": [],
+          "geoms": [],
+          "solvers": [],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 101,
+              "pc_face": -1,
+              "pc_index": 946,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 4
+            }
+          ]
+        },
+        "op": "corner_vert",
+        "v": 0
+      },
+      "max_rel_err": 0.0,
+      "name": "regress_on_vertex_unclassified",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#11 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcVertOnVert dereferences a NULL classification object (fuzz crash)))",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "e": 0,
+        "expected_rejection": true,
+        "model": {
+          "edges": [
+            {
+              "corner": 0,
+              "curve": {
+                "cpts": [
+                  [0.0, -0.038400690139145155, -0.14663428139851056, -1.7976931348623157e+308],
+                  [0.3333333333333333, -0.25141616288031676, 0.15676015114861314, -1.7976931348623157e+308],
+                  [0.6666666666666666, 0.11098085999663299, -0.2046366554711323, -1.7976931348623157e+308],
+                  [1.0, 0.20469679847891115, 0.05727573998034918, -1.7976931348623157e+308]
+                ],
+                "dim": 3,
+                "p": 3,
+                "u": [-1.1601596177252906, -1.1601596177252906, -1.1601596177252906, -1.1601596177252906, 1.573325500887563, 1.573325500887563, 1.573325500887563, 1.573325500887563]
+              },
+              "etype": 6,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "uv_curve": {
+                    "cpts": [
+                      [0.0, 0.13698372213903015, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [1.0, 0.19607360832048065, 1.7976931348623157e+308, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 1,
+                    "u": [-1.1601596177252906, -1.1601596177252906, 1.573325500887563, 1.573325500887563]
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 1,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "uv_curve": {
+                    "cpts": [
+                      [0.0, 0.05291385100981916, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.25, -0.12453229247536554, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.5, 0.03692505519031214, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.75, 0.28800976023023556, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [1.0, -0.28979352764383065, 1.7976931348623157e+308, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 2,
+                    "u": [-1.1601596177252906, -1.1601596177252906, -1.1601596177252906, -0.8114003825861562, 0.719860404637725, 1.573325500887563, 1.573325500887563, 1.573325500887563]
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "interval": [-1.1601596177252906, 1.573325500887563],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            }
+          ],
+          "geoms": [
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [-1, -1],
+              "sides": [],
+              "solver": 0,
+              "status": 0,
+              "surface": {
+                "bspline": {
+                  "form": 0,
+                  "net": [
+                    [
+                      [0.0, 0.0, -0.1309702770341108, -1.7976931348623157e+308],
+                      [0.0, 0.5, -0.004865645253537998, -1.7976931348623157e+308],
+                      [0.0, 1.0, -0.035847804683180884, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.2, 0.0, -0.16448702780428595, -1.7976931348623157e+308],
+                      [0.2, 0.5, -0.16404382943068346, -1.7976931348623157e+308],
+                      [0.2, 1.0, -0.16902688315930867, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.4, 0.0, 0.045153304772143826, -1.7976931348623157e+308],
+                      [0.4, 0.5, -0.16711779829463366, -1.7976931348623157e+308],
+                      [0.4, 1.0, 0.042899254768232364, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.6, 0.0, -0.0014278777122453956, -1.7976931348623157e+308],
+                      [0.6, 0.5, 0.07200553671411158, -1.7976931348623157e+308],
+                      [0.6, 1.0, 0.04713953329344872, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.8, 0.0, -0.09743277096086521, -1.7976931348623157e+308],
+                      [0.8, 0.5, 0.04550156413278525, -1.7976931348623157e+308],
+                      [0.8, 1.0, -0.1989357658925231, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [1.0, 0.0, 0.08580430969249508, -1.7976931348623157e+308],
+                      [1.0, 0.5, 0.1870327947935011, -1.7976931348623157e+308],
+                      [1.0, 1.0, -0.00905389632545095, -1.7976931348623157e+308]
+                    ]
+                  ],
+                  "oob": false,
+                  "p": 3,
+                  "q": 2,
+                  "u": [0.0, 0.0, 0.0, 0.0, 0.4453875594383863, 0.6124511378938046, 1.0, 1.0, 1.0, 1.0],
+                  "v": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+                }
+              }
+            },
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [-1, -1],
+              "sides": [],
+              "solver": 1,
+              "status": 0,
+              "surface": {
+                "bspline": {
+                  "form": 0,
+                  "net": [
+                    [
+                      [0.0, 0.0, 0.5647123799284471, -1.7976931348623157e+308],
+                      [0.0, 0.2, 0.4861777186479778, -1.7976931348623157e+308],
+                      [0.0, 0.4, 0.3438032747973472, -1.7976931348623157e+308],
+                      [0.0, 0.6, 0.6125508120099792, -1.7976931348623157e+308],
+                      [0.0, 0.8, 0.31679383431742336, -1.7976931348623157e+308],
+                      [0.0, 1.0, 0.39155495532082485, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.2, 0.0, 0.45442269529673734, -1.7976931348623157e+308],
+                      [0.2, 0.2, 0.38611231126997697, -1.7976931348623157e+308],
+                      [0.2, 0.4, 0.5551791787211815, -1.7976931348623157e+308],
+                      [0.2, 0.6, 0.3185743655934942, -1.7976931348623157e+308],
+                      [0.2, 0.8, 0.6341519243691424, -1.7976931348623157e+308],
+                      [0.2, 1.0, 0.6704457770885545, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.4, 0.0, 0.5960541083394497, -1.7976931348623157e+308],
+                      [0.4, 0.2, 0.48033014330346385, -1.7976931348623157e+308],
+                      [0.4, 0.4, 0.4712328903050302, -1.7976931348623157e+308],
+                      [0.4, 0.6, 0.33308109317604395, -1.7976931348623157e+308],
+                      [0.4, 0.8, 0.606589559382529, -1.7976931348623157e+308],
+                      [0.4, 1.0, 0.4783403906666921, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.6, 0.0, 0.4974040903349381, -1.7976931348623157e+308],
+                      [0.6, 0.2, 0.37645184401095955, -1.7976931348623157e+308],
+                      [0.6, 0.4, 0.31814428574374864, -1.7976931348623157e+308],
+                      [0.6, 0.6, 0.4449022755127296, -1.7976931348623157e+308],
+                      [0.6, 0.8, 0.42800730821267896, -1.7976931348623157e+308],
+                      [0.6, 1.0, 0.6099015968784403, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.8, 0.0, 0.5935712627508629, -1.7976931348623157e+308],
+                      [0.8, 0.2, 0.34081230755227176, -1.7976931348623157e+308],
+                      [0.8, 0.4, 0.6489763346996347, -1.7976931348623157e+308],
+                      [0.8, 0.6, 0.44981630768199554, -1.7976931348623157e+308],
+                      [0.8, 0.8, 0.4063800803818572, -1.7976931348623157e+308],
+                      [0.8, 1.0, 0.3892718644924701, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [1.0, 0.0, 0.6243227512744376, -1.7976931348623157e+308],
+                      [1.0, 0.2, 0.6600770666080011, -1.7976931348623157e+308],
+                      [1.0, 0.4, 0.5436971733342727, -1.7976931348623157e+308],
+                      [1.0, 0.6, 0.38892249538342444, -1.7976931348623157e+308],
+                      [1.0, 0.8, 0.32413638228128727, -1.7976931348623157e+308],
+                      [1.0, 1.0, 0.3264184534603025, -1.7976931348623157e+308]
+                    ]
+                  ],
+                  "oob": false,
+                  "p": 3,
+                  "q": 3,
+                  "u": [0.0, 0.0, 0.0, 0.0, 0.3814236027290075, 0.407704206556651, 1.0, 1.0, 1.0, 1.0],
+                  "v": [0.0, 0.0, 0.0, 0.0, 0.5960609524833095, 0.7130857390842616, 1.0, 1.0, 1.0, 1.0]
+                }
+              }
+            }
+          ],
+          "solvers": [
+            {
+              "ang": 0.03261280515723304,
+              "eus": [-1, -1],
+              "extend": [false, false],
+              "setup": false,
+              "surfs": [null, null],
+              "tang": 0.01,
+              "tol": 0.01
+            },
+            {
+              "ang": 0.015841780035900237,
+              "eus": [-1, -1],
+              "extend": [false, false],
+              "setup": false,
+              "surfs": [null, null],
+              "tang": 0.01,
+              "tol": 1e-6
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.4367297711816502, -0.05858819685443901, -0.022280839484916083],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 1
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.8294084275933296, 0.13746877084100356, -0.028741466185787254],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 1
+            }
+          ]
+        },
+        "op": "corner_edge"
+      },
+      "max_rel_err": 0.0,
+      "name": "regress_corner_edge_on_edge",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#12 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcEdgeOnEdge (blend.fillet_geom_p6) on the shim model crashes (fuzz crash)))",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "analytic": true,
+        "brep": {
+          "file": "Mouse.smb",
+          "kind": "file",
+          "rebuild": false
+        },
+        "expected_rejection": true,
+        "g": 0,
+        "model": {
+          "edges": [
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.44877898088908386, 0.7144625649180669, 0.4476064470610508],
+                    "deriv": [0.011585777127972374, -0.7662294390034798, -0.2708223316874836],
+                    "ptype": 2,
+                    "uv": [
+                      [0.8592886035275438, 0.5085768221797712],
+                      [0.7609370955678613, 0.11504704150611189]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [-0.08516380515022348, -0.30300412339722405, 0.020526062271876144],
+                    "deriv": [0.9039786170839681, -0.7084544111772131, -0.019090816500582086],
+                    "ptype": 1,
+                    "uv": [
+                      [0.15827124542613158, 0.6306048930538288],
+                      [0.5225210066038246, 0.9599576236625199]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [-0.7912767119443183, -0.45014375862386347, -0.17326578232639323],
+                    "deriv": [0.8472223141027706, 0.20096152531503342, -0.41580491251158924],
+                    "ptype": 1,
+                    "uv": [
+                      [0.26440060019453804, 0.07480688229939358],
+                      [0.20217651155941985, 0.9683357335948422]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.02720784785806485, 0.20038659869098252, -0.04129266574645585],
+                    "deriv": [0.03807866158895923, 0.054466712146863605, 0.23968132209296278],
+                    "ptype": 1,
+                    "uv": [
+                      [0.31278919126929217, 0.8015685282532625],
+                      [0.35157554549999603, 0.8245319924751325]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 3,
+              "vs": 2
+            }
+          ],
+          "geoms": [
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [],
+              "solver": 0,
+              "status": 0
+            }
+          ],
+          "solvers": [
+            {
+              "ang": 0.05,
+              "eus": [66, 652],
+              "extend": [false, true],
+              "setup": false,
+              "surfs": [
+                {
+                  "base": {
+                    "bspline": {
+                      "form": 0,
+                      "net": [
+                        [
+                          [0.0, 0.0, 0.2804687374272176, -1.7976931348623157e+308],
+                          [0.0, 0.5, 0.397002950640871, -1.7976931348623157e+308],
+                          [0.0, 1.0, 0.4145641860615516, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.25, 0.0, 0.4504106573092238, -1.7976931348623157e+308],
+                          [0.25, 0.5, 0.4749043805135977, -1.7976931348623157e+308],
+                          [0.25, 1.0, 0.37560431345661316, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.5, 0.0, 0.5376087365246385, -1.7976931348623157e+308],
+                          [0.5, 0.5, 0.5489879188821565, -1.7976931348623157e+308],
+                          [0.5, 1.0, 0.5195571178182932, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.75, 0.0, 0.47585284577639364, -1.7976931348623157e+308],
+                          [0.75, 0.5, 0.5455205474936691, -1.7976931348623157e+308],
+                          [0.75, 1.0, 0.4577291202700572, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [1.0, 0.0, 0.38155683403156154, -1.7976931348623157e+308],
+                          [1.0, 0.5, 0.4713725676651887, -1.7976931348623157e+308],
+                          [1.0, 1.0, 0.5155512415270864, -1.7976931348623157e+308]
+                        ]
+                      ],
+                      "oob": false,
+                      "p": 2,
+                      "q": 2,
+                      "u": [0.0, 0.0, 0.0, 0.335714989389555, 0.3872293512244931, 1.0, 1.0, 1.0],
+                      "v": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+                    }
+                  },
+                  "dist": -0.02657662463320537
+                },
+                {
+                  "base": {
+                    "bspline": {
+                      "form": 0,
+                      "net": [
+                        [
+                          [0.0, 0.0, -0.5057423502333951, -1.7976931348623157e+308],
+                          [0.0, 0.3333333333333333, -0.25524097949260116, -1.7976931348623157e+308],
+                          [0.0, 0.6666666666666666, -0.25728480619730915, -1.7976931348623157e+308],
+                          [0.0, 1.0, -0.41666474055360625, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.5, 0.0, -0.497051953980421, -1.7976931348623157e+308],
+                          [0.5, 0.3333333333333333, -0.48746156514935435, -1.7976931348623157e+308],
+                          [0.5, 0.6666666666666666, -0.5166881078779076, -1.7976931348623157e+308],
+                          [0.5, 1.0, -0.49672554986512185, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [1.0, 0.0, -0.4399519893456696, -1.7976931348623157e+308],
+                          [1.0, 0.3333333333333333, -0.25863876309701833, -1.7976931348623157e+308],
+                          [1.0, 0.6666666666666666, -0.3559327834519744, -1.7976931348623157e+308],
+                          [1.0, 1.0, -0.5570675066098978, -1.7976931348623157e+308]
+                        ]
+                      ],
+                      "oob": false,
+                      "p": 2,
+                      "q": 3,
+                      "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                      "v": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+                    }
+                  },
+                  "dist": -0.1189944499146777
+                }
+              ],
+              "tang": 0.01,
+              "tol": 0.0001
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 9
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 9
+            }
+          ]
+        },
+        "op": "re_calc"
+      },
+      "max_rel_err": 0.0,
+      "name": "regress_recalc_analytic_default",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#13 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcConeFilletGeom (blend.fillet_solver_p2) on the shim solver crashes))",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "brep": {
+          "file": "Mouse.smb",
+          "kind": "file",
+          "rebuild": false
+        },
+        "expected_rejection": true,
+        "model": {
+          "edges": [
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.3506053001806921, 0.7132381333634438],
+                      [0.2731097107298224, 0.11853610164272149]
+                    ],
+                    "uv_face": 242
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 2,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 3,
+              "vs": 1
+            }
+          ],
+          "geoms": [
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [],
+              "solver": 0,
+              "status": 0
+            }
+          ],
+          "solvers": [
+            {
+              "ang": 0.01,
+              "eus": [833, 51],
+              "extend": [false, false],
+              "setup": false,
+              "surfs": [null, null],
+              "tang": 0.01,
+              "tol": 1e-6
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [1, -1],
+              "pc_class": 102,
+              "pc_face": -1,
+              "pc_index": 704,
+              "pc_kind": 2,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [0, -1],
+              "pc_class": 103,
+              "pc_face": -1,
+              "pc_index": 242,
+              "pc_kind": 3,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.8668082764313509, -0.8017302873747743],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 7
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 7
+            }
+          ]
+        },
+        "op": "corner_vert",
+        "v": 1
+      },
+      "max_rel_err": 0.0,
+      "name": "regress_mate_cycle",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#14 (upstream source/SMLib/src/SmFilletGeom.cpp (mates whose main vertices form a cycle recurse without end upstream))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587805",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587806",
+      "values_compared": 145
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587807",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587808",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587809",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "sm_SrfSrfIntersection",
+        "unit": "blend.fillet_geom_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587810",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587811",
+      "values_compared": 143
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587812",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587813",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587814",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587815",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587816",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587817",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587818",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587819",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587820",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587821",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587822",
+      "values_compared": 146
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587823",
+      "values_compared": 129
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587824",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587825",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587826",
+      "values_compared": 46
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587827",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587828",
+      "values_compared": 158
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587829",
+      "values_compared": 135
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587830",
+      "values_compared": 135
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587831",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587832",
+      "values_compared": 149
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587833",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587834",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587835",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587836",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587837",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587838",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587839",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587840",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587841",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587842",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587843",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587844",
+      "values_compared": 120
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587845",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587846",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587847",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587848",
+      "values_compared": 119
+    },
+    {
+      "max_rel_err": 5.05690623323892e-16,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587849",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587850",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587851",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587852",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587853",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587854",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587855",
+      "values_compared": 153
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587856",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 1.7116064157139003e-15,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587857",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587858",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587859",
+      "values_compared": 119
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587860",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587861",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587862",
+      "values_compared": 132
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587863",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587864",
+      "values_compared": 146
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587865",
+      "values_compared": 120
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587866",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587867",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587868",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587869",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587870",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587871",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587872",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587873",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587874",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587875",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587876",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587877",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587878",
+      "values_compared": 153
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587879",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587880",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587881",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587882",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587883",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587884",
+      "values_compared": 118
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587885",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587886",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587887",
+      "values_compared": 158
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587888",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587889",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587890",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587891",
+      "values_compared": 143
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587892",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587893",
+      "values_compared": 136
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587894",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587895",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587896",
+      "values_compared": 132
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587897",
+      "values_compared": 46
+    },
+    {
+      "deferred": {
+        "symbol": "sm_SrfSrfIntersection",
+        "unit": "blend.fillet_geom_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587898",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587899",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587900",
+      "values_compared": 147
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587901",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587902",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587903",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587904",
+      "values_compared": 164
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587905",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587906",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "sm_SrfSrfIntersection",
+        "unit": "blend.fillet_geom_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587907",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587908",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587909",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587910",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587911",
+      "values_compared": 136
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587912",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587913",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587914",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587915",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587916",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587917",
+      "values_compared": 94
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587918",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587919",
+      "values_compared": 120
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587920",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587921",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587922",
+      "values_compared": 141
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587923",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587924",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587925",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587926",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 3.663446558865142e-14,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587927",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587928",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587929",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587930",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587931",
+      "values_compared": 148
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587932",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587933",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587934",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587935",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587936",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587937",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587938",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587939",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587940",
+      "values_compared": 148
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587941",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 2.6353324174235425e-15,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587942",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587943",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587944",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587945",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587946",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587947",
+      "values_compared": 129
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587948",
+      "values_compared": 94
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587949",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587950",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587951",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587952",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587953",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587954",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587955",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587956",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587957",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587958",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587959",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 1.3630745899780924e-15,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587960",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587961",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587962",
+      "values_compared": 137
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587963",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587964",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587965",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587966",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587967",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587968",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587969",
+      "values_compared": 129
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587970",
+      "values_compared": 158
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587971",
+      "values_compared": 94
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587972",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587973",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587974",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587975",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587976",
+      "values_compared": 146
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587977",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587978",
+      "values_compared": 158
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587979",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587980",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587981",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587982",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587983",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587984",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587985",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587986",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587987",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587988",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587989",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587990",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587991",
+      "values_compared": 126
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587992",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587993",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587994",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587995",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587996",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587997",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587998",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 1.80811704665081e-16,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587999",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588000",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588001",
+      "values_compared": 94
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588002",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588003",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588004",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588005",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588006",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588007",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588008",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588009",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588010",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588011",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588012",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588013",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588014",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588015",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588016",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588017",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588018",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588019",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588020",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588021",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588022",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588023",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588024",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588025",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588026",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588027",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588028",
+      "values_compared": 123
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588029",
+      "values_compared": 120
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588030",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588031",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588032",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588033",
+      "values_compared": 135
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588034",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588035",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588036",
+      "values_compared": 116
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588037",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588038",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588039",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_SrfSrfIntersection",
+        "unit": "blend.fillet_geom_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588040",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588041",
+      "values_compared": 94
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588042",
+      "values_compared": 120
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588043",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588044",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588045",
+      "values_compared": 152
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588046",
+      "values_compared": 119
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588047",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588048",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588049",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588050",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588051",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588052",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588053",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588054",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588055",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588056",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588057",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588058",
+      "values_compared": 131
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588059",
+      "values_compared": 146
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588060",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588061",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588062",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588063",
+      "values_compared": 119
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588064",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588065",
+      "values_compared": 157
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588066",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 3.8579792777919006e-16,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588067",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588068",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588069",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588070",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588071",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588072",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588073",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588074",
+      "values_compared": 114
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588075",
+      "values_compared": 128
+    },
+    {
+      "max_rel_err": 5.476161056465913e-16,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588076",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588077",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588078",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588079",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588080",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588081",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588082",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588083",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588084",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588085",
+      "values_compared": 98
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletIntersector::SmFilletIntersector",
+        "unit": "blend.fillet_intersector"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715588086",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 2.3391020088847994e-16,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588087",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588088",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588089",
+      "values_compared": 143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588090",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588091",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588092",
+      "values_compared": 124
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588093",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588094",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588095",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588096",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588097",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588098",
+      "values_compared": 152
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588099",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588100",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588101",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588102",
+      "values_compared": 154
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588103",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588104",
+      "values_compared": 94
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 28,
+  "cases_failed": 0,
+  "cases_passed": 283,
+  "cases_rejected": 4,
+  "cases_total": 315,
+  "deferred_by_unit": {
+    "blend.fillet_geom_p2": 4,
+    "blend.fillet_geom_p5": 11,
+    "blend.fillet_intersector": 13
+  },
+  "max_rel_err": 3.663446558865142e-14,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "blend.fillet_geom_p3"
+}
