@@ -91,8 +91,9 @@
 //!   (`topology.brep_p9`), `GlueVertices` / `MakeEdgeInFace` (`topology.brep_p5`),
 //!   `DeleteFace` (`topology.brep_p3`),
 //!   `SmFace::GetVertices` / `GetEdges` / `GetBrep` (`topology.face_p4`),
-//!   `SmFace::CalculateBoundingBox` / `Point3DClassify` (`query.face_p1`),
-//!   and the `SmCurveClassification` constructor (`intersect.curve_class_p4`). The
+//!   `SmFace::FaceIntersect` with UV curve and point outputs (`topology.face_p3`; part
+//!   2's `face_face_intersect_curves`, which [`IntersectorBrep`] does not cover),
+//!   `SmFace::CalculateBoundingBox` / `Point3DClassify` (`query.face_p1`). The
 //!   code after a stub is ported in full. `SmSurface::GlobalCurveIntersect` /
 //!   `CoincidenceCheck` (`surface.surface_p8`), `SmCurveClassification::Homogenize`
 //!   (`intersect.curve_class_p6`), `InsertTopologyIntersections`
@@ -506,6 +507,28 @@ pub struct FaceIntersection<O> {
     pub cc2: Vec<CurveClassification<O>>,
     /// `sCC3DCrvs`, `sCCUVCrvs1`, `sCCUVCrvs2`.
     pub cc_curves: [Vec<O>; 3],
+}
+
+/// `SmFace::FaceIntersect(ctx, pFace2, tol, angTolDeg, 3DCurves, NULL, NULL, NULL,
+/// &CC1, &CC2, &CC3D, &CCUV1, &CCUV2, &bAreCoincident)`; `opt_coincidence_flag` is
+/// `pbOptCoincidenceFlag`, an input ("known coincident or not") that makes
+/// `FaceIntersect` skip its own `CoincidenceCheck`.
+pub(super) fn face_face_intersect_curves<O>(
+    _face1: O,
+    _face2: O,
+    _approx_tol_3d: f64,
+    _ang_tol_deg: f64,
+    _opt_this_uv_curves: Option<&mut Vec<O>>,
+    _opt_other_uv_curves: Option<&mut Vec<O>>,
+    _opt_3d_points: Option<&mut Vec<Point3>>,
+    _opt_coincidence_flag: Option<bool>,
+) -> Result<FaceIntersection<O>> {
+    // UNPORTED(topology.face_p3): SmFace::FaceIntersect -- justified: part 2 needs the UV
+    // curve and point outputs, which IntersectorBrep::face_intersect does not return.
+    Err(SolidError::unported(
+        "SmFace::FaceIntersect",
+        "topology.face_p3",
+    ))
 }
 
 /// `pSurf->GlobalCurveIntersect(domain, *pCurve, interval, tol, solutions)` of the
@@ -3063,10 +3086,9 @@ pub fn intersect_shell_vertices<O: ClassObject + SolutionObject + Ord>(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when a `Homogenize` fails; [`SolidError::Unported`] for
-/// `SmBrep::GetEdges` (`topology.brep_p1`), the deferrals of the
-/// `SmCurveClassification` constructor (`ReSet`, `intersect.curve_class_p2`),
-/// `InsertTopologyIntersections`
+/// `SM_ERR` when a `Homogenize` fails; [`SolidError::Unported`] for the
+/// deferrals of the `SmCurveClassification` constructor (`ReSet`,
+/// `intersect.curve_class_p2`), `InsertTopologyIntersections`
 /// (`intersect.curve_class_p5`), `Homogenize` (`intersect.curve_class_p6`) and the
 /// callees of the solver and manager; [`SolidError::InvalidInput`] for null handles
 /// upstream dereferences.

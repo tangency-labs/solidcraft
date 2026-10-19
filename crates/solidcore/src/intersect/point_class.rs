@@ -142,11 +142,11 @@ use crate::topology::{Brep, BrepId};
 /// This avoids a global resolver or a second topology implementation.
 pub struct BrepMerge<'a, 'env, O> {
     /// Arena graph containing the classified object.
-    pub brep: &'a mut crate::topology::Brep,
+    pub brep: &'a mut Brep,
     /// Resolved target in that graph (region, face, edge or vertex).
-    pub target: crate::error::EntityRef,
+    pub target: EntityRef,
     /// Classification handle corresponding to a topology id in this B-rep.
-    pub handle: &'a dyn Fn(crate::error::EntityRef) -> O,
+    pub handle: &'a dyn Fn(EntityRef) -> O,
     /// Notification storage/identities shared with the caller's other mutations.
     pub notifications: &'a mut crate::topology::edge::NotifyEnv<'env>,
     /// Identity of each edge's curve from its id and actual native type code, including a new split edge.
@@ -1404,9 +1404,7 @@ impl<O: ClassObject> PointClassification<O> {
             PointClassType::Vertex,
             Some(handle(EntityRef::Vertex(vertex_id))),
         );
-        let set_point = |b: &mut crate::topology::Brep,
-                         env: &mut crate::topology::edge::NotifyEnv<'_>,
-                         point| {
+        let set_point = |b: &mut Brep, env: &mut crate::topology::edge::NotifyEnv<'_>, point| {
             let this = (env.key_of)(EntityRef::Vertex(vertex_id));
             vertex::set_point(
                 b,

@@ -1667,18 +1667,13 @@ fn set_face_tolerance(
     update_only_if_larger: bool,
     cascade_to_boundaries: bool,
 ) -> Result<()> {
-    let _ = (
+    crate::topology::face::p3::set_tolerance(
         b,
         face,
         tolerance,
         update_only_if_larger,
         cascade_to_boundaries,
-    );
-    // UNPORTED(topology.face_p3): SmFace::SetTolerance
-    Err(SolidError::unported(
-        "SmFace::SetTolerance",
-        "topology.face_p3",
-    ))
+    )
 }
 
 fn compute_loop_orientation(

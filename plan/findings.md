@@ -6383,6 +6383,25 @@ independent Apple libc++ database abort was not rerun.
 Strict C++-feature workspace Clippy also passes in the same disposable checkout
 with the runner-only profile override. No platform prerequisites enter this PR.
 
+## surface.cone_p2 review fixes (PR #153, 2026-10-16)
+
+- CI clippy (`--features difftest/cpp`) failed on three runner lints; fixed without
+  changing generated cases (`trim_defined` returns `bool`; the bounded-mode pick is a
+  `match` on the same single `rng.below(3)` draw; the test helper is an associated fn).
+- `BSplineSurface::copy_and_add_analytics`: a recognised cone is a DISPATCH GAP (no
+  `SurfaceKind::Cone` until issue #76 / PR #133), not an `UNPORTED(surface.surface_p2)`
+  stub, since surface.surface_p2 is partial.
+- Review adversarial subset added as `fixtures/surface.cone_p2/adversarial.json`
+  (308 cases: all swap/inside combinations for partial-sweep, apex, cylinder, 89/-60
+  degree semi-angle and unbounded cones in skewed frames; offsets at the truncation
+  boundaries with tolerance 0/negative; recognition with scale 0, -1, 1e6; twist,
+  tilt and shear edits at tolerance limits, negative/zero weights, 1e7 translations,
+  1e-6/1e6 scales; trims with zero/negative radii, non-orthogonal axes, start > end,
+  ellipses through the boundary circles at 1e-9 height fractions). All 308 are
+  bit-identical with the C++ (each goes through the shim's guards for inputs that
+  are undefined in C++). The reviewer's full 18724-case set (from its `gen_adv.py`)
+  is not committed.
+
 ## topology.face_p3 (`SmFace` part 3: `ComputeLoopOrientation`, `CreateUVTrimCurves`, `FaceIntersect`, `IsDegenerate`, `CreateComposites`, `SetTolerance`, `Notify`, lamina tests, PR #139, 2026-10-16; partial, no disagreements)
 
 - **Coverage.** Every case that runs on both sides agrees bit for bit (1758 cases, 530
@@ -6534,8 +6553,8 @@ with the runner-only profile override. No platform prerequisites enter this PR.
   7 `*_intersect_ang0*` cases; no `Intersect` with a zero angle tolerance hung or
   crashed the C++: upstream only converts it to radians (`SmFace.cpp:11342`) and passes
   it to the surface/surface intersector, so the guard now accepts `[0, 180]`.
-- **Upstream defects.** UB-162 (`ComputeLoopOrientation` reads the last of an empty
-  edge use array), UB-165 (`FaceIntersect` hands out deleted curves through
+- **Upstream defects.** UB-189 (`ComputeLoopOrientation` reads the last of an empty
+  edge use array), UB-193 (`FaceIntersect` hands out deleted curves through
   `pOptCC3DCrvs` without classification arrays). `sVeryFirstUV` is defined (the
   `SmVector2d` default initialisers) and ported as such.
 
@@ -7188,7 +7207,7 @@ PR #203 (on main's #146). Part 2 of `SmTopologyIntersector.cpp`: `RegisterExisti
   --fuzz 2000` reports FUZZ-PASS with 3 `differs` notes, all `sm_SetEdgeClass` with a
   mutated tolerance of -1e300 (C++ classifies an end to `SM_PC_VERTEX`, the port to
   `SM_PC_EDGE`): part 1's code, untouched by this PR.
-- Upstream issues: UB-169 (`RegisterExistingSSI` failure leaves the table's lists out of
+- Upstream issues: UB-184 (`RegisterExistingSSI` failure leaves the table's lists out of
   step), UB-175 [PSIRT] (`~SmProtoTopologyManager` use-after-free), HANG-25 (zero
   tolerance), WR-170 (copies of registered curves and a failed manager leak).
 
@@ -7930,6 +7949,59 @@ rejected: nothing runs on either side.
   (`ignore_soft`), so that `InvalidInput` is swallowed there and the split reports no new
   faces. It is unreachable today (`MergeInterval` makes no topology until
   `intersect.curve_class_p2`); that unit's porter must give the healer a typed resolver.
+
+## topology.brep_p10 (`SmBrep::MakeTopologyFromData`, PR #130): review fixes
+
+- **UV trim curve cast.** Upstream stores an edge use's UV trim curve as
+  `pNewEU1->m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pNewUV)`, which is NULL for a
+  copy that is not an `SmBSplineCurve` (composite, offset, projected, curve-on-surface,
+  ...). The copy is still made, gets the attributes and gets its owner set, but is not
+  stored. The first port always stored it. A version-38 file whose UV curve 0 is an
+  `SmCompositeCurve` (`fixtures/topology.brep_p10/uv_composite_v38.smb`) showed the
+  difference in the exported value stream; fixed.
+- **Coverage.** The upstream `.smb` files contain no valid wire-edge shells, vertex
+  shells, vertex loops (loop type 1 with an eu_type 1 record) or analytic edge-curve
+  replacements. Crafted fixtures `wire_vertex{,_nm}.smb`, `wire_quad_{full,sub,rev_nm}.smb`
+  (a collinear quadratic edge curve with full / sub-range / reversed interval, so both
+  outcomes of the `CreateAnalyticCurve` end-point check run) and `uv_bspline.smb` cover
+  them (`review_cases.json`, 128 cases). They use axis-aligned planes, so the analytic
+  paths are compared instead of being deferred by `SmCone::IsNurbSurfaceCone`
+  (surface.cone_p2).
+- **Known harness limits.** The shim refuses the closure / remove-all / project ops
+  after a `Set` patch: its guard proves only that `MakeTopologyFromData`'s record
+  indexing is defined, not that the graph it builds is consistent enough for the later
+  walks (an inconsistent loop or radial list can make them loop or read freed
+  objects). The generator never emits `Op::Project`; add it once topology.brep_p1
+  (`CreateParallelProjectionCurves`) lands. An `SmConic` UV curve cannot reach the
+  cast: `SmConic` has no `Copy`, so both sides fail at the copy and agree.
+- **Second review (2026-10-19, after topology.brep_p1 #145 merged).** Main's `Brep` now
+  holds `m_bEditingEnabled`, `region_list_head` and the face/edge/vertex lists; this PR's
+  duplicate `editing_enabled` was dropped and `Brep::new_with_infinite_region` sets
+  `region_list_head` to the infinite region (`PreInsert`). The six
+  `UNPORTED(topology.brep_p1)` sites now call `p1::add_attributes` (new
+  `TopologyEnv::all_attributes` = `rAllAttributes`; the B-rep, loop uses and face uses
+  receive their own lists), `p1::heal_brep(.., HealerOpType::All, None, None, None,
+  bMakeUVTrimCurves)`, `p1::regions`, `p1::faces`, `p1::wire_edges`,
+  `p1::create_parallel_projection_curves` (approx tol `&dTol`, NULL projection distance,
+  all three outputs) and `p1::find_side_of_curve`. The HealBrep cases now defer at
+  `SmFace::GetTolerance` (topology.face_p2, 63). topology.brep_p7's two
+  `UNPORTED(topology.brep_p10)` sites are wired: `ReadFromFile` (now `&mut Kernel` plus a
+  `TopologyEnv`, with an empty `sAttributes` as upstream) and `GlueEdgesGeneral`'s
+  `TestClosureSplitRegion(TRUE, edge)`; its 30 brep_p10 deferrals now defer at
+  surface.cone_p2 (24) and topology.face_p2 (6), 0 failed. Unit totals: 1404 cases, 839
+  passed, 0 failed, 565 deferred, `--perturb` SENSITIVE 839/839.
+- **Open (not fixed here).** (1) Geometry attributes are not copied when a shared data
+  surface/curve or a borrowed geometry is copied (upstream's `SmAObject` copy constructor
+  copies them; `a_object::copy_construct(env.attributes, from, to)` would match). The
+  harness cannot see it (ReadFromFile reads no attributes, the shim exports none) and no
+  unit calls `copy_construct` yet, so this needs a codebase-wide decision. (2) The shim
+  export walks only from the regions: face uses on no shell and vertices with no uses are
+  never compared; exporting `m_pFaceListHead` / `m_pEdgeListHead` / `m_pVertexListHead`
+  in list order would close that. (3) The topology.vertex, topology.edgeuse_p1/p2 and
+  topology.loopuse runners still label their inexact `.smb` imports
+  `topology.brep_p10 SmBrep::MakeTopologyFromData` (harness deferrals, not code stubs);
+  they could now read the file through `p7::read_from_file`. (4) topology.brep_p7's
+  `cpp-guard:unvalidated-topology` read guard (UB-164) is still in place.
 
 ## topology.brep_p9: per-call continuations and coverage limits (PR #183)
 

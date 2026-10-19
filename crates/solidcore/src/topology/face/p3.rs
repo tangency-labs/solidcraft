@@ -41,7 +41,7 @@
 //!   span reads `sVeryFirstUV`, which stays at the `SmVector2d` default
 //!   (`SM_UNDEF_DOUBLE`, `SM_UNDEF_DOUBLE`) when no sample point dropped with a guess;
 //!   the port does the same (defined upstream). A loop use of edge type without edge
-//!   uses reaches `GetLast` of an empty array (UB-162) and returns
+//!   uses reaches `GetLast` of an empty array (UB-189) and returns
 //!   [`SolidError::InvalidInput`].
 //! - **`CreateUVTrimCurves`** takes the optional UV curves and their orientations as one
 //!   argument (upstream requires both or neither). The surface owner is cleared and
@@ -55,7 +55,7 @@
 //!   `IsDegenerate` name the curves by a handle carrying their natural interval; the
 //!   objects are then switched to the edges, as upstream. All returned curves are owned
 //!   (upstream hands out deleted ones through `pOptCC3DCrvs` without classification
-//!   arrays, UB-165). Outputs are return values, so upstream's quirk that
+//!   arrays, UB-193). Outputs are return values, so upstream's quirk that
 //!   `pOptThisCCUVCrvs` / `pOptOtherCCUVCrvs` are never reset (they append to the
 //!   caller's arrays) has no counterpart; in the coincident branch the failing-copy
 //!   path replaces all four vectors with the intersector's.
@@ -506,7 +506,7 @@ const NUM_SAMPLES: u32 = 20;
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for missing
 /// topology, a face without surface, an edge loop without edge uses
-/// (upstream reads an empty array, UB-162); those of the surface copy,
+/// (upstream reads an empty array, UB-189); those of the surface copy,
 /// evaluations and solves; [`SolidError::Unported`] (from `SmEdgeuse::NormalizedEvaluate`
 /// and `GetOrCreateUVTrimCurve`).
 #[allow(clippy::too_many_lines)] // one upstream routine

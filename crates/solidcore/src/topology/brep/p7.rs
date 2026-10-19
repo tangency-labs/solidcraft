@@ -63,7 +63,6 @@
 //!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `GlueVertices`
 //!   (`topology.brep_p5`); `MakeShellVertexTopology` (`topology.brep_p2`, reached
 //!   through `topology.brep_p9`'s `MakeShellVertex`);
-//!   `MakeTopologyFromData`, `TestClosureSplitRegion(edge)` (`topology.brep_p10`);
 //!   `SmFace::GetBrep`, `GetEdges`
 //!   (`topology.face_p4`); `SmMerge` (`boolean.merge_p2`); the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), which

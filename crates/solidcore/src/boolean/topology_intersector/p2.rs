@@ -1395,7 +1395,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     #[allow(clippy::too_many_lines)]
     pub fn edge_edge_intersect(
         &mut self,
-        k: &Kernel,
+        k: &mut Kernel,
         brep: &mut impl IntersectorBrep<O>,
         input_edges1: &[Option<O>],
         input_edges2: &[Option<O>],

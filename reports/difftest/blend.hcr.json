@@ -2,40 +2,28 @@
   "abs_floors": [],
   "cases": [
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_start_hint_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#0 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_start_hint_minus1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#1 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_start_hint_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#2 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -46,28 +34,20 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_end_hint_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#4 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_end_hint_minus1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#5 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -78,40 +58,28 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_end_hint_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#7 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_start_hint_big",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#8 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_end_hint_big",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#9 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -122,28 +90,20 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_start_hint_0_5_is_none",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#11 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_start_hint_3_end_hint_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#12 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -162,28 +122,20 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_fa_gt_fb_start_hint_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#15 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_fa_gt_fb_end_hint_minus1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#16 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -202,28 +154,20 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_fa_gt_fb_full_start_hint_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#19 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "curve_visibility_fa_gt_fb_full_end_hint_minus1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.hcr/hints_and_fractions.json#20 (upstream source/SMLib/src/SmHCR.cpp:332-417)",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -342,16 +286,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354320",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
       "max_rel_err": 0.0,
@@ -406,40 +346,28 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0008",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354327",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354328",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354329",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -468,8 +396,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0014",
@@ -480,8 +408,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -491,16 +419,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0016",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354335",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -511,16 +435,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0018",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354337",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -531,40 +451,28 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0020",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354339",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0021",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354340",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0022",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354341",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -673,16 +581,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0035",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354354",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -791,8 +695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0049",
@@ -835,8 +739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0053",
@@ -866,16 +770,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0056",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354375",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "deferred": {
@@ -898,16 +798,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0059",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354378",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -999,8 +895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0071",
@@ -1097,16 +993,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0082",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354401",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -1208,16 +1100,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0095",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354414",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -1228,21 +1116,17 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0097",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354416",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -1252,16 +1136,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0099",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354418",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1309,16 +1189,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0105",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354424",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "both_errored": true,
@@ -1346,16 +1222,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0109",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354428",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "both_errored": true,
@@ -1367,16 +1239,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354430",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "both_errored": true,
@@ -1547,16 +1415,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0132",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354451",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1575,16 +1439,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0135",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354454",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1619,16 +1479,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0140",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354459",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1647,16 +1503,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0143",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354462",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -1675,16 +1527,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0146",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354465",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
       "max_rel_err": 0.0,
@@ -1712,8 +1560,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "smsurf_GetSurfaceCache",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0150",
@@ -1793,21 +1641,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0159",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354478",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0160",
@@ -1870,16 +1714,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0167",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354486",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1922,28 +1762,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0173",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354492",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0174",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354493",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1990,16 +1822,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0180",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354499",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -2010,16 +1838,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0182",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354501",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -2038,16 +1862,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0185",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354504",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "deferred": {
@@ -2112,8 +1932,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "smsurf_GetSurfaceCache",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0193",
@@ -2123,16 +1943,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0194",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354513",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
       "max_rel_err": 0.0,
@@ -2285,28 +2101,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0213",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354532",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354533",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
       "max_rel_err": 0.0,
@@ -2326,16 +2134,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0217",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354536",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -2346,16 +2150,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0219",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354538",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -2407,16 +2207,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0226",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354545",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "both_errored": true,
@@ -2428,16 +2224,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0228",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354547",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -2457,8 +2249,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0231",
@@ -2468,16 +2260,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354551",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -2574,8 +2362,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "smsurf_GetSurfaceCache",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0244",
@@ -2645,8 +2433,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0252",
@@ -2665,16 +2453,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0254",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354573",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -2730,16 +2514,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0261",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354580",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "deferred": {
@@ -2770,16 +2550,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354584",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -2831,16 +2607,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0272",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354591",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -2860,8 +2632,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0275",
@@ -2871,28 +2643,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0276",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354595",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0277",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354596",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -2973,28 +2737,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0287",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354606",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0288",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354607",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "both_errored": true,
@@ -3055,21 +2811,17 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0296",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354615",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0297",
@@ -3079,16 +2831,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0298",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354617",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3099,16 +2847,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0300",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354619",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3127,40 +2871,28 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0303",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354622",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354623",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0305",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354624",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3179,16 +2911,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0308",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354627",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "both_errored": true,
@@ -3200,28 +2928,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0310",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354629",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0311",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354630",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -3281,16 +3001,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0319",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354638",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "both_errored": true,
@@ -3371,16 +3087,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0329",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354648",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -3399,16 +3111,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0332",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354651",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -3462,16 +3170,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0339",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354658",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3490,16 +3194,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0342",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354661",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3555,16 +3255,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0349",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354668",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3584,28 +3280,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0352",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354671",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0353",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354672",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "both_errored": true,
@@ -3658,16 +3346,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354679",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3776,8 +3460,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0374",
@@ -3787,28 +3471,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0375",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354694",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0376",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354695",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -3831,16 +3507,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetSurfaces",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0379",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354698",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -3868,8 +3540,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0383",
@@ -3920,16 +3592,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0389",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354708",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -3940,21 +3608,17 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0391",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354710",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0392",
@@ -3980,16 +3644,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetInfiniteRegion",
-        "unit": "topology.brep_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0395",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354714",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -4025,16 +3685,16 @@
     }
   ],
   "cases_both_errored": 50,
-  "cases_deferred": 125,
+  "cases_deferred": 40,
   "cases_failed": 0,
-  "cases_passed": 309,
+  "cases_passed": 394,
   "cases_total": 434,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 35,
     "intersect.surface_drop_lib_p3": 1,
-    "topology.brep_p1": 67,
-    "topology.edge": 21,
-    "topology.vertex": 1
+    "surface.surface_p2": 3,
+    "topology.edge": 27,
+    "topology.face_p3": 7,
+    "topology.vertex": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

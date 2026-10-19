@@ -36,8 +36,11 @@
 //! is imported as its B-spline part) report `inexact_geometry` on both sides, decided
 //! from the same export.
 //!
-//! `ComputeSilhouettes` and `ComputeGlobalVisibility` are not run: their first statement
-//! is a `topology.brep_p1` query (every case would defer), and their C++ path reaches
+//! The importer leaves the surfaces' owners unset; the runner sets each face surface's
+//! owner to its face, as the upstream B-rep build does, so `SmBrep::GetSurfaces`
+//! (`IsPointVisible`) selects the same surfaces on both sides.
+//!
+//! `ComputeSilhouettes` and `ComputeGlobalVisibility` are not run: their C++ path reaches
 //! UB-170 on open silhouette chains.
 
 use super::topology_vertexuse::{gen_brep, import, path_of, push_curve, push_surface, sel, BrepIn, CrvIn};
@@ -54,7 +57,8 @@ use solidcore::intersect::curve_class::p1::CurveClassification;
 use solidcore::intersect::point_class::PointClassification;
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
-use solidcore::topology::{edge, Brep, EdgeId, VertexId};
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+use solidcore::topology::{edge, Brep, EdgeId, FaceId, VertexId};
 use solidcore::SolidError;
 use solidcore_ffi::units::{blend_hcr as ffi, topology_vertexuse as fixture};
 use std::collections::BTreeSet;
@@ -321,9 +325,22 @@ impl UnitDiff for Runner {
             Err(msg) => return Ok(Output::err(msg)),
         };
         let s = ffi::split(&p.scene).ok_or_else(|| harness("short scene output"))?;
-        let (scene, exact_faces) = import(s.export)?;
+        let (mut scene, exact_faces) = import(s.export)?;
         if inexact(&p.r, s.curve_types, &exact_faces) {
             return Ok(Output::err("inexact_geometry"));
+        }
+        // the surfaces' owners (`SmSurface::GetOwner`, set by the B-rep build upstream and
+        // read by `SmBrep::GetSurfaces`): the kernel's arena identities
+        let face_ids: Vec<FaceId> = scene.faces().ids().collect();
+        for id in face_ids {
+            if let Some(surface) = scene
+                .face_mut(id)
+                .map_err(|e| harness(e.to_string()))?
+                .surface
+                .as_mut()
+            {
+                let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(id))));
+            }
         }
         let [x0, y0, z0, x1, y1, z1] = s.scene_box;
         let (lo, hi) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
