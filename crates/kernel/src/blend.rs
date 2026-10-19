@@ -55,7 +55,12 @@ pub(crate) fn rebuild_face(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, 
 }
 
 /// [`rebuild_face`], also leaving out the `dropped` edges (consumed by a blend).
-fn rebuild_face_dropping(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, dropped: &[mt::EdgeID], connectors: &[mt::Edge]) -> Result<mt::Face> {
+pub(crate) fn rebuild_face_dropping(
+    f: &mt::Face,
+    subst: &HashMap<mt::EdgeID, mt::Edge>,
+    dropped: &[mt::EdgeID],
+    connectors: &[mt::Edge],
+) -> Result<mt::Face> {
     let mut wires = Vec::new();
     for w in f.absolute_boundaries() {
         let mut edges: Vec<mt::Edge> = Vec::new();
