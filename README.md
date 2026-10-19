@@ -115,6 +115,13 @@ agent at it).
 `solidcore-ffi` and `difftest` are test-only. It stays at 0.0.x until it is usable end
 to end.
 
+## Sponsors
+
+[![CI powered by Blacksmith](docs/sponsors/blacksmith-ci-powered.png)](https://www.blacksmith.sh)
+
+solidcore's continuous integration runs on [Blacksmith](https://www.blacksmith.sh), which
+sponsors its CI minutes.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and
