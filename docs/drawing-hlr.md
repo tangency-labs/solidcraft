@@ -1,7 +1,8 @@
 # Hidden lines (W06a)
 
 This is the geometry core of Drawing package W06 from the [published plan][plan] in
-[#860][rfc]: [#2455][issue] / [PR #2457][pr]. It turns the subset that the W05a
+[#860][rfc]: [#2455][issue] / [PR #2457][pr], with its parallel work and shared limits in
+[PR #2458][pr2]. It turns the subset that the W05a
 investigation ([#2105][w05-issue], [draft #2106][w05-pr], [findings][findings])
 showed to be ready into code: exact orthographic hidden lines for placed bodies whose
 faces are planes, cylinders, cones, spheres or tori.
@@ -30,9 +31,10 @@ hidden_lines(&[Prepared], &[Placement], &View, &Options, &cancel) -> Result<Draw
 - `View::new(direction_of_sight, up)` is an orthographic view. Screen coordinates are
   `(p . x, p . y)` in millimetres, with `x = direction x up` normalised and `y = x x
   direction`.
-- `cancel` is polled during the work; when it returns true the call ends with
-  `HlrError::Cancelled`. `prepare_cancellable(&Brep, &Options, &cancel)` is `prepare` with
-  such a callback, polled between edges, faces and surface comparisons.
+- `cancel` is polled during the work, from every worker thread (so it must be `Sync`); when it
+  returns true the call ends with `HlrError::Cancelled`.
+- `Options::threads` picks the worker threads: 0 (the default) one per core, 1 the calling
+  thread only, more at most that many. See [Parallel work](#parallel-work).
 
 The `Drawing` holds one `Line` per drawable edge and per silhouette curve of each
 placement, in order of placement. A line names its `placement` and `source` (`Edge { edge, tangent }`
@@ -95,6 +97,30 @@ large scenes keep their detail.
 the scene and shifted back at the end, so coordinates stay small: a part 1e7 mm from the
 origin, whether placed there or modelled there, is classified as at the origin.
 
+## Parallel work
+
+The work per curve runs on worker threads: silhouette tracing, screen sampling, the cuts at
+left-out faces' boxes, the classification of every piece, coverage, and the crossing search
+(by rows of its screen grid) with the refinement of each crossing. Each phase hands out its
+items to the workers one at a time and puts the results back in item order, so the drawing
+is the same, bit for bit, on any number of threads: the same pieces in the same order, the
+same statistics apart from the timings.
+
+- Silhouettes depend on the body and the direction of sight in its own frame, not on where it
+  stands, so placements that share both (repeated parts turned alike) share one tracing. In
+  the browser build, which always runs on the calling thread, this is the saving that remains.
+- Cancellation is polled before every item and inside the long ones (every 1024 rays, every
+  65536 crossing candidates). The first error, cancellation included, stops the other workers
+  and is the one returned.
+- A worker that panics loses its item: the call returns `HlrError::Internal` and no drawing,
+  and the panic does not reach the caller's thread.
+- With `threads: 0` a phase starts at most one worker per few items (16 curves, 4 grid rows,
+  256 crossings), so a small view runs on the calling thread without paying for threads.
+
+On a 32-thread desktop, 100 placements of boxes, cylinders, spheres and tori, each turned
+differently, take 0.8 s instead of 9.9 s on one thread; 300 placements turned alike take 0.8 s
+in all.
+
 ## Freeform faces
 
 Faces that are not planes, cylinders, cones, spheres or tori are freeform. By default
@@ -110,14 +136,27 @@ in the W05a findings.
 
 ## Limits
 
-- `Options::max_tracks` (curves) and `Options::max_rays` bound the work, as do internal
-  caps: crossing grid entries (50 million), crossing candidate pairs (500 million, counted
-  before the search, so no set of pairs met grows with them), crossings (50 million) and
-  the surface comparisons that group a body's faces (50 million). Exceeding one returns
-  `HlrError::Budget`.
-- `Options::trim_samples` is 1 to `MAX_TRIM_SAMPLES` (4096), and every coordinate of a
-  placed body at most `MAX_COORDINATE` (1e12 mm, the bound `geom::section` and
-  `geom::brep` put on stored numbers); otherwise the call returns `HlrError::Invalid`.
+- Every budget is for the whole call, counted over all worker threads; exceeding one returns
+  `HlrError::Budget` with its name, whichever thread noticed:
+
+  | Budget | Limit |
+  | --- | --- |
+  | Body records (`prepare`, by `Brep::validate`) | `brep::MAX_ITEMS`, 100 000 |
+  | Placements in a scene (`placement`) | `hlr::MAX_ITEMS`, the same 100 000 |
+  | Curves: drawable edges and silhouette pieces (`curve`) | `Options::max_tracks`, default `hlr::MAX_ITEMS` |
+  | Visibility rays (`ray`) | `Options::max_rays`, default 20 000 000 |
+  | Crossing grid entries, candidate pairs, crossings | 50 million, 500 million (counted before the search), 50 million |
+  | Left-out face grid entries, box checks (`shadow`) | 50 million, 500 million |
+  | Coverage point checks (`coverage`) | 200 million |
+
+  `hlr::MAX_ITEMS` is `section::MAX_ITEMS`: the aggregate item limit of `geom::section` and
+  `geom::brep` (and the body limit of `file.export_view_dxf`). It bounds the counts a caller
+  supplies (records, placements) and the default number of curves, the drawing's lines;
+  `max_tracks` may be raised for a large assembly. The default ray budget is the occlusion
+  work budget of `file.export_view_dxf`; every piece costs at least one ray, so it also
+  bounds the pieces. The other caps bound the steps between those counts.
+- `Options::trim_samples` is 1 to `MAX_TRIM_SAMPLES` (4096) and `Options::threads` at most
+  `MAX_THREADS` (64); other values are refused or capped.
 - `Options::tangent_edges` (default on) draws edges between tangent faces, flagged
   `tangent: true`; drafting policy for them is W17.
 - Tolerances are relative to the faces and the scene. They are meant for faces up to
@@ -127,14 +166,14 @@ in the W05a findings.
   recognition takes for one (closer than 1e-9 of their size or position, a nearly flat
   cone's far apex included) share the own-face margin of 1e-6 of the face's size when a
   ray leaves one of them.
-- Not in this slice: parallel per-curve work and the shared work limits of
-  `geom::section`, the kernel adapter (after W02), perspective, section regions (W03),
+- Not in this slice: the kernel adapter (after W02), perspective, section regions (W03),
   views and commands (W07), and mirrored placements. Of the records the kernel now saves,
   planes through three points (`PlaneThrough`) are drawn as planes; a procedural
   `SurfaceIntersection` curve is drawn as its leader, within its tolerance, when the leader is
   a spline; one with a polyline leader, or a `PlacedRevolution` surface whose placement is not
   rigid (it may scale it unevenly), is refused by `prepare` with `HlrError::Unsupported` until
-  the adapter handles them.
+  the adapter handles them. One surface's silhouette is traced on one
+  thread: a single torus seen obliquely takes about 0.3 s whatever the thread count.
 
 ## Fixtures
 
@@ -175,18 +214,18 @@ and intervals:
   there;
 - two strips of a torus 0.0003 rad wide keep their 0.006 mm of outline;
 - two touching boxes draw each shared edge once;
-- a box whose top plane record stands one rounding (or 1e-11 of 100 mm) off its edges still
-  hides its back edges, and so does a 0.001 mm cube 1e7 mm out whose top plane is one step
-  above its edges; a plate's sixteen holes each hide the same part of their bottom circle;
-  eight coaxial cylinders seen along their axis show one circle; 300 boxes apart on screen
-  are each drawn as the first one; an arc that bulges across a line 1 mm off its chord still
-  crosses it twice; the trim's chord grid agrees with a scan of every chord; surface groups
-  agree with comparing every pair of faces, and preparing can be cancelled;
 - mirrored placements, bad body indices and bad views are refused; cancellation and
   budgets return errors;
 - a box stored with planes through three points draws the same bits as one with
   axis-stored planes; rigidly placed revolutions draw as what they are, others are refused
   as not supported yet, as are intersection curves with no spline to follow;
+- a mixed scene (touching boxes, cylinders, a sphere, an oblique torus and a left-out patch,
+  with and without freeform faces) draws the same bits on 1, 2, 3, 8 and automatic threads;
+  placements sharing a body and a turn draw as if each had its own copy of the body; the ray
+  and curve budgets pass at the serial run's counts and fail one below them on 1 and 4
+  threads; cancellation asked only from worker threads ends a parallel run, and a failing or
+  panicking item ends the work with its error; scenes over `MAX_ITEMS` placements and trim
+  sample counts out of range are refused;
 - torus ray roots for thin, large and nearly tangent cases, and torus silhouettes near
   the axis direction.
 
@@ -195,5 +234,6 @@ and intervals:
 [findings]: https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6243691483
 [issue]: https://github.com/tangency-labs/solidcraft/issues/2455
 [pr]: https://github.com/tangency-labs/solidcraft/pull/2457
+[pr2]: https://github.com/tangency-labs/solidcraft/pull/2458
 [w05-issue]: https://github.com/tangency-labs/solidcraft/issues/2105
 [w05-pr]: https://github.com/tangency-labs/solidcraft/pull/2106

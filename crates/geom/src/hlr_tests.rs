@@ -2557,11 +2557,11 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
     let sag = 1000. * (1. - 0.1f64.cos());
     let out = Vec3::new(0.1f64.cos(), 0.1f64.sin(), 0.);
     let line = C3::Line { a: a + out, b: b + out };
-    let track = |curve: &C3, range: [f64; 2], sag: f64| {
+    fn track<'a>(view: &View, curve: &'a C3, range: [f64; 2], sag: f64) -> Track<'a> {
         let screen = |t: f64| view.screen(curve.at(t));
         Track {
             placement: 0,
-            curve: TrackCurve::Owned(curve.clone()),
+            curve,
             range,
             source: Source::Edge { edge: 0, tangent: false },
             acc: CurveAccuracy::Analytic,
@@ -2571,8 +2571,8 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
             sags: vec![sag],
             splits: Vec::new(),
         }
-    };
-    let mut tracks = vec![track(&arc, [0., 0.2], sag), track(&line, [0., 1.], 0.)];
+    }
+    let mut tracks = vec![track(&view, &arc, [0., 0.2], sag), track(&view, &line, [0., 1.], 0.)];
     assert!(sag > 4.9 && ((a + out).dist(a) - 1.).abs() < 1e-12);
     assert_eq!(crossings(&mut tracks, &ctx).unwrap(), 2);
     assert!(tracks.iter().all(|t| t.splits.len() == 2), "{:?}", tracks.iter().map(|t| &t.splits).collect::<Vec<_>>());
@@ -2869,4 +2869,128 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     assert!(side.iter().all(|p| (p[1] - height).abs() <= tolerance) && ((height - bottom) - 10.).abs() <= tolerance, "{side:?} over {bottom}");
     let off = prepare(&traced(11.), &o).err();
     assert!(matches!(off, Some(HlrError::Unsupported("surface intersection curve"))), "{off:?}");
+}
+
+/// Turned `a` radians about Z, standing at `t`.
+fn turned_about_z(body: usize, a: f64, t: [f64; 3]) -> Placement {
+    let (c, s) = (a.cos(), a.sin());
+    Placement { body, rotation: [Vec3::new(c, s, 0.), Vec3::new(-s, c, 0.), Vec3::new(0., 0., 1.)], translation: Vec3::new(t[0], t[1], t[2]) }
+}
+
+/// A mixed scene: boxes (two touching), cylinders, a sphere, a torus seen obliquely and a
+/// left-out freeform patch over them, some placements sharing a body and a turn.
+fn mixed_scene(o: &Options) -> (Vec<Prepared>, Vec<Placement>) {
+    let defs = vec![
+        prepare(&cuboid([0.; 3], [8.; 3]), o).unwrap(),
+        prepare(&cylinder(4., 10.), o).unwrap(),
+        prepare(&sphere(4.), o).unwrap(),
+        prepare(&torus(5., 1.5), o).unwrap(),
+        prepare(&twisted_patch(), o).unwrap(),
+    ];
+    let mut scene = vec![identity(0, [0.; 3]), identity(0, [8., 0., 0.]), identity(3, [4., 4., 12.]), identity(4, [6., 2., 20.])];
+    for k in 0..12 {
+        let body = [1, 2, 0][k % 3];
+        // Every other placement repeats an earlier turn: those share their silhouettes.
+        scene.push(turned_about_z(body, 0.4 * (k / 2) as f64, [3. + 5. * (k % 4) as f64, -6. - 5. * (k / 4) as f64, (k % 3) as f64]));
+    }
+    (defs, scene)
+}
+
+/// Everything a drawing holds, phase timings left out.
+fn fingerprint(mut d: Drawing) -> String {
+    d.stats.phase_ms = [0.; 4];
+    format!("{d:?}")
+}
+
+#[test]
+fn serial_and_parallel_work_draw_the_same_bits() {
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    for base in [Options::default(), Options { freeform: true, tangent_edges: false, ..Options::default() }] {
+        let (defs, scene) = mixed_scene(&base);
+        let run = |threads: usize| hidden_lines(&defs, &scene, &view, &Options { threads, ..base }, &never).unwrap();
+        let serial = run(1);
+        assert!(serial.stats.crossings > 0 && serial.stats.pieces > serial.stats.tracks, "{:?}", serial.stats);
+        assert!(base.freeform || serial.stats.uncertain_pieces > 0, "the patch casts its shadow: {:?}", serial.stats);
+        let serial = fingerprint(serial);
+        for threads in [2, 3, 8, 0] {
+            assert!(fingerprint(run(threads)) == serial, "{threads} threads differ from one");
+        }
+    }
+}
+
+#[test]
+fn placements_sharing_a_body_and_turn_draw_as_unshared_ones() {
+    // The second placement shares the first one's silhouettes; with its own copy of the body
+    // it traces them again. The drawings are the same.
+    let o = Options::default();
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    let scene = [turned_about_z(0, 0.3, [0.; 3]), turned_about_z(0, 0.3, [9., 3., 1.])];
+    let shared = hidden_lines(&[prepare(&torus(5., 1.5), &o).unwrap()], &scene, &view, &o, &never).unwrap();
+    let defs = [prepare(&torus(5., 1.5), &o).unwrap(), prepare(&torus(5., 1.5), &o).unwrap()];
+    let own = hidden_lines(&defs, &[scene[0], Placement { body: 1, ..scene[1] }], &view, &o, &never).unwrap();
+    assert!(shared.stats.silhouettes > 0);
+    assert!(fingerprint(shared) == fingerprint(own));
+}
+
+#[test]
+fn budgets_hold_for_the_whole_call_on_any_number_of_threads() {
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    let (defs, scene) = mixed_scene(&Options::default());
+    let all = hidden_lines(&defs, &scene, &view, &Options { threads: 1, ..Options::default() }, &never).unwrap();
+    let (rays, tracks) = (all.stats.rays, all.stats.tracks);
+    for threads in [1, 4] {
+        let o = Options { threads, ..Options::default() };
+        let run = |o: Options| hidden_lines(&defs, &scene, &view, &o, &never);
+        assert_eq!(run(Options { max_rays: rays, ..o }).map(|d| d.stats.rays).ok(), Some(rays), "{threads} threads");
+        assert!(matches!(run(Options { max_rays: rays - 1, ..o }), Err(HlrError::Budget("ray"))), "{threads} threads");
+        assert!(run(Options { max_tracks: tracks, ..o }).is_ok(), "{threads} threads");
+        assert!(matches!(run(Options { max_tracks: tracks - 1, ..o }), Err(HlrError::Budget("curve"))), "{threads} threads");
+    }
+}
+
+#[test]
+fn workers_poll_cancellation() {
+    // Cancelled only when asked from another thread than the caller's: every parallel item
+    // runs on a worker, which asks before it starts.
+    let caller = std::thread::current().id();
+    let elsewhere = move || std::thread::current().id() != caller;
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    let (defs, scene) = mixed_scene(&Options::default());
+    let run =
+        |threads: usize, cancel: &(dyn Fn() -> bool + Sync)| hidden_lines(&defs, &scene, &view, &Options { threads, ..Options::default() }, cancel);
+    assert!(run(1, &elsewhere).is_ok());
+    assert!(matches!(run(4, &elsewhere), Err(HlrError::Cancelled)));
+    // Cancelled part way through, wherever it is noticed, the call ends cancelled.
+    for after in [1, 10, 40] {
+        let polls = AtomicUsize::new(0);
+        let late = || polls.fetch_add(1, Ordering::Relaxed) >= after;
+        assert!(matches!(run(4, &late), Err(HlrError::Cancelled)), "after {after} polls");
+    }
+}
+
+#[test]
+fn a_failing_or_panicking_worker_stops_the_work_without_escaping() {
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let ctx = || context(&[], &[], &view, &Options { threads: 4, ..Options::default() }, &never).unwrap();
+    let items: Vec<usize> = (0..200).collect();
+    assert_eq!(ctx().map(&items, 1, |i| Ok(i * 3)).unwrap(), items.iter().map(|i| i * 3).collect::<Vec<_>>());
+    assert!(matches!(ctx().map(&items, 1, |i| if *i == 50 { Err(HlrError::Budget("test")) } else { Ok(*i) }), Err(HlrError::Budget("test"))));
+    let out = ctx().map(&items, 1, |i| {
+        assert_ne!(*i, 37, "a panicking item is the call's error");
+        Ok(*i)
+    });
+    assert!(matches!(out, Err(HlrError::Internal(_))), "{out:?}");
+}
+
+#[test]
+fn scenes_and_trims_beyond_the_shared_limits_are_refused() {
+    let def = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
+    let view = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
+    let crowd = vec![identity(0, [0.; 3]); MAX_ITEMS + 1];
+    assert!(matches!(hidden_lines(&[def], &crowd, &view, &Options::default(), &never), Err(HlrError::Budget("placement"))));
+    for trim_samples in [0, MAX_TRIM_SAMPLES + 1] {
+        assert!(matches!(prepare(&cuboid([0.; 3], [1.; 3]), &Options { trim_samples, ..Options::default() }), Err(HlrError::Invalid(_))));
+    }
+    assert_eq!(Options::default().max_tracks, crate::section::MAX_ITEMS);
+    assert_eq!(MAX_ITEMS, crate::brep::MAX_ITEMS);
 }
