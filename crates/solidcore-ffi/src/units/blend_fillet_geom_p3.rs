@@ -127,10 +127,9 @@ fn validate_model(rd: &mut Reader<'_>, counts: [usize; 10]) -> Result<[usize; 4]
 
     let ns = rd.index(MAX_LIST)?;
     for _ in 0..ns {
-        let tols = rd.finites(3)?;
-        if tols.iter().take(2).any(|&t| t <= 0.0) {
-            return Err(bad("solver: tolerances must be positive"));
-        }
+        // any finite tolerances: zero and negative ones run through every op upstream
+        // (the fillet x fillet drop, the mate and the intersector of ReCalcFilletGeom)
+        rd.finites(3)?;
         opt_below(rd, n_eu)?;
         opt_below(rd, n_eu)?;
         for _ in 0..2 {
@@ -150,6 +149,7 @@ fn validate_model(rd: &mut Reader<'_>, counts: [usize; 10]) -> Result<[usize; 4]
         rd.index(13)?; // SmFilletVertexType
         rd.index(12)?; // SmFilStatus
         opt_below(rd, MAX_LIST)?; // corner tag
+
         // SmPointClassificationType: SM_PC_UNKNOWN (100) ..= SM_PC_NOTHING (110)
         if rd.index(110)? < 100 {
             return Err(bad("vertex: point class below SM_PC_UNKNOWN"));

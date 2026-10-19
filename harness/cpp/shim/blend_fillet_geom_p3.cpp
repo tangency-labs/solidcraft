@@ -473,8 +473,8 @@ struct Model
         return main->GetVUAtRailEnd(fgs[0]) != NULL;
     }
 
-    // CalcFilletIntFillet(e): the solvers of both edge uses' geometries are dereferenced, and
-    // on the trimming path both UV trim curves.
+    // CalcFilletIntFillet(e): the solvers of both edge uses' geometries are dereferenced, on
+    // the trimming path both UV trim curves, and without a 3D curve the edge's corner.
     bool fif_safe(SmFilletEdge* e)
     {
         SmFilletEdgeuse* p = eu_of(e, 0);
@@ -495,9 +495,66 @@ struct Model
             return false;
         if (g1->GetFilletSurface() == NULL || g2->GetFilletSurface() == NULL)
             return true;
+        // without a B-spline 3D curve the surface/surface intersection is called with
+        // m_cpCorner->GetContext() (UB-200)
         if (e->GetCurve() == NULL || !e->GetCurve()->IsKindOf(SmBSplineCurve_TYPE))
-            return true;
+            return e->GetFilletCorner() != NULL;
         return p->GetUVTrimCurvePointer() != NULL && m->GetUVTrimCurvePointer() != NULL;
+    }
+
+    // ReCalcFilletGeom without a march direction, when rail 0 has no curve, reads
+    // sTsectPnts[0]->CrvDeriv() unchecked (SmFilletGeom.cpp:11648). True when its sort loop
+    // (:11431-11507) runs to the end without sorting a rail-end point: every vertex there is
+    // unprocessed, a mate or an extended-edge-use end, or its tsect point is unset
+    // (-SM_BIG_DOUBLE). A loop that returns an error first (NER, a rail without two edge uses)
+    // never gets there, and a point that reaches the curve solve is either sorted or an error.
+    static bool recalc_sorts_nothing(SmFilletGeom* geom, SmFilletSolver* fs)
+    {
+        SmFilletGeomType t = geom->GetFilletGeomType();
+        bool b3d = t == SM_FG_CORNER_FILLET || t == SM_FG_TANGENT_ROLLOVER;
+        for (ULONG jj = 0; jj < 2; ++jj)
+        {
+            if (!b3d && (fs->GetEdgeuse(jj) == NULL || fs->GetEdgeuse(jj)->GetUVTrimCurve() == NULL))
+                return false;
+            SmTArray<SmFilletEdge*> rails;
+            rails.Add(geom->GetRail(jj));
+            rails.Append(jj == 0 ? geom->*GeomPeek::other1() : geom->*GeomPeek::other2());
+            for (ULONG r = 0; r < rails.GetSize(); ++r)
+            {
+                if (rails[r] == NULL)
+                    return false;
+                SmTArray<SmEdgeuse*> eus;
+                rails[r]->GetEdgeuses(eus);
+                if (eus.GetSize() != 2)
+                    return false;
+                for (ULONG k = 0; k < 2; ++k)
+                {
+                    SmFilletVertexuse* vu = (SmFilletVertexuse*)eus[k]->GetVertexuse();
+                    SmFilletVertex* fv = vu == NULL ? NULL : (SmFilletVertex*)vu->GetVertex();
+                    if (fv == NULL)
+                        return false;
+                    if (fv->GetStatus() == SM_FIL_UNPROCESSED || fv->GetFilletVertexType() == SM_FV_MATE ||
+                        fv->GetFilletVertexType() == SM_FV_RAIL_X_EXTENDED_EDGEUSE)
+                        continue;
+                    SmTsectPnt& tp = vu->GetTsectPnt();
+                    if (!b3d)
+                    {
+                        SmPoint2d uv = tp.UVPos(jj);
+                        if (uv.x == -SM_BIG_DOUBLE || uv.y == -SM_BIG_DOUBLE)
+                            continue;
+                        return false;
+                    }
+                    if (tp.m_ePointType == SM_IP_UNKNOWN || tp.CrvPos().IsUndef())
+                    {
+                        SmPoint2d uv = tp.UVPos(0);
+                        if (uv.x == -SM_BIG_DOUBLE || uv.y == -SM_BIG_DOUBLE)
+                            continue;
+                    }
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     // ---- export (layout in the Rust wrapper) ----
@@ -643,11 +700,14 @@ int32_t run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             ref = read_curve(rd, ctx);
         // upstream dereferences the solver, its offset surfaces and (but for a corner
         // fillet) its first edge use; the analytic fillets (CalcConeFilletGeom, unit
-        // blend.fillet_solver_p2) read solver data this shim does not build
+        // blend.fillet_solver_p2) read solver data this shim does not build; without a
+        // march direction it may read the first of no sorted points (UB-199)
         SmFilletSolver* fs = geom == NULL ? NULL : geom->GetFilletSolver();
         if (fs == NULL || fs->GetSurface(0) == NULL || fs->GetSurface(1) == NULL ||
             (geom->GetFilletGeomType() != SM_FG_CORNER_FILLET && fs->GetEdgeuse(0) == NULL) ||
-            (analytic && geom->GetFilletGeomType() != SM_FG_TANGENT_ROLLOVER))
+            (analytic && geom->GetFilletGeomType() != SM_FG_TANGENT_ROLLOVER) ||
+            (!has_dir && geom->GetRail(0) != NULL && geom->GetRail(0)->GetCurve() == NULL &&
+             Model::recalc_sorts_nothing(geom, fs)))
         {
             delete ref;
             return SC_ERR_ARG;

@@ -1736,6 +1736,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash / out-of-range read.
 - **Rust port:** Kernel topology mutation remains deferred. Both the safe FFI validator and the C++ shim require equally sized partners for op 3 with fillets. Six `rejected_fillets_*` fixtures check rejection; 660 isolated probes independently exercise both guards at first and last indices of 1/2/3/32 intervals. Valid equal-sized pairs and non-fillet calls remain accepted.
 
+#### UB-191. `CombineCoincidentVertices` deletes its isolated surviving vertex when inputs alias
+- **Location:** `source/SMLib/src/SmBrep.cpp:1354-1366`, `SmBrep::CombineCoincidentVertices`.
+- **What happens:** The zero-incident-edge branch notifies, sets the surviving vertex's point/tolerance, then calls `DeleteVertex(pVertexToDelete)` and returns `SM_SUCCESS`. If both input pointers are the same, the supposedly surviving vertex is deleted too. Nothing inside the function touches it afterwards, so the call itself is defined; a caller that keeps using the survivor pointer reads freed memory.
+- **Trigger:** Pass the same isolated vertex as both `pSurvivingVertex` and `pVertexToDelete`. Aliases with incident edges go through `GlueVertices(v, v)` and keep the survivor.
+- **How found:** PR #194 review and source inspection while porting `topology.brep_p5`; corrected in the second review round (the function was first thought undefined).
+- **Confirmed:** no native reproduction of the caller hazard. The whole call is compared in difftest; only the shim's target-stage op, which reads the survivor afterwards, refuses this input.
+- **Severity:** dangling caller-held survivor (caller use-after-free).
+- **Rust port:** Ported as upstream: the isolated aliased combination deletes the vertex and succeeds. Rust ids cannot dangle into freed memory; a later lookup of the deleted id returns `NotFound`.
+
 #### UB-159. `SmFilletGeom(SmFilletSolver*, SmFilletGeomType)` leaves `m_dOrientations` and `m_bCapped` uninitialised
 - **Location:** `source/SMLib/src/SmFilletGeom.cpp:8971-9004` (`SmFilletGeom::SmFilletGeom`).
 - **What happens:** The constructor's initialiser list and loop set the type, solver, centre line, surface, split flag, status, offset surfaces, rails and deviations, but never `m_dOrientations[2]` or `m_bCapped[2]`. `m_bCapped` is assigned only by `SmFilletGeom::MakeFaceBrep` (`:9427`, `:9476`) and read by `SmFilletGeom::InsertIntersectionTopology` (`:12158`, `if (pV && !m_bCapped[ii])`) and `DumpLevel` (`:13306`): a geometry whose intersection topology is inserted before `MakeFaceBrep` has run reads indeterminate flags. `m_dOrientations` (`SmFilletGeom.h:546`) is never read or written after its declaration (the `m_dOrientations` of the solver classes are their own members), so it is merely dead and uninitialised.
@@ -1781,7 +1790,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash (NULL dereference) / UB (wrong-type cast).
 - **Rust port:** `FilletBrep::calc_vert_on_vert` returns `SM_ERR_NULL_POINTER` without an object and `SolidError::InvalidInput` for an object that is not a vertex.
 
-#### UB-183. `SmFilletVertex::CalcMateGeom` recurses without bound through a cycle of mates
+#### UB-185. `SmFilletVertex::CalcMateGeom` recurses without bound through a cycle of mates
 - **Location:** `source/SMLib/src/SmFilletGeom.cpp:3480-3490` (`SmFilletVertex::CalcMateGeom`: `pMainFV->CalcCornerVertGeom()`), with `CalcCornerVertGeom` (`:1434`) calling `CalcMateGeom` for an `SM_FV_MATE` vertex.
 - **What happens:** A mate computes its main vertex (`GetMate(0)`) first, unprocessed, through `CalcCornerVertGeom`; when the main vertex is itself an unprocessed mate whose `GetMate(0)` leads back (a cycle of `SM_FV_MATE` vertices, including a vertex that is its own mate), the two calls recurse until the stack overflows. Nothing marks a vertex as in progress.
 - **Trigger:** two unprocessed `SM_FV_MATE` fillet vertices that are each other's `GetMate(0)`.
@@ -1789,6 +1798,25 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the difftest shim refuses mate cycles, `SC_ERR_ARG`).
 - **Severity:** crash (stack overflow).
 - **Rust port:** the nesting is bounded by `blend::fillet_geom::p3::MAX_MATE_DEPTH` (64; upstream's corners nest it at most once); deeper nesting is `SolidError::InvalidInput`.
+
+
+#### UB-199. `SmFilletGeom::ReCalcFilletGeom` reads the first of no sorted rail-end points
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:11648` (`SmFilletGeom::ReCalcFilletGeom`: `sDir = sTsectPnts[0]->CrvDeriv();`), after the sort loop of `:11431-11507`.
+- **What happens:** Without a march direction (`pOptMarchDir == NULL`) and with no curve on rail 0, the direction is taken from the first sorted rail-end point without checking that there is one. The sort loop skips every vertex that is unprocessed, `SM_FV_MATE` or `SM_FV_RAIL_X_EXTENDED_EDGEUSE`, and every point whose uv is unset (`-SM_BIG_DOUBLE`, `:11494` and `:11505`). When it skips them all, `sTsectPnts` is empty, so `sTsectPnts[0]` reads past the array (its stack buffer) and dereferences that pointer.
+- **Trigger:** `ReCalcFilletGeom(FALSE, NULL, NULL)` on a geometry whose rails' end vertices are all unprocessed (or all mates), both rails present and rail 0 without a curve: the `recalc_setup_fails` fixture with every vertex `status` 0 and a solver whose `SetupOffsetValues` succeeds (`regress_recalc_no_dir_all_unprocessed`), or with every vertex a processed mate (`regress_recalc_no_dir_all_mates`).
+- **How found:** reviewer's adversarial fixtures on PR #242 (core dump in the difftest process).
+- **Confirmed:** yes (both regression fixtures segfault the reference build, SIGSEGV in the difftest process, when the shim's guard is disabled).
+- **Severity:** crash (out-of-range read, then a wild pointer dereference).
+- **Rust port:** unreachable today (`FilletBrep::re_calc_fillet_geom` stops at the fillet intersector's point intersection first); the march direction there takes the first point through `.first()` and returns `SolidError::InvalidInput` when there is none. The `blend.fillet_geom_p3` shim refuses (`SC_ERR_ARG`) exactly that model: no march direction, rail 0 without a curve, and a sort loop that would finish without a point.
+
+#### UB-200. `SmFilletEdge::CalcFilletIntFillet` reads the context of a missing fillet corner
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:6051` (`SmFilletEdge::CalcFilletIntFillet`, from `:5959`: `sm_SrfSrfIntersection(m_cpCorner->GetContext(), ...)`); the failure branch after it calls `pCorner->RecordFilletError` (`:6072`).
+- **What happens:** When the fillet/fillet edge has no B-spline 3D curve yet, the surface/surface intersection is called with the context of the edge's own fillet corner, which is never checked. An edge without corner (`m_cpCorner == NULL`) dereferences `NULL`. Upstream's corners make these edges with a corner, so only a caller that builds or calls one without it reaches this.
+- **Trigger:** `CalcFilletIntFillet(crContext, pCorner)` on an `SM_FE_FILLET_X_FILLET` edge without curve or corner, both end vertices processed and both geometries with a solver and a fillet surface: fixture `regress_fif_no_curve_no_corner` (generated seed 748 of the 2000-seed sweep).
+- **How found:** generated difftest case (the 2000-seed sweep while addressing the PR #242 review); gdb puts the SIGSEGV in `SmFilletEdge::CalcFilletIntFillet`.
+- **Confirmed:** yes (SIGSEGV in the reference build before the shim refused it).
+- **Severity:** crash (NULL dereference).
+- **Rust port:** `FilletBrep::calc_fillet_int_fillet` returns `SM_ERR_NULL_POINTER` for an edge without corner on that path, before the unported intersection. The `blend.fillet_geom_p3` shim refuses (`SC_ERR_ARG`) a fillet/fillet edge without corner when it has no B-spline curve.
 
 ### Healer target management
 

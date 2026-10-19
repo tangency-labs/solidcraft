@@ -821,12 +821,776 @@
       "values_compared": 0
     },
     {
+      "inputs": {
+        "analytic": false,
+        "brep": {
+          "file": "Mouse.smb",
+          "kind": "file",
+          "rebuild": false
+        },
+        "expected_rejection": true,
+        "g": 0,
+        "model": {
+          "edges": [
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.44877898088908386, 0.7144625649180669, 0.4476064470610508],
+                    "deriv": [0.011585777127972374, -0.7662294390034798, -0.2708223316874836],
+                    "ptype": 2,
+                    "uv": [
+                      [0.8592886035275438, 0.5085768221797712],
+                      [0.7609370955678613, 0.11504704150611189]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [-0.08516380515022348, -0.30300412339722405, 0.020526062271876144],
+                    "deriv": [0.9039786170839681, -0.7084544111772131, -0.019090816500582086],
+                    "ptype": 1,
+                    "uv": [
+                      [0.15827124542613158, 0.6306048930538288],
+                      [0.5225210066038246, 0.9599576236625199]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [-0.7912767119443183, -0.45014375862386347, -0.17326578232639323],
+                    "deriv": [0.8472223141027706, 0.20096152531503342, -0.41580491251158924],
+                    "ptype": 1,
+                    "uv": [
+                      [0.26440060019453804, 0.07480688229939358],
+                      [0.20217651155941985, 0.9683357335948422]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.02720784785806485, 0.20038659869098252, -0.04129266574645585],
+                    "deriv": [0.03807866158895923, 0.054466712146863605, 0.23968132209296278],
+                    "ptype": 1,
+                    "uv": [
+                      [0.31278919126929217, 0.8015685282532625],
+                      [0.35157554549999603, 0.8245319924751325]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 3,
+              "vs": 2
+            }
+          ],
+          "geoms": [
+            {
+              "gtype": 3,
+              "other1": [],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [],
+              "solver": 0,
+              "status": 0
+            }
+          ],
+          "solvers": [
+            {
+              "ang": 0.05,
+              "eus": [66, 652],
+              "extend": [false, true],
+              "setup": true,
+              "surfs": [
+                {
+                  "base": {
+                    "bspline": {
+                      "form": 0,
+                      "net": [
+                        [
+                          [0.0, 0.0, 0.2804687374272176, -1.7976931348623157e+308],
+                          [0.0, 0.5, 0.397002950640871, -1.7976931348623157e+308],
+                          [0.0, 1.0, 0.4145641860615516, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.25, 0.0, 0.4504106573092238, -1.7976931348623157e+308],
+                          [0.25, 0.5, 0.4749043805135977, -1.7976931348623157e+308],
+                          [0.25, 1.0, 0.37560431345661316, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.5, 0.0, 0.5376087365246385, -1.7976931348623157e+308],
+                          [0.5, 0.5, 0.5489879188821565, -1.7976931348623157e+308],
+                          [0.5, 1.0, 0.5195571178182932, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.75, 0.0, 0.47585284577639364, -1.7976931348623157e+308],
+                          [0.75, 0.5, 0.5455205474936691, -1.7976931348623157e+308],
+                          [0.75, 1.0, 0.4577291202700572, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [1.0, 0.0, 0.38155683403156154, -1.7976931348623157e+308],
+                          [1.0, 0.5, 0.4713725676651887, -1.7976931348623157e+308],
+                          [1.0, 1.0, 0.5155512415270864, -1.7976931348623157e+308]
+                        ]
+                      ],
+                      "oob": false,
+                      "p": 2,
+                      "q": 2,
+                      "u": [0.0, 0.0, 0.0, 0.335714989389555, 0.3872293512244931, 1.0, 1.0, 1.0],
+                      "v": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+                    }
+                  },
+                  "dist": -0.02657662463320537
+                },
+                {
+                  "base": {
+                    "bspline": {
+                      "form": 0,
+                      "net": [
+                        [
+                          [0.0, 0.0, -0.5057423502333951, -1.7976931348623157e+308],
+                          [0.0, 0.3333333333333333, -0.25524097949260116, -1.7976931348623157e+308],
+                          [0.0, 0.6666666666666666, -0.25728480619730915, -1.7976931348623157e+308],
+                          [0.0, 1.0, -0.41666474055360625, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.5, 0.0, -0.497051953980421, -1.7976931348623157e+308],
+                          [0.5, 0.3333333333333333, -0.48746156514935435, -1.7976931348623157e+308],
+                          [0.5, 0.6666666666666666, -0.5166881078779076, -1.7976931348623157e+308],
+                          [0.5, 1.0, -0.49672554986512185, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [1.0, 0.0, -0.4399519893456696, -1.7976931348623157e+308],
+                          [1.0, 0.3333333333333333, -0.25863876309701833, -1.7976931348623157e+308],
+                          [1.0, 0.6666666666666666, -0.3559327834519744, -1.7976931348623157e+308],
+                          [1.0, 1.0, -0.5570675066098978, -1.7976931348623157e+308]
+                        ]
+                      ],
+                      "oob": false,
+                      "p": 2,
+                      "q": 3,
+                      "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                      "v": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+                    }
+                  },
+                  "dist": -0.1189944499146777
+                }
+              ],
+              "tang": 0.01,
+              "tol": 0.0001
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 9
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 0,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 9
+            }
+          ]
+        },
+        "op": "re_calc"
+      },
       "max_rel_err": 0.0,
-      "name": "gen0000",
+      "name": "regress_recalc_no_dir_all_unprocessed",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#15 (upstream source/SMLib/src/SmFilletGeom.cpp (ReCalcFilletGeom reads sTsectPnts[0] of an empty array without a march direction: UB-199))",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "analytic": false,
+        "brep": {
+          "file": "Mouse.smb",
+          "kind": "file",
+          "rebuild": false
+        },
+        "expected_rejection": true,
+        "g": 0,
+        "model": {
+          "edges": [
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.44877898088908386, 0.7144625649180669, 0.4476064470610508],
+                    "deriv": [0.011585777127972374, -0.7662294390034798, -0.2708223316874836],
+                    "ptype": 2,
+                    "uv": [
+                      [0.8592886035275438, 0.5085768221797712],
+                      [0.7609370955678613, 0.11504704150611189]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [-0.08516380515022348, -0.30300412339722405, 0.020526062271876144],
+                    "deriv": [0.9039786170839681, -0.7084544111772131, -0.019090816500582086],
+                    "ptype": 1,
+                    "uv": [
+                      [0.15827124542613158, 0.6306048930538288],
+                      [0.5225210066038246, 0.9599576236625199]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [-0.7912767119443183, -0.45014375862386347, -0.17326578232639323],
+                    "deriv": [0.8472223141027706, 0.20096152531503342, -0.41580491251158924],
+                    "ptype": 1,
+                    "uv": [
+                      [0.26440060019453804, 0.07480688229939358],
+                      [0.20217651155941985, 0.9683357335948422]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.02720784785806485, 0.20038659869098252, -0.04129266574645585],
+                    "deriv": [0.03807866158895923, 0.054466712146863605, 0.23968132209296278],
+                    "ptype": 1,
+                    "uv": [
+                      [0.31278919126929217, 0.8015685282532625],
+                      [0.35157554549999603, 0.8245319924751325]
+                    ],
+                    "uv_face": -1
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "status": 0,
+              "ve": 3,
+              "vs": 2
+            }
+          ],
+          "geoms": [
+            {
+              "gtype": 3,
+              "other1": [],
+              "other2": [],
+              "rails": [0, 1],
+              "sides": [],
+              "solver": 0,
+              "status": 0
+            }
+          ],
+          "solvers": [
+            {
+              "ang": 0.05,
+              "eus": [66, 652],
+              "extend": [false, true],
+              "setup": true,
+              "surfs": [
+                {
+                  "base": {
+                    "bspline": {
+                      "form": 0,
+                      "net": [
+                        [
+                          [0.0, 0.0, 0.2804687374272176, -1.7976931348623157e+308],
+                          [0.0, 0.5, 0.397002950640871, -1.7976931348623157e+308],
+                          [0.0, 1.0, 0.4145641860615516, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.25, 0.0, 0.4504106573092238, -1.7976931348623157e+308],
+                          [0.25, 0.5, 0.4749043805135977, -1.7976931348623157e+308],
+                          [0.25, 1.0, 0.37560431345661316, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.5, 0.0, 0.5376087365246385, -1.7976931348623157e+308],
+                          [0.5, 0.5, 0.5489879188821565, -1.7976931348623157e+308],
+                          [0.5, 1.0, 0.5195571178182932, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.75, 0.0, 0.47585284577639364, -1.7976931348623157e+308],
+                          [0.75, 0.5, 0.5455205474936691, -1.7976931348623157e+308],
+                          [0.75, 1.0, 0.4577291202700572, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [1.0, 0.0, 0.38155683403156154, -1.7976931348623157e+308],
+                          [1.0, 0.5, 0.4713725676651887, -1.7976931348623157e+308],
+                          [1.0, 1.0, 0.5155512415270864, -1.7976931348623157e+308]
+                        ]
+                      ],
+                      "oob": false,
+                      "p": 2,
+                      "q": 2,
+                      "u": [0.0, 0.0, 0.0, 0.335714989389555, 0.3872293512244931, 1.0, 1.0, 1.0],
+                      "v": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+                    }
+                  },
+                  "dist": -0.02657662463320537
+                },
+                {
+                  "base": {
+                    "bspline": {
+                      "form": 0,
+                      "net": [
+                        [
+                          [0.0, 0.0, -0.5057423502333951, -1.7976931348623157e+308],
+                          [0.0, 0.3333333333333333, -0.25524097949260116, -1.7976931348623157e+308],
+                          [0.0, 0.6666666666666666, -0.25728480619730915, -1.7976931348623157e+308],
+                          [0.0, 1.0, -0.41666474055360625, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [0.5, 0.0, -0.497051953980421, -1.7976931348623157e+308],
+                          [0.5, 0.3333333333333333, -0.48746156514935435, -1.7976931348623157e+308],
+                          [0.5, 0.6666666666666666, -0.5166881078779076, -1.7976931348623157e+308],
+                          [0.5, 1.0, -0.49672554986512185, -1.7976931348623157e+308]
+                        ],
+                        [
+                          [1.0, 0.0, -0.4399519893456696, -1.7976931348623157e+308],
+                          [1.0, 0.3333333333333333, -0.25863876309701833, -1.7976931348623157e+308],
+                          [1.0, 0.6666666666666666, -0.3559327834519744, -1.7976931348623157e+308],
+                          [1.0, 1.0, -0.5570675066098978, -1.7976931348623157e+308]
+                        ]
+                      ],
+                      "oob": false,
+                      "p": 2,
+                      "q": 3,
+                      "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                      "v": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+                    }
+                  },
+                  "dist": -0.1189944499146777
+                }
+              ],
+              "tang": 0.01,
+              "tol": 0.0001
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.0, 0.0, 0.0],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 3
+            }
+          ]
+        },
+        "op": "re_calc"
+      },
+      "max_rel_err": 0.0,
+      "name": "regress_recalc_no_dir_all_mates",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#16 (upstream source/SMLib/src/SmFilletGeom.cpp (ReCalcFilletGeom reads sTsectPnts[0] of an empty array without a march direction: UB-199))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "recalc_unset_uv_3d",
       "outcome": "pass",
       "pass": true,
-      "source": "generated:seed=9207379614715587805",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#17 (upstream source/SMLib/src/SmFilletGeom.cpp (the 3D test skips an unknown point whose first uv is unset (-SM_BIG_DOUBLE in u)))",
       "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "recalc_unset_uv_v_3d",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#18 (upstream source/SMLib/src/SmFilletGeom.cpp (the 3D test skips an unknown point whose first uv is unset (-SM_BIG_DOUBLE in v)))",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "recalc_unset_uv_2d",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#19 (upstream source/SMLib/src/SmFilletGeom.cpp (the 2D test (SM_FG_DEFAULT) skips a point whose rail-side uv is unset))",
+      "values_compared": 98
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fillet_x_fillet_trim_zero_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#20 (upstream source/SMLib/src/SmFilletGeom.cpp (zero approximation and angle tolerances: DropPoint at approxTol * 10 = 0))",
+      "values_compared": 136
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "mate_on_mouse_face_zero_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#21 (upstream source/SMLib/src/SmFilletGeom.cpp (zero solver tolerances))",
+      "values_compared": 98
+    },
+    {
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "e": 0,
+        "expected_rejection": true,
+        "model": {
+          "edges": [
+            {
+              "corner": -1,
+              "etype": 4,
+              "eus": [
+                {
+                  "geom": 0,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "uv_curve": {
+                    "cpts": [
+                      [0.0, -0.19431159612449017, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.3333333333333333, 0.27193664235820897, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.6666666666666666, -0.07105435682974828, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [1.0, -0.11913802538631657, 1.7976931348623157e+308, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 2,
+                    "u": [0.0, 0.0, 0.0, 0.8685594822110453, 1.0, 1.0, 1.0]
+                  },
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 1,
+                  "tsect": {
+                    "cparam": 0.0,
+                    "crv": [0.0, 0.0, 0.0],
+                    "deriv": [0.0, 0.0, 0.0],
+                    "ptype": 1,
+                    "uv": [
+                      [0.0, 0.0],
+                      [0.0, 0.0]
+                    ],
+                    "uv_face": -1
+                  },
+                  "uv_curve": {
+                    "cpts": [
+                      [0.0, -0.03142172008832417, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.25, 0.13163390419600846, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.5, 0.26841064601498105, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [0.75, 0.21788277615760548, 1.7976931348623157e+308, -1.7976931348623157e+308],
+                      [1.0, 0.19004656294619227, 1.7976931348623157e+308, -1.7976931348623157e+308]
+                    ],
+                    "dim": 2,
+                    "p": 3,
+                    "u": [0.0, 0.0, 0.0, 0.0, 0.7063838685043892, 1.0, 1.0, 1.0, 1.0]
+                  },
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "interval": [0.0, 1.0],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            }
+          ],
+          "geoms": [
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [-1, -1],
+              "sides": [],
+              "solver": 0,
+              "status": 0,
+              "surface": {
+                "bspline": {
+                  "form": 0,
+                  "net": [
+                    [
+                      [0.0, 0.0, 0.06114158752295651, -1.7976931348623157e+308],
+                      [0.0, 0.5, 0.1443873956064754, -1.7976931348623157e+308],
+                      [0.0, 1.0, 0.17964976892350232, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.25, 0.0, -0.09371528744537483, -1.7976931348623157e+308],
+                      [0.25, 0.5, 0.012740625372413605, -1.7976931348623157e+308],
+                      [0.25, 1.0, 0.1855788439071125, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.5, 0.0, 0.1896297101349934, -1.7976931348623157e+308],
+                      [0.5, 0.5, 0.17048824944408264, -1.7976931348623157e+308],
+                      [0.5, 1.0, 0.1741131111040346, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.75, 0.0, -0.015081028503281052, -1.7976931348623157e+308],
+                      [0.75, 0.5, -0.02089177798185729, -1.7976931348623157e+308],
+                      [0.75, 1.0, -0.043207806963133866, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [1.0, 0.0, -0.07318917315992199, -1.7976931348623157e+308],
+                      [1.0, 0.5, -0.17611105477122346, -1.7976931348623157e+308],
+                      [1.0, 1.0, 0.005902874589605034, -1.7976931348623157e+308]
+                    ]
+                  ],
+                  "oob": false,
+                  "p": 3,
+                  "q": 1,
+                  "u": [0.0, 0.0, 0.0, 0.0, 0.1460865185860033, 1.0, 1.0, 1.0, 1.0],
+                  "v": [0.0, 0.0, 0.8457732680973149, 1.0, 1.0]
+                }
+              }
+            },
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [-1, -1],
+              "sides": [],
+              "solver": 1,
+              "status": 0,
+              "surface": {
+                "bspline": {
+                  "form": 0,
+                  "net": [
+                    [
+                      [0.0, 0.0, 0.6951666480936494, -1.7976931348623157e+308],
+                      [0.0, 0.5, 0.5243534753285871, -1.7976931348623157e+308],
+                      [0.0, 1.0, 0.32623019690454946, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [0.5, 0.0, 0.4329105277383829, -1.7976931348623157e+308],
+                      [0.5, 0.5, 0.5523746593768971, -1.7976931348623157e+308],
+                      [0.5, 1.0, 0.3158606859223039, -1.7976931348623157e+308]
+                    ],
+                    [
+                      [1.0, 0.0, 0.5153503564970086, -1.7976931348623157e+308],
+                      [1.0, 0.5, 0.6714333673381631, -1.7976931348623157e+308],
+                      [1.0, 1.0, 0.4513766983915697, -1.7976931348623157e+308]
+                    ]
+                  ],
+                  "oob": false,
+                  "p": 1,
+                  "q": 1,
+                  "u": [0.0, 0.0, 0.22479938211973083, 1.0, 1.0],
+                  "v": [0.0, 0.0, 0.9215288684207446, 1.0, 1.0]
+                }
+              }
+            }
+          ],
+          "solvers": [
+            {
+              "ang": 0.0501618094625769,
+              "eus": [-1, -1],
+              "extend": [false, false],
+              "setup": false,
+              "surfs": [null, null],
+              "tang": 0.01,
+              "tol": 1e-6
+            },
+            {
+              "ang": 0.07015757134134147,
+              "eus": [-1, -1],
+              "extend": [false, false],
+              "setup": false,
+              "surfs": [null, null],
+              "tang": 0.01,
+              "tol": 1e-7
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.7578733804122219, 0.06246073184492196, -0.040203550714303773],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 1
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 0,
+              "point": [0.14285251057775486, -0.22754893310014468, -0.04689386479598097],
+              "status": 1,
+              "t": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 1
+            }
+          ]
+        },
+        "op": "fillet_int_fillet"
+      },
+      "max_rel_err": 0.0,
+      "name": "regress_fif_no_curve_no_corner",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "shim_rejected_model",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#22 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcFilletIntFillet without a 3D curve calls sm_SrfSrfIntersection with m_cpCorner->GetContext() of an edge without corner: UB-200; generated seed 748 of the 2000-seed sweep))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587805",
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -905,12 +1669,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587814",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -1013,16 +1781,12 @@
       "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0022",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587827",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1166,8 +1930,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0040",
@@ -1441,16 +2205,12 @@
       "values_compared": 153
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587879",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1469,16 +2229,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0077",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587882",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1622,8 +2378,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0094",
@@ -1674,8 +2430,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -1721,16 +2477,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0105",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587910",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1741,16 +2493,12 @@
       "values_compared": 136
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0107",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587912",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1817,16 +2565,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0116",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587921",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1982,8 +2726,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0136",
@@ -2162,8 +2906,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0158",
@@ -2245,12 +2989,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0168",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587973",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2317,12 +3065,16 @@
       "values_compared": 142
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0177",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587982",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2657,12 +3409,16 @@
       "values_compared": 143
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0219",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588024",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2753,12 +3509,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "sm_SrfSrfIntersection",
+        "unit": "blend.fillet_geom_p2"
+      },
       "max_rel_err": 0.0,
       "name": "gen0231",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588036",
-      "values_compared": 116
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2925,12 +3685,16 @@
       "values_compared": 12
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0251",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588056",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2965,16 +3729,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588061",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3177,16 +3937,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletIntersector::SmFilletIntersector",
-        "unit": "blend.fillet_intersector"
-      },
       "max_rel_err": 0.0,
       "name": "gen0281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588086",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 2.3391020088847994e-16,
@@ -3266,7 +4022,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588096",
-      "values_compared": 125
+      "values_compared": 131
     },
     {
       "max_rel_err": 0.0,
@@ -3317,12 +4073,16 @@
       "values_compared": 154
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0298",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588103",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3336,13 +4096,13 @@
   "cases_both_errored": 0,
   "cases_deferred": 28,
   "cases_failed": 0,
-  "cases_passed": 283,
-  "cases_rejected": 4,
-  "cases_total": 315,
+  "cases_passed": 288,
+  "cases_rejected": 7,
+  "cases_total": 323,
   "deferred_by_unit": {
-    "blend.fillet_geom_p2": 4,
+    "blend.fillet_geom_p2": 5,
     "blend.fillet_geom_p5": 11,
-    "blend.fillet_intersector": 13
+    "intersect.surface_intersector_p4": 12
   },
   "max_rel_err": 3.663446558865142e-14,
   "pass": true,

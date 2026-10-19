@@ -45,7 +45,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::intersect::point_class::PointClassType;
 use solidcore::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};
 use solidcore::kernel::Kernel;
-use solidcore::math::Point3;
+use solidcore::math::{Point3, BIG_DOUBLE};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::math::{NOW, NOZ};
@@ -58,8 +58,8 @@ use solidcore_ffi::units::blend_fillet_geom_p3::{self as ffi, Op};
 use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
 use super::topology_edgeuse_p1::{
-    brep_block_of, bspline_of, clamped_knots, gen_curve, import, path_of, push_curve,
-    push_surface, sel, surface_of, BrepIn, BssIn, CrvIn, SrfIn, FILES,
+    brep_block_of, bspline_of, clamped_knots, gen_curve, import, path_of, push_curve, push_surface,
+    sel, surface_of, BrepIn, BssIn, CrvIn, SrfIn, FILES,
 };
 use crate::{HarnessError, Output, Rng, UnitDiff};
 
@@ -333,7 +333,9 @@ impl Target {
     }
 
     fn face(&self, s: i64) -> Option<FaceId> {
-        u32::try_from(sel(s, self.n_f())).ok().map(FaceId::from_index)
+        u32::try_from(sel(s, self.n_f()))
+            .ok()
+            .map(FaceId::from_index)
     }
 
     /// `(u0, v0, u1, v1)` of the face's surface domain.
@@ -430,7 +432,12 @@ fn model_input(i: &Inputs, tg: &Target) -> Result<Vec<f64>, HarnessError> {
     o.push(m.vertices.len() as f64);
     for v in &m.vertices {
         o.extend(v.point);
-        o.extend([v.vtype as f64, v.status as f64, v.corner as f64, v.pc_class as f64]);
+        o.extend([
+            v.vtype as f64,
+            v.status as f64,
+            v.corner as f64,
+            v.pc_class as f64,
+        ]);
         let (kind, idx) = tg.pc(v.pc_kind, v.pc_index);
         o.extend([kind as f64, idx as f64, sel(v.pc_face, tg.n_f()) as f64]);
         o.extend([v.t, v.uv[0], v.uv[1]]);
@@ -652,9 +659,14 @@ impl RustModel {
             for (rail, off) in s.surfs.iter().enumerate() {
                 if let Some(off) = off {
                     let base = surface_of(&off.base)?;
-                    let surface =
-                        OffsetSurface::new(&k, off.dist, base, SurfaceId::Free(rail as u32), SS_UNKNOWN)
-                            .map_err(h)?;
+                    let surface = OffsetSurface::new(
+                        &k,
+                        off.dist,
+                        base,
+                        SurfaceId::Free(rail as u32),
+                        SS_UNKNOWN,
+                    )
+                    .map_err(h)?;
                     fs.set_surface(
                         rail,
                         Some(OffsetSurfaceSlot {
@@ -873,7 +885,9 @@ impl RustModel {
                     g.and_then(|g| self.geoms.iter().position(|&x| x == g))
                         .map_or(-1.0, |i| i as f64),
                 );
-                let vu = r.vertexuse.ok_or_else(|| harness("edge use without vertex use"))?;
+                let vu = r
+                    .vertexuse
+                    .ok_or_else(|| harness("edge use without vertex use"))?;
                 let t = self.fb.fillet_vertexuse(vu).map_err(h)?.tsect_pnt();
                 o.push(f64::from(t.point_type.code()));
                 let (a, c) = (t.uv_pos(SrfIndex::First), t.uv_pos(SrfIndex::Second));
@@ -965,13 +979,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             ref_curve,
         } => {
             let g = *m.geoms.get(*g).ok_or_else(|| harness("geometry"))?;
-            let si = m
-                .fb
-                .geom(g)
-                .map_err(h)?
-                .fillet_solver()
-                .ok_or_else(|| harness("geometry without solver"))?;
-            let reference = ref_curve.as_ref().map(bspline_of).transpose()?.map(Curve::from);
+            let si =
+                m.fb.geom(g)
+                    .map_err(h)?
+                    .fillet_solver()
+                    .ok_or_else(|| harness("geometry without solver"))?;
+            let reference = ref_curve
+                .as_ref()
+                .map(bspline_of)
+                .transpose()?
+                .map(Curve::from);
             // the solver's own geometry (made by its constructor) is none of the model's
             let geometry_id = |_: FilletGeomRef| Ok(FilletGeomId(u32::MAX));
             let solver = m
@@ -1050,7 +1067,11 @@ fn gen_curve_on(rng: &mut Rng, dim: u64, scale: f64, a: f64, b: f64) -> CrvIn {
         .map(|i| {
             let x = i as f64 / n as f64 * scale;
             let y = rng.uniform(-0.3, 0.3) * scale;
-            let z = if dim == 2 { NOZ } else { rng.uniform(-0.3, 0.3) * scale };
+            let z = if dim == 2 {
+                NOZ
+            } else {
+                rng.uniform(-0.3, 0.3) * scale
+            };
             [x, y, z, NOW]
         })
         .collect();
@@ -1140,8 +1161,12 @@ fn gen_mate(rng: &mut Rng) -> Inputs {
 
     // main vertex: processed (or computed: an unprocessed fillet-x-edgeuse stays so)
     let mut main = vertex(
-        *rng.choose(&[FilletVertexType::RailEnd, FilletVertexType::RailXEdgeuse, FilletVertexType::FilletXEdgeuse])
-            .unwrap_or(&FilletVertexType::RailEnd),
+        *rng.choose(&[
+            FilletVertexType::RailEnd,
+            FilletVertexType::RailXEdgeuse,
+            FilletVertexType::FilletXEdgeuse,
+        ])
+        .unwrap_or(&FilletVertexType::RailEnd),
         FilStatus::Processed,
     );
     if main.vtype == FilletVertexType::FilletXEdgeuse as i64 && rng.chance(0.3) {
@@ -1347,7 +1372,8 @@ fn gen_fif(rng: &mut Rng) -> Inputs {
         ve: 1,
         etype: FilletEdgeType::FilletXFillet as i64,
         status: 0,
-        corner: if rng.chance(0.9) { 0 } else { -1 },
+        // without a curve upstream reads the corner's context (UB-200; the shim refuses that)
+        corner: if !has_curve || rng.chance(0.9) { 0 } else { -1 },
         curve: has_curve.then(|| curve.clone()),
         interval: Some([a, bb]),
         eus: [
@@ -1433,6 +1459,36 @@ fn gen_corner_edge(rng: &mut Rng) -> Inputs {
 }
 
 /// A fillet geometry on a solver over a target face's edge, for `ReCalcFilletGeom`.
+/// Whether `ReCalcFilletGeom`'s sort loop would sort a rail-end point of the generated
+/// rails (rail `jj` is edge `jj`): a processed vertex that is not a mate or an
+/// extended-edge-use end, with a set uv (`UVPos(jj)` for the 2D test; `UVPos(0)` of an
+/// unknown point for the 3D test).
+fn recalc_sorts_a_point(gtype: FilletGeomType, vertices: &[VertexIn], edges: &[EdgeIn]) -> bool {
+    let b3d = matches!(
+        gtype,
+        FilletGeomType::CornerFillet | FilletGeomType::TangentRollover
+    );
+    let unset = |uv: Option<&[f64; 2]>| uv.is_none_or(|p| p.contains(&-BIG_DOUBLE));
+    edges.iter().take(2).enumerate().any(|(jj, e)| {
+        [e.vs, e.ve].iter().zip(&e.eus).any(|(&v, eu)| {
+            let Some(v) = vertices.get(v) else {
+                return false;
+            };
+            if v.status != FilStatus::Processed as i64
+                || v.vtype == FilletVertexType::Mate as i64
+                || v.vtype == FilletVertexType::RailXExtendedEdgeuse as i64
+            {
+                return false;
+            }
+            let t = &eu.tsect;
+            if !b3d {
+                return !unset(t.uv.get(jj));
+            }
+            t.ptype != IntersectionPointType::Unknown as i64 || !unset(t.uv.first())
+        })
+    })
+}
+
 fn gen_recalc(rng: &mut Rng) -> Inputs {
     let brep = solid_brep(rng);
     let base = |rng: &mut Rng| {
@@ -1467,12 +1523,20 @@ fn gen_recalc(rng: &mut Rng) -> Inputs {
         .unwrap_or(&FilletGeomType::TangentRollover);
     let tsect = |rng: &mut Rng| {
         let ptype = if rng.chance(0.6) { 1 } else { 2 };
+        let mut uv = [
+            [rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0)],
+            [rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0)],
+        ];
+        // sometimes "unset" (-SM_BIG_DOUBLE), which the sort loop skips
+        if rng.chance(0.1) {
+            let k = rng.below(4) as usize;
+            if let Some(c) = uv.get_mut(k / 2).and_then(|p| p.get_mut(k % 2)) {
+                *c = -BIG_DOUBLE;
+            }
+        }
         TsectIn {
             ptype,
-            uv: [
-                [rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0)],
-                [rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0)],
-            ],
+            uv,
             uv_face: -1,
             crv: rng.point3(-1.0, 1.0),
             deriv: rng.point3(-1.0, 1.0),
@@ -1506,6 +1570,13 @@ fn gen_recalc(rng: &mut Rng) -> Inputs {
     let rails = if rng.chance(0.6) { [0, -1] } else { [0, 1] };
     let ref_curve = (gtype == FilletGeomType::CornerFillet && rng.chance(0.8))
         .then(|| gen_curve_on(rng, 3, 1.0, 0.0, 1.0));
+    let mut dir = rng.chance(0.5).then(|| rng.point3(-1.0, 1.0));
+    // Without a march direction, when rail 0 has no curve (never here) and both rails
+    // are there, upstream reads the first sorted point even when there is none (UB-199;
+    // the shim refuses that model): give such a model a direction.
+    if dir.is_none() && rails[1] >= 0 && !recalc_sorts_a_point(gtype, &vertices, &edges) {
+        dir = Some(rng.point3(-1.0, 1.0));
+    }
     Inputs {
         brep,
         model: ModelIn {
@@ -1527,7 +1598,7 @@ fn gen_recalc(rng: &mut Rng) -> Inputs {
             g: 0,
             // the analytic branch is skipped for a roll-over (the shim refuses others)
             analytic: gtype == FilletGeomType::TangentRollover && rng.chance(0.3),
-            dir: rng.chance(0.5).then(|| rng.point3(-1.0, 1.0)),
+            dir,
             ref_curve,
         },
         expected_rejection: false,
