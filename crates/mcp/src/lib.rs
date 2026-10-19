@@ -10,11 +10,13 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod feedback;
 mod server;
 mod skill_reference;
 mod tools;
 
 pub use backend::{Auto, Backend, Headless, Remote};
+pub use feedback::PREFIX as FEEDBACK_PREFIX;
 pub use server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
 pub use tools::{call_tool, tool_definitions};
 
