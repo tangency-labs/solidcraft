@@ -214,6 +214,7 @@ select.filter                     the selection
 select.same_look                  the selection
 select.set                        the selection
 selection.delete                  deletes what is selected through the commands that own each kind
+selection.get                     reads the selection, read only; crates/engine/src/cmd/edit_tests.rs
 settings.profile.apply            settings profiles: preferences saved, applied and shared
 settings.profile.delete           settings profiles: preferences saved, applied and shared
 settings.profile.export           settings profiles: preferences saved, applied and shared
