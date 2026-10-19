@@ -1727,9 +1727,11 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
 /// `v` to a round (`new`) tangent to it along a seam that crosses the chain obliquely, and the
 /// round bends to the far side of `old` from the ball rolling along `cur` (a round taking material
 /// away where an earlier one added it, or the other way round). The ball's contact with `old` does
-/// not run on along that seam, so the chain ends at `v`. A round of the same kind (an earlier
-/// round of the edge the chain runs into) and a round whose seam runs across the chain (a corner
-/// rounded square to the chain's faces) leave the chain as it was.
+/// not run on along that seam, so the chain ends at `v`, but only where the round ends flush with
+/// a wall's end as an earlier round does there ([`crate::merge_corner::mixed_end`]). A round of
+/// the same kind (an earlier round of the edge the chain runs into), a round whose seam runs
+/// across the chain (a corner rounded square to the chain's faces) and a curved face of the design
+/// (a cove, a slot's rounded corner) leave the chain as it was.
 fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex, d: Vec3) -> bool {
     use mt::{BoundedCurve, ParametricCurve};
     // Under about 3° from square to the chain: the seam runs across it.
@@ -1783,7 +1785,18 @@ fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex
     // cylinder's two halves) is no round's end.
     let bend = (m - p).dot(n1);
     let tol = p.dist(m) * 1e-3;
-    (convex && bend > tol) || (concave && bend < -tol)
+    if !((convex && bend > tol) || (concave && bend < -tol)) {
+        return false;
+    }
+    // And it is such a round's end: a cylinder ending flush with a wall's end
+    // ([`crate::merge_corner::mixed_end`]), adding material where `cur` takes it away or the other
+    // way round. A designed cove or a slot's rounded corner the chain runs on over is none.
+    let faces: Vec<mt::Face> = solid.face_iter().cloned().collect();
+    let fit = (p.dist(m) * 1e-4).clamp(1e-5, 1e-3);
+    crate::guard("chain end", || Ok(crate::merge_corner::mixed_end(&faces, v, old, shared, new, fit)))
+        .ok()
+        .flatten()
+        .is_some_and(|end| end.earlier_adds == convex)
 }
 
 /// Whether the faces on either side of `e` meet smoothly there (a seam between pieces of one
@@ -2040,8 +2053,8 @@ fn radius_step(radius: f64) -> f64 {
 /// The largest radius below `radius` (to three significant digits) at which the fillet of
 /// these edges works, with its result; `None` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
-/// them, so it is for an explicit request, not every refusal. A decisive refusal (no radius
-/// gets round it) ends the search.
+/// them, so it is for an explicit request, not every refusal. A decisive refusal ends the
+/// search, with the largest radius built before it, if any.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
     if !(radius.is_finite() && radius > 1e-6) {
         return None;
@@ -2062,8 +2075,9 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
                 lo = mid;
                 best = Some(b);
             }
-            // Refused whatever the radius: no point searching on.
-            Err(e) if decisive(&e) => return None,
+            // Refused for what the radius doesn't change: no point searching on. A smaller
+            // radius already built (the end may have fitted the earlier round there) stands.
+            Err(e) if decisive(&e) => break,
             Err(_) => hi = mid,
         }
     }

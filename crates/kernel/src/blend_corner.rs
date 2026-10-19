@@ -431,9 +431,9 @@ fn build(cur: &Body, sel_pts: &[(Vec3, f64)], round: bool) -> Result<Body> {
     }
 
     // The vertices at the ends of filleted edges: three planar faces, three straight edges.
-    let mut around: HashMap<mt::VertexID, Around> = HashMap::new();
-    // In a fixed order (by position): the refusal (the first vertex refused) doesn't depend on
-    // hashing.
+    // In a fixed order (by position), here and in the build: the refusal (the first vertex
+    // refused) doesn't depend on hashing. The edges at each in a fixed order too: by direction.
+    let mut around: Vec<(mt::VertexID, Around)> = Vec::new();
     let mut order_v: Vec<(&mt::VertexID, &mt::Vertex)> = touched.iter().collect();
     order_v.sort_by(|a, b| {
         let (p, q) = (vtx(a.1), vtx(b.1));
@@ -466,7 +466,8 @@ fn build(cur: &Body, sel_pts: &[(Vec3, f64)], round: bool) -> Result<Body> {
             .ok_or_else(|| KernelError::Failed("zero-length edge".into()))?;
             list.push((*id, u));
         }
-        around.insert(*vid, Around { edges: list });
+        list.sort_by(|(_, a), (_, b)| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)).then(a.z.total_cmp(&b.z)));
+        around.push((*vid, Around { edges: list }));
     }
 
     guard("fillet corners", || {

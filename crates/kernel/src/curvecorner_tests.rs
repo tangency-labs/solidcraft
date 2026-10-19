@@ -309,3 +309,20 @@ fn corner_blends_hold_at_any_scale() {
         }
     }
 }
+
+#[test]
+fn the_corner_refused_first_is_the_same_every_time() {
+    // An L-shaped block chamfered at its inner upright with a bottom edge from that upright's foot
+    // (a concave edge meeting another at a corner) and at the three edges of a far top corner:
+    // both corners are refused, each in its own way. The corners are checked by position, not in
+    // hash order, so the first refused, nearest x = 0, is the one reported, every time.
+    let pts = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (4.0, 4.0), (4.0, 10.0), (0.0, 10.0)];
+    let segs = pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect();
+    let body = crate::extrude(&Plane::XY, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], 0.0, 5.0).unwrap().pop().unwrap();
+    let picks = [Vec3::new(4.0, 4.0, 2.5), Vec3::new(7.0, 4.0, 0.0), Vec3::new(10.0, 2.0, 5.0), Vec3::new(5.0, 0.0, 5.0), Vec3::new(10.0, 0.0, 2.5)];
+    let ids: Vec<_> = picks.iter().map(|p| crate::surfaces::edge_near(&body, *p).unwrap().id()).collect();
+    for _ in 0..16 {
+        let e = super::corner_blend_style(&body.solid, &ids, 10.0, 1.0, false, false).err().unwrap();
+        assert_eq!(e, crate::blend::unsupported("concave blends meeting at a corner"));
+    }
+}
