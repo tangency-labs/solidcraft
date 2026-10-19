@@ -30,7 +30,7 @@
 //! (any `Shell` `max_tol`: a non-finite one skips the doubling loop), list counts up to
 //! [`MAX_LIST`], and a `VList` list without a repeated vertex (each copy of a coincident
 //! vertex is glued, the second one after it was freed: UB-178 in
-//! `plan/upstream-issues.md`). The `-3` guards are HANG-23 and HANG-24 (a zero or
+//! `plan/upstream-issues.md`). The `-3` guards are HANG-33 and HANG-24 (a zero or
 //! negative B-rep tolerance). They test only the necessary condition (the doubling
 //! cannot reach its bound), so they also refuse a B-rep that upstream returns from
 //! because its first `DoStitching` pass leaves no lamina edge; the runner applies the

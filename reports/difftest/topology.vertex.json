@@ -46220,8 +46220,7 @@
   "deferred_by_unit": {
     "surface.surf_of_extrusion_p2": 104,
     "surface.surface_p2": 208,
-    "topology.brep_p10": 224,
-    "topology.face_p3": 76
+    "topology.brep_p10": 224
   },
   "max_rel_err": 0.0,
   "pass": true,

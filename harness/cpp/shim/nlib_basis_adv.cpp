@@ -16,7 +16,7 @@
 // second line of defence. N_BasisInsertKnots reads X[mx+1] after inserting its last knot
 // (UB-11; the value never changes the result), so the insert buffer carries one
 // trailing slot, and its output buffer has room for the 2p+2+mx+1 knots it writes when
-// R has fewer than 2p+2 knots (UB-191).
+// R has fewer than 2p+2 knots (UB-196).
 #include "sc_shim.h"
 
 #include <algorithm>
@@ -183,7 +183,7 @@ SC_EXPORT int32_t sc_nlib_basis_adv_insert(const double* r, int64_t n_r, int32_t
     for (int64_t i = 0; i < n_x; ++i)
         xb[(size_t)i] = x[i];
     // Upstream writes p+1 + max(0, m-2p-1) + mx+1 + p+1 knots: m+mx+2 once R has at
-    // least 2p+2 knots, 2p+2+mx+1 below that (UB-191).
+    // least 2p+2 knots, 2p+2+mx+1 below that (UB-196).
     const int64_t ns = std::max(n_r, 2 * (int64_t)p + 2) + n_x;
     std::vector<double> sb((size_t)ns);
     NL_KNOTVECTOR knr, knx, kns;

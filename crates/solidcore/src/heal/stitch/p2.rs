@@ -27,7 +27,7 @@
 //!   gluing rescans a vertex at most `edges + 2` times (each successful glue removes an
 //!   edge); `StitchIntoSolid` / `StitchIntoShell` double the tolerance at most
 //!   [`MAX_TOL_DOUBLINGS`] times (upstream never terminates from a zero tolerance,
-//!   HANG-23/HANG-24 in `plan/upstream-issues.md`);
+//!   HANG-33/HANG-24 in `plan/upstream-issues.md`);
 //!   `SplitEdgesWithVertices` splits at most as many edges per vertex as the edge list
 //!   held when that vertex started (a split puts the vertex at both new edge ends).
 //!   Past a bound the port returns [`SolidError::InvalidInput`].
@@ -436,7 +436,7 @@ impl Stitch<'_> {
             // corresponds to 3d distance.
             let s_vec = Vec3::new(1.0, 1.0, 1.0).unitize()?;
 
-            let mut wire_edges = bp1::wire_edges(b, None)?;
+            let wire_edges = bp1::wire_edges(b, None)?;
 
             // for every vertex - label lamina vertices and store common line
             // projection parameter for later sorting
@@ -571,13 +571,13 @@ impl Stitch<'_> {
                         if do_squeeze {
                             squeeze_edge_to(b, squeeze_edge, v)?;
                         } else if do_glue {
-                            glue_vertices(b, v, cv, Some(&mut wire_edges))?;
+                            glue_vertices(k, b, v, cv, Some(&wire_edges))?;
                         }
                     } else {
                         if do_squeeze {
                             squeeze_edge_to(b, squeeze_edge, cv)?;
                         } else if do_glue {
-                            glue_vertices(b, cv, v, Some(&mut wire_edges))?;
+                            glue_vertices(k, b, cv, v, Some(&wire_edges))?;
                         }
                         v = cv;
                     }
@@ -1068,14 +1068,14 @@ impl Stitch<'_> {
                     if do_squeeze {
                         squeeze_edge_to(b, squeeze_edge, v)?;
                     } else if do_glue {
-                        glue_vertices(b, v, cv, None)?;
+                        glue_vertices(k, b, v, cv, None)?;
                     }
                     out.deleted.push(cv);
                 } else {
                     if do_squeeze {
                         squeeze_edge_to(b, squeeze_edge, cv)?;
                     } else if do_glue {
-                        glue_vertices(b, cv, v, None)?;
+                        glue_vertices(k, b, cv, v, None)?;
                     }
                     out.deleted.push(v);
                     v = cv;
@@ -1195,7 +1195,7 @@ impl Stitch<'_> {
                     set_point(k, b, v, mid)?;
 
                     // (status not checked)
-                    ignore_status(glue_vertices(b, v, new_v, None))?;
+                    ignore_status(glue_vertices(k, b, v, new_v, None))?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
 
@@ -1499,26 +1499,19 @@ pub(crate) fn find_and_set_infinite_region(
 
 /// `SmFace::IsLamina` (unit `topology.face_p3`).
 fn face_is_lamina(b: &Brep, f: FaceId) -> Result<bool> {
-    let _ = (b, f);
-    // UNPORTED(topology.face_p3): SmFace::IsLamina
-    Err(SolidError::unported("SmFace::IsLamina", "topology.face_p3"))
+    crate::topology::face::p3::is_lamina(b, f)
 }
 
 /// `SmFace::IsDegenerate(bSkipQuickCheck, pOptZoneTol3d)` (unit `topology.face_p3`;
 /// upstream defaults `FALSE`, `NULL`).
 fn face_is_degenerate(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     f: FaceId,
     skip_quick_check: bool,
     zone_tol_3d: Option<f64>,
 ) -> Result<bool> {
-    let _ = (k, b, f, skip_quick_check, zone_tol_3d);
-    // UNPORTED(topology.face_p3): SmFace::IsDegenerate
-    Err(SolidError::unported(
-        "SmFace::IsDegenerate",
-        "topology.face_p3",
-    ))
+    crate::topology::face::p3::is_degenerate(k, b, f, skip_quick_check, zone_tol_3d)
 }
 
 /// `SmFace::Notify(eNotifyOperation, pData1, pData2, pData3)` (unit

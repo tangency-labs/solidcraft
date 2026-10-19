@@ -52,7 +52,7 @@
     },
     {
       "name": "fuzz_insert_short_unsorted_r",
-      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:269-305 (N_BasisInsertKnots writes 2p+2+mx+1 knots when R has fewer than 2p+2, upstream-issues UB-191; crashed the reference with a heap overflow before the shim sized its output); found by difftest --fuzz 30000 (fuzz14324)",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:269-305 (N_BasisInsertKnots writes 2p+2+mx+1 knots when R has fewer than 2p+2, upstream-issues UB-196; crashed the reference with a heap overflow before the shim sized its output); found by difftest --fuzz 30000 (fuzz14324)",
       "inputs": {
         "op": "insert",
         "p": 4,
@@ -62,7 +62,7 @@
     },
     {
       "name": "fuzz_insert_short_r_four_new_knots",
-      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:269-305 (UB-191: two knots of degree 1 with R[0] > R[1] pass the range check, eight knots written); found by difftest --fuzz 30000 (fuzz20524)",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:269-305 (UB-196: two knots of degree 1 with R[0] > R[1] pass the range check, eight knots written); found by difftest --fuzz 30000 (fuzz20524)",
       "inputs": {
         "op": "insert",
         "p": 1,

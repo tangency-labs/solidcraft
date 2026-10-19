@@ -2682,9 +2682,8 @@
   "deferred_by_unit": {
     "harness:analytic-geometry-export": 1,
     "query.brep": 8,
-    "topology.brep_p2": 2,
-    "topology.brep_p5": 6,
-    "topology.brep_p9": 26,
+    "topology.brep_p2": 7,
+    "topology.brep_p4": 1,
     "topology.face_p2": 49,
     "topology.face_p4": 2
   },

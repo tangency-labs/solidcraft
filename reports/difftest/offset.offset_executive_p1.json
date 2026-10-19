@@ -5593,6 +5593,7 @@
   "deferred_by_unit": {
     "offset.offset_geometry_creation": 1,
     "query.brep": 1,
+    "topology.brep_p1": 1,
     "topology.brep_p4": 1,
     "topology.edgeuse_p3": 1
   },

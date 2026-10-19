@@ -238,7 +238,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB (use after free).
 - **Rust port:** Builds a local matrix when the caller's is null. Callers wanting reuse build it first.
 
-#### UB-191. `N_BasisInsertKnots` writes past its output for knot vectors shorter than `2p+2`
+#### UB-196. `N_BasisInsertKnots` writes past its output for knot vectors shorter than `2p+2`
 - **Location:** `NL_BasisAdv.cpp:253`, `N_BasisInsertKnots` (copies at `:275-276` and `:302-303`).
 - **What happens:** The routine always copies `R[0..=p]` and `R[mr-p..=mr]` into `S`. With fewer than `2p+2` knots these ranges overlap, so it writes `2p+2+mx+1` knots instead of the documented `mr+mx+2` and overruns a caller buffer of that size (heap corruption).
 - **Trigger:** `mr < 2p+1` with `X[0] > R[p]` and `X[mx] < R[mr-p]`, which needs an unsorted `R` (e.g. `p = 1`, `R = [4294967296, 0]`, `X = [1e300, 1.5, 2.5, 3.5]`). The range check rejects such `R` when it is sorted.
@@ -1466,6 +1466,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash / out-of-range read.
 - **Rust port:** Kernel topology mutation remains deferred. Both the safe FFI validator and the C++ shim require equally sized partners for op 3 with fillets. Six `rejected_fillets_*` fixtures check rejection; 660 isolated probes independently exercise both guards at first and last indices of 1/2/3/32 intervals. Valid equal-sized pairs and non-fillet calls remain accepted.
 
+#### UB-191. `CombineCoincidentVertices` deletes its isolated surviving vertex when inputs alias
+- **Location:** `source/SMLib/src/SmBrep.cpp:1354-1366`, `SmBrep::CombineCoincidentVertices`.
+- **What happens:** The zero-incident-edge branch notifies, sets the surviving vertex's point/tolerance, then calls `DeleteVertex(pVertexToDelete)` and returns `SM_SUCCESS`. If both input pointers are the same, the supposedly surviving vertex is deleted too. Nothing inside the function touches it afterwards, so the call itself is defined; a caller that keeps using the survivor pointer reads freed memory.
+- **Trigger:** Pass the same isolated vertex as both `pSurvivingVertex` and `pVertexToDelete`. Aliases with incident edges go through `GlueVertices(v, v)` and keep the survivor.
+- **How found:** PR #194 review and source inspection while porting `topology.brep_p5`; corrected in the second review round (the function was first thought undefined).
+- **Confirmed:** no native reproduction of the caller hazard. The whole call is compared in difftest; only the shim's target-stage op, which reads the survivor afterwards, refuses this input.
+- **Severity:** dangling caller-held survivor (caller use-after-free).
+- **Rust port:** Ported as upstream: the isolated aliased combination deletes the vertex and succeeds. Rust ids cannot dangle into freed memory; a later lookup of the deleted id returns `NotFound`.
+
 #### UB-159. `SmFilletGeom(SmFilletSolver*, SmFilletGeomType)` leaves `m_dOrientations` and `m_bCapped` uninitialised
 - **Location:** `source/SMLib/src/SmFilletGeom.cpp:8971-9004` (`SmFilletGeom::SmFilletGeom`).
 - **What happens:** The constructor's initialiser list and loop set the type, solver, centre line, surface, split flag, status, offset surfaces, rails and deviations, but never `m_dOrientations[2]` or `m_bCapped[2]`. `m_bCapped` is assigned only by `SmFilletGeom::MakeFaceBrep` (`:9427`, `:9476`) and read by `SmFilletGeom::InsertIntersectionTopology` (`:12158`, `if (pV && !m_bCapped[ii])`) and `DumpLevel` (`:13306`): a geometry whose intersection topology is inserted before `MakeFaceBrep` has run reads indeterminate flags. `m_dOrientations` (`SmFilletGeom.h:546`) is never read or written after its declaration (the `m_dOrientations` of the solver classes are their own members), so it is merely dead and uninitialised.
@@ -1512,6 +1521,19 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes by that reference run: 31 crashing scripts (7 coincidence-cache, 21 harness reads of NULL props, 3 degeneracy-cache). Requires inconsistent caller-controlled healer state; ordinary end-to-end healing was not the trigger.
 - **Severity:** crash/UB.
 
+#### UB-194. `SM_HISTOGRAM_EDGELEN_INDEX` converts negative doubles to `ULONG`
+- **Location:** `source/SMLib/inc/SmTArray.h:2395`-`2397` (macro); used by `SmHealData::Cache_EdgeProps` (`source/SMLib/src/SmHealData.cpp:2523`).
+- **What happens:** For an edge length `a` from 1e-5 up to 1, `floor(log10(a))` is -5 to -1, and `(ULONG)` of a negative double is UB. x86-64 g++ wraps, and the `+ 6` wraps back to the intended bucket 1 to 5. aarch64 g++ saturates to 0, so all these edges land in bucket 6 (lengths 1 to 10).
+- **Trigger:** `Cache_EdgeProps` on any B-rep with an edge shorter than 1 and at least 1e-5 long.
+- **How found:** generated difftest cases of `heal.heal_data_p1`, `heal.heal_data_p2` and `heal.heal_data_p3` that fail on macOS arm64 only.
+- **Confirmed:** yes. The C++ reference on macOS arm64 with GCC 13.4 puts these edges in bucket 6 (2026-10-17); the x86-64 build gives buckets 1 to 5.
+- **Severity:** crash/UB (wrong histogram bucket in practice).
+- **Rust port:** Emulates the x86-64 result (`edge_len_histogram_index`).
+- **What happens (PR #237, arm64 Linux):** For `1e-5 <= a < 1` the macro computes `(ULONG)(smos_Floor(smos_Log10(a))) + 6` with a negative double inside the cast. That is UB. x86-64 g++ truncates signed and the `+ 6` wraps back to the intended bucket (0.01 -> 4). AArch64 `fcvtzu` saturates to 0, so every edge shorter than 1 lands in bucket 6 (`[1, 10)`). The sibling `SM_HISTOGRAM_GAPSIZE_INDEX` adds 9 before the cast and is fine.
+- **Trigger (PR #237, arm64 Linux):** cache edge props of a B-rep with an edge of length in `[1e-5, 1)`, on an arm64 build.
+- **How found (PR #237, arm64 Linux):** arm64 difftest failures of `heal.heal_data_p1`-`p3` (for example `heal.heal_data_p1` `gen0086`, bucket 4: arm64 C++ 0, x86-64 / Rust 4).
+- **Confirmed (PR #237, arm64 Linux):** yes, by an arm64 C++ reference run (Ubuntu 24.04, GCC 13.3) and a standalone `fcvtzu` check. x86-64 CI matches the port.
+
 #### UB-178. One-list `SmStitch::StitchVertexPairs` glues a repeated vertex after freeing it
 - **Location:** `source/SMLib/src/SmStitch.cpp:3016`-`3047` (coincidence scan), `:3060`-`3190` (glue loop), one-list `StitchVertexPairs`.
 - **What happens:** The coincidence scan adds every later list entry within tolerance of `pV` to `sCoinVertices`, so a vertex listed twice lands there twice. Gluing the first copy (`GlueVertices(pV, copy)` or `SqueezeEdge`) deletes it; the second copy is then read (`IsLaminaVertex`, `GetPoint`) and glued after it was freed. Only `pV == sCoinVertices[jj]` (a repeat of `pV` itself) is caught.
@@ -1521,7 +1543,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash / use after free.
 - **Rust port:** Reproduces the order; a deleted vertex id makes the later query return `NotFound` instead of reading freed memory.
 
-#### UB-179. `SmStitch::DoStitching` keeps using an edge its failed glue deleted
+#### UB-197. `SmStitch::DoStitching` keeps using an edge its failed glue deleted
 - **Location:** `source/SMLib/src/SmStitch.cpp:2182`-`2213` (`DoStitching`, keep-`pTestE` branch of the edge gluing).
 - **What happens:** With `m_bIgnoreProblems`, a failing `GlueEdgesGeneral(pTestE, .., pE)` that nevertheless deleted `pE` sets `sVEdges[jj]` to `NULL`, but the local `pE` is not reset: it is added to `sCandidateEdges` and compared with the remaining `sVEdges[kk]` (`GetOtherVertex`, `GetCurve`, `GetInterval`), all through a stale pointer.
 - **Trigger:** `m_bIgnoreProblems` (e.g. `StitchIntoShell` with `bShellIsWellFormed == FALSE`), a coincident edge pair keeping the second edge, and a glue that fails after deleting the first.
@@ -1746,7 +1768,26 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** hang.
 - **Harness:** `surface.offset_surface` refuses every `CreateExtendedSurface` step in process (see HANG-6), so this input stops at its extension step; an FFI test replays the exact input and checks the refusal. These are unsafe-reference exclusions, not passing difftest cases.
 
-#### HANG-23. `SmStitch::StitchIntoShell` never returns when `dMaxStitchTol3d / 100` underflows
+#### HANG-25. `IntersectInsertRelate` does not return for a zero approximation tolerance
+- **Location:** `source/SMLib/src/SmTopologyIntersector.cpp:1092-1270`, `SmTopologyIntersector::IntersectInsertRelate` (the full topology intersection at `m_dThisApproxTol3d`).
+- **What happens:** With `m_dThisApproxTol3d` equal to `+0.0` or `-0.0`, the topology intersection did not finish within 180 s. Negative tolerances and tiny positive ones (down to the smallest subnormal) return within a second.
+- **Trigger:** `SetThisApproxTol3d(0)`, then `IntersectInsertRelate` on two intersecting B-reps.
+- **How found:** pre-review of PR #203 (the FFI's guard bypassed, timed C++ runs).
+- **Confirmed:** yes (C++ run: no result after 180 s at `0` and `-0`; `-1e-5`, `-1e300`, `1e-12`, `1e-200` and `5e-324` return).
+- **Severity:** hang (needs a bad argument from the calling code).
+- **Rust port:** The callee loops are unported (`IntersectTopology` defers at `SmBrep::GetFaces`). The FFI refuses `IntersectInsertRelate` at a zero tolerance.
+
+#### HANG-23. Polar set-up of a circle with a far STEP interval shifts one turn per iteration
+- **Location:** `source/SMLib/src/SmEllipse.cpp:278-289` (`SmPolarConversion::SetUpPolarConversion`, "move to period of greatest overlap").
+- **What happens:** Two `while` loops move the NURB's start/end angles by 360 degrees per iteration until their midpoint is within 180 degrees of the STEP interval's. The run time is proportional to the distance, and once the midpoint exceeds about `2^61` degrees adding 360 no longer changes it, so the loop never ends.
+- **Trigger:** An `SmCone` built with start and end angles `9223372036854775807` (any cone/cone or cone/plane intersection through `MakeNurb`, which rebuilds the polar converter of its iso circles).
+- **How found:** `surface.cone_p3` fuzzing (issue #207, fuzz02755: the Rust side timed out), then a native-only reproduction through `sc_surface_cone_p3_intersect` on Linux.
+- **Confirmed:** yes (the native call produced no result within 60 s).
+- **Severity:** hang.
+- **Rust port:** Returns `NotConverged` after `curve::ellipse::p2::MAX_PERIOD_SHIFTS` (2^20) shifts or when a shift no longer changes the midpoint; the callers ignore that status as upstream ignores the set-up's, leaving the converter impossible.
+- **Harness:** the `surface.cone_p3` FFI accepts cone angles only within upstream's documented `[-360, 360]` (`SmCone.h:205-206`). A first guard at about `3.8e8` degrees (the Rust bound) still let fuzzed intersections run past 20 s natively: every surface evaluation of such a cone goes through `SmEllipse::STEPInversion` and `SmExtent1d::PeriodicWrap`, one turn per iteration (HANG-1), confirmed with gdb backtraces.
+
+#### HANG-33. `SmStitch::StitchIntoShell` never returns when `dMaxStitchTol3d / 100` underflows
 - **Location:** `source/SMLib/src/SmStitch.cpp:2756`-`2791` (`StitchIntoShell`).
 - **What happens:** The loop starts at `dStitchTol3d = dMaxStitchTol3d / 100` and doubles it until it reaches `dMaxStitchTol3d` or no lamina edge is left. When the division underflows to `0`, doubling keeps it `0`, so `0 < dMaxStitchTol3d` holds forever and `DoStitching` runs again and again.
 - **Trigger:** `0 < dMaxStitchTol3d` below about `5e-322` (e.g. `1e-323`) on a B-rep that keeps a lamina edge.
@@ -2912,6 +2953,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the split needs `topology.proto_topology_p2`, so the difftest cases that reach it are deferred).
 - **Severity:** wrong result.
 - **Rust port:** Reproduces it (`ProtoTopologyManager::proto_edge_split`).
+
+#### WR-103. `CreateSphereFromArcs`' centre check compares a frame with itself
+- **Location:** `source/SMLib/src/SmBSplineSurface.cpp:2044`-`2065`, `SmBSplineSurface::CreateSphereFromArcs`: `const SmPoint3d & rOrigin = sRefFrame.GetOriginRef();` then, for each other arc, `IsArc(5, d3DTol, sRefFrame, ...)` and `sDiff = sRefFrame.GetOriginRef() - rOrigin`.
+- **What happens:** `rOrigin` is a reference into `sRefFrame`, which the later `IsArc` calls overwrite, so `sDiff` is always zero: arcs about different centres pass the "OtherCurve center is not the same as 1st Curve cent" test, and every later use of `rOrigin` (the sphere centre) sees the centre of whichever arc `IsArc` examined last.
+- **Trigger:** three arcs of equal radius about different centres; a generated `offset.offset_geometry_creation` case (`VertexOffset` with bounding edges from two B-reps: two torus circles about (10, 0, 0) and a sphere circle about the origin, all of radius 5) builds a sphere from them.
+- **How found:** difftest of `offset.offset_geometry_creation` (PR #156): the port captured the first centre by value, rejected the arcs with `SM_ERR`, and disagreed with the C++, which returned three trimming curves.
+- **Confirmed:** yes (the C++ build succeeds on the inputs above).
+- **Severity:** a silent wrong result (a sphere from non-concentric arcs); no crash.
+- **Rust port:** reproduces the bug. `nurbs::b_spline_surface::p2::BSplineSurface::create_sphere_from_arcs` first captured the first arc's centre by value (and so rejected non-concentric arcs that upstream accepts); since PR #156 it reads the current frame's origin at each use, as the aliased reference does, and the dead check is kept as a comment. That unit's `three_arcs_about_two_centres` fixture case pins the behaviour: three radius-5 arcs (120 degrees about the origin, 90 degrees about (10, 0, 0) sharing its start point, 60 degrees about (10, 0, 0)) from which the C++ builds a sphere; with the centre check put back, the port rejects them and the case fails.
 
 #### WR-186. `SmStitch::DoStitching` never resets its candidate flags while splitting edges
 - **Location:** `source/SMLib/src/SmStitch.cpp:1423`-`1500` (`DoStitching`, edge splitting at vertices).

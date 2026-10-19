@@ -27,7 +27,7 @@
 //! - `insert`: `0 <= p <= 32767`, at least `p + 1` knots, a non-empty insert vector,
 //!   every knot finite (NaN knots make upstream loop forever). With fewer than
 //!   `2p + 2` knots (only an unsorted `R` passes the range check) upstream writes
-//!   `2p + 2 + mx + 1` knots, past the documented `m + mx + 2` (UB-191); the shim's
+//!   `2p + 2 + mx + 1` knots, past the documented `m + mx + 2` (UB-196); the shim's
 //!   output buffer holds them, so the result is defined and compared.
 //! - `inc_mult`: `0 <= p <= 32767`, `0 <= t <= 1000`, a non-empty knot vector.
 //! - `derivs_array`: `0 <= degree <= 1000`, at least `2*degree + 2` finite knots (as
@@ -254,7 +254,7 @@ pub fn insert(r: &[f64], p: i32, x: &[f64]) -> Result<Vec<f64>, FfiError> {
     call_with_buffer(r.len() + x.len(), |buf, len| {
         // SAFETY: r has >= p+1 finite knots and x >= 1 finite knot, so upstream reads in
         // bounds (the shim pads X for its X[mx+1] read) and terminates; the shim sizes
-        // upstream's output for every knot it writes (UB-191), writes at most buf.len()
+        // upstream's output for every knot it writes (UB-196), writes at most buf.len()
         // entries to buf and one value to len.
         unsafe {
             sys::sc_nlib_basis_adv_insert(

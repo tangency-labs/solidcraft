@@ -651,8 +651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "classify_face_point_0",
@@ -987,8 +987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "fb_split_face_classified",
@@ -1670,8 +1670,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "classify_face_point_hang29_large_1e50_accepted",
@@ -3154,8 +3154,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0000",
@@ -3838,8 +3838,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0085",
@@ -3866,8 +3866,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0088",
@@ -3902,8 +3902,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0092",
@@ -3982,8 +3982,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -3994,8 +3994,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0102",
@@ -4150,8 +4150,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0121",
@@ -4450,8 +4450,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0158",
@@ -4734,8 +4734,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0193",
@@ -5354,8 +5354,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0270",
@@ -5398,8 +5398,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::CreateUVTrimCurves",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardLoopuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0275",
@@ -5610,7 +5610,7 @@
   "deferred_by_unit": {
     "intersect.surface_drop_curve": 2,
     "intersect.surface_intersector_p4": 5,
-    "topology.face_p3": 14
+    "topology.face_p4": 14
   },
   "max_rel_err": 0.0,
   "pass": true,

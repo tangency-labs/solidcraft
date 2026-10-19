@@ -7266,12 +7266,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_49",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#683 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -7298,12 +7302,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_52",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#686 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -7330,12 +7338,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_55",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#689 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -8018,12 +8030,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_49",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#759 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -8050,12 +8066,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_52",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#762 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -8082,12 +8102,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_55",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#765 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -13650,12 +13674,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "bilinear_intersect_49",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1291 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -13682,12 +13710,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "bilinear_intersect_52",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1294 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -13714,12 +13746,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "bilinear_intersect_55",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1297 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -14402,12 +14438,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_intersect_49",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1367 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -14434,12 +14474,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_intersect_52",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1370 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -14466,12 +14510,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_intersect_55",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1373 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -15154,12 +15202,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_intersect_49",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1443 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -15186,12 +15238,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_intersect_52",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1446 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -15218,12 +15274,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_intersect_55",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1449 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -15906,12 +15966,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "biquadratic_intersect_49",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1519 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -15938,12 +16002,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "biquadratic_intersect_52",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1522 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -15970,12 +16038,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "biquadratic_intersect_55",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1525 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -16008,228 +16080,340 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_00",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1529 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_01",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1530 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_02",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1531 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_03",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1532 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_04",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1533 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_05",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1534 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_06",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1535 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_07",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1536 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_08",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1537 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_09",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1538 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_10",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1539 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_11",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1540 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_12",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1541 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_13",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1542 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_14",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1543 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_15",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1544 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_16",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1545 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_17",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1546 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_18",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1547 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_19",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1548 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_20",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1549 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_21",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1550 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_22",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1551 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_23",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1552 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_24",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1553 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_25",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1554 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_26",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1555 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "surface.surface_cache_p2"
+      },
       "max_rel_err": 0.0,
       "name": "Endcap_pairs_intersect_27",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1556 (upstream source/SMLib/src/SmFace.cpp:11308)",
-      "values_compared": 4
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -18578,14 +18762,15 @@
     }
   ],
   "cases_both_errored": 3,
-  "cases_deferred": 1081,
+  "cases_deferred": 1127,
   "cases_failed": 0,
-  "cases_passed": 700,
+  "cases_passed": 654,
   "cases_total": 1781,
   "deferred_by_unit": {
     "intersect.curve_class_p2": 210,
     "intersect.surface_drop_lib_p3": 115,
     "surface.surf_of_extrusion_p2": 112,
+    "surface.surface_cache_p2": 46,
     "surface.surface_p2": 228,
     "topology.face_p2": 148,
     "topology.face_p4": 268

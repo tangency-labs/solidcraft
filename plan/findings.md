@@ -909,7 +909,7 @@ fuzzed Rust/C++ disagreements reported in #182 remain unassessed by this fix.
   The runner reports such inputs as `read_past_end` on both sides (C++ from the walk
   check, Rust from its out-of-range error), so the two detections are compared; the
   generator emits degree 0 on clamped vectors in 4 % of `compat_mult` cases.
-- *Crashes: `insert` with fewer than `2p+2` knots (UB-191).* An unsorted `R` can pass
+- *Crashes: `insert` with fewer than `2p+2` knots (UB-196).* An unsorted `R` can pass
   the range check; upstream then writes `2p+2+mx+1` knots into an `mr+mx+2` buffer.
   The Rust port already returned those knots; the shim now sizes its output for them,
   so the reference runs and the values are compared.
@@ -9511,8 +9511,8 @@ Difftest (`fixtures/heal.stitch_p1/constructed.json`: the SM_API_test box tests,
   close-to-boundary outcomes (an interior split defers at `MakeVertexSplitEdge`).
   `StitchIntoShell`: only the path where the doubling loop never runs (`max_tol <= 0`).
 - **Guards.** `-3` (upstream never returns): `StitchIntoShell` when `max_tol / 100`
-  underflows to zero (HANG-23, confirmed by a C++ run), `StitchIntoSolid` from a zero
+  underflows to zero (HANG-33, confirmed by a C++ run), `StitchIntoSolid` from a zero
   or negative B-rep tolerance (HANG-24; a non-finite diagonal ends or skips the loop).
   The FFI refuses a vertex repeated in the one-list `StitchVertexPairs` list (UB-178).
   Upstream defects kept by the port: WR-186 (`DoStitching`'s sticky candidate flags),
-  WR-187 (a cancelled squeeze reported as done), UB-179 (stale edge after a failed glue with `m_bIgnoreProblems`).
+  WR-187 (a cancelled squeeze reported as done), UB-197 (stale edge after a failed glue with `m_bIgnoreProblems`).
