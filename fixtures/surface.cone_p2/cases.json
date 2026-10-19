@@ -1,0 +1,1777 @@
+{
+ "cases": [
+  {
+   "name": "tess_cone_offset_0.5",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": 0.5,
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_-0.5",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -0.5,
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_-0.9",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -0.9,
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_-1.5",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -1.5,
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_-3.0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -3.0,
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_2.0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": 2.0,
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_swap0_inside0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -1.2,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tess_cone_recognize_swap0_inside0",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "tess_cone_rebuild_moved_swap0_inside0",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": false,
+      "inside": false
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "move_all",
+      "axis": [
+       1,
+       1,
+       0
+      ],
+      "angle": 30.0,
+      "t": [
+       1,
+       2,
+       3
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_swap1_inside0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -1.2,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tess_cone_recognize_swap1_inside0",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "tess_cone_rebuild_moved_swap1_inside0",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": true,
+      "inside": false
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "move_all",
+      "axis": [
+       1,
+       1,
+       0
+      ],
+      "angle": 30.0,
+      "t": [
+       1,
+       2,
+       3
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_swap0_inside1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -1.2,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tess_cone_recognize_swap0_inside1",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "tess_cone_rebuild_moved_swap0_inside1",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": false,
+      "inside": true
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "move_all",
+      "axis": [
+       1,
+       1,
+       0
+      ],
+      "angle": 30.0,
+      "t": [
+       1,
+       2,
+       3
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "tess_cone_offset_swap1_inside1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -1.2,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tess_cone_recognize_swap1_inside1",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "tess_cone_rebuild_moved_swap1_inside1",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0,
+      "swap": true,
+      "inside": true
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      0,
+      1
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "move_all",
+      "axis": [
+       1,
+       1,
+       0
+      ],
+      "angle": 30.0,
+      "t": [
+       1,
+       2,
+       3
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "apex_cone_offset_0.3",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 2.0,
+      "top": 0.0,
+      "height": 4.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": 0.3,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "apex_cone_offset_-0.3",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 2.0,
+      "top": 0.0,
+      "height": 4.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -0.3,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "apex_cone_offset_-5.0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:63 (solid offset of the faces)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 2.0,
+      "top": 0.0,
+      "height": 4.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": -5.0,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "apex_cone_recognize",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 2.0,
+      "top": 0.0,
+      "height": 4.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "apex_cone_rebuild",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2342 (my_test_cone_face_normal_table: CreateCone)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 2.0,
+      "top": 0.0,
+      "height": 4.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "none"
+     }
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_0_recognize",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_0_offset",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": 0.25,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_0_rebuild_twisted",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "move_last",
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "angle": 5.0,
+      "t": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_0_rebuild_reweighted",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "scale_last",
+      "f": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_0_recognize_flat",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "flatten"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_2.5_recognize",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      2.5,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "none"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_2.5_offset",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      2.5,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "offset",
+     "distance": 0.25,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_2.5_rebuild_twisted",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      2.5,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "move_last",
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "angle": 5.0,
+      "t": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_2.5_rebuild_reweighted",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      2.5,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "rebuild",
+     "edit": {
+      "kind": "scale_last",
+      "f": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "patch_cylinder_2.5_recognize_flat",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1185 (CreateConePatch, SM_CO_QUADRATIC)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 1.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 1.0
+     },
+     "origin": [
+      2.5,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "recognize",
+     "edit": {
+      "kind": "flatten"
+     },
+     "scale": 1.0
+    }
+   }
+  },
+  {
+   "name": "section_circle_mid",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 1.5,
+     "ry": 1.5,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "section_circle_bottom",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 1.0,
+     "ry": 1.0,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "section_circle_top",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 2.0,
+     "ry": 2.0,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "section_circle_below",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      -2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 0.8,
+     "ry": 0.8,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "section_circle_sub_domain",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 1.5,
+     "ry": 1.5,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0.1,
+      0.2,
+      0.6,
+      0.9
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "section_circle_arc",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 1.5,
+     "ry": 1.5,
+     "start": 30.0,
+     "end": 200.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tilted_ellipse_20.0",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      -0.05466795614934662,
+      0,
+      5.019897508806532
+     ],
+     "x": [
+      0.9396926207859084,
+      0,
+      -0.3420201433256687
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 1.5983841073738236,
+     "ry": 1.5009945457332547,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tilted_ellipse_60.0",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      -0.2678429083869397,
+      0,
+      5.463917525773196
+     ],
+     "x": [
+      0.5000000000000001,
+      0,
+      -0.8660254037844386
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 3.0927835051546384,
+     "ry": 1.5230192477004285,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "tilted_ellipse_80.0",
+   "upstream_ref": "source/SMLib/src/SmCone.cpp:3821 (IntersectWithPlane's trim of the section ellipse)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 10.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      -1.2540321049741119,
+      0,
+      12.111969478156604
+     ],
+     "x": [
+      0.17364817766693041,
+      0,
+      -0.984807753012208
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 12.733775715498115,
+     "ry": 1.8212071331189903,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  }
+ ]
+}

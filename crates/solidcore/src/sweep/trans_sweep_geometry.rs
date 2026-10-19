@@ -255,7 +255,7 @@ impl TranslationalSweepGeometry {
         let base = gen_base_mut(&mut start).ok_or(SolidError::null_pointer(OP))?;
         let surface = BSplineSurface::create_linear_sweep(base, self.sweep_vector)?;
         let output_surface = if self.base.make_analytics {
-            surface.copy_and_add_analytics()?
+            surface.copy_and_add_analytics(k)?
         } else {
             Surface::from(surface)
         };

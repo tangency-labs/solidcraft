@@ -8,9 +8,11 @@
 //! own submodule and adds methods to [`Cone`] (or free functions).
 
 pub mod p1;
+pub mod p2;
 pub mod p3;
 
 pub use p1::{
     total_coincidence_checker, Apex, Coincidence, Cone, ConeCanonical, ConeStepInversion,
     PositivePoint,
 };
+pub use p2::ellipse_trim_intervals;

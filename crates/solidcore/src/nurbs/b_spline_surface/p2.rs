@@ -59,8 +59,9 @@
 //!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only
 //!   the NURB is replaced: form and knot type stay those of the surface.
 //! - **Back-edges.** `CopyAndAddAnalytics` returns the [`Surface`] that
-//!   `SmPlane::IsNurbSurfacePlane` recognises, else needs the recognisers after it
-//!   (`surface.cone_p2`, `surface.sphere`,
+//!   `SmPlane::IsNurbSurfacePlane` recognises; a cone `SmCone::IsNurbSurfaceCone`
+//!   recognises needs `SurfaceKind::Cone` (`surface.surface_p2`), anything else the
+//!   recognisers after it (`surface.sphere`, then
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
 //!   `GetMaxAnalyticDomain` nothing unported (`SmSurface::Evaluate1stDerivatives` is
 //!   `surface::surface::p1`'s, `IsPlanar` and `IsClosed` are those of
@@ -204,11 +205,20 @@ fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
 
 /// `SmCone::IsNurbSurfaceCone` (then the sphere, revolution and extrusion
 /// recognisers).
-fn is_nurb_surface_cone(_srf: &BSplineSurface) -> Result<Option<Surface>> {
-    // UNPORTED(surface.cone_p2): SmCone::IsNurbSurfaceCone
+fn is_nurb_surface_cone(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface>> {
+    if crate::surface::cone::Cone::is_nurb_surface_cone(k, srf, 1.0)?.is_some() {
+        // DISPATCH GAP: the cone is not a SurfaceKind yet (no variant with its
+        // SmSurface overrides; issue #76 / PR #133), so no Surface can hold the
+        // recognised cone (no UNPORTED marker: surface.surface_p2 is partial).
+        return Err(SolidError::Unported {
+            upstream: "SmCone as SmSurface",
+            unit: "surface.surface_p2",
+        });
+    }
+    // UNPORTED(surface.sphere): SmSphere::IsNurbSurfaceSphere
     Err(SolidError::Unported {
-        upstream: "SmCone::IsNurbSurfaceCone",
-        unit: "surface.cone_p2",
+        upstream: "SmSphere::IsNurbSurfaceSphere",
+        unit: "surface.sphere",
     })
 }
 
@@ -339,16 +349,18 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// Those of [`Plane::is_nurb_surface_plane`]; [`SolidError::Unported`]: the
-    /// recognisers after the plane (`SmCone::IsNurbSurfaceCone`, ...) are not ported.
-    pub fn copy_and_add_analytics(&self) -> Result<Surface> {
+    /// Those of [`Plane::is_nurb_surface_plane`] and
+    /// [`crate::surface::cone::Cone::is_nurb_surface_cone`]; [`SolidError::Unported`]:
+    /// a recognised cone cannot be held by a [`Surface`] yet, and the recognisers
+    /// after the cone (`SmSphere::IsNurbSurfaceSphere`, ...) are not ported.
+    pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
         // SmPlane
         if let Some(plane) = Plane::is_nurb_surface_plane(self, 1.0)? {
             return Ok(Surface::from(plane));
         }
         // SmCone (then SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion)
-        if let Some(analytic) = is_nurb_surface_cone(self)? {
+        if let Some(analytic) = is_nurb_surface_cone(k, self)? {
             return Ok(analytic);
         }
         // arrive here - make sure it's a copy
@@ -1651,7 +1663,9 @@ mod tests {
     fn back_edges_are_unported() {
         let s = patch(false);
         let unported = |r: Result<()>| matches!(r, Err(SolidError::Unported { .. }));
-        assert!(unported(s.copy_and_add_analytics().map(|_| ())));
+        assert!(unported(
+            s.copy_and_add_analytics(&Kernel::default()).map(|_| ())
+        ));
         // (wired through surface.surface_p1 / surface.surface_p7)
         assert!(s.max_analytic_domain().is_ok());
         assert!(s.is_degenerate_point(1e-6, None).is_ok());

@@ -239,7 +239,7 @@ pub struct Cone {
 
 /// The cone's `CreateIsoParametricCurve` on its base parts (the virtual the
 /// inherited NURB rebuild calls).
-fn cone_iso_curve(
+pub(crate) fn cone_iso_curve(
     rev: &SurfOfRevolution,
     inside_out: bool,
     k: &Kernel,

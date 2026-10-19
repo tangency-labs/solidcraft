@@ -964,6 +964,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB (null dereference).
 - **Rust port:** Represents optional tolerances with `Option`; coincident-boundary calls currently defer to the missing Cone/Cylinder adapter in `surface.surface_p2` (#76/#133); the boundary algorithm itself merged in #120. The FFI adapter rejects exactly the native undefined path before its boundary calls.
 
+#### UB-153. `SmCone::CreateOffsetSurface` dereferences an unchecked `CreateCanonical` result
+- **Location:** `source/SMLib/src/SmCone.cpp:624`-`641`, the apex-truncation branch of `SmCone::CreateOffsetSurface` (def. `:533`).
+- **What happens:** When one new radius falls below the tolerance, the truncated cone is made by `SmCone::CreateCanonical`, whose status is ignored; `pOffCone->GetSTEPUVDomain()` and the following calls then dereference it. The new height is `dNewRadius * dHeight / dOldRadius`: an old radius of `0` gives an infinite or NaN height, for which the bounded constructor's NURB construction recurses without bound; a failed `MakeNurb` leaves `pOffCone` `NULL`.
+- **Trigger:** A bounded cone with bottom radius `0` and a negative top radius, offset so that the new bottom radius is at least the tolerance and the new top radius below it.
+- **How found:** read during porting (`surface.cone_p2`, PR #153).
+- **Confirmed:** no. The shim tries the same `CreateCanonical` first (with the same formulas) and refuses the input when it fails or the height is not finite.
+- **Severity:** crash/UB (null dereference, unbounded recursion).
+- **Rust port:** `create_canonical`'s error is returned; no recursion.
+
+#### UB-154. `sm_GetEllipseTrimIntervals` reads the parameter of a failed line/plane intersection
+- **Location:** `source/SMLib/src/SmCone.cpp:5399`-`5405` and `:5463`-`5477`, `sm_GetEllipseTrimIntervals` (def. `:5282`, file static).
+- **What happens:** The statuses of `smgu_LinePlaneIntersect` for the two seam lines are ignored and `dParam[0]`, `dParam[1]` (uninitialised) are then compared and used. The same happens with the domain of a failed `ConvertDomainFromNURBSToSTEP` (default-constructed).
+- **Trigger:** A seam line of the trimmed cone parallel to the ellipse plane (or of zero length, a zero-height trim domain).
+- **How found:** read during porting (`surface.cone_p2`, PR #153).
+- **Confirmed:** no. The shim runs the same calls first and refuses such inputs.
+- **Severity:** UB (uninitialised read).
+- **Rust port:** The errors are returned.
+
 ### Intersection
 
 #### UB-89. `SmVolume::ReadFromDB` fills NULL volumes and uses unread map types [PSIRT]
@@ -2237,6 +2255,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes (the C++ run returns 1 with the proto vertex still listed).
 - **Severity:** wrong result.
 - **Rust port:** Same result (`true`), for parity.
+
+#### WR-153. `SmCone::IsNurbSurfaceCone` returns an error status as its `SmBoolean`
+- **Location:** `source/SMLib/src/SmCone.cpp:4406`, `:4415`, `:4494` (`SER` around `CreateIsoParametricCurve`), `SmCone::IsNurbSurfaceCone` (def. `:4305`).
+- **What happens:** `SER` returns the failing `SmStatus` (e.g. `SM_ERR` = 1001) from a function returning `SmBoolean`, so callers such as `SmBSplineSurface::CopyAndAddAnalytics` read it as `TRUE` with a `NULL` cone and return success without a surface.
+- **Trigger:** An iso-curve extraction failure on a candidate cone NURB (e.g. a knot multiplicity above the degree).
+- **How found:** read during porting (`surface.cone_p2`, PR #153).
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Returns the error.
 
 #### WR-160. `SmOffsetSurface` third derivatives use wrong coefficients in `Cuuv` and `Cuvv`
 - **Location:** `source/SMLib/src/SmOffsetSurface.cpp:1468` and `:1479`, `SmOffsetSurface::EvaluatePlainOrSimple`.

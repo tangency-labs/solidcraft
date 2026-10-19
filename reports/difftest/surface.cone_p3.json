@@ -378,16 +378,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "oblique_section_deferred",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p3/analytic.json#45 (upstream source/SMLib/src/SmCone.cpp:3219 (analytic branch regression))",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -414,16 +410,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "orthogonal_cylinders_deferred",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p3/analytic.json#49 (upstream source/SMLib/src/SmCone.cpp:3219 (analytic branch regression))",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -930,16 +922,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366902980",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -950,16 +938,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366902982",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -1042,16 +1026,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366902993",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -1426,16 +1406,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0061",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903040",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -1634,16 +1610,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0086",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903065",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -1718,16 +1690,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0096",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903075",
-      "values_compared": 0
+      "values_compared": 421
     },
     {
       "max_rel_err": 0.0,
@@ -1802,16 +1770,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903085",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -1830,16 +1794,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0109",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903088",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -1890,16 +1850,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0116",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903095",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -2154,16 +2110,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0148",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903127",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -2242,16 +2194,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0158",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903137",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -2498,16 +2446,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0189",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903168",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -2574,28 +2518,20 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0198",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903177",
-      "values_compared": 0
+      "values_compared": 146
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0199",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903178",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -2670,16 +2606,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0208",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903187",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -2830,16 +2762,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0227",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903206",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -2922,16 +2850,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0238",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903217",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -3142,16 +3066,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903244",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -3186,28 +3106,20 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0270",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903249",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903250",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -3418,16 +3330,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0297",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903276",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -3470,16 +3378,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0303",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903282",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -3498,28 +3402,20 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0306",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903285",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0307",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903286",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -3618,16 +3514,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0320",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903299",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -3942,16 +3834,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0359",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903338",
-      "values_compared": 0
+      "values_compared": 569
     },
     {
       "max_rel_err": 0.0,
@@ -4026,16 +3914,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0369",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903348",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -4054,16 +3938,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0372",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903351",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -4142,28 +4022,20 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0382",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903361",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0383",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903362",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -4190,16 +4062,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903366",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -4314,16 +4182,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0402",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903381",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -4390,16 +4254,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0411",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903390",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -4458,16 +4318,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0419",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903398",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -4558,16 +4414,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0431",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903410",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -4642,16 +4494,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0441",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903420",
-      "values_compared": 0
+      "values_compared": 146
     },
     {
       "max_rel_err": 0.0,
@@ -4742,16 +4590,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0453",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903432",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4762,16 +4606,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0455",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903434",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -4810,16 +4650,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0460",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903439",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -5310,16 +5146,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0522",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903501",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -5378,16 +5210,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0530",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903509",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -5522,16 +5350,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0547",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903526",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -5670,16 +5494,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0565",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903544",
-      "values_compared": 0
+      "values_compared": 421
     },
     {
       "max_rel_err": 0.0,
@@ -5730,16 +5550,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0572",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903551",
-      "values_compared": 0
+      "values_compared": 146
     },
     {
       "max_rel_err": 0.0,
@@ -5822,16 +5638,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0583",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903562",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -5858,16 +5670,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0587",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903566",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -6026,16 +5834,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0607",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903586",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -6198,16 +6002,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0628",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903607",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -6218,16 +6018,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0630",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903609",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -6246,16 +6042,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903612",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -6306,16 +6098,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903619",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -6342,16 +6130,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0644",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903623",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -6490,16 +6274,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0662",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903641",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -6654,16 +6434,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0682",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903661",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -6714,16 +6490,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0689",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903668",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -6838,16 +6610,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0704",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903683",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -6882,16 +6650,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0709",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903688",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -7066,16 +6830,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903710",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -7118,16 +6878,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0737",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903716",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -7170,16 +6926,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0743",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903722",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -7286,16 +7038,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0757",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903736",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -7386,16 +7134,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0769",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903748",
-      "values_compared": 0
+      "values_compared": 213
     },
     {
       "max_rel_err": 0.0,
@@ -7422,16 +7166,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0773",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903752",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -7542,16 +7282,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0787",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903766",
-      "values_compared": 0
+      "values_compared": 233
     },
     {
       "max_rel_err": 0.0,
@@ -7674,16 +7410,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0803",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903782",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -7846,16 +7578,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0823",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903802",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -8014,16 +7742,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0843",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903822",
-      "values_compared": 0
+      "values_compared": 193
     },
     {
       "max_rel_err": 0.0,
@@ -8062,16 +7786,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0848",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903827",
-      "values_compared": 0
+      "values_compared": 146
     },
     {
       "max_rel_err": 0.0,
@@ -8346,28 +8066,20 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0883",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903862",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0884",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903863",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -8450,16 +8162,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0895",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903874",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -8470,28 +8178,20 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0897",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903876",
-      "values_compared": 0
+      "values_compared": 569
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0898",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903877",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -8726,16 +8426,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0928",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903907",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -8878,16 +8574,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0946",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903925",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -9162,16 +8854,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0981",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903960",
-      "values_compared": 0
+      "values_compared": 213
     },
     {
       "max_rel_err": 0.0,
@@ -9454,16 +9142,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366903996",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -9538,16 +9222,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904006",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -9574,16 +9254,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1031",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904010",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -9658,16 +9334,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1041",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904020",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -9694,16 +9366,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1045",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904024",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -10050,16 +9718,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1088",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904067",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -10270,16 +9934,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1115",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904094",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -10314,16 +9974,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1120",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904099",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -10470,16 +10126,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1139",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904118",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -10738,16 +10390,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1172",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904151",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -10822,16 +10470,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1182",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904161",
-      "values_compared": 0
+      "values_compared": 213
     },
     {
       "max_rel_err": 0.0,
@@ -10914,16 +10558,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1193",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904172",
-      "values_compared": 0
+      "values_compared": 381
     },
     {
       "max_rel_err": 0.0,
@@ -10934,16 +10574,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "sm_GetEllipseTrimIntervals",
-        "unit": "surface.cone_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1195",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844054982366904174",
-      "values_compared": 0
+      "values_compared": 146
     },
     {
       "deferred": {
@@ -10983,12 +10619,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 121,
+  "cases_deferred": 30,
   "cases_failed": 0,
-  "cases_passed": 1191,
+  "cases_passed": 1282,
   "cases_total": 1312,
   "deferred_by_unit": {
-    "surface.cone_p2": 91,
     "surface.surface_p2": 30
   },
   "max_rel_err": 0.0,

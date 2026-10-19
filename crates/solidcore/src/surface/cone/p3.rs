@@ -243,25 +243,33 @@ fn add_plane_ellipses(out: &mut SurfaceIntersection, curves: Vec<Curve>) -> Resu
     Ok(())
 }
 
-// Owned by the unfinished surface.cone_p2 claim. Keep the call in one place so
-// its porter can wire it without changing either intersection algorithm.
+/// `sm_GetEllipseTrimIntervals` ([`super::p2::ellipse_trim_intervals`]) with the
+/// ellipse's angular interval.
 fn ellipse_trim_intervals(
-    _k: &Kernel,
-    _center: Point3,
-    _x: Vec3,
-    _y: Vec3,
-    _rx: f64,
-    _ry: f64,
-    _angles: Extent1d,
-    _cone: &Cone,
-    _domain: &Extent2d,
-    _tol: f64,
+    k: &Kernel,
+    center: Point3,
+    x: Vec3,
+    y: Vec3,
+    rx: f64,
+    ry: f64,
+    angles: Extent1d,
+    cone: &Cone,
+    domain: &Extent2d,
+    tol: f64,
 ) -> Result<Vec<Extent1d>> {
-    // UNPORTED(surface.cone_p2): sm_GetEllipseTrimIntervals
-    Err(SolidError::unported(
-        "sm_GetEllipseTrimIntervals",
-        "surface.cone_p2",
-    ))
+    super::p2::ellipse_trim_intervals(
+        k,
+        center,
+        x,
+        y,
+        rx,
+        ry,
+        angles.min(),
+        angles.max(),
+        cone,
+        domain,
+        tol,
+    )
 }
 
 impl Cone {

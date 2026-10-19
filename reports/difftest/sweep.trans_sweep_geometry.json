@@ -355,8 +355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "interval_2_8_zero",
@@ -367,8 +367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "interval_2_8_short",
@@ -379,8 +379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "interval_2_8_outside",
@@ -391,8 +391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "interval_2_8_full",
@@ -859,8 +859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "ellipse_7_0_1",
@@ -879,8 +879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "ellipse_7_1_1",
@@ -2028,8 +2028,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "geometry_2_7_True_False",
@@ -2040,8 +2040,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "geometry_2_7_True_True",
@@ -2124,8 +2124,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "curved_surface_7_True",
@@ -2136,8 +2136,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "curved_surface_8_False",
@@ -2148,8 +2148,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "curved_surface_8_True",
@@ -2448,8 +2448,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0005",
@@ -2468,8 +2468,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0007",
@@ -2648,8 +2648,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0029",
@@ -2708,8 +2708,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0036",
@@ -3072,8 +3072,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0081",
@@ -3092,8 +3092,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0083",
@@ -3136,8 +3136,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0088",
@@ -3276,8 +3276,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0105",
@@ -3312,8 +3312,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0109",
@@ -3580,8 +3580,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0142",
@@ -3786,8 +3786,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0165",
@@ -3814,8 +3814,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0168",
@@ -3946,8 +3946,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -4222,8 +4222,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0218",
@@ -4322,8 +4322,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0230",
@@ -4382,8 +4382,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0237",
@@ -4605,8 +4605,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0262",
@@ -4913,8 +4913,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0300",
@@ -4933,8 +4933,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0302",
@@ -4953,8 +4953,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0304",
@@ -5037,8 +5037,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0314",
@@ -5177,8 +5177,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0331",
@@ -5302,8 +5302,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0344",
@@ -5386,8 +5386,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0354",
@@ -5534,8 +5534,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0372",
@@ -5642,8 +5642,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0385",
@@ -5705,8 +5705,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0390",
@@ -5717,8 +5717,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0391",
@@ -5761,8 +5761,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0396",
@@ -5797,8 +5797,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0400",
@@ -5882,8 +5882,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0408",
@@ -5910,8 +5910,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0411",
@@ -5946,8 +5946,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0415",
@@ -6102,8 +6102,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0434",
@@ -6346,8 +6346,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0464",
@@ -6450,8 +6450,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0474",
@@ -6582,8 +6582,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0490",
@@ -6594,8 +6594,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0491",
@@ -6678,8 +6678,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "gen0501",
@@ -6776,7 +6776,8 @@
   "cases_rejected": 19,
   "cases_total": 788,
   "deferred_by_unit": {
-    "surface.cone_p2": 50
+    "surface.sphere": 41,
+    "surface.surface_p2": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

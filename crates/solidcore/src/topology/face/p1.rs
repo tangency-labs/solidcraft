@@ -1641,7 +1641,7 @@ pub fn move_seam<O: LoopObject>(
             let mut joined = Surface::from(joined);
             if surface_is_analytic {
                 if let SurfaceKind::BSpline(j) = joined.kind() {
-                    if let Some(a) = ignored(j.copy_and_add_analytics())? {
+                    if let Some(a) = ignored(j.copy_and_add_analytics(k))? {
                         if a.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
                             joined = a;
                         }

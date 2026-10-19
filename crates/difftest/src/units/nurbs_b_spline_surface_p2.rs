@@ -797,7 +797,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = vec![0.0];
     let res: solidcore::Result<()> = match (&i.op, &i.this) {
         (OpIn::Analytics {}, Some(t)) => this_of(t)?
-            .copy_and_add_analytics()
+            .copy_and_add_analytics(&k)
             .map(|s| o.push(s.type_code() as f64)),
         (
             OpIn::Iso {
