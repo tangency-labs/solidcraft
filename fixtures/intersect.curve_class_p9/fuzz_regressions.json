@@ -18,6 +18,181 @@
       }
     },
     {
+      "name": "fuzz_tiny_plane_vertex_cache_state4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16262 (IntersectTSBound cache branch, vertex list UV from SmVertexuse::ComputeUVPoint); found by difftest --fuzz 30000 after intersect.curve_class_p2 (fuzz26250): plane of scale 1e-300, cached leaf vertex",
+      "inputs": {
+        "big": true,
+        "check3d": false,
+        "cross": true,
+        "defaults": true,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-300,
+        "state": 4,
+        "vertices": [[0.7111652965919807, 0.5, 0.0]],
+        "zone": 1e-7
+      }
+    },
+    {
+      "name": "fuzz_tiny_plane_vertex_cache_state4_zone10",
+      "upstream_ref": "same as fuzz_tiny_plane_vertex_cache_state4 with a coarse zone (fuzz29611)",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": true,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-300,
+        "state": 4,
+        "vertices": [[0.3924625508150472, 0.5, 0.0]],
+        "zone": 10.0
+      }
+    },
+    {
+      "name": "fuzz_tiny_plane_vertex_cache_state6",
+      "upstream_ref": "same as fuzz_tiny_plane_vertex_cache_state4 with a v-split leaf pair (fuzz03470)",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": true,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-300,
+        "state": 6,
+        "vertices": [[0.2635859306427154, 0.5, 1e-6]],
+        "zone": 0.09999999999999999
+      }
+    },
+    {
+      "name": "fuzz_tiny_plane_vertex_cache_state1",
+      "upstream_ref": "same as fuzz_tiny_plane_vertex_cache_state4 with a single-leaf cache",
+      "inputs": {
+        "big": true,
+        "check3d": false,
+        "cross": true,
+        "defaults": true,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-300,
+        "state": 1,
+        "vertices": [[0.7111652965919807, 0.5, 0.0]],
+        "zone": 1e-7
+      }
+    },
+    {
+      "name": "fuzz_tiny_plane_vertex_modified_state2",
+      "upstream_ref": "control for fuzz_tiny_plane_vertex_cache_state4: the same input on the non-cache branch (modified cache)",
+      "inputs": {
+        "big": true,
+        "check3d": false,
+        "cross": true,
+        "defaults": true,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-300,
+        "state": 2,
+        "vertices": [[0.7111652965919807, 0.5, 0.0]],
+        "zone": 1e-7
+      }
+    },
+    {
+      "name": "fuzz_plane_vertex_noise_state5",
+      "upstream_ref": "source/SMLib/src/SmVertexuse.cpp:543 + SmSurface.cpp:20069 (ComputeUVPoint through GlobalPointSolve, face point test); found by difftest --fuzz 30000 (fuzz24354): the projected UV 0.19999999999999998 leaves a 2.8e-17 drop distance",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": false,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-6,
+        "source": [[0.2, 0.5, 0.0], [0.8, 0.5, 0.0]],
+        "state": 5,
+        "vertices": [[0.2, 0.5, -1e300]],
+        "zone": 9.999999999999999e-14
+      }
+    },
+    {
+      "name": "fuzz_plane_vertex_noise_state4",
+      "upstream_ref": "same as fuzz_plane_vertex_noise_state5 (fuzz25059)",
+      "inputs": {
+        "big": true,
+        "check3d": false,
+        "cross": false,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-6,
+        "source": [[0.2, 0.5, 0.0], [0.8, 0.5, 0.0]],
+        "state": 4,
+        "vertices": [[0.2, 0.5, -1e300]],
+        "zone": 9.999999999999999e-14
+      }
+    },
+    {
+      "name": "fuzz_plane_vertex_noise_state0",
+      "upstream_ref": "same as fuzz_plane_vertex_noise_state5, non-cache branch (no trim cache)",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": false,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-6,
+        "source": [[0.2, 0.5, 0.0], [0.8, 0.5, 0.0]],
+        "state": 0,
+        "vertices": [[0.2, 0.5, -1e300]],
+        "zone": 9.999999999999999e-14
+      }
+    },
+    {
+      "name": "fuzz_plane_vertex_noise_state3",
+      "upstream_ref": "same as fuzz_plane_vertex_noise_state5, non-cache branch (containment not done)",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": false,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-6,
+        "source": [[0.2, 0.5, 0.0], [0.8, 0.5, 0.0]],
+        "state": 3,
+        "vertices": [[0.2, 0.5, -1e300]],
+        "zone": 9.999999999999999e-14
+      }
+    },
+    {
+      "name": "fuzz_plane_vertex_noise_state6",
+      "upstream_ref": "same as fuzz_plane_vertex_noise_state5, v-split leaf pair",
+      "inputs": {
+        "big": false,
+        "check3d": false,
+        "cross": false,
+        "defaults": false,
+        "dim3": false,
+        "kind": 1,
+        "op": 1,
+        "scale": 1e-6,
+        "source": [[0.2, 0.5, 0.0], [0.8, 0.5, 0.0]],
+        "state": 6,
+        "vertices": [[0.2, 0.5, -1e300]],
+        "zone": 9.999999999999999e-14
+      }
+    },
+    {
       "name": "fuzz_degenerate_source_no_curve_cache_empty_vertices",
       "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC) when the source curve cache cannot be built); found by difftest --fuzz 30000 (fuzz02411)",
       "inputs": {

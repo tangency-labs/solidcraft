@@ -152,7 +152,7 @@ fn last_index(knots: &[f64], op: &'static str) -> Result<usize> {
 
 /// `NL_IND_ERR` unless `i <= m - p - 1`.
 fn check_index(m: usize, i: usize, p: usize, op: &'static str) -> Result<()> {
-    match m.checked_sub(p + 1) {
+    match p.checked_add(1).and_then(|p1| m.checked_sub(p1)) {
         Some(n) if i <= n => Ok(()),
         _ => Err(nlib(op, NlibCode::Index)),
     }
@@ -744,8 +744,10 @@ pub fn basis_derivs(
 /// # Errors
 ///
 /// `InvalidInput` where upstream would read outside the knot vectors
-/// (vectors that are too short, unclamped, or with inner knots beyond the ends) or
-/// loop forever (NaN knots), and for the errors of [`reparam`].
+/// (vectors that are too short, unclamped, or with inner knots beyond the ends;
+/// upstream-issues UB-13) or loop forever (NaN knots), for a degree too large for
+/// the `i64` start index `p + 1` (upstream's degree is a `short`), and for the errors
+/// of [`reparam`].
 pub fn make_knots_compatible(
     r: &mut [f64],
     s: &mut [f64],
@@ -767,10 +769,23 @@ pub fn make_knots_compatible(
         }
     }
 
-    let nr = sgn(mr, OP)? - sgn(p, OP)? - 1;
-    let ns = sgn(ms, OP)? - sgn(q, OP)? - 1;
-    let mut i = sgn(p, OP)? + 1;
-    let mut j = sgn(q, OP)? + 1;
+    // Checked: degrees past `i64::MAX - 1` (far beyond upstream's `short`) would
+    // overflow the start indices.
+    let too_large = || SolidError::InvalidInput {
+        operation: OP,
+        reason: "degree too large",
+    };
+    let (ps, qs) = (sgn(p, OP)?, sgn(q, OP)?);
+    let nr = sgn(mr, OP)?
+        .checked_sub(ps)
+        .and_then(|v| v.checked_sub(1))
+        .ok_or_else(too_large)?;
+    let ns = sgn(ms, OP)?
+        .checked_sub(qs)
+        .and_then(|v| v.checked_sub(1))
+        .ok_or_else(too_large)?;
+    let mut i = ps.checked_add(1).ok_or_else(too_large)?;
+    let mut j = qs.checked_add(1).ok_or_else(too_large)?;
     let mut xr = Vec::new();
     let mut xs = Vec::new();
     let (r, s) = (&*r, &*s);
@@ -1058,5 +1073,20 @@ mod tests {
         let mut a = vec![0., f64::NAN, 1.];
         let mut b = vec![0., 0.5, 1.];
         assert!(make_knots_compatible(&mut a, &mut b, 0, 0).is_err());
+    }
+
+    #[test]
+    fn make_compatible_huge_degree_is_an_error_not_a_panic() {
+        let mut r = vec![1., 1., 1., 1., 2., 2., 2., 2.];
+        let mut s = vec![1., 2.];
+        let huge = usize::try_from(i64::MAX).unwrap();
+        for (p, q) in [(3, huge), (huge, 0), (usize::MAX, 3)] {
+            assert!(matches!(
+                make_knots_compatible(&mut r, &mut s, p, q),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        let k = [0., 0., 1., 1.];
+        assert!(find_global_max(&kv(&k), 0, usize::MAX, 1e-9).is_err());
     }
 }

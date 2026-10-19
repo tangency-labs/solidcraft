@@ -13,8 +13,12 @@
 //! | `derivs`            | `basis_derivs`                         | `N_BasisDerivs`                   |
 //! | `make_compatible`   | `make_knots_compatible`                | `N_MakeKnotsCompatible`           |
 //!
-//! Errors are normalised to `nlib_<NL_*_ERR number>` on both sides. Every run has at
-//! least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
+//! Errors are normalised to `nlib_<NL_*_ERR number>` on both sides. `make_compatible`
+//! inputs on which upstream would read past a knot vector's end (upstream-issues UB-13)
+//! are [`PAST_END`] on both sides: the C++ side from the ffi's exact walk check (the
+//! routine is not called), the Rust side from its out-of-range error, so the two
+//! detections are compared. Every run has at least [`MIN_GENERATED`] generated inputs
+//! (more with `--seeds`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,6 +36,13 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
+
+/// Error output of a `make_compatible` case on which upstream reads past `R[mr]` or
+/// `S[ms]`.
+pub const PAST_END: &str = "read_past_end";
+
+/// Operation of the Rust out-of-range error that [`PAST_END`] stands for.
+const MAKE_OP: &str = "nurbs::basis_basic::make_knots_compatible";
 
 /// `nlib.basis_basic` runner.
 pub struct Runner;
@@ -175,12 +186,18 @@ fn cpp(i: Inputs) -> Result<Output, HarnessError> {
         } => ffi::derivs(&knots, i32_of(degree)?, u, flag.side().flag(), i64_of(der)?)
             .map(|(span, nd)| nested("nd", Output::new().int("span", span), &nd)),
         Inputs::MakeCompatible { r, s, p, q } => {
-            ffi::make_compatible(&r, &s, i32_of(p)?, i32_of(q)?).map(|m| {
-                Output::new()
-                    .values("r", m.r)
-                    .values("s", m.s)
-                    .values("xr", m.xr)
-                    .values("xs", m.xs)
+            let (p, q) = (i32_of(p)?, i32_of(q)?);
+            ffi::make_compatible_reads_in_bounds(&r, &s, p, q).and_then(|in_bounds| {
+                if !in_bounds {
+                    return Ok(Output::err(PAST_END));
+                }
+                ffi::make_compatible(&r, &s, p, q).map(|m| {
+                    Output::new()
+                        .values("r", m.r)
+                        .values("s", m.s)
+                        .values("xr", m.xr)
+                        .values("xs", m.xs)
+                })
             })
         }
     };
@@ -243,13 +260,19 @@ fn rust(i: Inputs) -> Result<Output, HarnessError> {
             Err(e) => Err(e),
         },
         Inputs::MakeCompatible { mut r, mut s, p, q } => {
-            bb::make_knots_compatible(&mut r, &mut s, p, q).map(|(xr, xs)| {
-                Output::new()
+            match bb::make_knots_compatible(&mut r, &mut s, p, q) {
+                Ok((xr, xs)) => Ok(Output::new()
                     .values("r", r)
                     .values("s", s)
                     .values("xr", xr)
-                    .values("xs", xs)
-            })
+                    .values("xs", xs)),
+                Err(SolidError::InvalidInput { operation, reason })
+                    if operation == MAKE_OP && reason.starts_with("index out of range") =>
+                {
+                    return Ok(Output::err(PAST_END));
+                }
+                Err(e) => Err(e),
+            }
         }
     };
     Ok(out.unwrap_or_else(|e| rust_err(&e)))
@@ -557,6 +580,9 @@ fn gen_make(rng: &mut Rng) -> Inputs {
             .collect();
         gen_clamped_for_make(rng, q, sa, sb, false, &mapped)
     };
+    // Degree 0 on a vector clamped for degree p: upstream mostly reads past the ends
+    // (UB-13, PAST_END on both sides), sometimes stays in bounds.
+    let p = if rng.chance(0.04) { 0 } else { p };
     Inputs::MakeCompatible { r, s, p, q }
 }
 

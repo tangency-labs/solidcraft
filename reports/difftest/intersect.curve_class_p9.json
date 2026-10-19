@@ -11,10 +11,90 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_tiny_plane_vertex_cache_state4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#1 (upstream source/SMLib/src/SmCurveClass.cpp:16262 (IntersectTSBound cache branch, vertex list UV from SmVertexuse::ComputeUVPoint); found by difftest --fuzz 30000 after intersect.curve_class_p2 (fuzz26250): plane of scale 1e-300, cached leaf vertex)",
+      "values_compared": 104
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_tiny_plane_vertex_cache_state4_zone10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#2 (upstream same as fuzz_tiny_plane_vertex_cache_state4 with a coarse zone (fuzz29611))",
+      "values_compared": 104
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_tiny_plane_vertex_cache_state6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#3 (upstream same as fuzz_tiny_plane_vertex_cache_state4 with a v-split leaf pair (fuzz03470))",
+      "values_compared": 104
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_tiny_plane_vertex_cache_state1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#4 (upstream same as fuzz_tiny_plane_vertex_cache_state4 with a single-leaf cache)",
+      "values_compared": 104
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_tiny_plane_vertex_modified_state2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#5 (upstream control for fuzz_tiny_plane_vertex_cache_state4: the same input on the non-cache branch (modified cache))",
+      "values_compared": 104
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_plane_vertex_noise_state5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#6 (upstream source/SMLib/src/SmVertexuse.cpp:543 + SmSurface.cpp:20069 (ComputeUVPoint through GlobalPointSolve, face point test); found by difftest --fuzz 30000 (fuzz24354): the projected UV 0.19999999999999998 leaves a 2.8e-17 drop distance)",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_plane_vertex_noise_state4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#7 (upstream same as fuzz_plane_vertex_noise_state5 (fuzz25059))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_plane_vertex_noise_state0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#8 (upstream same as fuzz_plane_vertex_noise_state5, non-cache branch (no trim cache))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_plane_vertex_noise_state3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#9 (upstream same as fuzz_plane_vertex_noise_state5, non-cache branch (containment not done))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_plane_vertex_noise_state6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#10 (upstream same as fuzz_plane_vertex_noise_state5, v-split leaf pair)",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "fuzz_degenerate_source_no_curve_cache_empty_vertices",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#1 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC) when the source curve cache cannot be built); found by difftest --fuzz 30000 (fuzz02411))",
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#11 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC) when the source curve cache cannot be built); found by difftest --fuzz 30000 (fuzz02411))",
       "values_compared": 54
     },
     {
@@ -22,7 +102,7 @@
       "name": "fuzz_degenerate_source_no_curve_cache_state1",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#2 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz14891))",
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#12 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz14891))",
       "values_compared": 54
     },
     {
@@ -30,7 +110,7 @@
       "name": "fuzz_degenerate_source_no_curve_cache_one_vertex",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#3 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz12956))",
+      "source": "fixture:fixtures/intersect.curve_class_p9/fuzz_regressions.json#13 (upstream source/SMLib/src/SmCurveClass.cpp:16215 (IntersectTSBound, NER(pCC)); found by difftest --fuzz 30000 (fuzz12956))",
       "values_compared": 54
     },
     {
@@ -4038,9 +4118,9 @@
   "cases_both_errored": 0,
   "cases_deferred": 149,
   "cases_failed": 0,
-  "cases_passed": 277,
+  "cases_passed": 287,
   "cases_rejected": 2,
-  "cases_total": 428,
+  "cases_total": 438,
   "deferred_by_unit": {
     "curve.crv_on_surf": 24,
     "intersect.curve_class_p2": 10,

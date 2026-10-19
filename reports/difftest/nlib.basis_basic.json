@@ -8861,6 +8861,83 @@
       "values_compared": 4
     },
     {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_deg0_double_ends",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#0 (upstream source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (N_MakeKnotsCompatible reads past R[mr]: degree 0 on a vector whose ends have multiplicity 2, upstream-issues UB-13); found by difftest --fuzz 3000 (fuzz00204, /p = 0))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_deg0_duplicated_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#1 (upstream source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (UB-13: degree-0 S whose last knot was duplicated, so the walk passes S[ms]); found by difftest --fuzz 3000 (fuzz02196, /s element 4 duplicated))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_deg0_single_ends_in_bounds",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#2 (upstream source/SMLib/src/NL_BasisBasic.cpp:3665 (degree 0 with single end knots stays in bounds: the UB-13 walk check must accept it; values compared))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_deg0_reads_last_knots_in_bounds",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#3 (upstream source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (degree 0: the walk reads exactly R[mr] and S[ms] and stops; the UB-13 walk check must accept it; values compared))",
+      "values_compared": 6
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_unclamped_short_r",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#4 (upstream source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (UB-13: degree-1 R = [0, 0, 1] with a single end knot, so the walk passes R[mr]); found by difftest --fuzz 3000 (fuzz02776, /r truncated to 3, /s element 6 duplicated))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_clamped_minimal_r_in_bounds",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#5 (upstream source/SMLib/src/NL_BasisBasic.cpp:3681-3735 (the clamped counterpart of fuzz_make_unclamped_short_r: R = [0, 0, 1, 1] is rescaled to S's range and stays in bounds; values compared))",
+      "values_compared": 14
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_inner_knot_above_end_s",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#6 (upstream source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (UB-13: an inner knot of S raised to 2147483648, above the end knot, walks j past ms); found by difftest --fuzz 3000 (fuzz00227, /s/4 = 2147483648))",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_inner_knot_above_end_r",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#7 (upstream source/SMLib/src/NL_BasisBasic.cpp:3681-3735 (UB-13: an inner knot of R replaced by 1.0, above its end knot 0.0, after R is rescaled; walks i past mr); found by difftest --fuzz 3000 (fuzz01533, /r/5 = 1.0))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_make_inner_knot_in_order_in_bounds",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/nlib.basis_basic/fuzz_regressions.json#8 (upstream source/SMLib/src/NL_BasisBasic.cpp:3681-3735 (the sorted counterpart of fuzz_make_inner_knot_above_end_r: inner knot -1.0 below the end stays in bounds; values compared))",
+      "values_compared": 27
+    },
+    {
       "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
@@ -9221,12 +9298,13 @@
       "values_compared": 8
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0045",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=15337071574800034714",
-      "values_compared": 54
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -10113,12 +10191,13 @@
       "values_compared": 8
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0155",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=15337071574800034824",
-      "values_compared": 47
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -10839,12 +10918,13 @@
       "values_compared": 29
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0245",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=15337071574800034914",
-      "values_compared": 70
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -14021,12 +14101,13 @@
       "values_compared": 6
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0640",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=15337071574800035309",
-      "values_compared": 55
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -19455,12 +19536,13 @@
       "values_compared": 8
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1314",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=15337071574800035983",
-      "values_compared": 64
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -19601,12 +19683,13 @@
       "values_compared": 0
     },
     {
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen1332",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=15337071574800036001",
-      "values_compared": 49
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -20965,11 +21048,11 @@
       "values_compared": 3
     }
   ],
-  "cases_both_errored": 195,
+  "cases_both_errored": 206,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2596,
-  "cases_total": 2596,
+  "cases_passed": 2605,
+  "cases_total": 2605,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

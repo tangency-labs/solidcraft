@@ -28,6 +28,7 @@
 #include <SmVertexuse.h>
 #include <nurbs.h>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -41,7 +42,11 @@ struct P9Trim : SmTrimSrfCache {
     explicit P9Trim(const SmSurface& s) : SmTrimSrfCache(s) {
         m_sAuxMgr.Initialize(ALIGN_SIZE(sizeof(SmBezierAux2d)),25);
     }
+    // Loop-vertex UV projections, computed by native ComputeUVPoint while this cache is
+    // already attached to the surface (see sc_intersect_curve_class_p9_run).
+    typedef std::map<SmVertexuse*,SmPoint2d> UvMap;
     void recipe(const SmSurface& s, const SmTArray<SmLoopuse*>& loops, int state, bool collapsed,
+                const UvMap& uvs,
                 std::vector<std::unique_ptr<SmVertexList>>& vertices,
                 std::vector<std::unique_ptr<SmEdgeuseList>>& edges) {
         auto* tree = new (s.GetContext()) P9Tree(this); m_pTree=tree;
@@ -68,7 +73,7 @@ struct P9Trim : SmTrimSrfCache {
                 loops[li]->GetVertexuses(vs); loops[li]->GetEdgeuses(es);
                 for(long j=(long)vs.GetSize()-1;j>=0;--j) {
                     auto item=std::make_unique<SmVertexList>(); item->m_pVU=vs[j];
-                    vs[j]->ComputeUVPoint(item->m_vUVPoint); item->m_vUVTol.Set(0,0);
+                    item->m_vUVPoint=uvs.find(vs[j])->second; item->m_vUVTol.Set(0,0);
                     // A pole has many UV representatives. This cache recipe
                     // deliberately stores it in the lower v leaf, away from the query.
                     const auto pole=vs[j]->GetVertex()->GetPoint();
@@ -210,10 +215,34 @@ SC_EXPORT int32_t sc_intersect_curve_class_p9_run(const double* in,int64_t n,dou
     cc.SetSize(1); cc.SetInterval(SmExtent1d(in[14],in[15]));
     cc[0]=SmCurveInterval(cc.GetInterval(),&ctx,&cc);
     std::vector<std::unique_ptr<SmVertexList>> vl; std::vector<std::unique_ptr<SmEdgeuseList>> el;
+    // CacheGuard clears the cache before its externally owned list nodes, including
+    // when the native operation throws or the fixture is rejected below.
+    struct CacheGuard {
+        SmSurface* surface;
+        ~CacheGuard() { if(surface) SmCacheMgr::DeleteObjectsCache(surface); }
+    } cache_guard{op?s:nullptr};
     if(op) {
         std::unique_ptr<P9Trim> cache(new (&ctx) P9Trim(*s));
-        cache->recipe(*s,loops,state,kind==2,vl,el);
+        // Rust has no face point test (SmSurface::GlobalPointSolve classifies each
+        // drop against the owner face unless m_bPointTestEnabled is off), so the cache
+        // used for every native ComputeUVPoint call disables it, as the upstream callers
+        // do around GlobalPointSolve (SmVertexuse.cpp:471-480).
+        cache->m_bPointTestEnabled=FALSE;
+        P9Trim* attached=cache.get();
+        // Attach the cache first: ComputeUVPoint reaches the surface cache through the
+        // surface, and without one it builds a real trimmed cache, which fails on
+        // surfaces of extreme scale (status SM_ERR) and leaves the UV unset.
         SmCacheMgr::DeleteObjectsCache(s); s->SetCacheObj(cache.release());
+        P9Trim::UvMap uvs;
+        for(ULONG j=0;j<loops.GetSize();j++) {
+            SmTArray<SmVertexuse*> vs; loops[j]->GetVertexuses(vs);
+            for(ULONG k=0;k<vs.GetSize();k++) {
+                SmPoint2d uv;
+                if(vs[k]->ComputeUVPoint(uv)!=SM_SUCCESS) return SC_ERR_ARG;
+                uvs[vs[k]]=uv;
+            }
+        }
+        attached->recipe(*s,loops,state,kind==2,uvs,vl,el);
     }
     // State 2 is a cache flagged "face was modified" (m_bFaceWasModified), which is only
     // meaningful while the Brep is in edit mode. SmBrep starts with editing disabled, and
@@ -222,18 +251,12 @@ SC_EXPORT int32_t sc_intersect_curve_class_p9_run(const double* in,int64_t n,dou
     // to the cache units and fails on a face without loops. Enable editing so the cache is
     // used as given, which is what the Rust side models.
     if(op && state==2) brep->m_bEditingEnabled=TRUE;
-    struct CacheGuard {
-        SmSurface* surface;
-        ~CacheGuard() { if(surface) SmCacheMgr::DeleteObjectsCache(surface); }
-    } cache_guard{op?s:nullptr};
     SmStatus status=op?cc.IntersectTSBound(face,in[3]):in[7]?cc.IntersectEdges(targets,*face,FALSE):
         cc.IntersectEdges(targets,*face,in[5],in[6]);
     std::vector<double> result={status==SM_SUCCESS?0.:double(status),double(cc.GetSize()),cc.GetInterval().GetMin(),cc.GetInterval().GetMax()};
     for(ULONG j=0;j<cc.GetSize();j++) { auto& iv=cc[j]; result.push_back(iv.GetMin()); result.push_back(iv.GetMax());
         pc(result,iv.m_vStart,vertices,edges); pc(result,iv.m_vMid,vertices,edges); pc(result,iv.m_vEnd,vertices,edges);
     }
-    // CacheGuard clears the cache before its externally owned list nodes, including
-    // when the native operation throws.
     return sc_copy_out(result.data(),(int64_t)result.size(),out,cap,len);
     SC_CATCH
 }

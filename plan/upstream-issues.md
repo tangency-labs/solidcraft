@@ -205,11 +205,11 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 #### UB-13. `N_MakeKnotsCompatible` / `N_GetCompatibleKnotArrayMult` read past `U[m]`
 - **Location:** `NL_BasisBasic.cpp:3665` `N_MakeKnotsCompatible`, `NL_BasisAdv.cpp:119` `N_GetCompatibleKnotArrayMult`.
 - **What happens:** Both read past `U[m]` on several inputs. Their output buffers are caller-allocated and unbounded.
-- **Trigger:** Degree-0 vectors whose ends differ by less than `NL_PTOL`; inner knots within `NL_PTOL` of an end; unclamped vectors. For `N_GetCompatibleKnotArrayMult` also: degree 0 on vectors whose end knots repeat (`R[mr-1] == R[mr]` matched against `S[j]` advances both indices past the ends), an inner knot above the end knot, and an end knot replaced by a smaller value.
-- **How found:** read during porting; `N_GetCompatibleKnotArrayMult` also by `difftest --fuzz` (issue #182: 55 of 3000 fuzz cases, 501 of 30000, where the C++ ran on the shim's `+inf` padding and Rust reported the read).
-- **Confirmed:** no. For `N_GetCompatibleKnotArrayMult` the ffi now rejects exactly these inputs: the shim replays the routine's rescale (`N_BasisReparam` itself) and index walk and checks each index before the read (`sc_nlib_basis_adv_compat_mult_walk`), so upstream never runs on them. `N_MakeKnotsCompatible` still relies on the `+inf` padding.
+- **Trigger:** Degree-0 vectors whose ends differ by less than `NL_PTOL`; inner knots within `NL_PTOL` of an end; unclamped vectors. For `N_MakeKnotsCompatible` also: degree 0 on a vector whose end knots repeat (a degree-1 clamped vector passed with degree 0, or a duplicated end knot), an inner knot above the end knot (also after the rescale), and a vector with fewer than `p + 1` equal end knots.
+- **How found:** read during porting; `N_MakeKnotsCompatible` also by `difftest --fuzz` on `nlib.basis_basic` (17 of 3000 fuzz cases, 249 of 30000, where the C++ ran on the shim's `+inf` padding and Rust reported the read).
+- **Confirmed:** no. For `N_MakeKnotsCompatible` the ffi now rejects exactly these inputs: the shim replays the routine's rescale (`N_BasisReparam` itself) and index walk and checks each index before the read (`sc_nlib_basis_basic_make_compatible_walk`), so upstream never runs on them; the `+inf` padding stays as a second line of defence.
 - **Severity:** crash/UB.
-- **Rust port:** Returns `InvalidInput` for the out-of-range reads. The `nlib.basis_adv` difftest compares this with the shim's walk check (`read_past_end` on both sides).
+- **Rust port:** Returns `InvalidInput` for the out-of-range reads. The `nlib.basis_basic` difftest compares this with the shim's walk check (`read_past_end` on both sides; fixtures in `fixtures/nlib.basis_basic/fuzz_regressions.json`).
 
 #### UB-14. `NL_PascalTri[18][18]` is indexed past its end
 - **Location:** `source/SMLib/inc/NL_Globals.h:67` (the table); users include `NL_Bezier.cpp:105`, `:118` (elevation / product matrices) and `:5417` `N_BezCrvExtend` (hence `N_BezSrfExtend4D`).

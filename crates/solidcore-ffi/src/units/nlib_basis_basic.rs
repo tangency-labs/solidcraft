@@ -11,6 +11,7 @@
 //! | [`compatible`]         | `sc_nlib_basis_basic_compatible`          | `N_GetCompatibleKnotVectorToTol`, `N_GetCompatibleKnotArray` |
 //! | [`derivs`]             | `sc_nlib_basis_basic_derivs`              | `N_BasisDerivs`                   |
 //! | [`make_compatible`]    | `sc_nlib_basis_basic_make_compatible`     | `N_MakeKnotsCompatible`           |
+//! | [`make_compatible_reads_in_bounds`] | `sc_nlib_basis_basic_make_compatible_walk` | (guard of [`make_compatible`]) |
 //!
 //! Errors: `FfiError::Status(code)` carries the NLib error number (`NL_ERROR.eno`)
 //! when the upstream routine returned its error flag.
@@ -28,7 +29,12 @@
 //!   non-empty with at least `n_vec - 1` knots (so the new knots fit what upstream
 //!   allocates);
 //! - `make_compatible`: at least `degree + 1` knots, `|knot| <= 1e100`, and a positive
-//!   range `U[m] - U[0] >= 1e-100` per vector (so the rescale stays finite).
+//!   range `U[m] - U[0] >= 1e-100` per vector (so the rescale stays finite), and no read
+//!   past `R[mr]` or `S[ms]` (upstream-issues UB-13: degree 0 with repeated end knots,
+//!   unclamped or unsorted vectors, too few knots for the degree). That last check
+//!   is exact: [`make_compatible_reads_in_bounds`] replays upstream's rescale (with
+//!   `N_BasisReparam` itself) and index walk in the shim. The shim still pads both
+//!   vectors with `+inf` entries.
 
 use crate::{check, FfiError};
 
@@ -104,6 +110,15 @@ mod sys {
             out_xs: *mut f64,
             out_nxs: *mut i64,
             cap: i64,
+        ) -> i32;
+        pub fn sc_nlib_basis_basic_make_compatible_walk(
+            r: *const f64,
+            n_r: i64,
+            s: *const f64,
+            n_s: i64,
+            p: i32,
+            q: i32,
+            out_walk: *mut i32,
         ) -> i32;
     }
 }
@@ -413,10 +428,51 @@ fn make_compatible_vector(k: &[f64], degree: i32) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// Upstream `N_MakeKnotsCompatible(r, s, p, q)`.
-pub fn make_compatible(r: &[f64], s: &[f64], p: i32, q: i32) -> Result<MakeCompatible, FfiError> {
+/// Whether `N_MakeKnotsCompatible(r, s, p, q)` reads only `r[0..=mr]` and `s[0..=ms]`
+/// (`false`: it would read past an end, upstream-issues UB-13). The shim replays
+/// upstream's rescale and index walk on copies, without the routine itself.
+///
+/// Errors: the other [`make_compatible`] domain checks, and `InvalidArgument` where the
+/// walk would stop advancing (upstream loops forever; excluded by those checks).
+pub fn make_compatible_reads_in_bounds(
+    r: &[f64],
+    s: &[f64],
+    p: i32,
+    q: i32,
+) -> Result<bool, FfiError> {
     make_compatible_vector(r, p)?;
     make_compatible_vector(s, q)?;
+    let mut walk = -1i32;
+    // SAFETY: r has >= p+1 and s >= q+1 finite knots of bounded magnitude and positive
+    // range; the shim reads them into copies and checks every index before reading it,
+    // and writes one value to `walk`.
+    let st = unsafe {
+        sys::sc_nlib_basis_basic_make_compatible_walk(
+            r.as_ptr(),
+            len_i64(r.len())?,
+            s.as_ptr(),
+            len_i64(s.len())?,
+            p,
+            q,
+            &raw mut walk,
+        )
+    };
+    check(st)?;
+    match walk {
+        0 => Ok(true),
+        1 => Ok(false),
+        2 => Err(bad("upstream would loop forever".into())),
+        w => Err(bad(format!("walk status {w}"))),
+    }
+}
+
+/// Upstream `N_MakeKnotsCompatible(r, s, p, q)`.
+pub fn make_compatible(r: &[f64], s: &[f64], p: i32, q: i32) -> Result<MakeCompatible, FfiError> {
+    if !make_compatible_reads_in_bounds(r, s, p, q)? {
+        return Err(bad(
+            "upstream would read past the knot vectors (UB-13)".into()
+        ));
+    }
     let cap = r.len() + s.len() + 2 * MC_PAD;
     let mut out_r = vec![0.0; r.len()];
     let mut out_s = vec![0.0; s.len()];
@@ -424,8 +480,9 @@ pub fn make_compatible(r: &[f64], s: &[f64], p: i32, q: i32) -> Result<MakeCompa
     let mut xs = vec![0.0; cap];
     let (mut nxr, mut nxs) = (0i64, 0i64);
     // SAFETY: finite knots with bounded magnitude and positive ranges keep the rescale
-    // finite, so upstream terminates; the shim pads both vectors with +inf entries and
-    // gives upstream `cap` slots for each new-knot vector (more than it can write).
+    // finite, so upstream terminates; the walk check above keeps every knot read in
+    // bounds (the shim also pads both vectors with +inf entries) and the shim gives
+    // upstream `cap` slots for each new-knot vector (more than it can write).
     // Output buffers have r.len(), s.len(), cap and cap writable slots.
     let st = unsafe {
         sys::sc_nlib_basis_basic_make_compatible(

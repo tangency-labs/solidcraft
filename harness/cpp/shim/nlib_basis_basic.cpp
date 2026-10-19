@@ -12,9 +12,11 @@
 // every argument first; the checks here are a second line of defence.
 //
 // Defensive copies: upstream N_GetCompatibleKnotVectorToTol may read U[-1] of a knot
-// vector, and N_MakeKnotsCompatible may read a few entries past U[m] on unusual
-// inputs; the knot buffers handed to them carry a leading slot / trailing +inf slots
-// so those reads stay inside allocated memory (they never change the results).
+// vector, so its buffers carry a leading slot (the read never changes the result).
+// N_MakeKnotsCompatible reads past R[mr] / S[ms] on some inputs (upstream-issues
+// UB-13); sc_nlib_basis_basic_make_compatible_walk detects exactly those and the
+// wrapper rejects them, and its knot buffers still carry trailing +inf slots as a
+// second line of defence.
 #include "sc_shim.h"
 
 #include <cmath>
@@ -48,7 +50,93 @@ bool basis_domain(int64_t n_knots, int32_t degree)
 }
 
 const int64_t MC_PAD = 8; // trailing +inf entries for N_MakeKnotsCompatible
+
+// Outcomes of make_compatible_walk.
+const int32_t WALK_IN_BOUNDS = 0;
+const int32_t WALK_PAST_END = 1;
+const int32_t WALK_ENDLESS = 2;
+
+// Replays N_MakeKnotsCompatible(R, S, p, q) without writing new knots: its scale step
+// (NL_BasisBasic.cpp:3681-3693, calling N_BasisReparam itself on copies) and its index
+// walk (:3695-3735, reads at :3706-3729), checking every R[i] / S[j] index before the read. WALK_PAST_END
+// when upstream would read past R[mr] or S[ms] (UB-13), WALK_ENDLESS when an iteration
+// advances neither index (upstream would loop forever), else WALK_IN_BOUNDS. Reads of
+// R[i+1] / S[j+1] happen only while i <= nr / j <= ns and are always in bounds.
+// Requires n_r >= p+1, n_s >= q+1.
+int32_t make_compatible_walk(const double* r, int64_t n_r, const double* s, int64_t n_s, NL_DEGREE p,
+                             NL_DEGREE q)
+{
+    std::vector<double> R(r, r + n_r), S(s, s + n_s);
+    const NL_INDEX mr = (NL_INDEX)(n_r - 1), ms = (NL_INDEX)(n_s - 1);
+    NL_KNOTVECTOR knr, kns;
+    N_KnotVectorFromRealArray(&knr, R.data(), mr);
+    N_KnotVectorFromRealArray(&kns, S.data(), ms);
+    if (fabs(R[0] - S[0]) > NL_PTOL || fabs(R[mr] - S[ms]) > NL_PTOL)
+    {
+        NL_INTERVAL I;
+        if ((R[mr] - R[0]) > (S[ms] - S[0]))
+        {
+            N_CreateInterval(&I, R[0], R[mr]);
+            N_BasisReparam(&kns, q, I);
+        }
+        else
+        {
+            N_CreateInterval(&I, S[0], S[ms]);
+            N_BasisReparam(&knr, p, I);
+        }
+    }
+    const NL_INDEX nr = mr - p - 1, ns = ms - q - 1;
+    NL_INDEX i = p + 1, j = q + 1;
+    while (i <= nr || j <= ns)
+    {
+        const NL_INDEX i0 = i, j0 = j;
+        if (i > mr || j > ms)
+            return WALK_PAST_END;
+        if (fabs(R[i] - S[j]) < NL_PTOL)
+        {
+            while (i <= nr && R[i] == R[i + 1])
+                i++;
+            while (j <= ns && S[j] == S[j + 1])
+                j++;
+            i++;
+            j++;
+        }
+        if (i > mr || j > ms)
+            return WALK_PAST_END;
+        if (R[i] < S[j])
+        {
+            while (i <= nr && R[i] == R[i + 1])
+                i++;
+            i++; // upstream stores R[i] (in bounds: i <= max(i0, nr+1) <= mr) first
+        }
+        if (i > mr || j > ms)
+            return WALK_PAST_END;
+        if (R[i] > S[j])
+        {
+            while (j <= ns && S[j] == S[j + 1])
+                j++;
+            j++; // upstream stores S[j] first, in bounds likewise
+        }
+        if (i == i0 && j == j0)
+            return WALK_ENDLESS;
+    }
+    return WALK_IN_BOUNDS;
+}
 } // namespace
+
+// Whether N_MakeKnotsCompatible(R, S, p, q) stays inside R[0..=mr] and S[0..=ms]:
+// *out_walk = 0 (in bounds), 1 (reads past the end, UB-13) or 2 (would loop forever).
+SC_EXPORT int32_t sc_nlib_basis_basic_make_compatible_walk(const double* r, int64_t n_r, const double* s,
+                                                           int64_t n_s, int32_t p, int32_t q, int32_t* out_walk)
+{
+    if (n_r < 1 || n_s < 1 || p < 0 || q < 0 || p > 32767 || q > 32767 || n_r < (int64_t)p + 1 ||
+        n_s < (int64_t)q + 1)
+        return SC_ERR_ARG;
+    SC_TRY
+    *out_walk = make_compatible_walk(r, n_r, s, n_s, (NL_DEGREE)p, (NL_DEGREE)q);
+    return SC_OK;
+    SC_CATCH
+}
 
 // N_BasisFindGlobalMax(knt, i, p, tol) -> out[0] = max, out[1] = u.
 SC_EXPORT int32_t sc_nlib_basis_basic_global_max(const double* knots, int64_t n_knots, int64_t index,
@@ -205,6 +293,8 @@ SC_EXPORT int32_t sc_nlib_basis_basic_make_compatible(const double* r, int64_t n
         n_s < (int64_t)q + 1 || cap < n_r + n_s + 2 * MC_PAD)
         return SC_ERR_ARG;
     SC_TRY
+    if (make_compatible_walk(r, n_r, s, n_s, (NL_DEGREE)p, (NL_DEGREE)q) != WALK_IN_BOUNDS)
+        return SC_ERR_ARG;
     const double inf = std::numeric_limits<double>::infinity();
     std::vector<double> rb((size_t)(n_r + MC_PAD), inf), sb((size_t)(n_s + MC_PAD), inf);
     for (int64_t i = 0; i < n_r; ++i)
