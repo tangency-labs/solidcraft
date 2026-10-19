@@ -1,11 +1,12 @@
 //! Local G-code post-processors for normalised [`PathSegment`] toolpaths.
 //!
 //! Used when the CAM companion returns geometry only, or for deterministic golden tests.
-//! Output is intended for operator review before running on a machine — not machine-verified.
+//! Output is intended for operator review before running on a machine, not machine-verified.
 //!
 //! Dialects land one PR at a time (`grbl`, then Marlin / Repetier / Mach3 / LinuxCNC / Fanuc / Haas).
 
 mod grbl;
+mod marlin;
 
 use crate::{GcodeDialect, LineEnding, PathSegment, PostProfile, Tool, ToolKind};
 
@@ -21,7 +22,8 @@ pub fn post_toolpath(segments: &[PathSegment], profile: &PostProfile, tool: &Too
     let mut out = String::new();
     match profile.dialect {
         GcodeDialect::Grbl | GcodeDialect::Generic => grbl::write_header(&mut out, tool, eol),
-        // Other dialects share the GRBL-class header until their peel PRs land.
+        GcodeDialect::Marlin => marlin::write_header(&mut out, tool, eol),
+        // Remaining dialects share the GRBL-class header until their peel PRs land.
         _ => grbl::write_header(&mut out, tool, eol),
     }
     if !profile.preamble.is_empty() {
@@ -79,7 +81,9 @@ fn write_move(out: &mut String, code: &str, to: [f64; 3], feed: Option<f64>, eol
 
 /// Built-in post profile presets for common controllers (grows with dialect peels).
 pub fn preset_posts() -> Vec<(&'static str, PostProfile)> {
-    vec![grbl::preset()]
+    let mut out = vec![grbl::preset()];
+    out.push(marlin::preset());
+    out
 }
 
 #[cfg(test)]
@@ -116,8 +120,8 @@ mod tests {
     }
 
     #[test]
-    fn presets_start_with_grbl() {
+    fn presets_cover_landed_dialects() {
         let names: Vec<_> = preset_posts().iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["GRBL"]);
+        assert_eq!(names, ["GRBL", "Marlin"]);
     }
 }
