@@ -193,19 +193,21 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
 #[test]
 fn colored_components_toggle_is_stable_and_does_not_change_the_design() {
     let mut s = Session::default();
+    let first_id = s.doc_mut().add_component(Some("First"), 0).unwrap();
+    let second_id = s.doc_mut().add_component(Some("Second"), 0).unwrap();
     let before = serde_json::to_value(&s.doc).unwrap();
-    assert_eq!(component_color(&s, 1), None);
+    assert_eq!(component_color(&s, first_id), None);
     assert_eq!(s.execute("inspect.colored_components", &json!({})).unwrap()["enabled"], true);
     s.colored_components = Some(());
-    let first = component_color(&s, 1);
+    let first = component_color(&s, first_id);
     assert!(first.is_some());
-    assert_ne!(first, component_color(&s, 2));
+    assert_ne!(first, component_color(&s, second_id));
     s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
-    assert_eq!(component_color(&s, 1), first);
+    assert_eq!(component_color(&s, first_id), first);
     assert!(s.execute("inspect.colored_components", &json!({"enabled": "yes"})).is_err());
-    assert_eq!(component_color(&s, 1), first);
+    assert_eq!(component_color(&s, first_id), first);
     assert_eq!(s.execute("inspect.colored_components", &json!({})).unwrap()["enabled"], false);
-    assert_eq!(component_color(&s, 1), None);
+    assert_eq!(component_color(&s, first_id), None);
     assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
 }
 
