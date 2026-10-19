@@ -427,13 +427,13 @@ pub struct Options {
     pub freeform: bool,
     /// Boundary samples per curve piece when trimming faces, 1 to [`MAX_TRIM_SAMPLES`].
     pub trim_samples: usize,
-    /// Curves (edges and silhouette pieces) in the whole scene, at most.
+    /// Most curves (drawable edges and silhouette pieces) in the whole scene.
     pub max_tracks: usize,
-    /// Visibility rays in the whole call, at most, whichever threads cast them.
+    /// Most visibility rays in the whole call, counted over all worker threads.
     pub max_rays: usize,
-    /// Worker threads: 0 picks one per core (and runs small views on the calling thread), 1
-    /// runs on the calling thread, more caps the workers at that many (up to [`MAX_THREADS`]).
-    /// The browser build always runs on the calling thread. The result is the same either way.
+    /// Worker threads: 0 uses one per core (small views stay on the calling thread), 1 runs
+    /// on the calling thread, a larger number caps the workers (at most [`MAX_THREADS`]). The
+    /// browser build always runs on the calling thread. The drawing is the same either way.
     pub threads: usize,
 }
 
@@ -443,9 +443,9 @@ impl Default for Options {
     }
 }
 
-/// Placements in one scene at most, and the default [`Options::max_tracks`]: the aggregate
-/// item limit shared with [`crate::section`] and [`crate::brep`] (which bounds each body's
-/// records when [`prepare`] validates it).
+/// Most placements in one scene, and the default [`Options::max_tracks`]: the aggregate item
+/// limit shared with [`crate::section`] and [`crate::brep`] (which bounds each body's records
+/// when [`prepare`] validates the body).
 pub const MAX_ITEMS: usize = crate::section::MAX_ITEMS;
 /// Largest [`Options::trim_samples`].
 pub const MAX_TRIM_SAMPLES: usize = 4096;
@@ -453,7 +453,7 @@ pub const MAX_TRIM_SAMPLES: usize = 4096;
 /// and `geom::brep` put on stored numbers. Beyond it the scene's size, and every tolerance
 /// taken from it, would lose its meaning or overflow.
 pub const MAX_COORDINATE: f64 = 1e12;
-/// Largest number of worker threads.
+/// Most worker threads.
 pub const MAX_THREADS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -574,14 +574,14 @@ struct Ctx<'a> {
     scale: f64,
     /// World boxes of placements, screen min/max and depth min.
     boxes: Vec<([f64; 2], [f64; 2], f64)>,
-    // Totals over all workers; each worker's share is added as it goes, so a budget holds
-    // for the whole call and the sums do not depend on which thread did what.
+    // Totals over all workers. Each worker adds its share as it goes, so a budget holds for
+    // the whole call and the sums do not depend on which thread did what.
     rays: AtomicUsize,
     surface_tests: AtomicUsize,
     transitions: AtomicUsize,
     max_rays: usize,
     freeform: bool,
-    /// Most worker threads, and whether the caller left the number to us.
+    /// Most worker threads, and whether that number was chosen automatically (`threads: 0`).
     workers: usize,
     auto_workers: bool,
     /// Set by the first worker that fails: the others stop as if cancelled.
@@ -595,10 +595,10 @@ impl Ctx<'_> {
         self.stop.load(Ordering::Relaxed) || (self.cancel)()
     }
 
-    /// `f` over `items`, results in item order on whichever threads ran them, so the output
-    /// is the same serial or parallel. Left to choose, it starts a worker per `grain` items at
-    /// most (cheap items are not worth a thread each). Cancellation is polled before every
-    /// item; the first error stops the other workers and is returned.
+    /// `f` over `items`, with the results in item order whichever threads ran them, so the
+    /// output is the same serial or parallel. With an automatic thread count it starts at most
+    /// one worker per `grain` items (cheap items are not worth a thread each). Cancellation is
+    /// polled before every item; the first error stops the other workers and is returned.
     fn map<T: Sync, R: Send>(&self, items: &[T], grain: usize, f: impl Fn(&T) -> Result<R, HlrError> + Sync) -> Result<Vec<R>, HlrError> {
         let one = |item: &T| if self.cancelled() { Err(HlrError::Cancelled) } else { f(item) };
         #[cfg(not(target_arch = "wasm32"))]
@@ -611,9 +611,9 @@ impl Ctx<'_> {
         items.iter().map(one).collect()
     }
 
-    /// [`Ctx::map`] on worker threads, every item on one of them (the calling thread waits, so
-    /// a worker's panic is caught at its join); `None` when one thread is enough or none
-    /// could be started.
+    /// [`Ctx::map`] on worker threads. Every item runs on a spawned worker while the calling
+    /// thread waits, so a worker's panic is caught when it is joined. `None` when one thread
+    /// is enough or none could be started.
     #[cfg(not(target_arch = "wasm32"))]
     fn map_on_threads<T: Sync, R: Send>(
         &self,
@@ -621,8 +621,8 @@ impl Ctx<'_> {
         grain: usize,
         one: &(impl Fn(&T) -> Result<R, HlrError> + Sync),
     ) -> Option<Result<Vec<R>, HlrError>> {
-        // ponytail: threads start per phase (tens of microseconds each); a pool kept for the
-        // whole call if small views ever need parallel work.
+        // Threads are started per phase, at tens of microseconds each. A pool kept for the
+        // whole call would pay that once, should small views ever need parallel work.
         let workers = if self.auto_workers { self.workers.min(items.len() / grain.max(1)) } else { self.workers.min(items.len()) };
         if workers < 2 {
             return None;
@@ -757,8 +757,8 @@ pub fn hidden_lines(
     let mut stats = Stats::default();
     let mut unsupported = Vec::new();
     let clock = Clock::start();
-    // 1. Tracks: drawable edges and trimmed silhouettes of every placement. The edges alone
-    // may exceed the budget: that is known before any silhouette is traced.
+    // 1. Tracks: drawable edges and trimmed silhouettes of every placement. Whether the edges
+    // alone exceed the budget is known before any silhouette is traced.
     let drawable = |e: &EdgeData| !(e.kind == EdgeKind::Seam || (e.kind == EdgeKind::Tangent && !opts.tangent_edges));
     let edge_counts: Vec<usize> = defs.iter().map(|d| d.edges.iter().filter(|e| drawable(e)).count()).collect();
     let edge_tracks = scene.iter().fold(0usize, |n, p| n.saturating_add(edge_counts.get(p.body).copied().unwrap_or(0)));
@@ -776,8 +776,8 @@ pub fn hidden_lines(
         *uses.entry(key(p)).or_insert(0) += 1;
     }
     let uses: Vec<_> = uses.into_iter().collect();
-    // The curves each tracing adds, once per placement sharing it, count as they are found:
-    // the budget holds while the workers trace.
+    // The curves each tracing adds, once per placement sharing it, are counted as they are
+    // found, so the budget holds while the workers trace.
     let curves = AtomicUsize::new(edge_tracks);
     let traced = ctx.map(&uses, 1, |&((body, x, y, z), placements)| {
         let Some(def) = defs.get(body) else { return Ok(None) };
@@ -1521,8 +1521,8 @@ fn crossings(tracks: &mut [Track], ctx: &Ctx) -> Result<usize, HlrError> {
             }
         }
     }
-    // Every pair of segments sharing a cell is looked at in each cell they share: the work is
-    // known before it starts.
+    // A pair of segments is visited once per cell they share, so the number of visits is
+    // known before the search starts.
     let pairs = grid.iter().fold(0usize, |n, c| n.saturating_add(c.len().saturating_mul(c.len().saturating_sub(1)) / 2));
     if pairs > 500_000_000 {
         return Err(HlrError::Budget("crossing pair"));
@@ -1568,7 +1568,7 @@ fn crossings(tracks: &mut [Track], ctx: &Ctx) -> Result<usize, HlrError> {
         let k = if matches!(tr.c3(), C3::Line { .. } | C3::Polyline(_)) { 1 } else { k };
         (0..=k).map(|j| ctx.view.screen(p.apply(tr.c3().at(a.0 + (b.0 - a.0) * j as f64 / k as f64)))).collect()
     };
-    // Rows of cells in parallel, joined in grid order: the crossings come out in the same
+    // Rows of cells in parallel, joined in grid order, so the crossings come out in the same
     // order whichever thread found them.
     let total = AtomicUsize::new(0);
     let rows: Vec<usize> = (0..n).collect();
@@ -1789,7 +1789,7 @@ fn cover(lines: &mut [Line], tol: f64, step: f64, ctx: &Ctx) -> Result<(), HlrEr
             .any(|(k, state, a, b, sag)| hides(key, own, *k, *state) && point_segment(q, *a, *b) <= tol + sag + slack)
     };
     // Lines in parallel: a piece's flag depends on the chords alone, never on other flags.
-    // `total` counts checks over all of them, whichever thread made them.
+    // `total` counts the checks over all lines, whichever thread made them.
     let total = AtomicUsize::new(0);
     let lines_ro: &[Line] = lines;
     let indices: Vec<usize> = (0..lines_ro.len()).collect();
@@ -1924,7 +1924,7 @@ fn classify_range(t: &Track, a: f64, b: f64, ctx: &Ctx) -> Result<Vec<([f64; 2],
 }
 
 fn classify(t: &Track, x: f64, ctx: &Ctx) -> Result<Visibility, HlrError> {
-    // The budget is for the whole call: each ray takes its number from the shared count.
+    // The budget is for the whole call: each ray takes the next number from the shared count.
     let n = ctx.rays.fetch_add(1, Ordering::Relaxed).saturating_add(1);
     if n > ctx.max_rays {
         return Err(HlrError::Budget("ray"));
@@ -1944,6 +1944,7 @@ fn classify_point(ctx: &Ctx, placement: usize, own: &[usize], own_eps: f64, worl
     state
 }
 
+/// [`classify_point`], counting the surface ray tests in `tests`.
 fn classify_point_counted(ctx: &Ctx, placement: usize, own: &[usize], own_eps: f64, world: Vec3, tests: &mut usize) -> Visibility {
     let screen = ctx.view.screen(world);
     let depth = world.dot(ctx.view.d);

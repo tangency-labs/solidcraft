@@ -31,10 +31,10 @@ hidden_lines(&[Prepared], &[Placement], &View, &Options, &cancel) -> Result<Draw
 - `View::new(direction_of_sight, up)` is an orthographic view. Screen coordinates are
   `(p . x, p . y)` in millimetres, with `x = direction x up` normalised and `y = x x
   direction`.
-- `cancel` is polled during the work, from every worker thread (so it must be `Sync`); when it
-  returns true the call ends with `HlrError::Cancelled`.
-- `Options::threads` picks the worker threads: 0 (the default) one per core, 1 the calling
-  thread only, more at most that many. See [Parallel work](#parallel-work).
+- `cancel` is polled during the work, from every worker thread, so it must be `Sync`; when
+  it returns true the call ends with `HlrError::Cancelled`.
+- `Options::threads` sets the number of worker threads (0, the default, means one per core);
+  see [Parallel work](#parallel-work).
 
 The `Drawing` holds one `Line` per drawable edge and per silhouette curve of each
 placement, in order of placement. A line names its `placement` and `source` (`Edge { edge, tangent }`
@@ -99,27 +99,34 @@ origin, whether placed there or modelled there, is classified as at the origin.
 
 ## Parallel work
 
-The work per curve runs on worker threads: silhouette tracing, screen sampling, the cuts at
-left-out faces' boxes, the classification of every piece, coverage, and the crossing search
-(by rows of its screen grid) with the refinement of each crossing. Each phase hands out its
-items to the workers one at a time and puts the results back in item order, so the drawing
-is the same, bit for bit, on any number of threads: the same pieces in the same order, the
-same statistics apart from the timings.
+`hidden_lines` spreads its per-curve work over worker threads: silhouette tracing, screen
+sampling, the cuts at the boxes of left-out faces, the classification of pieces, coverage,
+and the crossing search (by rows of its screen grid) with the refinement of each crossing.
+Each phase hands its items to the workers one at a time and stores every result at its
+item's index, so the drawing is identical, bit for bit, for any number of threads: the same
+pieces in the same order and the same statistics apart from the phase timings.
 
-- Silhouettes depend on the body and the direction of sight in its own frame, not on where it
-  stands, so placements that share both (repeated parts turned alike) share one tracing. In
-  the browser build, which always runs on the calling thread, this is the saving that remains.
-- Cancellation is polled before every item and inside the long ones (every 1024 rays, every
-  65536 crossing candidates). The first error, cancellation included, stops the other workers
-  and is the one returned.
-- A worker that panics loses its item: the call returns `HlrError::Internal` and no drawing,
-  and the panic does not reach the caller's thread.
-- With `threads: 0` a phase starts at most one worker per few items (16 curves, 4 grid rows,
-  256 crossings), so a small view runs on the calling thread without paying for threads.
+- **Thread count.** With `Options::threads` at 0 (the default) a phase uses up to one worker
+  per core, but at most one per 16 curves, 4 grid rows or 256 crossings, so a small view
+  stays on the calling thread. 1 runs everything on the calling thread; a larger number caps
+  the workers. The browser build always runs on the calling thread.
+- **Shared silhouettes.** Silhouettes depend on the body and the direction of sight in its
+  own frame, not on its position, so placements that share both (repeated parts turned
+  alike) share one tracing. This speeds up the browser build too.
+- **Cancellation.** `cancel` is polled before every item and inside long items (every 1024
+  rays, every 65 536 crossing candidates), on whichever thread runs them.
+- **Errors.** The first error, cancellation included, stops the other workers and is the one
+  returned. When two different failures coincide on different threads (a cancellation while
+  a budget is exceeded), the error returned may differ from a run on one thread; a successful
+  result never does.
+- **Panics.** Every parallel item runs on a spawned worker that the calling thread joins. A
+  worker that panics loses its item: the call returns `HlrError::Internal` and no drawing, and
+  the panic does not reach the caller. Work on the calling thread (one thread, or the browser
+  build) lets a panic propagate to the caller as before.
 
-On a 32-thread desktop, 100 placements of boxes, cylinders, spheres and tori, each turned
-differently, take 0.8 s instead of 9.9 s on one thread; 300 placements turned alike take 0.8 s
-in all.
+Measured on a 32-thread desktop (release build, isometric view of boxes, cylinders, spheres
+and tori): 100 placements, each turned differently, take 0.8 s, against 9.9 s on one thread;
+300 placements turned alike take 0.8 s, against 33 to 55 s before silhouettes were shared.
 
 ## Freeform faces
 
@@ -136,27 +143,39 @@ in the W05a findings.
 
 ## Limits
 
-- Every budget is for the whole call, counted over all worker threads; exceeding one returns
-  `HlrError::Budget` with its name, whichever thread noticed:
+Inputs are checked before any work:
 
-  | Budget | Limit |
-  | --- | --- |
-  | Body records (`prepare`, by `Brep::validate`) | `brep::MAX_ITEMS`, 100 000 |
-  | Placements in a scene (`placement`) | `hlr::MAX_ITEMS`, the same 100 000 |
-  | Curves: drawable edges and silhouette pieces (`curve`) | `Options::max_tracks`, default `hlr::MAX_ITEMS` |
-  | Visibility rays (`ray`) | `Options::max_rays`, default 20 000 000 |
-  | Crossing grid entries, candidate pairs, crossings | 50 million, 500 million (counted before the search), 50 million |
-  | Left-out face grid entries, box checks (`shadow`) | 50 million, 500 million |
-  | Coverage point checks (`coverage`) | 200 million |
+| Input | Limit | Otherwise |
+| --- | --- | --- |
+| Records of one body | `brep::MAX_ITEMS` (100 000), checked by `Brep::validate` in `prepare` | `Invalid("portable B-rep")` |
+| Placements in one scene | `hlr::MAX_ITEMS` (100 000) | `Budget("placement")` |
+| `Options::trim_samples` | 1 to `MAX_TRIM_SAMPLES` (4096) | `Invalid("trim samples")` |
+| `Options::threads` | at most `MAX_THREADS` (64) | capped |
 
-  `hlr::MAX_ITEMS` is `section::MAX_ITEMS`: the aggregate item limit of `geom::section` and
-  `geom::brep` (and the body limit of `file.export_view_dxf`). It bounds the counts a caller
-  supplies (records, placements) and the default number of curves, the drawing's lines;
-  `max_tracks` may be raised for a large assembly. The default ray budget is the occlusion
-  work budget of `file.export_view_dxf`; every piece costs at least one ray, so it also
-  bounds the pieces. The other caps bound the steps between those counts.
-- `Options::trim_samples` is 1 to `MAX_TRIM_SAMPLES` (4096) and `Options::threads` at most
-  `MAX_THREADS` (64); other values are refused or capped.
+Work budgets are totals over the whole call and all worker threads. Whether one is exceeded
+does not depend on the number of threads or on their scheduling:
+
+| Work | Budget | Error |
+| --- | --- | --- |
+| Curves: drawable edges and silhouette pieces | `Options::max_tracks`, default `hlr::MAX_ITEMS` | `Budget("curve")` |
+| Visibility rays | `Options::max_rays`, default 20 000 000 | `Budget("ray")` |
+| Crossing grid entries | 50 million | `Budget("crossing grid")` |
+| Crossing candidate pairs, counted before the search | 500 million | `Budget("crossing pair")` |
+| Crossings | 50 million | `Budget("crossing")` |
+| Left-out face grid entries | 50 million | `Budget("shadow grid")` |
+| Left-out face box checks | 500 million | `Budget("shadow")` |
+| Coverage point checks | 200 million | `Budget("coverage")` |
+
+`hlr::MAX_ITEMS` is `section::MAX_ITEMS`, the aggregate item limit that `geom::section` and
+`geom::brep` already apply, and the body limit of `file.export_view_dxf`. It bounds what a
+caller supplies (records, placements) and, by default, the number of curves, which is the
+number of lines in the drawing; a caller drawing a large assembly may raise `max_tracks`.
+The default ray budget is the occlusion work budget of `file.export_view_dxf`. Every piece
+costs at least one ray, so the ray budget also bounds the pieces. The remaining caps bound
+the steps in between.
+
+Other limits:
+
 - `Options::tangent_edges` (default on) draws edges between tangent faces, flagged
   `tangent: true`; drafting policy for them is W17.
 - Tolerances are relative to the faces and the scene. They are meant for faces up to
@@ -169,11 +188,12 @@ in the W05a findings.
 - Not in this slice: the kernel adapter (after W02), perspective, section regions (W03),
   views and commands (W07), and mirrored placements. Of the records the kernel now saves,
   planes through three points (`PlaneThrough`) are drawn as planes; a procedural
-  `SurfaceIntersection` curve is drawn as its leader, within its tolerance, when the leader is
-  a spline; one with a polyline leader, or a `PlacedRevolution` surface whose placement is not
-  rigid (it may scale it unevenly), is refused by `prepare` with `HlrError::Unsupported` until
-  the adapter handles them. One surface's silhouette is traced on one
-  thread: a single torus seen obliquely takes about 0.3 s whatever the thread count.
+  `SurfaceIntersection` curve is drawn as its leader, within its tolerance, when the leader
+  is a spline; one with a polyline leader, or a `PlacedRevolution` surface whose placement
+  is not rigid (it may scale it unevenly), is refused by `prepare` with
+  `HlrError::Unsupported` until the adapter handles them. A single surface's silhouette is
+  traced on one thread, so one torus seen obliquely still takes about 0.3 s whatever the
+  thread count.
 
 ## Fixtures
 
