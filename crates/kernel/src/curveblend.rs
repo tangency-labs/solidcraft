@@ -2695,10 +2695,11 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             rec.blend(&face, [chain_e.id()]);
             out.push(face);
         }
-        // The bands at merges, made by this blend in place of its chain's end edge.
+        // The bands at merges, made by this blend in place of its chain's end edge and the
+        // earlier round's end, the edges meeting at the corner.
         for m in &merges {
             let (Some(band), Some(chain_e)) = (bands.get(&m.k), chain.get(m.ke)) else { return Err(fail("merge band")) };
-            rec.blend(&band.face, [chain_e.id()]);
+            rec.blend(&band.face, [chain_e.id(), m.end.cap.id()]);
             out.push(band.face.clone());
         }
         let mut shells = solid.boundaries().clone();

@@ -1268,6 +1268,24 @@ fn rounds_meeting_at_the_wall_ends_merge_alike_in_any_order() {
         if ra == rb {
             routes.push(("together", fillet(&body, &both, ra).unwrap()));
         }
+        // The earlier round's ends picked too (each from where its contact with the top meets the
+        // side to the line of the wall's end), before the chain or after it: the merge takes them
+        // up, and the corner is the same.
+        let ends_of = |b: &Body, which: usize| -> Vec<Vec3> {
+            wall_ends()
+                .into_iter()
+                .map(|end| {
+                    let ([_, q_w, q_s], gone) = merge_points(end, ra, rb);
+                    let q = if which == 1 { q_w } else { q_s };
+                    crate::blend::edge_mid(&edge_between(b, gone[which], q, 1e-6).0).unwrap()
+                })
+                .collect()
+        };
+        let (caps_a, caps_b) = (ends_of(&footed, 1), ends_of(&edged, 2));
+        let picks: Vec<Vec3> = caps_a.iter().chain(&outline).copied().collect();
+        routes.push(("foot then edge, the foot's ends picked first", fillet(&footed, &picks, rb).unwrap()));
+        let picks: Vec<Vec3> = foot.iter().chain(&caps_b).copied().collect();
+        routes.push(("edge then foot, the edge's ends picked last", fillet(&edged, &picks, ra).unwrap()));
         // Tapering where the round doesn't fit has nothing to taper.
         let (tapered, tapers) = crate::fillet_tapered(&footed, &outline, rb).unwrap();
         assert!(tapers.iter().all(Option::is_none), "{ra} {rb}");
@@ -1306,10 +1324,25 @@ fn rounds_meeting_at_the_wall_ends_merge_alike_in_any_order() {
             let merged = v - (v_footed + v_edged - v_body);
             assert!((merged - correction).abs() < 0.002, "{how}: merged {merged}, expected {correction}");
             volumes.push(v);
+            // Every route has its vertices where the first has them.
+            assert!(same_vertices(result, &routes[0].1, 1e-6), "{how}: the vertices differ from {}'s", routes[0].0);
         }
         let v0 = volumes[0];
         assert!(volumes.iter().all(|v| (v - v0).abs() < 1e-6 * v0), "foot {ra} edge {rb}: {volumes:?}");
     }
+}
+
+/// The points of the distinct vertices of `body`.
+fn vertex_points(body: &Body) -> Vec<Vec3> {
+    let mut seen = std::collections::HashSet::new();
+    body.solid.vertex_iter().filter(|v| seen.insert(v.id())).map(|v| from_p3(v.point())).collect()
+}
+
+/// Whether `a` and `b` have as many vertices, each of either within `tol` of one of the other's.
+fn same_vertices(a: &Body, b: &Body, tol: f64) -> bool {
+    let (pa, pb) = (vertex_points(a), vertex_points(b));
+    let near = |p: &Vec3, ps: &[Vec3]| ps.iter().any(|q| q.dist(*p) < tol);
+    pa.len() == pb.len() && pa.iter().all(|p| near(p, &pb)) && pb.iter().all(|p| near(p, &pa))
 }
 
 /// A prism over the polygon `pts` (in the plane z = 0 through `origin`), from `z0` to `z1` above.
@@ -1342,8 +1375,9 @@ fn volume_at(b: &Body, tol: f64) -> f64 {
 
 #[test]
 fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
-    // [`plate_with_round_corners`] scaled and moved far from the origin: the same corner, in both
-    // orders, at every scale.
+    // [`plate_with_round_corners`] scaled and moved far from the origin: the same corner by every
+    // route (either order, each at its radius, the earlier round's ends picked too) at every
+    // scale, and with the plate's corners left sharp.
     let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
     let (first, second) = ((2.0f64 / 3.0).atan(), 0.5f64.atan());
     let (ra, rb) = (1.0, 0.5);
@@ -1366,6 +1400,7 @@ fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
         );
         let mut body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
         body = fillet(&body, &[at(Vec3::new(20.0, 2.0, 4.0))], k).unwrap();
+        let sharp = body.clone();
         body = fillet(&body, &[Vec3::new(12.0, 10.0, 1.0), Vec3::new(28.0, 10.0, 1.0), Vec3::new(28.0, -4.0, 1.0)].map(at), 3.0 * k).unwrap();
         let outline = [
             Vec3::new(0.0, 2.0, 2.0),
@@ -1380,24 +1415,49 @@ fn the_merge_corner_at_a_hundredth_and_a_hundred_times_off_the_origin() {
         let edged = fillet(&body, &picks, rb * k).unwrap();
         let ends = wall_ends().map(|(v, w, m, tan)| (at(v), w, m, tan));
         let tol = 1e-6 * k;
+        // The foot's ends, picked with the plate's edge.
+        let caps = ends.map(|end| {
+            let ([_, q_w, _], gone) = merge_points(end, ra * k, rb * k);
+            crate::blend::edge_mid(&edge_between(&footed, gone[1], q_w, tol).0).unwrap()
+        });
+        let both: Vec<Vec3> = foot.iter().chain(&picks).copied().collect();
+        let radii: Vec<f64> = foot.iter().map(|_| ra * k).chain(picks.iter().map(|_| rb * k)).collect();
+        let routes = [
+            ("foot then edge", fillet(&footed, &picks, rb * k).unwrap()),
+            ("edge then foot", fillet(&edged, &foot, ra * k).unwrap()),
+            ("each at its radius", crate::fillet_each(&body, &both, &radii).unwrap()),
+            ("foot then edge, the foot's ends picked", fillet(&footed, &caps.iter().chain(&picks).copied().collect::<Vec<_>>(), rb * k).unwrap()),
+        ];
         let mut volumes = Vec::new();
-        for (how, result) in
-            [("foot then edge", fillet(&footed, &picks, rb * k).unwrap()), ("edge then foot", fillet(&edged, &foot, ra * k).unwrap())]
-        {
+        for (how, result) in &routes {
             let how = format!("{how} at {k}x");
-            assert_merged(&result, &ends, (ra * k, rb * k), tol, &how);
+            assert_merged(result, &ends, (ra * k, rb * k), tol, &how);
             for end in ends {
                 let ([p_star, q_w, q_s], _) = merge_points(end, ra * k, rb * k);
                 for q in [q_w, q_s] {
-                    let bend = crease(&result, p_star, q, tol);
+                    let bend = crease(result, p_star, q, tol);
                     assert!(bend < 1e-3, "{how}: {bend} rad between the band and the round to {q:?}");
                 }
             }
-            let grown = (volume_at(&result, 2e-4 * k) - volume_at(&body, 2e-4 * k)) / k.powi(3);
+            let grown = (volume_at(result, 2e-4 * k) - volume_at(&body, 2e-4 * k)) / k.powi(3);
             assert!((grown - analytic).abs() < 0.008, "{how}: grown {grown}, expected {analytic}");
             volumes.push(grown);
+            assert!(same_vertices(result, &routes[0].1, tol), "{how}: the vertices differ from {}'s", routes[0].0);
         }
-        assert!((volumes[0] - volumes[1]).abs() < 1e-4, "{k}x: {volumes:?}");
+        assert!(volumes.iter().all(|v| (v - volumes[0]).abs() < 1e-4), "{k}x: {volumes:?}");
+        // The plate's corners left sharp: its straight top edges from the wall's ends round on
+        // their own, and merge with the foot's round either way round.
+        let tops = [Vec3::new(6.0, 6.0, 2.0), Vec3::new(24.0, -12.0, 2.0)].map(at);
+        let edged = fillet(&sharp, &tops, rb * k).unwrap();
+        assert!(edged.validity().is_empty(), "sharp at {k}x: {:?}", edged.validity());
+        let a = fillet(&fillet(&sharp, &foot, ra * k).unwrap(), &tops, rb * k).unwrap();
+        let b = fillet(&edged, &foot, ra * k).unwrap();
+        for (how, result) in [("sharp, foot then edge", &a), ("sharp, edge then foot", &b)] {
+            assert_merged(result, &ends, (ra * k, rb * k), tol, &format!("{how} at {k}x"));
+        }
+        let (va, vb) = (volume_at(&a, 2e-4 * k), volume_at(&b, 2e-4 * k));
+        assert!((va - vb).abs() < 1e-6 * va, "sharp at {k}x: {va} {vb}");
+        assert!(same_vertices(&a, &b, tol), "sharp at {k}x: the orders' vertices differ");
     }
 }
 
@@ -1584,4 +1644,61 @@ fn a_chain_runs_on_round_a_tilted_slot_and_a_boss_on_a_tilted_plate() {
     let plate = crate::transform(&plate, Vec3::ZERO, Vec3::ZERO, Vec3::Y, tilt).unwrap();
     let boss = boolean(&plate, &rounded_bar(), BoolOp::Union).unwrap().unwrap();
     chain_and_round_kept(&boss, Vec3::new(0.0, 2.0, 0.0), 8, &[0.5]);
+}
+
+#[test]
+fn a_sharp_plate_edge_rounds_into_the_wall_end_and_merges_with_the_foot() {
+    // [`wall_on_a_plate`] with the plate's corners left sharp: the top edge from each wall end to
+    // the plate's next corner is a chain of one straight edge. At the wall's end its end faces are
+    // the wall's face and its end (flush with the plate's side beneath): the round runs on past
+    // the vertex to the line between them, as it does along the rounded outline. With the foot
+    // rounded too, in either order or each at its radius, the two merge at both wall ends.
+    let body = wall_on_a_plate();
+    let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
+    let foot = [Vec3::new(10.0, 2.0, 2.0), corner, Vec3::new(20.0, -10.0, 2.0)];
+    let tops = [Vec3::new(6.0, 6.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
+    let (first, second) = ((2.0f64 / 3.0).atan(), 0.5f64.atan());
+    // Each edge's round is cut off at both ends by planes square to the top along parallel
+    // traces (y = 2 and y = 10 along the first edge, x = 20 and x = 28 along the second): every
+    // line along it is as long as the edge.
+    let lines = 208f64.sqrt() + 320f64.sqrt();
+    let v_body = planned_volume(&body);
+    for (ra, rb) in [(1.0, 0.5), (0.5, 1.0)] {
+        let edged = fillet(&body, &tops, rb).unwrap();
+        assert!(edged.validity().is_empty(), "{rb}: {:?}", edged.validity());
+        assert_eq!(edged.crossed_face_loops().unwrap(), 0);
+        let removed = (1.0 - std::f64::consts::FRAC_PI_4) * rb * rb * lines;
+        let lost = v_body - planned_volume(&edged);
+        assert!((lost - removed).abs() < 0.006, "edge {rb}: removed {lost}, expected {removed}");
+        // Alone, the round meets the line of the wall's end at its side contact and the wall's
+        // trace at its top contact; the old corner is gone.
+        for end in wall_ends() {
+            let ([_, _, q_s], [v, _, p2]) = merge_points(end, ra, rb);
+            assert_eq!((vertices_at(&edged, q_s, 1e-6), vertices_at(&edged, v, 1e-6), vertices_at(&edged, p2, 1e-6)), (1, 0, 1), "edge {rb}");
+        }
+        let footed = round_the_foot(&body, ra).unwrap();
+        let radii: Vec<f64> = foot.iter().map(|_| ra).chain(tops.iter().map(|_| rb)).collect();
+        let both: Vec<Vec3> = foot.iter().chain(&tops).copied().collect();
+        let routes = [
+            ("foot then edge", fillet(&footed, &tops, rb).unwrap()),
+            ("edge then foot", round_the_foot(&edged, ra).unwrap()),
+            ("each at its radius", crate::fillet_each(&body, &both, &radii).unwrap()),
+        ];
+        let analytic = foot_round_added(ra) - removed + merge_correction(first, ra, rb) + merge_correction(second, ra, rb);
+        for (how, result) in &routes {
+            let how = format!("{how}, foot {ra} edge {rb}");
+            assert_merged(result, &wall_ends(), (ra, rb), 1e-6, &how);
+            for end in wall_ends() {
+                let ([p_star, q_w, q_s], _) = merge_points(end, ra, rb);
+                for q in [q_w, q_s] {
+                    assert!(crease(result, p_star, q, 1e-6) < 1e-3, "{how}");
+                }
+            }
+            let grown = planned_volume(result) - v_body;
+            assert!((grown - analytic).abs() < 0.008, "{how}: grown {grown}, expected {analytic}");
+            let v0 = planned_volume(&routes[0].1);
+            assert!((planned_volume(result) - v0).abs() < 1e-6 * v0, "{how}");
+            assert!(same_vertices(result, &routes[0].1, 1e-6), "{how}: the vertices differ from {}'s", routes[0].0);
+        }
+    }
 }
