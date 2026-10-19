@@ -1702,3 +1702,42 @@ fn a_sharp_plate_edge_rounds_into_the_wall_end_and_merges_with_the_foot() {
         }
     }
 }
+
+#[test]
+fn hostile_sizes_and_picks_at_the_merge_corner_are_refused_or_built_sound() {
+    // The plate's edge rounded where it meets the foot's round at the wall's ends (and the foot's
+    // ends picked with it), at sizes and picks nobody means: refused, or a sound body.
+    let (body, outline) = plate_with_round_corners();
+    let footed = round_the_foot(&body, 1.0).unwrap();
+    let sound = |how: String, r: crate::Result<Body>| {
+        if let Ok(b) = r {
+            assert!(b.validity().is_empty(), "{how}: {:?}", b.validity());
+            assert_eq!(b.crossed_face_loops().unwrap(), 0, "{how}");
+        }
+    };
+    let caps: Vec<Vec3> = wall_ends()
+        .into_iter()
+        .map(|end| {
+            let ([_, q_w, _], gone) = merge_points(end, 1.0, 0.5);
+            crate::blend::edge_mid(&edge_between(&footed, gone[1], q_w, 1e-6).0).unwrap()
+        })
+        .collect();
+    let with_caps: Vec<Vec3> = outline.iter().chain(&caps).copied().collect();
+    for r in [f64::NAN, f64::INFINITY, -1.0, 0.0, 1e-300, 1e-7, 1.999, 2.0, 2.001, 1e6, 1e300] {
+        sound(format!("edge {r}"), fillet(&footed, &outline, r));
+        sound(format!("edge and caps {r}"), fillet(&footed, &with_caps, r));
+        let radii: Vec<f64> = outline.iter().enumerate().map(|(i, _)| if i == 0 { r } else { 0.5 }).collect();
+        sound(format!("each {r}"), crate::fillet_each(&footed, &outline, &radii));
+    }
+    // A radius the band has no room for: the largest that builds, or none.
+    if let Some((r, b)) = crate::fillet_max(&footed, &outline, 2.5) {
+        sound(format!("largest {r}"), Ok(b));
+    }
+    // Picks off every edge, or not numbers at all; radii that don't match the picks.
+    for p in [Vec3::new(f64::NAN, 0.0, 2.0), Vec3::new(1e300, 0.0, 0.0), Vec3::new(0.0, 2.0, 1e-300)] {
+        let picks: Vec<Vec3> = outline.iter().copied().chain([p]).collect();
+        sound(format!("pick {p:?}"), fillet(&footed, &picks, 0.5));
+    }
+    assert!(crate::fillet_each(&footed, &outline, &[0.5]).is_err());
+    sound("no picks".into(), fillet(&footed, &[], 0.5));
+}
