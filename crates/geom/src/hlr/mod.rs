@@ -1065,12 +1065,11 @@ fn screen_samples(t: &Track, ctx: &Ctx) -> Result<(Vec<(f64, [f64; 2])>, Vec<f64
 /// Where a track's curve crosses the sides of left-out faces' screen boxes, and the ends of the
 /// chords whose curve enters a box that the chord misses. `checks` counts the candidate boxes
 /// over all tracks, whichever thread looked: the shadow budget is for the whole call.
-/// Cancellation is polled every 4096 chords.
+/// Cancellation is polled every 4096 chords and every 1024 boxes met.
 fn shadow_cuts(t: &Track, ctx: &Ctx, shadows: &ShadowIndex, checks: &AtomicUsize) -> Result<Vec<f64>, HlrError> {
     let view = &ctx.view;
     let Some(pl) = ctx.scene.get(t.placement) else { return Ok(Vec::new()) };
-    let mut near = Vec::new();
-    let mut cuts = Vec::new();
+    let (mut near, mut cuts, mut met) = (Vec::new(), Vec::new(), 0usize);
     for (i, w) in t.samples.windows(2).enumerate() {
         if i % 4096 == 4095 && ctx.cancelled() {
             return Err(HlrError::Cancelled);
@@ -1084,6 +1083,11 @@ fn shadow_cuts(t: &Track, ctx: &Ctx, shadows: &ShadowIndex, checks: &AtomicUsize
             return Err(HlrError::Budget("shadow"));
         }
         for sh in near.iter().filter_map(|k| shadows.list.get(*k)) {
+            // A chord can meet many boxes, each side found by bisection on the curve.
+            met += 1;
+            if met % 1024 == 0 && ctx.cancelled() {
+                return Err(HlrError::Cancelled);
+            }
             for (k, edge) in [(0usize, sh.lo[0]), (0, sh.hi[0]), (1, sh.lo[1]), (1, sh.hi[1])] {
                 let (u, v) = (a.1[k], b.1[k]);
                 if (u - edge) * (v - edge) < 0. {

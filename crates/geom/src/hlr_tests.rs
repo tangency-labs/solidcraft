@@ -3093,6 +3093,20 @@ fn long_items_poll_cancellation_inside_them() {
     let boxes = prepare(&Brep { version: crate::brep::VERSION, shells }, &o).unwrap();
     let ctx = context(&[], &[], &view, &o, &|| true).unwrap();
     assert!(matches!(body_silhouettes(&boxes, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+    // One chord across the boxes of many left-out faces: it asks every 1024 boxes.
+    let defs = [prepare(&cuboid([0.; 3], [1.; 3]), &o).unwrap()];
+    let top = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let mut track = first_edge_track(&defs[0]);
+    let ctx = context(&defs, &scene, &top, &o, &never).unwrap();
+    (track.samples, track.sags) = screen_samples(&track, &ctx).unwrap();
+    // The prepared box stands at its centre: edge 0 runs from (-0.5, -0.5) to (0.5, -0.5).
+    assert_eq!(track.samples.len(), 2, "one chord");
+    let across =
+        (1..2000).map(|k| Shadow { lo: [k as f64 / 2000. - 0.5 - 1e-4, -1.], hi: [k as f64 / 2000. - 0.5 + 1e-4, 1.], near: -10. }).collect();
+    let shadows = ShadowIndex::new(across).unwrap();
+    assert_eq!(shadow_cuts(&track, &ctx, &shadows, &AtomicUsize::new(0)).unwrap().len(), 2 * 1999);
+    let ctx = context(&defs, &scene, &top, &o, &|| true).unwrap();
+    assert!(matches!(shadow_cuts(&track, &ctx, &shadows, &AtomicUsize::new(0)), Err(HlrError::Cancelled)));
 }
 
 #[test]
