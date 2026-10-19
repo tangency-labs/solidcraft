@@ -21,6 +21,7 @@
 //! | [`FilletSolver::set_extension_flags`]                  | `SetExtensionFlags`                                   |
 //! | [`FilletSolver::set_offsets_data`], [`FilletSolver::offsets_data`] | `SetOffsetsData`, `GetOffsetsData`        |
 //! | [`FilletSolver::setup_offset_extension`]               | `SetupOffsetExtension`                                |
+//! | [`FilletSolverOps::setup_offset_extension`]            | `SetupOffsetExtension` (virtual dispatch)             |
 //! | [`FilletSolver::compute_surface_values`]               | `ComputeSurfaceValues`                                |
 //! | [`compute_uv_vectors`]                                 | `SmFilletSolver::ComputeUVVectors`                    |
 //! | [`FilletSolver::split_fillet_geom_at_side_edge`]       | `SplitFilletGeomAtSideEdge`                           |
@@ -79,6 +80,10 @@
 //! - **Analytic surfaces.** `sm_TestAnalyticSurface` takes an [`AnalyticTestSurface`]:
 //!   a [`Surface`], a [`Cone`] (cone or cylinder), a [`Sphere`] or a [`Torus`], since
 //!   no [`Surface`] kind holds the last three yet.
+//! - **Rail trims.** `sm_TrimRail` trims curves of the rail edge and its edge uses,
+//!   whose `SmTol::GetZoneTol3d(this)` is the rail's tolerance; `Curve::trim` reads the
+//!   zone tolerance of an owner-less curve from its kernel, so the trims get a kernel
+//!   with the rail's tolerance as zone tolerance (`plan/findings.md`, probe notes).
 //! - **Arguments.** Out-params become return values; `SmContext` arguments become the
 //!   [`Kernel`]. `SmFindClippedRadiusEFO` takes the target distance its constructor
 //!   reads from the `SmConstantDistanceFS` (`GetDistance`, unit
@@ -1614,6 +1619,23 @@ pub trait FilletSolverOps {
         Ok(true)
     }
 
+    /// `SetupOffsetExtension(pSurf, rDomain)` (virtual): the base is
+    /// [`FilletSolver::setup_offset_extension`]. `SmSurfaceSurfaceFS` overrides it (unit
+    /// `blend.fillet_standard_solver_p1`); a solver of that class implements this hook.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSolver::setup_offset_extension`]; [`SolidError::Unported`] for
+    /// an override of an unported unit.
+    fn setup_offset_extension(
+        &self,
+        k: &Kernel,
+        surface: &Surface,
+        domain: &mut Extent2d,
+    ) -> Result<()> {
+        self.solver().setup_offset_extension(k, surface, domain)
+    }
+
     /// `CanMakeAnalytic`: `!OffsetRadiiCanChange()` for the base.
     ///
     /// # Errors
@@ -2165,6 +2187,13 @@ pub struct FindClippedRadiusEfo<'a> {
     pub approx_tol_3d: f64,
     /// `m_dGuessT`.
     pub guess_t: f64,
+    /// `rdFOfT` as the last [`Self::evaluate`] left it, also on its failure paths
+    /// (`0` before the first call).
+    pub last_f_of_t: f64,
+    /// `rdFPrimeOfT` as the last [`Self::evaluate`] left it (`0` on its failure paths).
+    pub last_f_prime: f64,
+    /// `rbFoundAnswer` as the last [`Self::evaluate`] left it, also on its failure paths.
+    pub last_found: bool,
 }
 
 impl<'a> FindClippedRadiusEfo<'a> {
@@ -2212,6 +2241,9 @@ impl<'a> FindClippedRadiusEfo<'a> {
             target_distance,
             approx_tol_3d,
             guess_t: this_uv.x,
+            last_f_of_t: 0.0,
+            last_f_prime: 0.0,
+            last_found: false,
         })
     }
 
@@ -2291,7 +2323,9 @@ impl<'a> FindClippedRadiusEfo<'a> {
 
     /// `Evaluate(dRadius, rdFOfT, rdFPrimeOfT, rbFoundAnswer)`: `F` is the rail point
     /// distance minus the target distance at the boundary crossing for `radius`, `F'`
-    /// its forward difference over `SM_ZONE_TOL_3D`. Returns `(F, F', found)`.
+    /// its forward difference over `SM_ZONE_TOL_3D`. Returns `(F, F', found)`; the
+    /// out-parameters upstream leaves on a failure path are in
+    /// [`Self::last_f_of_t`], [`Self::last_f_prime`] and [`Self::last_found`].
     ///
     /// # Errors
     ///
@@ -2300,6 +2334,10 @@ impl<'a> FindClippedRadiusEfo<'a> {
     pub fn evaluate(&mut self, radius: f64) -> Result<(f64, f64, bool)> {
         const OP_E: &str = "blend::fillet_solver::p1::FindClippedRadiusEfo::evaluate";
         let mut radius = radius;
+        // init output
+        self.last_f_of_t = 0.0;
+        self.last_f_prime = 0.0;
+        self.last_found = false;
         let mut found = false;
         self.set_offsets(radius)?;
         let Some((other_uv_found, t_found)) = self.intersect_iso()? else {
@@ -2316,8 +2354,10 @@ impl<'a> FindClippedRadiusEfo<'a> {
         }
         let distance = self.base_points(self.uv, self.other_uv)?;
         let f_of_t = distance - self.target_distance;
+        self.last_f_of_t = f_of_t;
         if f_of_t.abs() < EFF_ZERO {
             found = true;
+            self.last_found = true;
         }
 
         let step_size = ZONE_TOL_3D;
@@ -2333,6 +2373,7 @@ impl<'a> FindClippedRadiusEfo<'a> {
         };
         let distance1 = self.base_points(uv_found, other_uv_found)?;
         let f_prime = (distance1 - self.target_distance - f_of_t) / step_size;
+        self.last_f_prime = f_prime;
         Ok((f_of_t, f_prime, found))
     }
 }
@@ -2636,22 +2677,37 @@ pub fn test_manifold_tangent_rollover(
 }
 
 /// `sm_TestSideEdgeConvexity(pSideEdge, bIsTangentialSideEdge)`: whether a radial
-/// sector of the side edge is convex.
+/// sector of the side edge is convex: for each edge use (the mate of one whose shell
+/// lies in the B-rep's infinite region), `IsConvexRadialSector(10, step_off)`, stepping
+/// off for a tangential side edge; true at the first convex one.
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] for any edge use (`SmBrep::GetInfiniteRegion`).
-pub fn test_side_edge_convexity(b: &Brep, side_edge: EdgeId, is_tangential: bool) -> Result<bool> {
+/// [`SolidError::InvalidInput`] for an edge use without shell or mate (upstream
+/// dereferences `NULL`); those of `IsConvexRadialSector`.
+pub fn test_side_edge_convexity(
+    k: &Kernel,
+    b: &mut Brep,
+    side_edge: EdgeId,
+    is_tangential: bool,
+) -> Result<bool> {
     let eus = edge::edgeuses(b, side_edge, None, None)?;
-    let _ = is_tangential;
-    if eus.is_empty() {
-        return Ok(false);
-    }
-    // UNPORTED(topology.brep_p1): SmBrep::GetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::GetInfiniteRegion",
-        "topology.brep_p1",
-    ))
+    for eu0 in eus {
+        let mut eu_id = eu0;
+        let shell = eu::shell(b, eu_id)?.ok_or_else(|| invalid("edge use without shell"))?;
+        // pShell->GetBrep()->GetInfiniteRegion(): the shell's B-rep is `b`
+        let infinite_reg = b.infinite_region();
+        if b.shell(shell)?.region == infinite_reg {
+            eu_id = eu::mate(b, eu_id)?.ok_or_else(|| invalid("edge use without mate"))?;
+        }
+
+        let step_off = is_tangential;
+        if crate::topology::edgeuse::p2::is_convex_radial_sector(k, b, eu_id, 10, step_off, 0.0)? {
+            return Ok(true);
+        }
+    } // end for each Edgeuse
+
+    Ok(false)
 }
 
 /// `sm_FindNextGoodInterval(pCC, lStartSearch, rbFound, rlFoundIndex)`: the first
@@ -2700,21 +2756,33 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
         .ok_or(SolidError::null_pointer(OP_T))?;
     let mut trim = *trim_interval;
     let missing = || SolidError::null_pointer(OP_T);
+    // `SmBSplineCurve::Trim` reads `SmTol::GetZoneTol3d(this)`: for a curve owned by an
+    // edge, or by an edge use of an edge (the UV trim curves), that is the edge's
+    // tolerance (`SM_USE_OLDTOL`), not the system zone tolerance the owner-less
+    // `Curve::trim` reads from its kernel. All three curves belong to the rail, so
+    // they trim with a kernel whose zone tolerance is the rail's tolerance.
+    let tk = Kernel::new(&crate::kernel::KernelOptions {
+        tolerances: crate::kernel::Tolerances {
+            zone_tol_3d: edge::tolerance(b, rail)?,
+            ..k.tolerances
+        },
+        ..crate::kernel::KernelOptions::default()
+    });
     b.edge_mut(rail)?
         .curve
         .as_mut()
         .ok_or_else(missing)?
-        .trim(k, &mut trim, TrimMode::Notify)?;
+        .trim(&tk, &mut trim, TrimMode::Notify)?;
     b.edgeuse_mut(uv_owner)?
         .uv_trim_curve
         .as_mut()
         .ok_or_else(missing)?
-        .trim(k, &mut trim, TrimMode::Notify)?;
+        .trim(&tk, &mut trim, TrimMode::Notify)?;
     b.edgeuse_mut(orig_owner)?
         .uv_trim_curve
         .as_mut()
         .ok_or_else(missing)?
-        .trim(k, &mut trim, TrimMode::Notify)?;
+        .trim(&tk, &mut trim, TrimMode::Notify)?;
     Ok(())
 }
 
@@ -3035,4 +3103,106 @@ pub fn compute_support_edge(
         "topology.edge",
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::surface::plane::Plane;
+
+    /// `Evaluate`'s result and the EFO's `(F, F', found, guess_t)` after it.
+    type Evaluated = (Result<(f64, f64, bool)>, (f64, f64, bool, f64));
+
+    /// A solver with offsets of `bases` (orientations `orient`) and an EFO on surface 0,
+    /// `SM_SP_U`, `iso = 0`, evaluated at `radius`; returns the result and the EFO's
+    /// `(F, F', found, guess_t)` after the call.
+    fn clipped(
+        bases: [Surface; 2],
+        orient: [f64; 2],
+        other_dom: Extent2d,
+        radius: f64,
+    ) -> Evaluated {
+        let kern = Kernel::default();
+        let mut fs = FilletSolver::new(1e-6, 0.1, 0.01);
+        for (k, base) in bases.into_iter().enumerate() {
+            let surface =
+                OffsetSurface::new(&kern, 0.0, base, SurfaceId::Free(k as u32), SS_UNKNOWN)
+                    .unwrap();
+            fs.set_surface(
+                k,
+                Some(OffsetSurfaceSlot {
+                    key: k as u64,
+                    surface,
+                }),
+            )
+            .unwrap();
+        }
+        fs.orientations = orient;
+        let wide = Extent2d::from_points(Point2::new(-10.0, -10.0), Point2::new(10.0, 10.0));
+        let uv = [Vec2::new(0.1, 0.2), Vec2::new(0.3, -0.2)];
+        let mut e = FindClippedRadiusEfo::new(
+            &mut fs,
+            0,
+            &[wide, other_dom],
+            SurfParamType::U,
+            0.0,
+            uv,
+            0.5,
+        )
+        .unwrap();
+        let r = e.evaluate(radius);
+        let after = (e.last_f_of_t, e.last_f_prime, e.last_found, e.guess_t);
+        (r, after)
+    }
+
+    fn z_plane() -> Surface {
+        Surface::from(Plane::from_normal(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ))
+    }
+
+    /// The plane of normal `(1, 2, 3)` whose unit offset passes through `(0, 0, 1)`.
+    fn tilted() -> Surface {
+        let n = Vec3::new(1.0, 2.0, 3.0);
+        let u = n.unitize().unwrap();
+        Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 1.0) - u, n))
+    }
+
+    fn is_sm_err(r: &Result<(f64, f64, bool)>) -> bool {
+        matches!(r, Err(SolidError::Upstream { code, .. }) if *code == crate::error::SM_ERR)
+    }
+
+    #[test]
+    fn clipped_parallel_offsets_fail_at_the_first_intersection() {
+        let wide = Extent2d::from_points(Point2::new(-10.0, -10.0), Point2::new(10.0, 10.0));
+        let (r, (f, fp, found, guess)) = clipped([z_plane(), z_plane()], [1.0, -1.0], wide, 1.0);
+        assert!(is_sm_err(&r), "{r:?}");
+        assert_eq!((f, fp, found, guess), (0.0, 0.0, false, 0.1));
+    }
+
+    #[test]
+    fn clipped_tilted_plane_evaluates() {
+        let wide = Extent2d::from_points(Point2::new(-10.0, -10.0), Point2::new(10.0, 10.0));
+        let (r, _) = clipped([z_plane(), tilted()], [1.0, 1.0], wide, 1.0);
+        let (f, fp, found) = r.unwrap();
+        assert!(f.is_finite() && fp.is_finite() && fp != 0.0 && !found);
+    }
+
+    #[test]
+    fn clipped_point_domain_fails_after_the_radius_step() {
+        let point = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(0.0, 0.0));
+        let (r, (f, fp, _, guess)) = clipped([z_plane(), tilted()], [1.0, 1.0], point, 1.0);
+        assert!(is_sm_err(&r), "{r:?}");
+        // the first intersection set F and the guess, the second failed
+        assert!(f != 0.0 && fp == 0.0 && guess != 0.1, "{f} {fp} {guess}");
+    }
+
+    #[test]
+    fn clipped_far_domain_fails_at_the_first_intersection() {
+        let far = Extent2d::from_points(Point2::new(50.0, 50.0), Point2::new(60.0, 60.0));
+        let (r, (f, _, _, guess)) = clipped([z_plane(), tilted()], [1.0, 1.0], far, 1.0);
+        assert!(is_sm_err(&r), "{r:?}");
+        assert_eq!((f, guess), (0.0, 0.1));
+    }
 }

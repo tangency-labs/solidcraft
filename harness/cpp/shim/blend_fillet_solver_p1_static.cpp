@@ -3,7 +3,7 @@
 // .cpp-local classes of upstream source/SMLib/src/SmFilletSolver.cpp (sm_FindNextGoodInterval,
 // sm_CheckEdgeCurveDomains, sm_TestAnalyticSurface, sm_TrimRail, sm_TestManifoldTangentRollover,
 // SmRailRailIntersectENFO,
-// the SmFindClippedRadiusEFO constructor), plus the external sm_TestSideEdgeConvexity and the
+// the SmFindClippedRadiusEFO constructor and Evaluate), plus the external sm_TestSideEdgeConvexity and the
 // solver's B-rep queries (GetVertex, FindIndexOfRailOnFace, FindIndexOfRailXSideEdgeuse).
 //
 // Static functions and .cpp-local classes cannot be linked against, so this translation unit
@@ -326,17 +326,23 @@ void run_rail_rail(Rd& rd, std::vector<double>& o)
     sc_fsp1_solver_delete(fs2);
 }
 
-// `idx dist tol has0 off0 has1 off1 o0 o1 dom0[4] dom1[4] param iso uv0[2] uv1[2]` ->
-// `surf other param iso orient other_orient other_dom[4] target tol guess uv[2] other_uv[2]`
-// (surfaces as 0/1 for the solver's first/second offset surface, -1 for none).
+// `idx dist tol base0 base1 has0 off0 has1 off1 o0 o1 dom0[4] dom1[4] param iso uv0[2]
+// uv1[2] eval radius` -> `surf other param iso orient other_orient other_dom[4] target tol
+// guess uv[2] other_uv[2]` (surfaces as 0/1 for the solver's first/second offset surface,
+// -1 for none; base i is the base of offset surface i), then with `eval`
+// `Evaluate(radius, F, F', found)`: `status F F' found sUV[idx][2] sUV[1-idx][2] guess
+// off0 off1` (sUV is the caller's array m_rUV / m_rOtherUV refer to; the offset distances
+// Evaluate leaves), or `-2` without both offset surfaces (upstream dereferences NULL).
 void run_clipped(Rd& rd, std::vector<double>& o)
 {
     const SmContext& ctx = the_context();
     ULONG idx = (ULONG)rd.idx();
     double dist = rd.num();
     double tol = rd.num();
+    SmSurface* base[2] = {NULL, NULL};
+    base[0] = read_surface(rd, ctx);
+    base[1] = read_surface(rd, ctx);
     void* fs = sc_fsp1_dist_solver_new(dist, tol);
-    SmPlane base(SmPoint3d(0.0, 0.0, 0.0), SmVector3d(0.0, 0.0, 1.0), &ctx);
     SmOffsetSurface* made[2] = {NULL, NULL};
     for (uint32_t i = 0; i < 2; i++)
     {
@@ -344,7 +350,7 @@ void run_clipped(Rd& rd, std::vector<double>& o)
         double off = rd.num();
         if (has)
         {
-            made[i] = new (ctx) SmOffsetSurface(off, base);
+            made[i] = new (ctx) SmOffsetSurface(off, *base[i]);
             sc_fsp1_solver_set_surface(fs, i, made[i]);
         }
     }
@@ -362,6 +368,8 @@ void run_clipped(Rd& rd, std::vector<double>& o)
     SmVector2d uv[2];
     uv[0] = rd.uv();
     uv[1] = rd.uv();
+    bool eval = rd.flag();
+    double radius = rd.num();
     {
         SmFindClippedRadiusEFO e(&copy_view(fs), idx, doms, param, iso, uv);
         auto key = [&](SmOffsetSurface* s) { return s == NULL ? -1.0 : (s == made[0] ? 0.0 : (s == made[1] ? 1.0 : -3.0)); };
@@ -382,8 +390,32 @@ void run_clipped(Rd& rd, std::vector<double>& o)
         o.push_back(e.m_rUV.y);
         o.push_back(e.m_rOtherUV.x);
         o.push_back(e.m_rOtherUV.y);
+        if (eval)
+        {
+            if (made[0] == NULL || made[1] == NULL)
+                o.push_back(-2.0);
+            else
+            {
+                double f = -7.0, fp = -7.0;
+                SmBoolean found = UNSURE;
+                SmStatus s = e.Evaluate(radius, f, fp, found);
+                o.push_back(st(s));
+                o.push_back(f);
+                o.push_back(fp);
+                o.push_back(flg(found));
+                o.push_back(uv[idx].x);
+                o.push_back(uv[idx].y);
+                o.push_back(uv[1 - idx].x);
+                o.push_back(uv[1 - idx].y);
+                o.push_back(e.m_dGuessT);
+                o.push_back(made[0]->GetOffsetDistance());
+                o.push_back(made[1]->GetOffsetDistance());
+            }
+        }
     }
     sc_fsp1_solver_delete(fs); // deletes its offset surfaces
+    delete base[0];
+    delete base[1];
 }
 
 // `block edge tangential` -> `0 ret`; edge -1 is a fresh SmEdge without edge uses.
@@ -406,9 +438,30 @@ void run_convexity(Rd& rd, const char* path, std::vector<double>& o)
     delete b;
 }
 
-// `block edge t0 t1` -> `0 status curve uv uv_mate` (`-2` without primary edge use or mate).
-// The rail is a plain SmEdge viewed as the SmFilletEdge sm_TrimRail takes: it calls only
-// SmEdge/SmEdgeuse methods neither fillet class overrides.
+// `zt(curve) zt(uv) zt(uv_mate) n knots[n] mults[n]` (`-1` for the knots without curve or
+// when GetKnots fails).
+void put_zone_tol_and_knots(std::vector<double>& o, const SmCurve* c, const SmCurve* uv, const SmCurve* uv_mate)
+{
+    o.push_back(SmTol::GetZoneTol3d((const SmObject*)c));
+    o.push_back(SmTol::GetZoneTol3d((const SmObject*)uv));
+    o.push_back(SmTol::GetZoneTol3d((const SmObject*)uv_mate));
+    SmTArray<double> knots;
+    SmTArray<ULONG> mults;
+    if (c == NULL || c->GetKnots(knots, &mults) != SM_SUCCESS)
+    {
+        o.push_back(-1.0);
+        return;
+    }
+    o.push_back((double)knots.GetSize());
+    for (ULONG i = 0; i < knots.GetSize(); i++)
+        o.push_back(knots[i]);
+    for (ULONG i = 0; i < mults.GetSize(); i++)
+        o.push_back((double)mults[i]);
+}
+
+// `block edge t0 t1` -> `0 zt[3] knots status curve uv uv_mate` (`-2` without primary edge
+// use or mate). The rail is a plain SmEdge viewed as the SmFilletEdge sm_TrimRail takes: it
+// calls only SmEdge/SmEdgeuse methods neither fillet class overrides.
 void run_trim_rail(Rd& rd, const char* path, std::vector<double>& o)
 {
     Graph g;
@@ -424,6 +477,11 @@ void run_trim_rail(Rd& rd, const char* path, std::vector<double>& o)
         o.push_back(-2.0);
     else
     {
+        // before the trim: the zone tolerance SmBSplineCurve::Trim reads for each curve
+        // (SmTol::GetZoneTol3d(this): the owning edge's tolerance) and the 3D curve's
+        // unique knots and multiplicities (`n knots[n] mults[n]`, `-1` without curve or
+        // when GetKnots fails)
+        put_zone_tol_and_knots(o, e->GetCurve(), prim->GetUVTrimCurve(), mate->GetUVTrimCurve());
         SmStatus s = sm_TrimRail((SmFilletEdge*)e, SmExtent1d(t0, t1));
         o.push_back(st(s));
         put_crv(o, e->GetCurve());
