@@ -18,6 +18,14 @@
 // (two B-rep blocks; `path` holds the two file paths separated by a newline). The private
 // m_pProtoTopoMgr of the intersector is reached through a pointer-to-member (the manager is
 // made by IntersectInsertRelate, unit boolean.topology_intersector_p2, not ported yet).
+//
+// harness/cpp/shim/boolean_topology_intersector_p2.cpp includes this file with
+// SC_TI_EXTRA_OPS defined: unknown script ops then go to its run_extra_op, and the entry
+// point is renamed SC_TI_EVAL_NAME (sc_boolean_topology_intersector_p2_eval). Without the
+// macros this file builds exactly as before.
+#ifndef SC_TI_EVAL_NAME
+#define SC_TI_EVAL_NAME sc_boolean_topology_intersector_p1_eval
+#endif
 #include "sc_topology_fixture.h"
 
 #include <SmBrepCache.h>
@@ -812,6 +820,62 @@ struct TiMgr
 };
 template struct TiRob<TiMgr, &SmTopologyIntersector::m_pProtoTopoMgr>;
 
+// UB-175: ~SmProtoTopologyManager deletes the listed proto edges before the listed proto
+// vertices; each ~SmProtoEdge unlists itself once from its start vertex and once from a
+// different end vertex, then each ~SmProtoVertex calls RemoveProtoVertex on every edge it
+// still lists. An edge whose ends coincide is listed twice there (AddProtoEdge, DD1) and a
+// combined vertex keeps entries of edges that no longer end at it: those entries are freed
+// edges. Replays the unlisting on copies and returns whether any listed vertex keeps a
+// listed edge; with `unlink`, removes those entries first so the destructor stays defined
+// (the script's own manager: its teardown is ours, lesson 23). Scope: only the edge-phase
+// unlisting is modelled; a proto vertex freed before the manager's destructor would be a
+// different use-after-free and is not flagged (no such path in source for these ops; the
+// pre-ready valgrind sample of the op-47 family covers it).
+static bool mgr_teardown_stale(SmProtoTopologyManager* mgr, bool unlink)
+{
+    SmTArray<SmProtoVertex*>& pvs = mgr->GetProtoVertices();
+    SmTArray<SmProtoEdge*>& pes = mgr->GetProtoEdges();
+    std::map<SmProtoVertex*, std::vector<SmProtoEdge*>> lists;
+    for (ULONG i = 0; i < pvs.GetSize(); i++)
+    {
+        if (pvs[i] == nullptr || lists.count(pvs[i]))
+            continue;
+        std::vector<SmProtoEdge*>& l = lists[pvs[i]];
+        SmTArray<SmProtoEdge*>& src = pvs[i]->GetProtoEdges();
+        for (ULONG j = 0; j < src.GetSize(); j++)
+            l.push_back(src[j]);
+    }
+    auto unlist = [&](SmProtoVertex* v, SmProtoEdge* e) {
+        auto it = lists.find(v);
+        if (it == lists.end())
+            return;
+        auto f = std::find(it->second.begin(), it->second.end(), e);
+        if (f != it->second.end())
+            it->second.erase(f);
+    };
+    std::vector<SmProtoEdge*> freed;
+    for (ULONG i = 0; i < pes.GetSize(); i++)
+    {
+        SmProtoEdge* e = pes[i];
+        if (e == nullptr || std::find(freed.begin(), freed.end(), e) != freed.end())
+            continue;
+        freed.push_back(e);
+        unlist(e->GetStartProtoVertex(), e);
+        if (e->GetEndProtoVertex() != e->GetStartProtoVertex())
+            unlist(e->GetEndProtoVertex(), e);
+    }
+    bool stale = false;
+    for (auto& kv : lists)
+        for (SmProtoEdge* e : kv.second)
+            if (std::find(freed.begin(), freed.end(), e) != freed.end())
+            {
+                stale = true;
+                if (unlink)
+                    kv.first->RemoveProtoEdge(e);
+            }
+    return stale;
+}
+
 enum TiOp : int32_t
 {
     TI_EXPORT = 0,
@@ -1113,6 +1177,12 @@ bool build_two(Rd& rd, const char* path, Two& t, std::vector<double>& o)
     t.index_geometry();
     return true;
 }
+
+#ifdef SC_TI_EXTRA_OPS
+// The script ops of the including shim; false for an op it does not know.
+bool run_extra_op(int64_t op, Rd& rd, Two& t, SmTopologyIntersector* ti, SmProtoTopologyManager*& mgr,
+                  int64_t ctor_kind, std::vector<double>& o);
+#endif
 
 void run_script(Rd& rd, Two& t, std::vector<double>& o)
 {
@@ -1639,12 +1709,21 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
             o.push_back((double)mgr->GetProtoEdges().GetSize());
             break;
         }
-        default: o.push_back(-9.0); break;
+        default:
+#ifdef SC_TI_EXTRA_OPS
+            if (run_extra_op(op, rd, t, ti, mgr, ctor_kind, o))
+                break;
+#endif
+            o.push_back(-9.0);
+            break;
         }
     }
     delete ti; // the destructor frees the table (and its curves), maps and subset
     if (mgr)
+    {
+        mgr_teardown_stale(mgr, true);
         delete mgr;
+    }
 }
 
 void run_ti(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
@@ -1685,8 +1764,8 @@ void run_ti(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 }
 } // namespace
 
-SC_EXPORT int32_t sc_boolean_topology_intersector_p1_eval(int32_t op, const char* path, const double* in, int64_t n_in,
-                                                          double* out, int64_t cap, int64_t* out_len)
+SC_EXPORT int32_t SC_TI_EVAL_NAME(int32_t op, const char* path, const double* in, int64_t n_in, double* out,
+                                 int64_t cap, int64_t* out_len)
 {
     if (in == NULL || n_in < 1 || out_len == NULL || path == NULL)
         return SC_ERR_ARG;

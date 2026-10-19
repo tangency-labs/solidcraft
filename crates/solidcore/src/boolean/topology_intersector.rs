@@ -10,6 +10,7 @@
 //! ([`p1::Relations`], co-ported by `boolean.merge_p1`).
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{
     EdgeFaceIntersect, ExistingSsi, FaceFaceCoincidence, FaceFaceIntersect, ImprintFace,

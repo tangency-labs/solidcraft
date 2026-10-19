@@ -6910,6 +6910,84 @@ Changes made for bherbruck's review (all re-verified; numbers below are the new 
   is exercised by the difftest. Final numbers: `PARTIAL boolean.topology_intersector_p1 cases=827 passed=653 failed=0 deferred=174 max_rel_err=0e0 blocked_by=query.face_p1(7),topology.brep_p1(74),topology.face_p2(82),topology.face_p4(11)`, `SENSITIVE boolean.topology_intersector_p1 perturbed=653 detected=653 unperturbed=0 deferred=174`, `cases_both_errored` 3 (scripts cut at op 0), 32 of the 653 passes compare one refused op's status only; real-value comparisons 618.
 
 
+## boolean.topology_intersector_p2
+
+PR #203 (on main's #146). Part 2 of `SmTopologyIntersector.cpp`: `RegisterExistingSSI`,
+`CheckForSqueezeVertices`, `DeleteFaces`, `FixGaps`, `RemoveRelationship`,
+`IntersectInsertRelate`, `IntersectTopology`, `SetRelationships`, `FixupClassMates`,
+`FixupSplitVertexPair`, `EdgeEdgeIntersect`, `EdgeFaceCoincidence` in
+`boolean::topology_intersector::p2`.
+
+- **Harness.** Part 2 runs on part 1's intersector and two-B-rep script: the p2 shim
+  includes p1's (`SC_TI_EXTRA_OPS` hook, ops 41-51), the p2 FFI binding extends p1's
+  validation (`ExtraOps`), and part 1's runner interprets part 2's ops (dispatch to
+  `run_part2_op`). Part 1's `RegisterExistingSSI` op (16) now runs the port on the Rust
+  side instead of filling the table directly; part 1's difftest is unchanged (827 cases,
+  653 pass, 0 fail, 174 deferred). `SmTsectCurveType` inputs are bounded to the enum
+  (0-6) in the FFI and an unknown code is a harness error (it mapped to `Unknown` before).
+- **Coverage (what the passes complete).** Per op occurrence in non-deferred cases:
+  `RemoveRelationship` 29 success / 35 `SM_ERR`; `CheckForSqueezeVertices` 75 success
+  without a conflicting mate (empty lists) / 26 `SM_ERR` (existing relationship better),
+  every conflict that combines defers (`CombineCoincidentVertices`, `topology.brep_p5`);
+  `DeleteFaces` 68 success, all with an empty face list (a face reaches `SmFace::GetEdges`,
+  `topology.face_p4`); `FixGaps` 119 success without a gap pair / 14
+  `SM_ERR_NULL_POINTER` (gap pair with an unmated vertex); `SetRelationships` 39 success on
+  managers without definitions; `FixupClassMates` 56 success / 17 `SM_ERR` (sizes differ);
+  `FixupSplitVertexPair` 57 success, 6 removing the interval; `EdgeEdgeIntersect` 127
+  success without a split (a split defers on `MakeVertexSplitEdge`, `topology.brep_p9`);
+  `EdgeFaceCoincidence` 128 success without an imprint (`Point3DClassify`,
+  `query.face_p1`); `IntersectTopology` and `IntersectInsertRelate`: no passing case (both
+  start with `SmBrep::GetFaces`, `topology.brep_p1`). The census is the ignored test
+  `units::boolean_topology_intersector_p2::tests::census`. Main's topology.shell fixture changes
+  (the shell-state export and import, `sc_topology_fixture::append_shell_state` /
+  `topology_vertexuse::read_shell_state`, and the GetEdges-first walk) changed 10 generated
+  cases at the merge of main@86f2d3bd: the walk renumbers the handles, so the same seeds
+  select other entities and the C++ reference output itself changes, not only the Rust
+  side. Net -2 passes: 4 pass -> defer (2 at `MakeVertexSplitEdge`, 2 at
+  `CombineCoincidentVertices`) and 2 defer -> pass; the other 4 still pass with a different
+  value count (more in most, gen0767 172 -> 169). 0 fail before and after.
+- **Guards.** The shim refuses (`-2`) what upstream dereferences: vertex members of a mate
+  that is not a vertex, edges of a vertex without curve (`FixGaps`,
+  `EdgeFaceCoincidence`), faces without surface, an interval index past a
+  classification, a vertex classification without a vertex; a null B-rep only where a
+  combination would run (the shim replays the scan up to the first candidate). The
+  `FixGaps` / `EdgeFaceCoincidence` edge-curve checks are per vertex, slightly stricter
+  than upstream (only common edges are measured); no fixture B-rep has such edges.
+  `CheckForSqueezeVertices` checks the other vertex's B-rep mate only where the second
+  block dereferences it (the first block's `SM_ERR` returns before). `SetRelationships`
+  without the maps (constructor 1) is refused only for a manager with a definition whose
+  two final topologies are set, the only ones that reach `Relate`'s map insert.
+  `FixupSplitVertexPair` checks the index against both classifications only: upstream
+  bounds its `index + 1` writes by the B-rep classification's size, so with a shorter
+  other one the write lands in `SmTArray`'s spare slots (at least 16; `MAX_INTERVALS` is
+  16) and the `RemoveAt` hides it. The port skips that write (case `split_oob`).
+  `IntersectInsertRelate` (op 47) needs a nonzero approximation tolerance (HANG-25: `0`
+  and `-0` gave no C++ result within 180 s; negative and tiny positive ones return) and
+  B-rep blocks below 1e154 (a control point at 1e300 gave no result within 20 s, HANG-16's
+  class). The port defers op 47 at `GetFaces` in every case, so the guard removes no
+  compared case.
+- **Memory (valgrind).** The 4a6bcc86 claim "valgrind 75 cases clean" was wrong: that
+  sample had no op-47 program that builds proto edges. The pre-review ran 10 programs
+  per op family, C++ and Rust. Three C++ op-47 runs (one a lone `IntersectInsertRelate`)
+  read freed memory in `~SmProtoTopologyManager`. The cause is upstream's own teardown
+  order (UB-175 [PSIRT]), not the shim's. The shim now runs a verbatim copy of
+  `IntersectInsertRelate` that unlinks the stale proto-edge entries before the delete
+  and answers `-2`. The port mirrors that: `intersect_insert_relate` returns
+  `InvalidInput` after the teardown. The shim's own manager teardown at the end of a
+  script unlinks them too (that `delete` is ours, lesson 23), so the manager ops of both
+  parts stay defined. Re-run after the fix: see the PR body.
+- **`CheckForSqueezeVertices`** appends to the caller's lists
+  (`check_for_squeeze_vertices_into`, from oursland's #211): the first conflict block
+  appends, the second can still return `SM_ERR`, and part 3's `MergeCurveClasses` keeps
+  going after a failure.
+- **Part 1 fuzz note (not changed here).** `difftest --unit boolean.topology_intersector_p1
+  --fuzz 2000` reports FUZZ-PASS with 3 `differs` notes, all `sm_SetEdgeClass` with a
+  mutated tolerance of -1e300 (C++ classifies an end to `SM_PC_VERTEX`, the port to
+  `SM_PC_EDGE`): part 1's code, untouched by this PR.
+- Upstream issues: UB-169 (`RegisterExistingSSI` failure leaves the table's lists out of
+  step), UB-175 [PSIRT] (`~SmProtoTopologyManager` use-after-free), HANG-25 (zero
+  tolerance), WR-170 (copies of registered curves and a failed manager leak).
+
 ## intersect.curve_class_p5: independent port
 
 Part 5 remains independent of the open p2/p7 PRs. Part 6 landed independently

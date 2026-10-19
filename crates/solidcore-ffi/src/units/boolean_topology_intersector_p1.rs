@@ -250,18 +250,18 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
+pub(crate) fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
 /// Sequential reader over the input.
-struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     input: &'a [f64],
     at: usize,
 }
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
             .get(self.at)
@@ -271,7 +271,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finite(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > MAX_COORD {
             return Err(bad("non-finite or huge value"));
@@ -295,7 +295,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
+    pub(crate) fn index(&mut self, max: usize) -> Result<usize, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
             return Err(bad(format!("bad index/count {v} (max {max})")));
@@ -304,7 +304,7 @@ impl Reader<'_> {
     }
 
     /// A signed integer in `lo..=hi`.
-    fn int(&mut self, lo: i64, hi: i64) -> Result<i64, FfiError> {
+    pub(crate) fn int(&mut self, lo: i64, hi: i64) -> Result<i64, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < lo as f64 || v > hi as f64 {
             return Err(bad(format!("bad integer {v} (expected {lo}..={hi})")));
@@ -312,7 +312,7 @@ impl Reader<'_> {
         Ok(v as i64)
     }
 
-    fn flag(&mut self) -> Result<bool, FfiError> {
+    pub(crate) fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
     }
 
@@ -535,7 +535,7 @@ pub fn split_exports(out: &[f64]) -> Option<(Vec<f64>, Option<Vec<f64>>)> {
 }
 
 /// The counts the script validation checks handles against.
-struct Counts {
+pub(crate) struct Counts {
     /// Per B-rep: `[vertices, edges, faces]`; `None` for an absent B-rep.
     breps: [Option<[usize; 3]>; 2],
     /// Curves registered so far.
@@ -544,7 +544,11 @@ struct Counts {
 
 impl Counts {
     /// A handle triple; returns its kind.
-    fn handle(&self, rd: &mut Reader<'_>, allow_null: bool) -> Result<HandleKind, FfiError> {
+    pub(crate) fn handle(
+        &self,
+        rd: &mut Reader<'_>,
+        allow_null: bool,
+    ) -> Result<HandleKind, FfiError> {
         let b = rd.int(-1, 2)?;
         let kind = rd.int(-1, 8)?;
         let i = rd.int(-1, i64::from(u32::MAX))?;
@@ -599,7 +603,7 @@ impl Counts {
         Ok(kind)
     }
 
-    fn handle_of(
+    pub(crate) fn handle_of(
         &self,
         rd: &mut Reader<'_>,
         allowed: &[HandleKind],
@@ -612,7 +616,7 @@ impl Counts {
         Ok(k)
     }
 
-    fn list(
+    pub(crate) fn list(
         &self,
         rd: &mut Reader<'_>,
         allowed: &[HandleKind],
@@ -633,12 +637,56 @@ fn point_class(rd: &mut Reader<'_>, c: &Counts) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// The script state a later op's validation depends on.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScriptState {
+    /// The constructor (0: with B-reps and maps, 1: context only, no maps).
+    pub ctor: usize,
+    /// An op that may delete or split topology ran (no handle-taking op may follow).
+    pub mutated: bool,
+    /// A proto topology manager is installed.
+    pub has_mgr: bool,
+    /// The intersector's B-reps are set.
+    pub have_breps: [bool; 2],
+    /// No op may follow (the last op ran).
+    pub closed: bool,
+    /// The intersector's current approximation tolerance.
+    pub approx: f64,
+    /// The largest magnitude of the B-rep blocks' numbers (markers excluded).
+    pub block_max_abs: f64,
+}
+
+/// The script ops of a later part of the unit (`boolean.topology_intersector_p2`),
+/// validated by that part's binding on top of this one's.
+pub(crate) trait ExtraOps {
+    /// The largest op code.
+    fn max_code(&self) -> i64;
+    /// Validates the arguments of op `code`; `Ok(false)` for an unknown code.
+    ///
+    /// # Errors
+    ///
+    /// [`FfiError::InvalidArgument`] for an invalid op.
+    fn op(
+        &self,
+        code: i64,
+        rd: &mut Reader<'_>,
+        c: &mut Counts,
+        st: &mut ScriptState,
+    ) -> Result<bool, FfiError>;
+}
+
 /// Checks the script after the B-rep blocks.
 #[allow(clippy::too_many_lines)]
-fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
+fn script(
+    rd: &mut Reader<'_>,
+    mut c: Counts,
+    extra: Option<&dyn ExtraOps>,
+    block_max_abs: f64,
+) -> Result<(), FfiError> {
     use HandleKind::{Brep, Edge, Face, FaceSurface, Vertex};
-    rd.index(1)?; // ctor: both constructors set both B-reps (1 through SetPrimaryBrep / SetOtherBrep)
-    rd.finite()?; // approx (a negative value is accepted, as upstream)
+    // ctor: both constructors set both B-reps (1 through SetPrimaryBrep / SetOtherBrep)
+    let ctor = rd.index(1)?;
+    let mut approx = rd.finite()?; // approx (a negative value is accepted, as upstream)
     rd.finite()?; // ang
     let n_ops = rd.index(MAX_OPS)?;
     let mut mutated = false;
@@ -656,8 +704,30 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
         Brep,
     ];
     for _ in 0..n_ops {
-        let code = rd.int(1, 33)?;
-        let op = ScriptOp::from_code(code).ok_or_else(|| bad("bad script op"))?;
+        let code = rd.int(1, extra.map_or(33, |x| x.max_code().max(33)))?;
+        let Some(op) = ScriptOp::from_code(code) else {
+            let extra = extra.ok_or_else(|| bad("bad script op"))?;
+            let mut st = ScriptState {
+                ctor,
+                mutated,
+                has_mgr,
+                have_breps,
+                closed: false,
+                approx,
+                block_max_abs,
+            };
+            if !extra.op(code, rd, &mut c, &mut st)? {
+                return Err(bad("bad script op"));
+            }
+            mutated = st.mutated;
+            has_mgr = st.has_mgr;
+            have_breps = st.have_breps;
+            if st.closed {
+                rd.done()?;
+                return Ok(());
+            }
+            continue;
+        };
         let takes_handles = !matches!(
             op,
             ScriptOp::Getters
@@ -713,7 +783,7 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
                 point_class(rd, &c)?;
             }
             ScriptOp::SetTols => {
-                rd.finite()?;
+                approx = rd.finite()?;
                 rd.finite()?;
             }
             ScriptOp::SetBreps => {
@@ -733,7 +803,7 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
                             c.curves += 1;
                         }
                     }
-                    rd.index(7)?;
+                    rd.index(6)?; // SmTsectCurveType: SM_TC_UNKNOWN .. SM_TC_REGION_BOUNDARY
                     rd.finite()?;
                 }
             }
@@ -828,7 +898,18 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
     Ok(())
 }
 
-fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+/// A shim entry point (`sc_boolean_topology_intersector_p1_eval` or a later part's).
+pub(crate) type Entry = unsafe extern "C" fn(
+    i32,
+    *const std::ffi::c_char,
+    *const f64,
+    i64,
+    *mut f64,
+    i64,
+    *mut i64,
+) -> i32;
+
+fn raw(entry: Entry, op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let cpath = std::ffi::CString::new(path).map_err(|_| bad("path has a NUL byte"))?;
     call_with_buffer(8192, |buf, len| {
         // SAFETY: cpath is a valid NUL-terminated string; input is valid for
@@ -836,7 +917,7 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         // callers); buf is valid for buf.len() writes and the shim honours the
         // capacity; len is valid.
         unsafe {
-            sys::sc_boolean_topology_intersector_p1_eval(
+            entry(
                 op.code(),
                 cpath.as_ptr(),
                 input.as_ptr(),
@@ -857,6 +938,27 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
 /// failure.
 pub fn eval(op: Op, paths: [&str; 2], input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    eval_with(
+        sys::sc_boolean_topology_intersector_p1_eval,
+        None,
+        op,
+        paths,
+        input,
+    )
+}
+
+/// [`eval`] through `entry`, with the later part's ops `extra`.
+///
+/// # Errors
+///
+/// As [`eval`].
+pub(crate) fn eval_with(
+    entry: Entry,
+    extra: Option<&dyn ExtraOps>,
+    op: Op,
+    paths: [&str; 2],
+    input: &[f64],
+) -> Result<Vec<f64>, FfiError> {
     if paths.iter().any(|p| p.contains('\n')) {
         return Err(bad("path with a newline"));
     }
@@ -864,7 +966,7 @@ pub fn eval(op: Op, paths: [&str; 2], input: &[f64]) -> Result<Vec<f64>, FfiErro
     let mut rd = Reader { input, at: 0 };
     brep_blocks(&mut rd, paths)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
-    let export = raw(Op::Export, &joined, block)?;
+    let export = raw(entry, Op::Export, &joined, block)?;
     if op == Op::Export {
         rd.done()?;
         return Ok(export);
@@ -881,7 +983,13 @@ pub fn eval(op: Op, paths: [&str; 2], input: &[f64]) -> Result<Vec<f64>, FfiErro
     if c.breps[0].is_none() {
         return Err(bad("first export unreadable"));
     }
-    script(&mut rd, c)?;
+    // (NOW / NOZ markers are +-f64::MAX)
+    let block_max_abs = block
+        .iter()
+        .map(|v| v.abs())
+        .filter(|v| *v < f64::MAX)
+        .fold(0.0, f64::max);
+    script(&mut rd, c, extra, block_max_abs)?;
     rd.done()?;
-    raw(op, &joined, input)
+    raw(entry, op, &joined, input)
 }

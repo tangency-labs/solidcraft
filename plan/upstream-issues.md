@@ -1137,6 +1137,16 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB; wrong result for in-bounds unequal values.
 - **Rust port:** retains V coordinates, with checked indexing returning an error. The plane-intersection path remains dependency-deferred.
 
+#### UB-175. `~SmProtoTopologyManager` frees proto edges before the proto vertices that still list them [PSIRT]
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp`, `SmProtoTopologyManager::~SmProtoTopologyManager` (the three `SmObjsDelete` locals), `SmProtoVertex::~SmProtoVertex` (:1881-1895), `SmProtoEdge::~SmProtoEdge` (:2645-2664), `SmProtoVertex::AddProtoEdge` (`inc/SmProtoTopology.h:502`, "DD1: Even if already there"), `SmProtoVertex::CombineProtoVertex` (:2598-2603); reached from `SmTopologyIntersector::IntersectInsertRelate` (`SmTopologyIntersector.cpp:1267`), which `SmMerge` (the boolean merge) and `SmFilletExecutive` call.
+- **What happens:** The destructor declares the deleters for proto vertices, proto edges and proto faces in that order, so they run in reverse: the proto edges are freed before the proto vertices. Each `~SmProtoEdge` unlists itself once from its start vertex and, only when different, once from its end vertex. A proto edge whose two ends are the same vertex was listed there twice by `CreateProtoEdge` (`AddProtoEdge` adds duplicates), and `CombineProtoVertex` appends the merged vertex's edge entries without checking where those edges end. Either way an entry survives the edge phase, and `~SmProtoVertex` then calls `RemoveProtoVertex` on the freed edge. That is a read of freed memory, plus a write of a null pointer into it if the freed bytes happen to match the vertex address.
+- **Trigger:** any intersection whose resolved proto topology has a proto edge with coinciding end vertices, or a combined vertex still listing an edge that no longer ends at it, when the manager is deleted.
+- **How found:** pre-review of PR #203 (`boolean.topology_intersector_p2`): valgrind on generated `IntersectInsertRelate` programs (3 of 10).
+- **Confirmed:** yes (valgrind "Invalid read" in `SmProtoEdge::RemoveProtoVertex <- ~SmProtoVertex <- ~SmProtoTopologyManager <- IntersectInsertRelate`, on a block freed in the same destructor and allocated by `CreateProtoEdge`; all frames are upstream code).
+- **Security ([PSIRT]):** reachable from file data. Two B-reps read from files whose boolean (or fillet merge) produces such a proto edge reach it through the public boolean API, with no bad argument from the caller. The impact looks low: `~SmProtoEdge` nulls the fields that are read just before the block is freed, and nothing is allocated between the free and the read in single-threaded use, so the conditional write needs the block to have been reused. It is still a use-after-free on ordinary inputs, so it should be reported.
+- **Severity:** crash/UB (use-after-free), after every output is final.
+- **Rust port:** The arena teardown (`ProtoTopologyManager::destroy`) skips edges already deleted, so it is defined. `IntersectInsertRelate` detects the condition before the teardown (replaying the unlisting) and returns `SolidError::InvalidInput` after destroying the manager. The difftest shim runs a verbatim copy of `IntersectInsertRelate` that unlinks the stale entries before the delete and answers `-2` in that case; the shim's own manager teardown unlinks them too.
+
 ### Topology
 
 #### UB-105. `SmVertex::GetMaxUpDimGap3d` adds to a NULL gap array
@@ -1605,6 +1615,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes. Unmodified C++ times out; debugger captured `d1`, `du`, and search parameters as NaN.
 - **Severity:** hang.
 - **Harness:** `surface.offset_surface` refuses every `CreateExtendedSurface` step in process (see HANG-6), so this input stops at its extension step; an FFI test replays the exact input and checks the refusal. These are unsafe-reference exclusions, not passing difftest cases.
+
+#### HANG-25. `IntersectInsertRelate` does not return for a zero approximation tolerance
+- **Location:** `source/SMLib/src/SmTopologyIntersector.cpp:1092-1270`, `SmTopologyIntersector::IntersectInsertRelate` (the full topology intersection at `m_dThisApproxTol3d`).
+- **What happens:** With `m_dThisApproxTol3d` equal to `+0.0` or `-0.0`, the topology intersection did not finish within 180 s. Negative tolerances and tiny positive ones (down to the smallest subnormal) return within a second.
+- **Trigger:** `SetThisApproxTol3d(0)`, then `IntersectInsertRelate` on two intersecting B-reps.
+- **How found:** pre-review of PR #203 (the FFI's guard bypassed, timed C++ runs).
+- **Confirmed:** yes (C++ run: no result after 180 s at `0` and `-0`; `-1e-5`, `-1e300`, `1e-12`, `1e-200` and `5e-324` return).
+- **Severity:** hang (needs a bad argument from the calling code).
+- **Rust port:** The callee loops are unported (`IntersectTopology` defers at `SmBrep::GetFaces`). The FFI refuses `IntersectInsertRelate` at a zero tolerance.
 
 ## Nondeterminism
 
@@ -2630,6 +2649,27 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no. The fixture runs the path in the C++ build and the doubly copied curves compare equal to the originals, so neither the extra copy nor the leak is observable in a result; both follow from source inspection.
 - **Severity:** memory leak / wasted work; results unaffected.
 - **Rust port:** Faithful: the re-copies go to the caller's curve store and the earlier handles stay unreferenced; the non-B-spline case reports the `SM_ERR` in `ExistingSsi::status` with the outputs filled so far.
+
+#### UB-169. A failed `RegisterExistingSSI` leaves the intersection table's lists out of step
+- **Location:** `source/SMLib/src/SmTopologyIntersector.cpp:276-315` (`SER(SM_ERR)` at :303), `SmTopologyIntersector::RegisterExistingSSI`; read at :211 by `CheckIfHaveExistingSSI`.
+- **What happens:** `RegisterExistingSSI` adds both surfaces to `m_vBrepSurfaces` / `m_vOtherSurfaces` first and the results last. A 3D curve that is not an `SmBSplineCurve` (or a null entry) returns `SM_ERR` from inside the copy loop, so the results list stays one entry shorter (and the copies made so far leak). A later `CheckIfHaveExistingSSI` that matches that surface pair reads `m_vResults[ii]` with `ii` one past the results' size. `m_vResults` is an `SmTArray`, which allocates at least 16 zeroed slots, so there are three outcomes:
+  - **Null dereference:** the failed registration was the table's first, so `m_pData` is still NULL.
+  - **Zeroed slot:** otherwise, with no later registration. `m_p3DCurves` is NULL there, so the call reports an existing intersection with no curves.
+  - **Wrong curves:** after any later successful registration, `ii` indexes the next pair's results, so the failed pair inherits another pair's curves (and every later pair is shifted). This is the likely case in practice.
+- **Trigger:** `RegisterExistingSSI(s1, s2, {line or NULL}, ..)` for a non-B-spline 3D curve (an `SmLine`, `SmCompositeCurve`, ...), then `CheckIfHaveExistingSSI(s1, s2)`; also a `crUVCurves1/2` shorter than `cr3DCurves`, which the copy loop indexes in step with the 3D list.
+- **How found:** read during porting (`boolean.topology_intersector_p2`, PR #203).
+- **Confirmed:** no (source inspection; the difftest shim only registers B-spline curves and equal-length lists).
+- **Severity:** undefined behaviour (null dereference) in the first case, a wrong result in the other two, after an error status.
+- **Rust port:** Faithful on the table (surfaces added, results not). `CheckIfHaveExistingSSI` then fails with `SolidError::InvalidInput` ("intersection table lists differ in length") in all three cases. For the zeroed and misaligned cases, which are defined upstream, that is a deviation: the port refuses instead of reproducing a wrong result. A UV list shorter than the 3D list is `InvalidInput` in `register_existing_ssi`.
+
+#### WR-170. `IntersectTopology` leaks the copies of registered intersection curves; a failed `IntersectInsertRelate` leaks its manager
+- **Location:** `source/SMLib/src/SmTopologyIntersector.cpp:1781-1792` (and the deleters built only at :1874), `IntersectTopology`; :1161, :1188, :1212, `IntersectInsertRelate`.
+- **What happens:** For a face pair registered in the intersection table, `CheckIfHaveExistingSSI` returns fresh copies of the registered curves and the loop `continue`s before the `SmObjsDelete` guards that would delete them, so every registered pair leaks its copies (once per call). `IntersectInsertRelate` allocates `m_pProtoTopoMgr` and returns through `SER_MSG` when `IntersectTopology` or `ResolveIntersections` fails, leaving the manager allocated and installed; the next call overwrites the pointer.
+- **Trigger:** `RegisterExistingSSI` with curves for a face pair of the two B-reps, then `IntersectInsertRelate`; any failing `IntersectTopology` (e.g. a failing `CoincidenceCheck` or `FaceIntersect`).
+- **How found:** read during porting (`boolean.topology_intersector_p2`, PR #203).
+- **Confirmed:** no (source inspection).
+- **Severity:** memory leak; results unaffected.
+- **Rust port:** Faithful: the copies stay unreferenced in the caller's curve store and are not reported as deleted; after a failure the manager stays installed on the intersector.
 
 ### Healing
 

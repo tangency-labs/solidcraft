@@ -1,0 +1,1084 @@
+{
+ "cases": [
+  {
+   "name": "loop_crossings_sheet_line",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_get_loop_crossings (sm_make_xy_sheet(20) and the line (0,10,0)-(20,10,0)); EdgeEdgeIntersect / EdgeFaceCoincidence / IntersectTopology of the pair",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      20,
+      20
+     ]
+    },
+    "brep_b": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "edge_edge",
+      "edges1": [
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        1,
+        2
+       ],
+       [
+        0,
+        1,
+        3
+       ]
+      ],
+      "edges2": [
+       [
+        1,
+        1,
+        0
+       ]
+      ],
+      "manifold": false,
+      "ignore": true
+     },
+     {
+      "op": "edge_face_coin",
+      "verts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        0,
+        2
+       ],
+       [
+        0,
+        0,
+        3
+       ]
+      ],
+      "excluded": [],
+      "ignore": true,
+      "nesting": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "loop_crossings_sheet_line_topology",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_get_loop_crossings; the manager of IntersectInsertRelate and IntersectTopology on the sheet/line pair",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      20,
+      20
+     ]
+    },
+    "brep_b": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "mgr_new",
+      "capture": 0.02,
+      "override_tol": 0.0
+     },
+     {
+      "op": "set_rels"
+     },
+     {
+      "op": "intersect_topo"
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_union_2d_sheets",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:TestSmBoolean2DPlanarUnion (two overlapping planar sheets); mates, RemoveRelationship, FixGaps, EdgeEdgeIntersect",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      20,
+      20
+     ]
+    },
+    "brep_b": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      10,
+      5,
+      30,
+      15
+     ]
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       1,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "remove_rel",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       1,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "other_mate",
+      "h": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "fix_gaps",
+      "verts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "op": "edge_edge",
+      "edges1": [
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        1,
+        2
+       ],
+       [
+        0,
+        1,
+        3
+       ]
+      ],
+      "edges2": [
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        1,
+        1,
+        2
+       ],
+       [
+        1,
+        1,
+        3
+       ]
+      ],
+      "manifold": false,
+      "ignore": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_union_2d_iir",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:TestSmBoolean2DPlanarUnion; IntersectInsertRelate of the two sheets",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      20,
+      20
+     ]
+    },
+    "brep_b": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      10,
+      5,
+      30,
+      15
+     ]
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "iir"
+     }
+    ]
+   }
+  },
+  {
+   "name": "bbu_box_pair_squeeze",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:my_test_bbu (Boolean of two B-rep files); CheckForSqueezeVertices on related vertices of two copies",
+   "inputs": {
+    "brep_a": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "brep_b": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       1,
+       0,
+       2
+      ]
+     },
+     {
+      "op": "squeeze",
+      "bv": [
+       0,
+       0,
+       0
+      ],
+      "ov": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "squeeze",
+      "bv": [
+       0,
+       0,
+       1
+      ],
+      "ov": [
+       1,
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "bbu_box_pair_delete_faces",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:my_test_bbu; DeleteFaces of the merge",
+   "inputs": {
+    "brep_a": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "brep_b": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "delete_faces",
+      "faces": [
+       [
+        0,
+        2,
+        0
+       ],
+       [
+        0,
+        2,
+        1
+       ]
+      ],
+      "keep": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "fillet_preview_class_mates",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:TestSmFilletPreview (fillet B-rep); FixupClassMates of a homogenised classification pair on a fillet edge",
+   "inputs": {
+    "brep_a": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "brep_b": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "relate",
+      "a": [
+       0,
+       1,
+       1
+      ],
+      "b": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "op": "fixup_class",
+      "b": {
+       "c": [
+        0,
+        3,
+        0
+       ],
+       "t0": 0,
+       "t1": 1,
+       "tol": 1e-05,
+       "relative": true,
+       "ivls": [
+        {
+         "a": 0,
+         "b": 0.0005,
+         "pcs": [
+          {
+           "cls": 104,
+           "h": [
+            0,
+            0,
+            0
+           ],
+           "t": 0.0,
+           "dev": 0.0
+          },
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            0
+           ],
+           "t": 0.00025,
+           "dev": 0.0
+          },
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            0
+           ],
+           "t": 0.0005,
+           "dev": 0.0
+          }
+         ]
+        },
+        {
+         "a": 0.0005,
+         "b": 1,
+         "pcs": [
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            0
+           ],
+           "t": 0.0005,
+           "dev": 0.0
+          },
+          {
+           "cls": 103,
+           "h": [
+            0,
+            1,
+            1
+           ],
+           "t": 0.5,
+           "dev": 0.0
+          },
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0.0
+          }
+         ]
+        }
+       ]
+      },
+      "o": {
+       "c": [
+        0,
+        3,
+        0
+       ],
+       "t0": 0,
+       "t1": 1,
+       "tol": 1e-05,
+       "relative": true,
+       "ivls": [
+        {
+         "a": 0,
+         "b": 0.0005,
+         "pcs": [
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0.0
+          },
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0.0
+          },
+          {
+           "cls": 104,
+           "h": [
+            1,
+            0,
+            0
+           ],
+           "t": 0.0005,
+           "dev": 0.0001
+          }
+         ]
+        },
+        {
+         "a": 0.0005,
+         "b": 1,
+         "pcs": [
+          {
+           "cls": 104,
+           "h": [
+            1,
+            0,
+            0
+           ],
+           "t": 0.0005,
+           "dev": 0.0001
+          },
+          {
+           "cls": 103,
+           "h": [
+            1,
+            1,
+            1
+           ],
+           "t": 0.5,
+           "dev": 0.0
+          },
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0.0
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "ssf_split_vertex_pair",
+   "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp:TestSmSurfaceSurfaceFillet; FixupSplitVertexPair on a short interval between mated vertices",
+   "inputs": {
+    "brep_a": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "brep_b": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       1,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "fixup_split",
+      "index": 1,
+      "b": {
+       "c": [
+        0,
+        3,
+        1
+       ],
+       "t0": 0,
+       "t1": 1,
+       "tol": 1e-05,
+       "relative": true,
+       "ivls": [
+        {
+         "a": 0,
+         "b": 0.4,
+         "pcs": [
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0
+          },
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            1
+           ],
+           "t": 0.2,
+           "dev": 0
+          },
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            1
+           ],
+           "t": 0.4,
+           "dev": 0
+          }
+         ]
+        },
+        {
+         "a": 0.4,
+         "b": 0.4001,
+         "pcs": [
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            1
+           ],
+           "t": 0.4,
+           "dev": 0
+          },
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            1
+           ],
+           "t": 0.40005,
+           "dev": 0
+          },
+          {
+           "cls": 104,
+           "h": [
+            0,
+            0,
+            1
+           ],
+           "t": 0.4001,
+           "dev": 1e-06
+          }
+         ]
+        },
+        {
+         "a": 0.4001,
+         "b": 1,
+         "pcs": [
+          {
+           "cls": 104,
+           "h": [
+            0,
+            0,
+            1
+           ],
+           "t": 0.4001,
+           "dev": 1e-06
+          },
+          {
+           "cls": 102,
+           "h": [
+            0,
+            2,
+            1
+           ],
+           "t": 0.7,
+           "dev": 0
+          },
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0
+          }
+         ]
+        }
+       ]
+      },
+      "o": {
+       "c": [
+        0,
+        3,
+        1
+       ],
+       "t0": 0,
+       "t1": 1,
+       "tol": 1e-05,
+       "relative": true,
+       "ivls": [
+        {
+         "a": 0,
+         "b": 0.4,
+         "pcs": [
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0
+          },
+          {
+           "cls": 102,
+           "h": [
+            1,
+            2,
+            1
+           ],
+           "t": 0.2,
+           "dev": 0
+          },
+          {
+           "cls": 104,
+           "h": [
+            1,
+            0,
+            1
+           ],
+           "t": 0.4,
+           "dev": 1e-06
+          }
+         ]
+        },
+        {
+         "a": 0.4,
+         "b": 0.4001,
+         "pcs": [
+          {
+           "cls": 104,
+           "h": [
+            1,
+            0,
+            1
+           ],
+           "t": 0.4,
+           "dev": 1e-06
+          },
+          {
+           "cls": 102,
+           "h": [
+            1,
+            2,
+            1
+           ],
+           "t": 0.40005,
+           "dev": 0
+          },
+          {
+           "cls": 102,
+           "h": [
+            1,
+            2,
+            1
+           ],
+           "t": 0.4001,
+           "dev": 0
+          }
+         ]
+        },
+        {
+         "a": 0.4001,
+         "b": 1,
+         "pcs": [
+          {
+           "cls": 102,
+           "h": [
+            1,
+            2,
+            1
+           ],
+           "t": 0.4001,
+           "dev": 0
+          },
+          {
+           "cls": 102,
+           "h": [
+            1,
+            2,
+            1
+           ],
+           "t": 0.7,
+           "dev": 0
+          },
+          {
+           "cls": 100,
+           "h": [
+            -1,
+            8,
+            -1
+           ],
+           "dev": 0
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_tsurf_register_and_skip",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_analytic_tsurf_creation (one-face B-reps intersected); RegisterExistingSSI marking the pair as not intersecting, then IntersectTopology",
+   "inputs": {
+    "brep_a": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "brep_b": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "register_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ],
+      "curves": []
+     },
+     {
+      "op": "check_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ]
+     },
+     {
+      "op": "mgr_new",
+      "capture": 0.01,
+      "override_tol": 0.0
+     },
+     {
+      "op": "intersect_topo"
+     }
+    ]
+   }
+  }
+ ]
+}

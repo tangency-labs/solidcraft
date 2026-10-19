@@ -3700,7 +3700,7 @@ fn run_proto(
                     }
                     if !skip {
                         // (the shim's intersector relates nothing: GetOtherMate is always null)
-                        match st3(r.mgr.glue_coincident_brep_vertices(k, &r.pool, &|_| None))? {
+                        match st3(r.mgr.glue_coincident_brep_vertices(k, &r.pool, &mut solidcore::topology::proto_topology::p3::NoMates))? {
                             Ok(deleted) => {
                                 let ids = r.kill_curves(deleted);
                                 out.push(ids.len() as f64);
