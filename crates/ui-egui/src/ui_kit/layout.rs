@@ -596,12 +596,17 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
 /// Tokens: control_height, space_8, font_label, text and icon-button tokens.
 /// Picked-item row with a remove action. Tokens: `control_height, space_8, font_label, text; icon-button tokens`.
 pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
+    list_row_with_sense(ui, key, text, egui::Sense::click())
+}
+
+/// Picked-item row with explicit keyboard participation for its remove action.
+pub(crate) fn list_row_with_sense(ui: &mut Ui, key: &str, text: &str, sense: egui::Sense) -> Response {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     let remove = egui::Rect::from_min_max(egui::pos2((rect.right() - row_height()).max(rect.left()), rect.top()), rect.max);
     let label = egui::Rect::from_min_max(rect.min, egui::pos2((remove.left() - t.space_8).max(rect.left()), rect.bottom()));
     paint_text(ui, label, text, egui::FontId::proportional(t.font_label), t.form_ink, false);
-    let response = ui.push_id(key, |ui| super::icon_button_at(ui, remove, "close", "Remove")).inner;
+    let response = ui.push_id(key, |ui| super::icon_button_at_with_sense(ui, remove, "close", "Remove", sense)).inner;
     scenario::publish_rect(&format!("dialog:list:{key}"), rect);
     scenario::publish_handle(&format!("dialog:list:{key}:remove"), remove.center());
     response

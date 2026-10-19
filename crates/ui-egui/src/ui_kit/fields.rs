@@ -404,9 +404,14 @@ pub(crate) struct Selection {
 
 /// Three looks: the active input in accent, a filled one in a quiet neutral tint, an empty one plain.
 pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Response {
+    selection_field_with_sense(ui, text, options, egui::Sense::CLICK)
+}
+
+/// Selection target with explicit keyboard participation; uses the same visual and accessible state.
+pub(crate) fn selection_field_with_sense(ui: &mut Ui, text: &str, options: Selection, sense: egui::Sense) -> Response {
     let Selection { active, filled } = options;
     let t = Tokens::get();
-    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::CLICK);
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), sense);
     // A separate action fill lets two-colour palettes reserve the focus accent for inverted ink.
     let inverted = t.form_primary_fill != t.form_primary;
     if active && !filled && !inverted {

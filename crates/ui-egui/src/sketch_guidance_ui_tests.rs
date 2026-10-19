@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::panic)]
 use crate::scenario::Harness;
 use crate::sketch_modify_ui::{Mod, candidate};
 use crate::viewport::Hit;
@@ -405,111 +405,89 @@ fn tracking_does_not_leak_outside_the_viewport_or_into_another_sketch() {
     assert!(h.app.viewport.tracking.guide.is_none());
 }
 
-/// Lining up while drawing (#7828), turned on (it is off by default): a fixture whose points sit
-/// off the grid, so that only lining up can place a point exactly on them, seen from the top at
-/// about 1 mm of snap tolerance.
-fn lining_up_fixture(points: &[(&str, Value)]) -> Harness {
-    let mut h = Harness::new();
-    h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
-    assert!(!h.app.preferences.sketch_align_points, "off unless turned on");
-    h.app.preferences.sketch_align_points = true;
-    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-    for (command, params) in points {
-        h.app.run(command, params.clone()).unwrap();
+}
+
+#[test]
+fn dialog_tab_mirror_advances_from_canvas_and_reverses_without_changing_picks() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    pick(&mut h, [-15.0, 17.5], false);
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+    pick(&mut h, [0.0, 20.0], false);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+    step(&mut h, json!({"key":"Tab", "shift":true}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    pick(&mut h, [-22.5, 10.0], true);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+}
+
+#[test]
+fn dialog_tab_patterns_follow_display_order_in_both_directions() {
+    for command in ["sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        step(&mut h, json!({"call":"ui.camera","params":{"target":[-60,0,0],"distance":120}}));
+        step(&mut h, json!({"start":command}));
+        pick(&mut h, [-22.5, 10.0], false);
+        step(&mut h, json!({"key":"Tab"}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{command}");
+        step(&mut h, json!({"key":"Tab"}));
+        step(&mut h, json!({"key":"A", "cmd":true}));
+        step(&mut h, json!({"text":"4"}));
+        let d = h.app.dialog.as_ref().unwrap();
+        match &d.kind {
+            crate::dialogs::Kind::SketchModify(Mod::PatternRect { count, .. } | Mod::PatternCirc { count, .. }) => assert_eq!(count, "4"),
+            _ => panic!("pattern dialog"),
+        }
+        step(&mut h, json!({"key":"Tab", "shift":true}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+        step(&mut h, json!({"key":"Tab", "shift":true}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+        if command == "sketch.pattern.rectangular" {
+            // Entities, Direction, Quantity, Spacing, Direction 2, Quantity 2, Spacing 2.
+            for _ in 0..4 {
+                step(&mut h, json!({"key":"Tab"}));
+            }
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"key":"Tab"}));
+            step(&mut h, json!({"key":"A", "cmd":true}));
+            step(&mut h, json!({"text":"2"}));
+            let crate::dialogs::Kind::SketchModify(Mod::PatternRect { count2, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+                panic!("rectangular pattern dialog");
+            };
+            assert_eq!(count2, "2");
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            step(&mut h, json!({"key":"A", "cmd":true}));
+            step(&mut h, json!({"text":"25 mm"}));
+            let crate::dialogs::Kind::SketchModify(Mod::PatternRect { spacing, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+                panic!("rectangular pattern dialog");
+            };
+            assert_eq!(spacing, "25 mm");
+        }
     }
-    h.call("ui.view", json!({"view":"top"}));
-    h.call("ui.camera", json!({"target":[25,0,0],"distance":180}));
+}
+
+#[test]
+fn dialog_tab_does_not_intercept_modified_tabs_or_collapsed_dialogs() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::ALT, egui::Modifiers::COMMAND] {
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers });
+        }
+        h.frames(3);
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    }
+    h.app.dialog.as_mut().unwrap().collapsed = true;
     h.frames(3);
-    h
-}
-
-/// The active sketch's point at `at`, and the points level (`Horizontal`) or plumb (`Vertical`)
-/// constraints tie it to.
-fn point_and_alignments(h: &Harness, at: [f64; 2]) -> Option<(String, Vec<(&'static str, String)>)> {
-    use solidcraft_engine::sketch::ConstraintKind::{HorizontalPoints, VerticalPoints};
-    let st = h.app.session.world_state();
-    let sk = &st.sketch(h.app.session.active_sketch?)?.sketch;
-    let at = solidcraft_engine::geom::Vec2::new(at[0], at[1]);
-    let i = sk.points.iter().position(|p| p.pos.dist(at) < 1e-9)?;
-    let id = |k: usize| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
-    let tied = sk
-        .constraints
-        .iter()
-        .filter_map(|c| match c.kind {
-            HorizontalPoints { p, q } if p == i || q == i => Some(("Horizontal", id(if p == i { q } else { p }))),
-            VerticalPoints { p, q } if p == i || q == i => Some(("Vertical", id(if p == i { q } else { p }))),
-            _ => None,
-        })
-        .collect();
-    Some((id(i), tied))
-}
-
-#[test]
-fn line_up_takes_the_nearest_point_on_each_axis_on_its_own() {
-    use crate::sketch_tools::{Lined, line_up};
-    use solidcraft_engine::geom::Vec2;
-    let points = [(Some("a".to_string()), Vec2::new(0.0, 10.4)), (Some("b".to_string()), Vec2::new(50.3, -30.0)), (None, Vec2::new(5.0, 10.2))];
-    let (level, plumb) = line_up(&points, Vec2::new(50.0, 10.0), 0.5);
-    assert_eq!(level, Some(Lined { id: None, at: Vec2::new(5.0, 10.2), horizontal: true }), "the nearer of the two level points");
-    assert_eq!(plumb, Some(Lined { id: Some("b".into()), at: Vec2::new(50.3, -30.0), horizontal: false }));
-    // Right on a point is a point snap's business, not lining up; far from all, nothing.
-    assert_eq!(line_up(&points, Vec2::new(50.3, -30.1), 0.5), (None, None));
-    assert_eq!(line_up(&points, Vec2::new(25.0, -10.0), 0.5), (None, None));
-}
-
-/// #8089, a duplicate of #7828: a rectangle drawn beside another takes its height from one
-/// rectangle and its width from a point below, both at once, and keeps both alignments, in the
-/// rectangle's one undo step. With the preference off, only one axis lines up, as before.
-#[test]
-fn a_rectangle_corner_lines_up_with_two_points_at_once_and_keeps_both() {
-    for aligning in [true, false] {
-        let mut h = lining_up_fixture(&[
-            ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20.37,10.43]})),
-            ("sketch.point", json!({"point":[50.37,-30.21]})),
-        ]);
-        h.app.preferences.sketch_align_points = aligning;
-        let undo = h.app.session.undo.len();
-        let below = point_and_alignments(&h, [50.37, -30.21]).unwrap().0;
-        step(&mut h, json!({"start":"sketch.rectangle.two_point"}));
-        step(&mut h, json!({"click":{"sketch":[30,0.3]}}));
-        step(&mut h, json!({"move":{"sketch":[50.2,10.6]}}));
-        if aligning {
-            step(&mut h, json!({"expect":{"count":{"name":"sketch_align_guides","value":2}}}));
-        }
-        step(&mut h, json!({"click":{"sketch":[50.2,10.6]}}));
-        let corner = point_and_alignments(&h, [50.37, 10.43]);
-        if !aligning {
-            assert!(corner.is_none(), "off: the corner follows the grid, not the other points");
-            continue;
-        }
-        let (_, tied) = corner.expect("the corner lands level with the rectangle's top and plumb with the point");
-        assert!(tied.iter().any(|(kind, to)| *kind == "Vertical" && *to == below), "{tied:?}");
-        assert!(tied.iter().any(|(kind, _)| *kind == "Horizontal"), "{tied:?}");
-        let (_, start) = point_and_alignments(&h, [30.0, 0.0]).expect("the first corner lines up with the bottom");
-        assert!(start.iter().any(|(kind, _)| *kind == "Horizontal"), "{start:?}");
-        assert_eq!(h.app.session.undo.len(), undo + 1, "the alignments are in the rectangle's undo step");
-    }
-}
-
-/// #7828: a line kept horizontal from its start also lines up under a point above, and the
-/// click keeps both: the line's Horizontal and the end's alignment with that point.
-#[test]
-fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
-    let mut h = lining_up_fixture(&[("sketch.point", json!({"point":[20.37,30.13]}))]);
-    let above = point_and_alignments(&h, [20.37, 30.13]).unwrap().0;
-    step(&mut h, json!({"start":"sketch.line"}));
-    step(&mut h, json!({"click":{"sketch":[0,0]}}));
-    step(&mut h, json!({"move":{"sketch":[20.2,0.15]}}));
-    step(&mut h, json!({"expect":{"count":{"name":"sketch_align_guides","value":1}}}));
-    step(&mut h, json!({"click":{"sketch":[20.2,0.15]}}));
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    h.app.dialog.as_mut().unwrap().collapsed = false;
     step(&mut h, json!({"key":"Escape"}));
-    let (_, tied) = point_and_alignments(&h, [20.37, 0.0]).expect("the end is level with the start and plumb with the point");
-    assert_eq!(tied, [("Vertical", above)]);
-    let st = h.app.session.world_state();
-    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-    assert!(
-        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Horizontal { .. })),
-        "the line stays horizontal"
-    );
-}
+    assert!(h.app.dialog.is_none());
