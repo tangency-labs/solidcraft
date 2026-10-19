@@ -1,0 +1,4107 @@
+{
+  "cases": [
+    {
+      "name": "bspline_outside_left",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": -0.1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_outside_right",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 1.1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_within_scaled_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 5e-13,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_within_scaled_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.9999999999995,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_near_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.01,
+        "tolerances": [
+          0.02,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_equal_start_tol",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.01,
+        "tolerances": [
+          0.01,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_near_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.99,
+        "tolerances": [
+          0,
+          0.02
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_both_start_wins",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          2,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_interior",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "bspline_editing_off",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "real_line_outside_left",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": -0.1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_outside_right",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 1.1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_within_scaled_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 5e-13,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_within_scaled_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.9999999999995,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_near_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.01,
+        "tolerances": [
+          0.02,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_equal_start_tol",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.01,
+        "tolerances": [
+          0.01,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_near_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.99,
+        "tolerances": [
+          0,
+          0.02
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_both_start_wins",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.5,
+        "tolerances": [
+          2,
+          2
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_interior",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_line_editing_off",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "rational_quadratic_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                0.5,
+                1,
+                0,
+                0.5
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 2,
+            "u": [
+              -3,
+              -3,
+              -3,
+              7,
+              7,
+              7
+            ]
+          },
+          "t0": -3,
+          "t1": 7
+        },
+        "parameter": 2.0,
+        "tolerances": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "name": "rational_quadratic_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                0.5,
+                1,
+                0,
+                0.5
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 2,
+            "u": [
+              -3,
+              -3,
+              -3,
+              7,
+              7,
+              7
+            ]
+          },
+          "t0": -3,
+          "t1": 7
+        },
+        "parameter": 2.0,
+        "tolerances": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "rational_quadratic_both",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                0.5,
+                1,
+                0,
+                0.5
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 2,
+            "u": [
+              -3,
+              -3,
+              -3,
+              7,
+              7,
+              7
+            ]
+          },
+          "t0": -3,
+          "t1": 7
+        },
+        "parameter": 2.0,
+        "tolerances": [
+          20,
+          20
+        ]
+      }
+    },
+    {
+      "name": "rational_quadratic_interior",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                0.5,
+                1,
+                0,
+                0.5
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 2,
+            "u": [
+              -3,
+              -3,
+              -3,
+              7,
+              7,
+              7
+            ]
+          },
+          "t0": -3,
+          "t1": 7
+        },
+        "parameter": 2.0,
+        "tolerances": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "constant_curve_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                3,
+                4,
+                1
+              ],
+              [
+                2,
+                3,
+                4,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "name": "constant_curve_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                3,
+                4,
+                1
+              ],
+              [
+                2,
+                3,
+                4,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "constant_curve_both",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                3,
+                4,
+                1
+              ],
+              [
+                2,
+                3,
+                4,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          20,
+          20
+        ]
+      }
+    },
+    {
+      "name": "constant_curve_interior",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                3,
+                4,
+                1
+              ],
+              [
+                2,
+                3,
+                4,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "network_infinite_region",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:8004",
+      "inputs": {
+        "op": 0,
+        "brep": {
+          "kind": "network"
+        }
+      }
+    },
+    {
+      "name": "network_orient_sheet",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "network"
+        },
+        "same": false
+      }
+    },
+    {
+      "name": "network_shell_vertex_0",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "network"
+        },
+        "variant": 0,
+        "point": [
+          1.25,
+          -2.5,
+          4
+        ]
+      }
+    },
+    {
+      "name": "network_shell_vertex_1",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "network"
+        },
+        "variant": 1,
+        "point": [
+          1.25,
+          -2.5,
+          4
+        ]
+      }
+    },
+    {
+      "name": "plane_infinite_region",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:8004",
+      "inputs": {
+        "op": 0,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "plane_orient_sheet",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "same": false
+      }
+    },
+    {
+      "name": "plane_shell_vertex_0",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 0,
+        "point": [
+          1.25,
+          -2.5,
+          4
+        ]
+      }
+    },
+    {
+      "name": "plane_shell_vertex_1",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 1,
+        "point": [
+          1.25,
+          -2.5,
+          4
+        ]
+      }
+    },
+    {
+      "name": "plane_vertex_loop_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "same": false,
+        "point": [
+          0.5,
+          0.5,
+          0
+        ]
+      }
+    },
+    {
+      "name": "plane_vertex_loop_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "same": true,
+        "point": [
+          0.5,
+          0.5,
+          0
+        ]
+      }
+    },
+    {
+      "name": "plane_insert_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 0
+      }
+    },
+    {
+      "name": "plane_insert_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 1
+      }
+    },
+    {
+      "name": "plane_insert_2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 2
+      }
+    },
+    {
+      "name": "plane_insert_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 3
+      }
+    },
+    {
+      "name": "plane_insert_4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "variant": 4
+      }
+    },
+    {
+      "name": "plane_insert_editing_off",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "editing": false
+      }
+    },
+    {
+      "name": "plane_split_face_edge_interior",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "bspline_face_infinite_region",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:8004",
+      "inputs": {
+        "op": 0,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "bspline_face_orient_sheet",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "same": false
+      }
+    },
+    {
+      "name": "bspline_face_shell_vertex_0",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 0,
+        "point": [
+          1.25,
+          -2.5,
+          4
+        ]
+      }
+    },
+    {
+      "name": "bspline_face_shell_vertex_1",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 1,
+        "point": [
+          1.25,
+          -2.5,
+          4
+        ]
+      }
+    },
+    {
+      "name": "bspline_face_vertex_loop_False",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "same": false,
+        "point": [
+          0.5,
+          0.5,
+          0
+        ]
+      }
+    },
+    {
+      "name": "bspline_face_vertex_loop_True",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "same": true,
+        "point": [
+          0.5,
+          0.5,
+          0
+        ]
+      }
+    },
+    {
+      "name": "bspline_face_insert_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 0
+      }
+    },
+    {
+      "name": "bspline_face_insert_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 1
+      }
+    },
+    {
+      "name": "bspline_face_insert_2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 2
+      }
+    },
+    {
+      "name": "bspline_face_insert_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 3
+      }
+    },
+    {
+      "name": "bspline_face_insert_4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "variant": 4
+      }
+    },
+    {
+      "name": "bspline_face_insert_editing_off",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12242",
+      "inputs": {
+        "op": 5,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "editing": false
+      }
+    },
+    {
+      "name": "bspline_face_split_face_edge_interior",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "point_merge_6_near_start_sss_ignored",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0,
+        "point": [
+          10,
+          -10,
+          20
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "point_merge_6_near_end_sss_ignored",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 1,
+        "point": [
+          20,
+          3,
+          4
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "point_merge_6_outside",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": -1,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_6_source_dominates",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          1e-08,
+          0,
+          0
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_6_vertex_dominates",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0.01,
+          0,
+          0
+        ],
+        "tolerances": [
+          1,
+          1
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_6_new_center",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0.5,
+          1,
+          0
+        ],
+        "tolerances": [
+          0.1,
+          0.1
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_6_sss_point",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0.2,
+          0.3,
+          0
+        ],
+        "tolerances": [
+          0.1,
+          0.1
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "point_merge_6_same_point",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_7_near_start_sss_ignored",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0,
+        "point": [
+          10,
+          -10,
+          20
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "point_merge_7_near_end_sss_ignored",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 1,
+        "point": [
+          20,
+          3,
+          4
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "point_merge_7_outside",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": -1,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_7_source_dominates",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          1e-08,
+          0,
+          0
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_7_vertex_dominates",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0.01,
+          0,
+          0
+        ],
+        "tolerances": [
+          1,
+          1
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_7_new_center",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0.5,
+          1,
+          0
+        ],
+        "tolerances": [
+          0.1,
+          0.1
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "point_merge_7_sss_point",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0.2,
+          0.3,
+          0
+        ],
+        "tolerances": [
+          0.1,
+          0.1
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "point_merge_7_same_point",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": true
+      }
+    },
+    {
+      "name": "opposite_primary_bspline_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 2,
+        "parameter": 0,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_bspline_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 2,
+        "parameter": 1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_bspline_near_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 2,
+        "parameter": 0.01,
+        "tolerances": [
+          0.02,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_bspline_equal_start_tol",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 2,
+        "parameter": 0.01,
+        "tolerances": [
+          0.01,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_bspline_near_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 2,
+        "parameter": 0.99,
+        "tolerances": [
+          0,
+          0.02
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_real_line_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 3,
+        "parameter": 0,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_real_line_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 3,
+        "parameter": 1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_real_line_near_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 3,
+        "parameter": 0.01,
+        "tolerances": [
+          0.02,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_real_line_equal_start_tol",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 3,
+        "parameter": 0.01,
+        "tolerances": [
+          0.01,
+          0
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "opposite_primary_real_line_near_end",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 3,
+        "parameter": 0.99,
+        "tolerances": [
+          0,
+          0.02
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "point_merge_keeps_unset_flag_on_refused_start",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 4,
+        "parameter": -0.1,
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          10,
+          20,
+          30
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "ten_sample_recheck_rejects_start_then_end_wins",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21282",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                0.5,
+                2,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 2,
+            "u": [
+              0,
+              0,
+              0,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0.5,
+        "tolerances": [
+          1.15,
+          2
+        ]
+      }
+    },
+    {
+      "name": "bspline_negative_raw_tolerance_converts_before_split",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21282; source/SMLib/inc/SmTol.h:SmZoneTol3d",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.01,
+        "tolerances": [
+          -0.02,
+          0
+        ]
+      }
+    },
+    {
+      "name": "real_line_negative_raw_tolerance_converts_before_split",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21282; source/SMLib/inc/SmTol.h:SmZoneTol3d",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 1,
+        "parameter": 0.01,
+        "tolerances": [
+          -0.02,
+          0
+        ]
+      }
+    }
+  ]
+}

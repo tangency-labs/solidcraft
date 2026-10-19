@@ -735,8 +735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "copy_vertex_1_0_0_null_region",
@@ -747,8 +747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "copy_vertex_1_0_1",
@@ -1327,8 +1327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0000",
@@ -2175,7 +2175,7 @@
     "boolean.topology_intersector_p3": 4,
     "intersect.surface_drop_lib_p3": 18,
     "query.brep": 14,
-    "topology.brep_p9": 3,
+    "topology.brep_p2": 3,
     "topology.face_p2": 6
   },
   "max_rel_err": 0.0,

@@ -103,8 +103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0009",
@@ -183,8 +183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0018",
@@ -743,8 +743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0082",
@@ -755,8 +755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0083",
@@ -1259,8 +1259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0140",
@@ -2127,8 +2127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0238",
@@ -4763,8 +4763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0542",
@@ -5111,8 +5111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0581",
@@ -5667,8 +5667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0644",
@@ -7643,8 +7643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0868",
@@ -9243,8 +9243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1052",
@@ -9599,8 +9599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1092",
@@ -10335,8 +10335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1177",
@@ -10707,8 +10707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1221",
@@ -10803,8 +10803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1232",
@@ -11707,8 +11707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1335",
@@ -11791,8 +11791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1344",
@@ -12199,8 +12199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1389",
@@ -12591,8 +12591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1435",
@@ -12971,8 +12971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep mutable owning context",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1478",
@@ -13416,7 +13416,7 @@
   "cases_passed": 1247,
   "cases_total": 1533,
   "deferred_by_unit": {
-    "topology.brep_p9": 20,
+    "topology.brep_p1": 20,
     "topology.edge": 105,
     "topology.face_p1": 41,
     "topology.face_p2": 60,

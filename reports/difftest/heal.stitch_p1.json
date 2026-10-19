@@ -1426,16 +1426,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_s0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#145",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -1446,16 +1442,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_s0.999",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#147",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2018,76 +2010,52 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge0_s0.5_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#218",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge0_s0.5_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#219",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge0_s0.5_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#220",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge0_s0.25_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#221",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge0_s0.25_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#222",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge0_s0.25_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#223",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2138,76 +2106,52 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge1_s0.5_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#230",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge1_s0.5_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#231",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge1_s0.5_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#232",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge1_s0.25_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#233",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge1_s0.25_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#234",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge1_s0.25_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#235",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2258,76 +2202,52 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge2_s0.5_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#242",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge2_s0.5_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#243",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge2_s0.5_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#244",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge2_s0.25_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#245",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge2_s0.25_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#246",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge2_s0.25_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#247",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2378,76 +2298,52 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge3_s0.5_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#254",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge3_s0.5_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#255",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge3_s0.5_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#256",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge3_s0.25_off5e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#257",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge3_s0.25_off2e-06_tol1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#258",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeVertexSplitEdge",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "square_split_edge3_s0.25_off5e-06_tol1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#259",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2779,16 +2675,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 94,
+  "cases_deferred": 68,
   "cases_failed": 0,
-  "cases_passed": 206,
+  "cases_passed": 232,
   "cases_total": 300,
   "deferred_by_unit": {
     "harness:analytic-geometry-export": 1,
     "heal.stitch_p2": 3,
     "query.brep": 7,
     "topology.brep_p5": 6,
-    "topology.brep_p9": 26,
     "topology.face_p2": 49,
     "topology.face_p4": 2
   },

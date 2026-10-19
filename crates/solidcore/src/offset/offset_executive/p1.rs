@@ -312,13 +312,16 @@ impl OffsetExecutive {
         self.blend_to_faces.remove_all();
     }
 
-    /// Synchronizes mapped edge ranges. A required split defers at `MakeVertexSplitEdge`;
-    /// no-split, no-match, gap and null-padding branches are fully implemented.
+    /// Synchronizes mapped edge ranges, splitting offset edges at the other side's
+    /// breaks with `MakeVertexSplitEdge`. `notifications` and `curve_ref` identify the
+    /// offset B-rep's entities and edge curves for the split's notifications.
     pub fn synchronize_offset_edgeuses(
         &mut self,
-        _kernel: &Kernel,
+        kernel: &mut Kernel,
         original: Option<EdgeuseId>,
         other: Option<EdgeuseId>,
+        notifications: &mut NotifyEnv<'_>,
+        curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     ) -> Result<SynchronizedEdgeuses> {
         let original = required(original)?;
         let mut first = self.edgeuse_to_edgeuses.seconds(original);
@@ -338,7 +341,7 @@ impl OffsetExecutive {
             return Ok(out);
         }
 
-        let brep = self.required_offset_brep()?;
+        let brep = required(self.offset_brep.as_mut())?;
         remove_small_stuff(brep, &mut second)?;
         if second.is_empty() {
             sort_edgeuses(brep, &mut first)?;
@@ -346,8 +349,9 @@ impl OffsetExecutive {
             out.edgeuses = first.into_iter().map(Some).collect();
             return Ok(out);
         }
-        insert_breaks(brep, &first, &second)?;
-        insert_breaks(brep, &second, &first)?;
+        insert_breaks(kernel, brep, &first, &mut second, notifications, curve_ref)?;
+        insert_breaks(kernel, brep, &second, &mut first, notifications, curve_ref)?;
+        let brep = &*brep;
         sort_edgeuses(brep, &mut first)?;
         sort_edgeuses(brep, &mut second)?;
         extract_gaps(brep, &mut first, &second, &mut out.gaps)?;
@@ -479,16 +483,19 @@ impl OffsetExecutive {
     }
 
     /// Builds edge cap offsets. Notifications use distinct original/result object keys;
-    /// the geometry creation itself remains owned by `offset.offset_geometry_creation`.
+    /// `offset_curve_ref` identifies offset edge curves split while synchronizing. The
+    /// geometry creation itself remains owned by `offset.offset_geometry_creation`.
+    #[allow(clippy::too_many_arguments)]
     pub fn build_offset_of_edgeuses(
         &mut self,
-        kernel: &Kernel,
+        kernel: &mut Kernel,
         original: &Brep,
         edgeuse: EdgeuseId,
         other: EdgeuseId,
         _mark_type: MarkType,
         notifications: &mut NotifyEnv<'_>,
         offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+        offset_curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     ) -> Result<()> {
         let edge = edge_of(original, edgeuse)?;
         let first_face = eu::face(original, edgeuse)?;
@@ -499,7 +506,20 @@ impl OffsetExecutive {
         {
             return Ok(());
         }
-        let synchronized = self.synchronize_offset_edgeuses(kernel, Some(edgeuse), Some(other))?;
+        // Splits notify offset B-rep entities, keyed like the result side below.
+        let mut offset_notifications = NotifyEnv {
+            records: &mut *notifications.records,
+            attributes: &mut *notifications.attributes,
+            context: notifications.context.as_deref_mut(),
+            key_of: offset_key_of,
+        };
+        let synchronized = self.synchronize_offset_edgeuses(
+            kernel,
+            Some(edgeuse),
+            Some(other),
+            &mut offset_notifications,
+            offset_curve_ref,
+        )?;
         // Geometry creation is unconditional on the first pair, so no later
         // iteration is reachable until EdgeuseOffset is available.
         if let Some(offset) = synchronized.edgeuses.first() {
@@ -1034,25 +1054,48 @@ fn sort_edgeuses(brep: &Brep, edgeuses: &mut [EdgeuseId]) -> Result<()> {
     }
 }
 
-fn insert_breaks(brep: &Brep, edgeuses: &[EdgeuseId], to_split: &[EdgeuseId]) -> Result<()> {
+fn insert_breaks(
+    kernel: &mut Kernel,
+    brep: &mut Brep,
+    edgeuses: &[EdgeuseId],
+    to_split: &mut Vec<EdgeuseId>,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+) -> Result<()> {
     for max_end in [false, true] {
         for &edgeuse in edgeuses {
             let source = interval(brep, edgeuse)?;
             let param = if max_end { source.max() } else { source.min() };
-            for &split in to_split {
+            // Uses appended by a split are scanned too: upstream re-reads GetSize.
+            let mut index = 0;
+            while let Some(&split) = to_split.get(index) {
+                index += 1;
                 let target = interval(brep, split)?;
-                if target.contains_value(param, 0.0)
-                    && !target.is_value_on_boundary(param, EFF_ZERO).0
+                if !target.contains_value(param, 0.0)
+                    || target.is_value_on_boundary(param, EFF_ZERO).0
                 {
-                    // Continuation cpp:2538–2555: failed splits continue scanning;
-                    // successful splits append matching CCW then CW uses and break.
-                    // Returning Unported must not be mistaken for a failed C++ split.
-                    // UNPORTED(topology.brep_p9): SmBrep::MakeVertexSplitEdge
-                    return Err(SolidError::unported(
-                        "SmBrep::MakeVertexSplitEdge",
-                        "topology.brep_p9",
-                    ));
+                    continue;
                 }
+                // The split reads the offset B-rep's own editing state (the executive's
+                // constructors enable it, cpp:437, 1073). Dependency errors propagate;
+                // only SM_ERR continues.
+                let edge_id = edge_of(brep, split)?;
+                let output = crate::topology::brep::p9::make_vertex_split_edge(
+                    kernel, brep, edge_id, param, env, curve_ref,
+                )?;
+                if !output.split {
+                    continue; // Can't split if too close to end point
+                }
+                let new_edges = required(output.edges)?;
+                let ccw = required(eu::ccw_edgeuse(brep, split)?)?;
+                let cw = required(eu::cw_edgeuse(brep, split)?)?;
+                if new_edges.contains(&edge_of(brep, ccw)?) {
+                    to_split.push(ccw);
+                }
+                if new_edges.contains(&edge_of(brep, cw)?) {
+                    to_split.push(cw);
+                }
+                break;
             }
         }
     }
@@ -1285,6 +1328,75 @@ mod tests {
         ))
     }
 
+    /// A wire edge with real vertices and a primary/mate pair, as in the p9 split tests.
+    fn wire_use(brep: &mut Brep, min: f64, max: f64) -> EdgeuseId {
+        let mut curve = Line::from_points(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 3);
+        let interval = Extent1d::from_raw(min, max);
+        curve.edit_parameterization(&interval).unwrap();
+        let v0 = brep.add_vertex(Vec3::ZERO).unwrap();
+        let v1 = brep.add_vertex(Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let edge = brep.add_edge(v0, v1).unwrap();
+        let record = brep.edge_mut(edge).unwrap();
+        record.interval = interval;
+        record.curve = Some(Curve::from(curve));
+        let mut primary = None;
+        for (vertex, orientation) in [(v0, OrientType::Same), (v1, OrientType::Opposite)] {
+            let vertexuse = brep
+                .add_vertexuse_record(Vertexuse {
+                    vertex: Some(vertex),
+                    ..Vertexuse::default()
+                })
+                .unwrap();
+            let edgeuse = brep
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    owner: crate::topology::EdgeuseOwner::Shell(None),
+                    vertexuse: Some(vertexuse),
+                    orientation,
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            brep.vertexuse_mut(vertexuse).unwrap().owner =
+                crate::topology::VertexuseOwner::Edgeuse(Some(edgeuse));
+            brep.vertex_mut(vertex).unwrap().vertexuses.push(vertexuse);
+            brep.edge_mut(edge).unwrap().edgeuses.push(edgeuse);
+            primary.get_or_insert(edgeuse);
+        }
+        primary.unwrap()
+    }
+
+    fn split_env<R>(
+        run: impl FnOnce(&mut NotifyEnv<'_>, &dyn Fn(EdgeId, i64) -> ObjectRef) -> R,
+    ) -> R {
+        let mut records = BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let key = |_: EntityRef| ObjectRef {
+            key: ObjectKey(1),
+            type_code: edge::TYPE,
+        };
+        let mut env = NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key,
+        };
+        run(&mut env, &|edge, kind| ObjectRef {
+            key: ObjectKey(1000 + u64::from(edge.index())),
+            type_code: kind,
+        })
+    }
+
+    fn sync(
+        executive: &mut OffsetExecutive,
+        original: Option<EdgeuseId>,
+        other: Option<EdgeuseId>,
+    ) -> Result<SynchronizedEdgeuses> {
+        let mut kernel = Kernel::default();
+        split_env(|env, curve_ref| {
+            executive.synchronize_offset_edgeuses(&mut kernel, original, other, env, curve_ref)
+        })
+    }
+
     fn assert_dependency<T: core::fmt::Debug>(result: Result<T>, symbol: &str, owner: &str) {
         match result.unwrap_err() {
             SolidError::Unported { upstream, unit } => {
@@ -1407,10 +1519,9 @@ mod tests {
 
     #[test]
     fn synchronization_null_original_and_empty_maps_do_not_need_a_brep() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         assert!(matches!(
-            executive.synchronize_offset_edgeuses(&kernel, None, None),
+            sync(&mut executive, None, None),
             Err(SolidError::Upstream {
                 code: crate::error::SM_ERR_NULL_POINTER,
                 ..
@@ -1418,16 +1529,13 @@ mod tests {
         ));
         let a = EdgeuseId::from_index(100);
         assert_eq!(
-            executive
-                .synchronize_offset_edgeuses(&kernel, Some(a), None)
-                .unwrap(),
+            sync(&mut executive, Some(a), None).unwrap(),
             SynchronizedEdgeuses::default()
         );
     }
 
     #[test]
     fn unmapped_first_side_sorts_but_does_not_filter_the_other_side() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         let mut brep = Brep::new();
         let high = add_use(&mut brep, 5.0, 6.0, 100.0);
@@ -1442,9 +1550,7 @@ mod tests {
         executive.relate_edgeuses(b, high);
         executive.relate_edgeuses(b, low);
         executive.set_offset_brep(brep);
-        let out = executive
-            .synchronize_offset_edgeuses(&kernel, Some(a), Some(b))
-            .unwrap();
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
         assert_eq!(out.edgeuses, vec![None, None]);
         assert_eq!(out.other_edgeuses, vec![Some(low), Some(high)]);
         assert!(out.gaps.is_empty() && out.other_gaps.is_empty());
@@ -1452,7 +1558,6 @@ mod tests {
 
     #[test]
     fn strict_ten_percent_removal_then_null_padding() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         let mut brep = Brep::new();
         let small = add_use(&mut brep, 0.0, 1.0, 1.0);
@@ -1461,9 +1566,7 @@ mod tests {
         executive.relate_edgeuses(original, small);
         executive.relate_edgeuses(original, large);
         executive.set_offset_brep(brep);
-        let out = executive
-            .synchronize_offset_edgeuses(&kernel, Some(original), None)
-            .unwrap();
+        let out = sync(&mut executive, Some(original), None).unwrap();
         assert_eq!(out.edgeuses, vec![Some(large)]);
         assert_eq!(out.other_edgeuses, vec![None]);
         // Filtering is local; correspondence cardinality is not rewritten.
@@ -1486,7 +1589,6 @@ mod tests {
 
     #[test]
     fn synchronization_second_side_is_filtered_before_its_empty_branch() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         let mut brep = Brep::new();
         let keep = add_use(&mut brep, 0.0, 2.0, 2.0);
@@ -1496,16 +1598,13 @@ mod tests {
         executive.relate_edgeuses(a, keep);
         executive.relate_edgeuses(b, zero);
         executive.set_offset_brep(brep);
-        let out = executive
-            .synchronize_offset_edgeuses(&kernel, Some(a), Some(b))
-            .unwrap();
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
         assert_eq!(out.edgeuses, vec![Some(keep)]);
         assert_eq!(out.other_edgeuses, vec![None]);
     }
 
     #[test]
     fn synchronization_filtered_first_side_still_leaves_second_unfiltered() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         let mut brep = Brep::new();
         let zero = add_use(&mut brep, 0.0, 0.0, 0.0);
@@ -1517,16 +1616,13 @@ mod tests {
         executive.relate_edgeuses(b, small);
         executive.relate_edgeuses(b, large);
         executive.set_offset_brep(brep);
-        let out = executive
-            .synchronize_offset_edgeuses(&kernel, Some(a), Some(b))
-            .unwrap();
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
         assert_eq!(out.edgeuses, vec![None, None]);
         assert_eq!(out.other_edgeuses, vec![Some(small), Some(large)]);
     }
 
     #[test]
     fn synchronization_matches_intervals_without_requiring_splits() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         let mut brep = Brep::new();
         let high_a = add_use(&mut brep, 1.0, 2.0, 1.0);
@@ -1542,9 +1638,7 @@ mod tests {
             executive.relate_edgeuses(b, offset);
         }
         executive.set_offset_brep(brep);
-        let out = executive
-            .synchronize_offset_edgeuses(&kernel, Some(a), Some(b))
-            .unwrap();
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
         assert_eq!(out.edgeuses, vec![Some(low_a), Some(high_a)]);
         assert_eq!(out.other_edgeuses, vec![Some(low_b), Some(high_b)]);
         assert!(out.gaps.is_empty() && out.other_gaps.is_empty());
@@ -1552,7 +1646,6 @@ mod tests {
 
     #[test]
     fn synchronization_extracts_gaps_in_sorted_order() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         let mut brep = Brep::new();
         let high = add_use(&mut brep, 4.0, 5.0, 1.0);
@@ -1564,9 +1657,7 @@ mod tests {
         executive.relate_edgeuses(a, low);
         executive.relate_edgeuses(b, other);
         executive.set_offset_brep(brep);
-        let out = executive
-            .synchronize_offset_edgeuses(&kernel, Some(a), Some(b))
-            .unwrap();
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
         assert!(out.edgeuses.is_empty() && out.other_edgeuses.is_empty());
         assert_eq!(out.gaps, vec![low, high]);
         assert_eq!(out.other_gaps, vec![other]);
@@ -1589,46 +1680,78 @@ mod tests {
     }
 
     #[test]
-    fn break_insertion_defers_only_for_strict_interior_outside_boundary_tolerance() {
+    fn break_insertion_skips_boundaries_and_continues_past_refused_splits() {
+        let mut kernel = Kernel::default();
         let mut brep = Brep::new();
-        let whole = add_use(&mut brep, 0.0, 1.0, 1.0);
+        let whole = wire_use(&mut brep, 0.0, 1.0);
         let equal = add_use(&mut brep, 0.0, 1.0, 1.0);
-        insert_breaks(&brep, &[equal], &[whole]).unwrap();
         let near = add_use(&mut brep, EFF_ZERO / 2.0, 1.0, 1.0);
-        insert_breaks(&brep, &[near], &[whole]).unwrap();
-        let exact = add_use(&mut brep, EFF_ZERO, 1.0, 1.0);
-        assert_dependency(
-            insert_breaks(&brep, &[exact], &[whole]),
-            "SmBrep::MakeVertexSplitEdge",
-            "topology.brep_p9",
-        );
         let max_break = add_use(&mut brep, 0.0, 0.5, 1.0);
-        assert_dependency(
-            insert_breaks(&brep, &[max_break], &[whole]),
-            "SmBrep::MakeVertexSplitEdge",
-            "topology.brep_p9",
-        );
+        let edges = brep.edges().len();
+        let insert = |brep: &mut Brep, kernel: &mut Kernel, uses: &[EdgeuseId]| {
+            let mut to_split = vec![whole];
+            let result = split_env(|env, curve_ref| {
+                insert_breaks(kernel, brep, uses, &mut to_split, env, curve_ref)
+            });
+            (result, to_split)
+        };
+        // Editing disabled (the B-rep constructor's default): every split is
+        // refused with SM_ERR, so the scan continues and nothing is split.
+        let (result, to_split) = insert(&mut brep, &mut kernel, &[equal, near, max_break]);
+        result.unwrap();
+        assert_eq!(to_split, vec![whole]);
+        assert_eq!(brep.edges().len(), edges);
+        // Interior by the boundary test but within MakeVertexSplitEdge's scaled zero:
+        // refused even with editing enabled.
+        brep.set_editing_enabled(true);
+        let exact = add_use(&mut brep, EFF_ZERO, 1.0, 1.0);
+        let edges = brep.edges().len();
+        let (result, to_split) = insert(&mut brep, &mut kernel, &[equal, near, exact]);
+        result.unwrap();
+        assert_eq!(to_split, vec![whole]);
+        assert_eq!(brep.edges().len(), edges);
+        assert!(!kernel.context.doing_boolean());
+        // A strict interior break splits, up to the B-rep's ADD notification.
+        let (result, _) = insert(&mut brep, &mut kernel, &[max_break]);
+        assert_dependency(result, "SmBrep::Notify", "topology.brep_p2");
     }
 
     #[test]
-    fn synchronization_reports_split_dependency_without_mutating_relations_or_arenas() {
-        let kernel = Kernel::default();
+    fn synchronization_without_editing_refuses_splits() {
         let mut executive = executive();
         let mut brep = Brep::new();
         let part = add_use(&mut brep, 0.25, 1.0, 1.0);
-        let whole = add_use(&mut brep, 0.0, 1.0, 1.0);
+        let whole = wire_use(&mut brep, 0.0, 1.0);
         let a = EdgeuseId::from_index(80);
         let b = EdgeuseId::from_index(81);
         executive.relate_edgeuses(a, part);
         executive.relate_edgeuses(b, whole);
         executive.set_offset_brep(brep);
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
+        assert_eq!(out.edgeuses, vec![Some(part)]);
+        assert_eq!(out.other_edgeuses, vec![Some(whole)]);
+        assert_eq!(executive.offset_brep().unwrap().edges().len(), 2);
+    }
+
+    #[test]
+    fn synchronization_reports_split_dependency_without_changing_relations() {
+        let mut executive = executive();
+        let mut brep = Brep::new();
+        let part = add_use(&mut brep, 0.25, 1.0, 1.0);
+        let whole = wire_use(&mut brep, 0.0, 1.0);
+        let a = EdgeuseId::from_index(80);
+        let b = EdgeuseId::from_index(81);
+        executive.relate_edgeuses(a, part);
+        executive.relate_edgeuses(b, whole);
+        brep.set_editing_enabled(true);
+        executive.set_offset_brep(brep);
         assert_dependency(
-            executive.synchronize_offset_edgeuses(&kernel, Some(a), Some(b)),
-            "SmBrep::MakeVertexSplitEdge",
-            "topology.brep_p9",
+            sync(&mut executive, Some(a), Some(b)),
+            "SmBrep::Notify",
+            "topology.brep_p2",
         );
         assert_eq!(executive.offset_edgeuse(a), Some(part));
-        assert_eq!(executive.offset_brep().unwrap().edges().len(), 2);
+        assert_eq!(executive.offset_edgeuse(b), Some(whole));
     }
 
     #[test]
@@ -1646,12 +1769,11 @@ mod tests {
 
     #[test]
     fn invalid_mapped_ids_return_errors_instead_of_panicking() {
-        let kernel = Kernel::default();
         let mut executive = executive();
         executive.relate_edgeuses(EdgeuseId::from_index(80), EdgeuseId::from_index(u32::MAX));
         executive.set_offset_brep(Brep::new());
         assert!(matches!(
-            executive.synchronize_offset_edgeuses(&kernel, Some(EdgeuseId::from_index(80)), None),
+            sync(&mut executive, Some(EdgeuseId::from_index(80)), None),
             Err(SolidError::NotFound { .. })
         ));
     }

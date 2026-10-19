@@ -61,7 +61,8 @@
 //!   (`topology.brep_p1`); `SmBrep::Notify`, `SetTolerance`, `sm_CheckAndFixUVTrimCurves`,
 //!   `RebuildUVTrimCurves` (`topology.brep_p2`); `MakeWireEdge`, `MakeWireEdgeVertex`
 //!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `GlueVertices`
-//!   (`topology.brep_p5`); `MakeShellVertex` (`topology.brep_p9`);
+//!   (`topology.brep_p5`); `MakeShellVertexTopology` (`topology.brep_p2`, reached
+//!   through `topology.brep_p9`'s `MakeShellVertex`);
 //!   `MakeTopologyFromData`, `TestClosureSplitRegion(edge)` (`topology.brep_p10`);
 //!   `SmFace::GetBrep`, `GetEdges`
 //!   (`topology.face_p4`); `SmMerge` (`boolean.merge_p2`); the curve constructor of
@@ -242,15 +243,12 @@ fn test_closure_split_region_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Re
 
 /// `MakeShellVertex(region, point, rpNewShell, rpNewVertex)`.
 fn make_shell_vertex(
-    _b: &mut Brep,
-    _region: RegionId,
-    _point: Point3,
+    b: &mut Brep,
+    region: RegionId,
+    point: Point3,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<(ShellId, VertexId)> {
-    // UNPORTED(topology.brep_p9): SmBrep::MakeShellVertex
-    Err(SolidError::unported(
-        "SmBrep::MakeShellVertex",
-        "topology.brep_p9",
-    ))
+    super::p9::make_shell_vertex(b, Some(region), point, env)
 }
 
 /// `MakeTopologyFromData(pBrepData, sAttributes, bMakeUVTrimCurves, bAddAnalytics,
@@ -650,6 +648,7 @@ pub fn make_face_with_curves(
     orientation: OrientType,
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<NewFace> {
     let FaceCurvesInput {
         loops,
@@ -891,7 +890,7 @@ pub fn make_face_with_curves(
             }
             let found_start = m.found;
             let start_vertex = if vertices.is_empty() {
-                let (_shell, v) = make_shell_vertex(b, region, start_pt)?;
+                let (_shell, v) = make_shell_vertex(b, region, start_pt, env)?;
                 vertices.push(v);
                 // (upstream assigns the new shell only when it already has one)
                 v
@@ -967,7 +966,7 @@ pub fn make_face_with_curves(
     // vertex loops
     let mut loop_vertices: Vec<VertexId> = Vec::new();
     for &p in &loop_points {
-        let (_shell, v) = make_shell_vertex(b, region, p)?;
+        let (_shell, v) = make_shell_vertex(b, region, p, env)?;
         loop_vertices.push(v);
     }
 
@@ -1363,6 +1362,7 @@ pub fn copy_faces(
     dest: &mut Brep,
     use_merge: bool,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<(Vec<FaceId>, bool)> {
     // pDestinationBrep->SetTolerance(GetTolerance()) = (tol, TRUE, TRUE): grow only
     brep_set_tolerance(dest, src.tolerance(), true, true)?;
@@ -1422,6 +1422,7 @@ pub fn copy_faces(
             OrientType::Same,
             None,
             this_face,
+            env,
         ) {
             Ok(made) => {
                 if let Some(nf) = made.face {
@@ -1670,7 +1671,15 @@ mod tests {
                 ..Region::default()
             })
             .unwrap();
-        let run = |b: &mut Brep, input: FaceCurvesInput, region| {
+        let mut records = std::collections::BTreeMap::new();
+        let mut attrs = AttributeStore::default();
+        let mut env = ed::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attrs,
+            context: None,
+            key_of: &key_of,
+        };
+        let mut run = |b: &mut Brep, input: FaceCurvesInput, region| {
             make_face_with_curves(
                 &k,
                 b,
@@ -1681,6 +1690,7 @@ mod tests {
                 OrientType::Same,
                 None,
                 &face_ref,
+                &mut env,
             )
         };
         // no curves
@@ -1769,8 +1779,18 @@ mod tests {
         );
         let mut src = Brep::new();
         let mut dest = Brep::new();
-        assert!(copy_faces(&k, &mut src, &[], &mut dest, false, &face_ref)
-            .unwrap_err()
-            .is_unported());
+        let mut records = std::collections::BTreeMap::new();
+        let mut attrs = AttributeStore::default();
+        let mut env = ed::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attrs,
+            context: None,
+            key_of: &key_of,
+        };
+        assert!(
+            copy_faces(&k, &mut src, &[], &mut dest, false, &face_ref, &mut env)
+                .unwrap_err()
+                .is_unported()
+        );
     }
 }

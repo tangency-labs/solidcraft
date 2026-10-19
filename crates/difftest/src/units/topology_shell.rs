@@ -139,8 +139,8 @@ mod ray_num3 {
 // This adapter supports exactly empty shape trees (harness-limited, see below). There are no geometry
 // handles to invent: every object-dependent accessor has an uninhabited input.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum NoRayObject {}
-struct EmptyRayWorld;
+pub(crate) enum NoRayObject {}
+pub(crate) struct EmptyRayWorld;
 impl solidcore::geom::solution_array::SolutionObject for NoRayObject {
     fn kind(&self) -> solidcore::geom::solution_array::ObjectKind {
         match *self {}

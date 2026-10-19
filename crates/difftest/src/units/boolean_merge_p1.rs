@@ -108,7 +108,7 @@ fn obj(k: u64, t: i64) -> ObjectRef {
 fn id<I: ArenaId>(v: Option<I>) -> i64 {
     v.map_or(-1, |v| i64::from(v.index()))
 }
-fn graph(b: &Brep, record: Vec<f64>) -> Output {
+pub(crate) fn graph(b: &Brep, record: Vec<f64>) -> Output {
     let mut ints = vec![
         b.regions().len() as i64,
         b.shells().len() as i64,
@@ -387,7 +387,13 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
                     records: &mut records,
                     attributes: &mut attrs,
                     source_key: &|_| obj(1, 16021),
-                    destination_key: &|_| obj(2, 16021),
+                    destination_key: &|e| match e {
+                        solidcore::EntityRef::Vertex(_) => obj(2, 16021),
+                        solidcore::EntityRef::Vertexuse(v) => {
+                            obj(100 + u64::from(v.index()), 16006)
+                        }
+                        _ => obj(200, 16001),
+                    },
                 },
                 Some(&mut context),
             )?;

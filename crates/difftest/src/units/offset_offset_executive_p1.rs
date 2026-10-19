@@ -1025,29 +1025,64 @@ fn rust_config(input: &Config) -> HResult<Output> {
         .ints("relate_statuses", statuses))
 }
 
+// Notification identities for the offset B-rep. No runner record observes them;
+// they only keep split notifications distinct per entity and curve.
+fn notify_key(entity: solidcore::error::EntityRef) -> ObjectRef {
+    match entity {
+        solidcore::error::EntityRef::Edge(id) => ObjectRef {
+            key: ObjectKey(100 + u64::from(id.index())),
+            type_code: solidcore::topology::edge::TYPE,
+        },
+        solidcore::error::EntityRef::Vertex(id) => ObjectRef {
+            key: ObjectKey(200 + u64::from(id.index())),
+            type_code: solidcore::topology::vertex::TYPE,
+        },
+        _ => ObjectRef {
+            key: ObjectKey(0),
+            type_code: 0,
+        },
+    }
+}
+fn curve_key(edge: EdgeId, type_code: i64) -> ObjectRef {
+    ObjectRef {
+        key: ObjectKey(300 + u64::from(edge.index())),
+        type_code,
+    }
+}
+
+// The shim's measured_traversal: GetEdges order without the closing support edges,
+// each edge's uses in its list order (primary first).
+fn measured_traversal(
+    brep: &Brep,
+    supports: &[EdgeId],
+) -> RResult<(Vec<EdgeId>, Vec<EdgeuseId>)> {
+    let edges: Vec<EdgeId> = solidcore::topology::brep::p1::edges(brep, None)?
+        .into_iter()
+        .filter(|edge| !supports.contains(edge))
+        .collect();
+    let mut uses = Vec::new();
+    for &edge in &edges {
+        uses.extend_from_slice(&brep.edge(edge)?.edgeuses);
+    }
+    Ok((edges, uses))
+}
+
 fn rust_sync(input: &Synchronize) -> RResult<Output> {
-    let kernel = Kernel::default();
+    let mut kernel = Kernel::default();
     let mut original = Brep::new();
     let edge_a = unit_wire(&mut original, 0.0)?;
     let edge_b = unit_wire(&mut original, 1.0)?;
     let a = primary(&original, edge_a)?;
     let b = primary(&original, edge_b)?;
     let mut offset = Brep::new();
-    let mut measured = Vec::new();
+    let mut supports = Vec::new();
     let mut fixtures = Vec::new();
     for edge in input.first.iter().chain(&input.second) {
-        let (edge, _) = loop_fixture(&mut offset, edge)?;
-        measured.push(edge);
+        let (edge, support) = loop_fixture(&mut offset, edge)?;
+        supports.push(support);
         fixtures.push(primary(&offset, edge)?);
     }
-    let before: Vec<_> = measured
-        .iter()
-        .map(|&edge| offset.edge(edge).map(|edge| edge.edgeuses.clone()))
-        .collect::<solidcore::Result<Vec<_>>>()
-        .map_err(setup)?
-        .into_iter()
-        .flatten()
-        .collect();
+    let (_, before) = measured_traversal(&offset, &supports)?;
     let mut executive = OffsetExecutive::new(OffsetOperation::SolidOffset, 1.0, 1e-6);
     for (index, &use_id) in fixtures.iter().enumerate() {
         if index < input.first.len() {
@@ -1064,22 +1099,37 @@ fn rust_sync(input: &Synchronize) -> RResult<Output> {
     };
     let first_lookup = lookup(first);
     let second_lookup = lookup(second);
-    let (status, synchronized) =
-        operation(executive.synchronize_offset_edgeuses(&kernel, first, second))?;
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let mut notifications = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &notify_key,
+    };
+    let (status, synchronized) = operation(executive.synchronize_offset_edgeuses(
+        &mut kernel,
+        first,
+        second,
+        &mut notifications,
+        &curve_key,
+    ))?;
     let offset = executive
         .offset_brep()
         .ok_or_else(|| bad("synchronize lost its offset B-rep"))?;
+    // As the shim: the records use a second traversal, which sees split edges.
+    let (measured, after) = measured_traversal(offset, &supports)?;
     let mut output = Output::new()
         .ints("operation", vec![status, first_lookup, second_lookup])
         .ints(
             "fixture_edgeuses",
             fixtures
                 .iter()
-                .map(|&eu| id(&before, Some(eu)))
+                .map(|&eu| id(&after, Some(eu)))
                 .collect::<Vec<_>>(),
         )
-        .int("edgeuse_count", before.len() as i64);
-    for (index, &use_id) in before.iter().enumerate() {
+        .int("edgeuse_count", after.len() as i64);
+    for (index, &use_id) in after.iter().enumerate() {
         let edge_id = offset
             .edgeuse(use_id)
             .map_err(setup)?
@@ -1129,7 +1179,7 @@ fn rust_sync(input: &Synchronize) -> RResult<Output> {
             key,
             values
                 .into_iter()
-                .map(|eu| id(&before, eu))
+                .map(|eu| id(&after, eu))
                 .collect::<Vec<_>>(),
         );
     }
@@ -1141,7 +1191,7 @@ fn rust_sync(input: &Synchronize) -> RResult<Output> {
             key,
             values
                 .into_iter()
-                .map(|eu| id(&before, Some(eu)))
+                .map(|eu| id(&after, Some(eu)))
                 .collect::<Vec<_>>(),
         );
     }
@@ -1233,7 +1283,7 @@ fn rust_extend(input: &Extension) -> RResult<Output> {
 }
 
 fn rust_probe(branch: Probe, tolerance: f64) -> RResult<Output> {
-    let kernel = Kernel::default();
+    let mut kernel = Kernel::default();
     let mut original = Brep::new();
     let mut executive = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.25, tolerance);
     executive.set_offset_brep(Brep::new());
@@ -1348,13 +1398,14 @@ fn rust_probe(branch: Probe, tolerance: f64) -> RResult<Output> {
                 key_of: &key_of,
             };
             executive.build_offset_of_edgeuses(
-                &kernel,
+                &mut kernel,
                 &original,
                 first,
                 other,
                 MarkType::Mark,
                 &mut notifications,
                 &key_of,
+                &curve_key,
             )
         }
     };
@@ -2164,7 +2215,7 @@ mod tests {
     }
 
     #[test]
-    fn genuine_split_and_probe_calls_propagate_the_actual_dependency() {
+    fn refused_split_completes_and_probe_propagates_the_actual_dependency() {
         let input = Inputs::Synchronize(Synchronize {
             first: vec![EdgeIn {
                 curve: CurveIn::Line {
@@ -2185,8 +2236,10 @@ mod tests {
             null_original: false,
             null_other: false,
         });
+        // The fixture B-rep keeps the constructor's editing state (FALSE), as the
+        // shim's: MakeVertexSplitEdge refuses and synchronization completes.
         let output = Runner.run_rust(&case(&input)).unwrap();
-        assert_eq!(output.deferred.unwrap().unit, "topology.brep_p9");
+        assert!(output.deferred.is_none() && output.error.is_none());
         let output = Runner
             .run_rust(&case(&Inputs::Probe {
                 branch: Probe::ReplaceEmpty,
@@ -2335,7 +2388,7 @@ mod tests {
         assert!(normalize_sync_ties(missing).is_err());
         for output in [
             Output::err("operation failure"),
-            Output::deferred("topology.brep_p9", "SplitEdge"),
+            Output::deferred("topology.brep_p2", "SmBrep::Notify"),
             Output::rejected("native fixture constructor status_1007"),
         ] {
             let output = output.int("edgeuse_count", -2);

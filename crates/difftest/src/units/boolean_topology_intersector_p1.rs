@@ -758,7 +758,6 @@ struct Two {
     breps: [Option<Brep>; 2],
     curves: Vec<SmCurve>,
     extra: Vec<SmCurve>,
-    editing: [bool; 2],
     env: [NotifyEnv; 2],
     /// Each B-rep's cache (`SmBrep::GetBrepCache`), built on first use as the C++
     /// topology solver builds it on demand.
@@ -786,7 +785,6 @@ impl Two {
             breps: [Some(a), b],
             curves: Vec::new(),
             extra: Vec::new(),
-            editing: [false, false],
             env,
             caches: [std::cell::OnceCell::new(), std::cell::OnceCell::new()],
         }
@@ -1119,7 +1117,112 @@ impl ProtoTopology<H> for Two {
     }
 }
 
+pub(crate) fn p9_entity_ref(entity: EntityRef) -> ObjectRef {
+    let (kind, index) = match entity {
+        EntityRef::Brep(v) => (16011, v.index()),
+        EntityRef::Shell(v) => (16013, v.index()),
+        EntityRef::Face(v) => (16002, v.index()),
+        EntityRef::Loop(v) => (16003, v.index()),
+        EntityRef::Edge(v) => (16016, v.index()),
+        EntityRef::Vertex(v) => (16021, v.index()),
+        EntityRef::Region(v) => (16012, v.index()),
+        EntityRef::Faceuse(v) => (16022, v.index()),
+        EntityRef::Loopuse(v) => (16004, v.index()),
+        EntityRef::Edgeuse(v) => (16005, v.index()),
+        EntityRef::Vertexuse(v) => (16006, v.index()),
+    };
+    ObjectRef {
+        key: ObjectKey((kind as u64) << 32 | u64::from(index)),
+        type_code: kind,
+    }
+}
+
 impl IntersectorBrep<H> for Two {
+    fn make_vertex_loop(&mut self, brep: H, face: H, point: Point3) -> solidcore::Result<(H, H)> {
+        if brep.kind != K_BREP || face.kind != K_FACE || brep.b != face.b {
+            return Err(invalid("vertex loop owner mismatch"));
+        }
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        let b = self
+            .breps
+            .get_mut(slot)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("absent B-rep"))?;
+        let store = self
+            .env
+            .get_mut(slot)
+            .ok_or_else(|| invalid("bad notification owner"))?;
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut store.records,
+            attributes: &mut store.attributes,
+            context: None,
+            key_of: &p9_entity_ref,
+        };
+        let (loop_, vertex) = solidcore::topology::brep::p9::make_vertex_loop(
+            b,
+            fid(face),
+            point,
+            OrientType::Opposite,
+            &mut env,
+        )?;
+        Ok((
+            hd(brep.b, K_LOOP, loop_.index()),
+            hd(brep.b, K_VERTEX, vertex.index()),
+        ))
+    }
+    fn make_vertex_split_edge(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        edge: H,
+        parameter: f64,
+    ) -> solidcore::Result<(H, H, H)> {
+        if brep.kind != K_BREP || edge.kind != K_EDGE || brep.b != edge.b {
+            return Err(invalid("split edge owner mismatch"));
+        }
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        let b = self
+            .breps
+            .get_mut(slot)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("absent B-rep"))?;
+        let store = self
+            .env
+            .get_mut(slot)
+            .ok_or_else(|| invalid("bad notification owner"))?;
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut store.records,
+            attributes: &mut store.attributes,
+            context: None,
+            key_of: &p9_entity_ref,
+        };
+        let out = solidcore::topology::brep::p9::make_vertex_split_edge(
+            k,
+            b,
+            eid(edge),
+            parameter,
+            &mut env,
+            &|e, kind| ObjectRef {
+                key: ObjectKey(((kind as u64) << 32) | u64::from(e.index())),
+                type_code: kind,
+            },
+        )?;
+        if !out.split {
+            return Err(SolidError::sm_err("difftest::topology_intersector::split"));
+        }
+        let [a, z] = out
+            .edges
+            .ok_or_else(|| invalid("successful split without edges"))?;
+        let v = out
+            .vertex
+            .ok_or_else(|| invalid("successful split without vertex"))?;
+        Ok((
+            hd(brep.b, K_EDGE, a.index()),
+            hd(brep.b, K_EDGE, z.index()),
+            hd(brep.b, K_VERTEX, v.index()),
+        ))
+    }
+
     fn brep_edges(&self, brep: H) -> solidcore::Result<Vec<H>> {
         let b = self.brep_r(brep)?;
         Ok(bp1::edges(b, None)?
@@ -1376,13 +1479,16 @@ impl IntersectorBrep<H> for Two {
     }
     fn set_editing_enabled(&mut self, brep: H, enabled: bool) -> solidcore::Result<bool> {
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
-        if brep.kind != K_BREP || self.breps.get(slot).and_then(Option::as_ref).is_none() {
+        if brep.kind != K_BREP {
             return Err(invalid("not a B-rep handle"));
         }
-        let old = self.editing.get(slot).copied().unwrap_or(false);
-        if let Some(e) = self.editing.get_mut(slot) {
-            *e = enabled;
-        }
+        let b = self
+            .breps
+            .get_mut(slot)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("not a B-rep handle"))?;
+        let old = b.editing_enabled();
+        b.set_editing_enabled(enabled);
         Ok(old)
     }
     fn topology_objects(&self) -> &dyn TopologyObjects<H> {
@@ -2932,7 +3038,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                     b.ok_or_else(|| harness("edge"))?,
                 );
                 if let Some(r) = status(
-                    ti::test_and_split_two_edges(&k, &mut two, a, b, *tol),
+                    ti::test_and_split_two_edges(&mut k, &mut two, a, b, *tol),
                     &mut o,
                 )? {
                     o.extend([
@@ -3005,7 +3111,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                     o.push(NULL_DEREF);
                     continue;
                 }
-                let r = ti.edge_face_intersect(&k, &mut two, &es, &fs, *manifold, *ignore);
+                let r = ti.edge_face_intersect(&mut k, &mut two, &es, &fs, *manifold, *ignore);
                 let Some(r) = status(r, &mut o)? else {
                     continue;
                 };

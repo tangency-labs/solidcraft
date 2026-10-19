@@ -46,8 +46,10 @@
 //!   [`SolidError::InvalidInput`] there. Its rescan of a vertex after gluing a closer
 //!   one is bounded by `4 * (n1 + n2) + 16` passes (each glue empties a slot, so
 //!   upstream needs at most `n1 + 2 * n2`).
-//! - `SmVertex::SetPoint`'s change notification runs on a record set local to the call
-//!   (no attributes are attached by the stitch).
+//! - `SmVertex::SetPoint`'s and `SmBrep::MakeVertexSplitEdge`'s notifications run on
+//!   record sets local to the call (no attributes are attached by the stitch). The
+//!   split's refusal (`SM_ERR` with the nearby endpoint) is reported as `SM_ERR`, the
+//!   only distinction its caller makes.
 //! - Uninitialised reads upstream: `DoSimpleFaceStitch` ignores `CurveMaxDistanceBetween`'s
 //!   status (`SE`) and reads the unset `dDistToCurve` after a failure (the port reads 0).
 //! - `UnifyNormals` ignores `NormalizedEvaluate`'s status and goes on with `sPnt` / `sDir`
@@ -55,7 +57,7 @@
 //!   writes them only after its last status), [`Point3::UNDEF`] / [`Vec3::UNDEF`] here.
 //! - The calls into `SmBrep::GlueVertices`, `RemoveFaces`, `StitchAndOrient`
 //!   (`topology.brep_p5`), `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
-//!   (`topology.brep_p3`), `MakeVertexSplitEdge` (`topology.brep_p9`), `Notify`
+//!   (`topology.brep_p3`), `Notify`
 //!   (`topology.brep_p2`), `CalculateBoundingBox` (`query.brep`), `SmFace::GetBrep`,
 //!   `GetVertices`, `GetEdges` (`topology.face_p4`), `SmMerge::MergeAddedFace`
 //!   (`boolean.merge_p2`) and `SmStitch::DoStitching`, `StitchIntoSolid`,
@@ -546,7 +548,7 @@ pub struct EdgeSplitTest {
 /// `SM_ERR_NULL_POINTER` for an edge without curve or a split without new vertex;
 /// those of the drop (`SER`).
 pub fn test_and_split_edge(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     e: EdgeId,
     point: Point3,
@@ -590,7 +592,7 @@ pub fn test_and_split_edge(
     }
 
     // Must have a point which can split the Edge.
-    let (e1, e2, new_v) = match make_vertex_split_edge(b, e, dropped.parameter) {
+    let (e1, e2, new_v) = match make_vertex_split_edge(k, b, e, dropped.parameter) {
         Ok(r) => r,
         Err(err) if err.is_unported() => return Err(err),
         Err(_) => {
@@ -2031,18 +2033,52 @@ pub(crate) fn squeeze_edge_to(b: &mut Brep, e: Option<EdgeId>, keep: VertexId) -
     ))
 }
 
-/// `SmBrep::MakeVertexSplitEdge(edge, t, rpE1, rpE2, rpNewV)` (unit `topology.brep_p9`).
+/// `SmBrep::MakeVertexSplitEdge(edge, t, rpE1, rpE2, rpNewV)` (unit `topology.brep_p9`),
+/// with its notifications on records local to the call (as [`set_point`]). A refused
+/// split (`SM_ERR` with the nearby endpoint) is an `SM_ERR` error: the caller only
+/// tests for `SM_SUCCESS`.
 pub(crate) fn make_vertex_split_edge(
+    k: &mut Kernel,
     b: &mut Brep,
     e: EdgeId,
     t: f64,
 ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-    let _ = (b, e, t);
-    // UNPORTED(topology.brep_p9): SmBrep::MakeVertexSplitEdge
-    Err(SolidError::unported(
-        "SmBrep::MakeVertexSplitEdge",
-        "topology.brep_p9",
-    ))
+    let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = |entity: EntityRef| match entity {
+        EntityRef::Edge(id) => arena_identity(CacheObject::Edge(id)),
+        EntityRef::Face(id) => arena_identity(CacheObject::Face(id)),
+        EntityRef::Vertex(id) => arena_identity(CacheObject::Vertex(id)),
+        EntityRef::Edgeuse(id) => local_identity(crate::topology::edgeuse::p1::TYPE, id.index()),
+        EntityRef::Vertexuse(id) => local_identity(vertexuse::TYPE, id.index()),
+        EntityRef::Loopuse(id) => local_identity(crate::topology::loopuse::TYPE, id.index()),
+        _ => local_identity(crate::topology::topology::TYPE, 0),
+    };
+    // The kernel's context is the split's own `k`; no separate object context.
+    let mut env = edge::NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let out =
+        crate::topology::brep::p9::make_vertex_split_edge(k, b, e, t, &mut env, &|edge, kind| {
+            local_identity(kind, edge.index())
+        })?;
+    if !out.split {
+        return Err(SolidError::sm_err(OP));
+    }
+    let [e1, e2] = out.edges.ok_or_else(|| ner("split without edges"))?;
+    Ok((Some(e1), Some(e2), out.vertex))
+}
+
+/// A call-local identity: the type code above the index, outside the arena identities'
+/// key space (bare indices).
+fn local_identity(type_code: i64, index: u32) -> ObjectRef {
+    ObjectRef {
+        type_code,
+        key: ObjectKey((type_code.unsigned_abs() << 32) | u64::from(index)),
+    }
 }
 
 /// `SmBrep::Notify(SM_NO_PRE_EDIT, this, NULL, NULL)` (unit `topology.brep_p2`).
