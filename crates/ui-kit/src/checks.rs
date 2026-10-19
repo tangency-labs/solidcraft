@@ -51,7 +51,17 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     }
 }
 
-/// Checkboxes only via crate::checkbox. Labels, accessibility, keyboard and response stay native.
+/// Feature forms reserve Enter for OK. Other controls retain native activation.
+pub(super) fn activated(response: &Response) -> bool {
+    if super::fields::feature_form_active(&response.ctx) && response.has_focus() && response.ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        response.surrender_focus();
+        false
+    } else {
+        response.clicked()
+    }
+}
+
+/// Checkboxes only via crate::checkbox; label and box share one hit target.
 pub fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
     checkbox_indeterminate(ui, label, value, false)
 }
@@ -88,9 +98,9 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
         (t.space_14 + icon_width + gap + galley.size().x).max(ui.spacing().interact_size.y).min(super::metrics::dimension(ui.available_width()));
     let height = ui.spacing().interact_size.y.max(t.space_14).max(galley.size().y).max(if icon.is_empty() { 0.0 } else { t.space_16 });
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
-    super::settings_search::remember(ui, label, rect);
-    super::settings_search::follow(ui, label, rect);
-    if response.clicked() {
+    crate::settings_search::remember(ui, label, rect);
+    crate::settings_search::follow(ui, label, rect);
+    if activated(&response) {
         *value = mixed || !*value;
         response.mark_changed();
     }
