@@ -62,7 +62,6 @@
 //!   `RebuildUVTrimCurves` (`topology.brep_p2`); `MakeWireEdge`, `MakeWireEdgeVertex`
 //!   (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`); `GlueVertices`
 //!   (`topology.brep_p5`); `MakeShellVertex` (`topology.brep_p9`);
-//!   `MakeTopologyFromData`, `TestClosureSplitRegion(edge)` (`topology.brep_p10`);
 //!   `SmFace::Notify`, `SetTolerance`,
 //!   `CreateUVTrimCurves` (`topology.face_p3`); `SmFace::GetBrep`, `GetEdges`
 //!   (`topology.face_p4`); `SmMerge` (`boolean.merge_p2`); the curve constructor of
@@ -73,7 +72,9 @@
 //!   upstream interval loop around them is ported (`GetSize() != 1` skips before the
 //!   second merge, `SM_ERR` after it, `SE(SM_ERR)` for a middle not on an edge).
 //!   `SmShell::IsInnerShell` (merged shells) calls `topology.shell`'s port;
-//!   `MakeFaceTopology` and `TestClosureSplitRegion(faceuse)` call `topology.brep_p6`'s.
+//!   `MakeFaceTopology` and `TestClosureSplitRegion(faceuse)` call `topology.brep_p6`'s;
+//!   `MakeTopologyFromData` and `TestClosureSplitRegion(edge)` call
+//!   `topology.brep_p10`'s (`ReadFromFile` takes that unit's [`TopologyEnv`]).
 //!   That `MakeFaceTopology` names the face for its surface's owner before the face
 //!   exists, so it gets the key `this_face` gives the next face id (arenas only append);
 //!   it builds the face on a copy of the surface, which `MakeFace` then replaces with
@@ -103,6 +104,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::InValueType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::brep::p10::{self, MakeTopologyOptions, TopologyEnv};
 use crate::topology::brep::p6;
 use crate::topology::brep_data::BrepData;
 use crate::topology::database_io::FileType;
@@ -232,13 +234,10 @@ fn glue_vertices(_b: &mut Brep, _v1: VertexId, _v2: VertexId) -> Result<()> {
     ))
 }
 
-/// `TestClosureSplitRegion(TRUE, edge, aNewShells, aNewRegions)` (status ignored).
-fn test_closure_split_region_edge(_b: &mut Brep, _e: EdgeId) -> Result<()> {
-    // UNPORTED(topology.brep_p10): SmBrep::TestClosureSplitRegion
-    Err(SolidError::unported(
-        "SmBrep::TestClosureSplitRegion",
-        "topology.brep_p10",
-    ))
+/// `TestClosureSplitRegion(TRUE, edge, aNewShells, aNewRegions)` (unit
+/// `topology.brep_p10`; status ignored by the caller).
+fn test_closure_split_region_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    p10::test_closure_split_region(k, b, true, e).map(|_| ())
 }
 
 /// `MakeShellVertex(region, point, rpNewShell, rpNewVertex)`.
@@ -255,21 +254,36 @@ fn make_shell_vertex(
 }
 
 /// `MakeTopologyFromData(pBrepData, sAttributes, bMakeUVTrimCurves, bAddAnalytics,
-/// bForceSameTol)` with the defaults `bCheckUVCurves = FALSE`, `bAlwaysHeal = FALSE`,
-/// `bHealerIsEnabled = TRUE` (`ReadFromFile` passes an empty local `sAttributes`).
+/// bForceSameTol)` (unit `topology.brep_p10`) with the defaults `bCheckUVCurves =
+/// FALSE`, `bAlwaysHeal = FALSE`, `bHealerIsEnabled = TRUE`. `ReadFromFile` passes an
+/// empty local `sAttributes`, so the records' attribute indices refer to nothing.
 fn make_topology_from_data(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _data: &mut BrepData,
-    _make_uv_trim_curves: bool,
-    _add_analytics: bool,
-    _force_same_tol: bool,
+    k: &mut Kernel,
+    b: &mut Brep,
+    data: &mut BrepData,
+    env: &mut TopologyEnv<'_>,
+    make_uv_trim_curves: bool,
+    add_analytics: bool,
+    force_same_tol: bool,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p10): SmBrep::MakeTopologyFromData
-    Err(SolidError::unported(
-        "SmBrep::MakeTopologyFromData",
-        "topology.brep_p10",
-    ))
+    // SmTArray<SmAttribute*> sAttributes; (empty)
+    let saved = std::mem::take(&mut env.all_attributes);
+    let r = p10::make_topology_from_data(
+        k,
+        b,
+        data,
+        env,
+        MakeTopologyOptions {
+            make_uv_trim_curves,
+            add_analytics,
+            force_same_tol,
+            check_uv_trim_curves: false,
+            always_heal: false,
+            healer_enabled: true,
+        },
+    );
+    env.all_attributes = saved;
+    r
 }
 
 /// `SmFace::Notify(op, data1, data2, data3)` on face `f` (`None` for a null datum or for
@@ -427,23 +441,29 @@ fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellI
 // ---- ReadFromFile ---------------------------------------------------------------------------
 
 /// `ReadFromFile`: reads one B-rep from the contents of a database file of `file_type`
-/// into `b`, then checks and fixes its UV trim curves, or rebuilds them with
-/// `rebuild_uv_trim_curves`.
+/// into `b` (a B-rep as `SmBrep()` makes it: see
+/// [`Brep::new_with_infinite_region`]), then checks and fixes its UV trim curves, or
+/// rebuilds them with `rebuild_uv_trim_curves`. `env` names the new topology objects and
+/// receives their records and the attributes of the geometry copies (its
+/// `all_attributes` is not used: upstream passes an empty array).
 ///
 /// # Errors
 ///
-/// Those of [`BrepData::read_from_file`]; [`SolidError::Unported`]
-/// (`MakeTopologyFromData`, `sm_CheckAndFixUVTrimCurves`, `RebuildUVTrimCurves`).
+/// Those of [`BrepData::read_from_file`] and
+/// [`p10::make_topology_from_data`]; [`SolidError::Unported`]
+/// (`sm_CheckAndFixUVTrimCurves`, `RebuildUVTrimCurves`, and the callees of
+/// `MakeTopologyFromData`).
 pub fn read_from_file(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     data: Vec<u8>,
     file_type: FileType,
     rebuild_uv_trim_curves_flag: bool,
+    env: &mut TopologyEnv<'_>,
 ) -> Result<()> {
     let mut brep_data = BrepData::read_from_file(k, data, file_type)?;
     // MakeTopologyFromData(pBrepData, sAttributes, FALSE, TRUE, TRUE)
-    make_topology_from_data(k, b, &mut brep_data, false, true, true)?;
+    make_topology_from_data(k, b, &mut brep_data, env, false, true, true)?;
     drop(brep_data);
 
     // check the UV trim curves unless they are rebuilt (statuses ignored)
@@ -1311,7 +1331,7 @@ pub fn glue_edges_general(
             new_region = attempt.region;
         }
         if ed::is_spine(b, surv)? && new_region.is_none() {
-            ignore_status(test_closure_split_region_edge(b, surv))?;
+            ignore_status(test_closure_split_region_edge(k, b, surv))?;
         }
     }
     Ok(())
@@ -1727,9 +1747,20 @@ mod tests {
 
     #[test]
     fn read_errors_and_deferral() {
-        let k = Kernel::default();
-        let mut b = Brep::new();
-        assert!(read_from_file(&k, &mut b, Vec::new(), FileType::Ascii, false).is_err());
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let mut store = AttributeStore::new();
+        let mut records = std::collections::BTreeMap::new();
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1,
+        };
+        assert!(
+            read_from_file(&mut k, &mut b, Vec::new(), FileType::Ascii, false, &mut env).is_err()
+        );
         let mut src = Brep::new();
         let mut dest = Brep::new();
         assert!(copy_faces(&k, &mut src, &[], &mut dest, false, &face_ref)

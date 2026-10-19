@@ -26,7 +26,10 @@
 //! `cpp-guard:null-surface`
 //! (`MergeSelfIntersectionCurves` on a face without surface).
 //!
-//! **Deferred.** Every read that gets past `SmBrepData::ReadFromFile`, every face made
+//! **Deferred.** Every read that gets past `SmBrepData::ReadFromFile` (it now runs
+//! `MakeTopologyFromData` of `topology.brep_p10` on a B-rep with the infinite region
+//! and defers later: `sm_CheckAndFixUVTrimCurves`, analytic copies, `HealBrep`'s
+//! callees), every face made
 //! (`MakeShellVertex`, `MakeFaceTopology`, `GetInfiniteRegion`), every glue past its
 //! early returns, every copy (`SmBrep::SetTolerance`). The comparisons are the read
 //! errors of damaged files, the input errors of the face makers, the null-surface status
@@ -56,7 +59,7 @@ use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
-use solidcore::topology::brep::p7;
+use solidcore::topology::brep::{p10, p7};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::edge as ed;
 use solidcore::topology::{Brep, EdgeId, FaceId, Region};
@@ -631,6 +634,28 @@ fn key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
+/// A distinct identity for every topology object `ReadFromFile` builds (geometry copies
+/// are keyed from `1 << 50` up).
+fn read_key_of(e: EntityRef) -> ObjectRef {
+    let (type_code, kind, i) = match e {
+        EntityRef::Brep(x) => (16011, 0, x.index()),
+        EntityRef::Region(x) => (16012, 1, x.index()),
+        EntityRef::Shell(x) => (16013, 2, x.index()),
+        EntityRef::Faceuse(x) => (16022, 3, x.index()),
+        EntityRef::Face(x) => (16002, 4, x.index()),
+        EntityRef::Loopuse(x) => (16004, 5, x.index()),
+        EntityRef::Loop(x) => (16003, 6, x.index()),
+        EntityRef::Edgeuse(x) => (16005, 7, x.index()),
+        EntityRef::Edge(x) => (16016, 8, x.index()),
+        EntityRef::Vertexuse(x) => (16006, 9, x.index()),
+        EntityRef::Vertex(x) => (16021, 10, x.index()),
+    };
+    ObjectRef {
+        type_code,
+        key: ObjectKey((kind + 1) << 40 | u64::from(i)),
+    }
+}
+
 fn this_face(f: FaceId) -> ObjectRef {
     key_of(EntityRef::Face(f))
 }
@@ -744,8 +769,18 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                     "SmBrep::MakeTopologyFromData",
                 ))));
             }
-            let mut b = Brep::new();
-            let r = p7::read_from_file(k, &mut b, bytes, FileType::Ascii, *rebuild);
+            // a B-rep as `new SmBrep(ctx)` makes it (with the infinite region)
+            let mut b = Brep::new_with_infinite_region().map_err(hfail)?;
+            let mut records = BTreeMap::new();
+            let mut attrs = AttributeStore::default();
+            let mut env = p10::TopologyEnv {
+                all_attributes: &[],
+                attributes: &mut attrs,
+                key_of: &read_key_of,
+                records: &mut records,
+                next_key: 1u64 << 50,
+            };
+            let r = p7::read_from_file(k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env);
             let mut o = vec![status(&r)?];
             if r.is_ok() {
                 o.extend(brep_counts(&b));

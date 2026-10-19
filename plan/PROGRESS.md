@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` and `reports/difftest/*.json` by `harness/plan/progress.py`; do not edit by hand.
 
-**210 / 261 units ported** (113 green, 97 partial), **296,647 / 387,903 upstream lines (76.5%)**. 41 claimed, 0 blocked, 10 todo.
+**211 / 261 units ported** (114 green, 97 partial), **298,303 / 387,903 upstream lines (76.9%)**. 41 claimed, 0 blocked, 9 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -16,7 +16,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 - [ ] `blend.fillet_executive_p1` (2063 lines) — missing: `blend.fillet_executive_p3`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_standard_solver_p1` +3 more
 - [ ] `blend.fillet_corner_p1` (1971 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_standard_solver_p1`
-- [ ] `blend.fillet_geom_p4` (2074 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`
 - [ ] `blend.fillet_standard_solver_p2` (1989 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_solver_p3` +1 more
 - [ ] `blend.fillet_corner_p3` (1697 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`
 - [ ] `blend.fillet_executive_p2` (1152 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_standard_solver_p1` +1 more
@@ -27,7 +26,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 ## In progress
 
-- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.surface_drop_lib_p3` (2062 lines) — in progress: #136 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p4` (2022 lines) — in progress: #137 @froglemonade2 (ready for review)
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
@@ -66,6 +64,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_solver_p3` (1112 lines) — in progress: #236 @denelson1-dot (ready for review)
 - [ ] 🔨 `primitive.api_primitives` (885 lines) — in progress: #160 @bherbruck (ready for review)
 - [ ] 🔨 `blend.fillet_geom_p3` (1032 lines) — in progress: #242 @denelson1-dot (ready for review)
+- [ ] 🔨 `blend.fillet_geom_p4` (2074 lines) — in progress: #252 @bherbruck (draft)
 - [ ] 🔨 `blend.fillet_geom_p6` (1813 lines) — in progress: #247 @brett19 (ready for review)
 - [ ] 🔨 `offset.offset_executive_p2` (1846 lines) — in progress: #201 @altvnk (ready for review)
 
@@ -182,7 +181,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [x] ✅ `curve.curve_p9` (1783 lines) — green, 3093 cases
 
-### surface (39/40)
+### surface (40/40)
 
 - [x] ✅ `surface.volume_p1` (2014 lines) — green, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
@@ -202,7 +201,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_cache_p2` (1245 lines) — partial, 905 cases
 - [x] ✅ `surface.torus` (1180 lines) — green, 563 cases
 - [x] ✅ `surface.unbend_volume` (920 lines) — green, 1874 cases
-- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #153 @bherbruck (ready for review)
+- [x] ✅ `surface.cone_p2` (1656 lines) — green, 1550 cases
 - [ ] 🟡 `surface.surf_of_revolution_p2` (1369 lines) — partial, 1167 cases
 - [ ] 🟡 `surface.surface_cache_p3` (1703 lines) — partial, 600 cases
 - [ ] 🟡 `surface.volume_p2` (1490 lines) — partial, 11220 cases
@@ -364,7 +363,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_solver_p2` (1939 lines) — in progress: #249 @froglemonade2 (draft)
 - [ ] 🔨 `blend.fillet_solver_p3` (1112 lines) — in progress: #236 @denelson1-dot (ready for review)
 - [ ] 🔨 `blend.fillet_geom_p3` (1032 lines) — in progress: #242 @denelson1-dot (ready for review)
-- [ ] ⏳ `blend.fillet_geom_p4` (2074 lines) — waiting
+- [ ] 🔨 `blend.fillet_geom_p4` (2074 lines) — in progress: #252 @bherbruck (draft)
 - [ ] 🔨 `blend.fillet_geom_p6` (1813 lines) — in progress: #247 @brett19 (ready for review)
 - [ ] ⏳ `blend.fillet_standard_solver_p2` (1989 lines) — waiting
 - [ ] ⏳ `blend.fillet_corner_p3` (1697 lines) — waiting

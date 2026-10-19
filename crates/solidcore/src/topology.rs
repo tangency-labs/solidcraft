@@ -7,8 +7,9 @@
 //! | Rust                        | Upstream                                              |
 //! |-----------------------------|-------------------------------------------------------|
 //! | [`Brep`]                    | `SmBrep` (face/edge/vertex lists `m_p*ListHead`, `m_bValidateOnly`; its own members in [`brep::p1`]) |
-//! | [`Region`] / [`RegionId`]   | `SmRegion` (minimal: its list owner)                  |
-//! | [`Shell`] / [`ShellId`]     | `SmShell`                                             |
+//! | [`Region`] / [`RegionId`]   | `SmRegion` (minimal: list owner, shell list, void flag) |
+//! | [`Shell`] / [`ShellId`]     | `SmShell` (faces, region, type and list head)         |
+//! | [`Brep::new_with_infinite_region`] | `SmBrep::SmBrep()` (topology part, CO-PORTED) |
 //! | [`Faceuse`] / [`FaceuseId`] | `SmFaceuse` (unit `topology.edgeuse_p1`)              |
 //! | [`Face`] / [`FaceId`]       | `SmFace` (unit `topology.face_p2`)                    |
 //! | [`Loopuse`] / [`LoopuseId`] | `SmLoopuse` (unit `topology.loopuse`)                 |
@@ -617,7 +618,29 @@ impl Brep {
         Self::default()
     }
 
-    /// The region designated as infinite by the B-rep constructor.
+    /// `SmBrep()` (CO-PORTED by `topology.brep_p10` from unit `topology.brep_p3`, the
+    /// topology part only): an empty B-rep whose region list holds the infinite region,
+    /// a void region (`SetIsVoid(TRUE)`); editing disabled, tolerance
+    /// [`ZONE_TOL_3D`].
+    ///
+    /// # Errors
+    ///
+    /// None in practice (the region arena is empty).
+    pub fn new_with_infinite_region() -> Result<Self> {
+        let mut b = Self::default();
+        // Create infinite region and put into brep's region list
+        let r = b.regions.insert(Region {
+            in_brep: true,
+            shells: Vec::new(),
+            is_void: 1,
+        })?;
+        b.infinite_region = Some(r);
+        // PreInsert: the infinite region heads the region list
+        b.region_list_head = Some(r);
+        Ok(b)
+    }
+
+    /// `m_pInfiniteRegion` (`GetInfiniteRegion`).
     #[must_use]
     pub const fn infinite_region(&self) -> Option<RegionId> {
         self.infinite_region

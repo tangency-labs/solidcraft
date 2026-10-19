@@ -163,8 +163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_Mouse.smb_0",
@@ -175,8 +175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_Mouse.smb_1",
@@ -319,8 +319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_Endcap.smb_0",
@@ -331,8 +331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_Endcap.smb_1",
@@ -455,8 +455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_box_with_large_fillet.smb_0",
@@ -467,8 +467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_box_with_large_fillet.smb_1",
@@ -611,8 +611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_cone.smb_0",
@@ -623,8 +623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_cone.smb_1",
@@ -759,8 +759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_disk.smb_0",
@@ -771,8 +771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_disk.smb_1",
@@ -907,8 +907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_ellips_ts2.smb_0",
@@ -919,8 +919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_ellips_ts2.smb_1",
@@ -1063,8 +1063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_plane_circ.smb_0",
@@ -1075,8 +1075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_plane_circ.smb_1",
@@ -1199,8 +1199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_plane_square.smb_0",
@@ -1211,8 +1211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_plane_square.smb_1",
@@ -1347,8 +1347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_sphere.smb_0",
@@ -1359,8 +1359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_sphere.smb_1",
@@ -1483,8 +1483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_extrude.smb_0",
@@ -1495,8 +1495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_extrude.smb_1",
@@ -1631,8 +1631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_rev.smb_0",
@@ -1643,8 +1643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_rev.smb_1",
@@ -1779,8 +1779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_sphere150.smb_0",
@@ -1791,8 +1791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_sphere150.smb_1",
@@ -1927,8 +1927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_torus.smb_0",
@@ -1939,8 +1939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_torus.smb_1",
@@ -2075,8 +2075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_toruswvy.smb_0",
@@ -2087,8 +2087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_toruswvy.smb_1",
@@ -2223,8 +2223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_vase_rev.smb_0",
@@ -2235,8 +2235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
+        "symbol": "SmSphere::IsNurbSurfaceSphere",
+        "unit": "surface.sphere"
       },
       "max_rel_err": 0.0,
       "name": "read_vase_rev.smb_1",
@@ -3015,10 +3015,12 @@
     "cpp-guard:ub-165": 3,
     "curve.crv_on_surf": 1,
     "curve.curve_p6": 2,
+    "surface.sphere": 20,
+    "surface.surface_p2": 4,
     "topology.brep_p1": 12,
-    "topology.brep_p10": 30,
     "topology.brep_p2": 51,
     "topology.brep_p9": 19,
+    "topology.face_p2": 6,
     "topology.face_p3": 1
   },
   "max_rel_err": 0.0,
