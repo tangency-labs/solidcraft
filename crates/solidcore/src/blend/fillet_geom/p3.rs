@@ -79,7 +79,7 @@ use crate::blend::fillet_intersector;
 use crate::blend::fillet_solver::p1::{FilletGeomRef, FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};

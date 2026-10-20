@@ -10447,6 +10447,43 @@ Both are fuzz "differs" notes (no crash, no panic); the unit's cases and `--pert
    committed fixture `rollover_sphere_tight`, `tol = 1e-12`, passes), so the flag flips only on rounding noise around zero (presumably the
    sphere's evaluation of the normal or binormal); not investigated further.
 
+## blend.fillet_solver_p1: SmoothOutIntersection (back-edge stub of #179, PR #192 round 4)
+
+`blend.fillet_intersector` (#179) listed ten back-edge stubs tagged `blend.fillet_solver_p1`; this PR wires them in
+`impl FilletSolverOps for ConstantRadiusAssistedFs` (`blend/fillet_intersector.rs`) except the one below.
+
+- **`SmSelfIntersectionHandler::SmoothOutIntersection` (`FlushCurve` step 9, `SmFilletIntersector.cpp:1569`) cannot be wired by
+  this unit and is owned by no unit.** The call is virtual on the handler object `GetSelfIntersectionHandler()` returns; the
+  only override that exists is `SmMakeCurveBlendSIH::SmoothOutIntersection` (`SmFilletSolver.cpp:8157-8669`, 513 lines), which
+  `harness/callgraph/units.json` does not assign to any unit (it appears in `unused_functions.txt`: the call graph cannot resolve
+  the virtual call, and nothing calls it directly). This unit owns only the handlers' constructors/destructors (no data).
+  The handler is the member `SmFilletExecutive::m_pSelfIntersectionHandler`: a solver outside an executive has none (upstream
+  dereferences the NULL `m_pExecutive`), and `FilletSolver::self_intersection_handler` already reports the executive's data as
+  `Unported` (`blend.fillet_executive_p1`), so `SmoothOutIntersection` is unreachable from the Rust solver before that unit lands.
+  It is therefore an explicit `Unported` override tagged with the unit that must create the handler
+  (`blend.fillet_executive_p1`); whoever ports the executive should also port the `SmMakeCurveBlendSIH` class
+  (`SmoothOutIntersection`, 513 lines; the `CreateBlends` / `SmMakeSurfaceBlendSIH` overrides are dummies or unused).
+- **`m_pFSG->CreateSurface`** is wired through `FilletSurfaceGenerator::create_surface`: the base class gives `SM_ERR`, the Eiffel tower
+  generator its surface, the linear/circular/blend-curve generators stay `Unported` in `blend.fillet_standard_solver_p1/_p2`. The
+  generators read only the rails, the fillet points and the approximation tolerance, so the centre line, the UV curves and the two
+  surfaces the C++ call also passes are not needed.
+- **`ComputeSurfaceValues` on `ConstantRadiusAssistedFs`** is wired to `FilletSolver::compute_surface_values`, which calls the virtual
+  `SetupOffsetValues`; the `SmConstantRadiusFS` override belongs to `blend.fillet_standard_solver_p1`, so the call ends in that
+  unit's `Unported` until it lands (deferred, as before, in the intersector's difftest).
+
+## blend.fillet_solver_p1: stubs naming blend.fillet_geom_p1 (merged main after #259/#269)
+
+`blend.fillet_geom_p1` is `partial` on main, so the audit lists this unit's 48 `UNPORTED(blend.fillet_geom_p1)` sites as CHECK
+(`SmFilletGeom::Get/SetOffsetSurface`, `GetRail`, `SetFilletGeomType`, `SmFilletEdge::Get/SetOriginalFace`, `SmFilletVertex`
+accessors, `SmFilletEdgeuse::SetUVCurve/Get/SetFilletGeom`, ...). They are not wired here: the ported `FilletGeom` / `FilletEdge` /
+`FilletVertex` live inside a `FilletBrep` and are addressed by `FilletGeomId` / `EdgeId` / `VertexId`, and a `FilletGeom` stores a
+`FilletSolverId`, while this unit's solver owns opaque `FilletGeomRef` handles and its `FilletSolverOps` methods take `&Brep` (not
+`&mut FilletBrep`). Wiring means replacing the handles by `FilletBrep` ids and threading `&mut FilletBrep` through `FilletSolverOps`,
+`blend.fillet_custom_solver`, `blend.fillet_intersector` and the three shims (the 7 deferred `FinishConstruction` cases of this unit's
+report, which stop at `SetOffsetSurface`, are the first to run). That signature change touches every downstream solver PR and is left
+to a follow-up. The two sites that were wireable are wired: `SmFilletSolver::FindIndexOfRailOnFace` (`blend/fillet_geom/p1.rs`, 
+`sm_CreateCubicRailRailInterpolant`) and the `SmCircularCrossSectionFSG` constructor (`offset/offset_geometry_creation.rs`).
+
 ## blend.fillet_intersector (PR #179)
 
 - **FlushCurve with two or more points cannot run standalone in C++.** Past the span
@@ -11137,3 +11174,51 @@ Difftest (`fixtures/heal.stitch_p1/constructed.json`: the SM_API_test box tests,
   in `blend/fillet_solver/p1.rs` (`split_fillet_geom_at_side_edge`, `split_fillet_geom`)
   stay stubs: that code holds the solver's opaque `FilletGeomRef`s and a plain pseudo
   `Brep`, not a `FilletBrep` (as for part 3's `TopologySplit`).
+
+## primitive.api_primitives: review fixes (PR #160, 2026-10-19; no disagreements)
+
+- **Torus surface guard was too wide (AGENTS.md section 4 step 5 item 6, "no more").** The FFI guard refused every
+  non-finite origin and every `+inf` radius, but `SmTorus::CreateCanonical` (`SmTorus.cpp:190`) returns
+  `SM_ERR` for any radius not above `SM_EFF_ZERO` (NaN included) before it reads the origin or builds
+  the NURB. The crash fences (UB-198) now apply only when both radii are above `SM_EFF_ZERO`. The
+  reviewer's cases (origin `(NaN,0,0)` with radii `(3,0)` / `(0,1)`, origin `(0,inf,0)` with `(3,-1)`,
+  radii `(inf,0)`, `(-2,inf)`, `(NaN,inf)`, `(0,DBL_MAX)`, origin `(-inf,0,0)` with `(1e-12,5)`) all
+  return `SM_ERR` in the C++ and match Rust bit for bit.
+- **New fixture** `fixtures/primitive.api_primitives/review_adversarial.json` (216 cases: zero, `-0`,
+  negative, sub-normal, `SM_EFF_ZERO` and just above, `1e18`, `1e300`, `DBL_MAX` and non-finite
+  sizes and origins for the plane/cylinder/cone/torus surfaces and the pyramid): 191 pass, 25 defer
+  (pyramid at `topology.brep_p8`). Generated case `gen0732` (a `SmApiCreateConeEllipticEnds` input)
+  now passes on its validation status instead of deferring at `primitive.primitive_creation_p1`,
+  from main merged into the branch before this fix.
+- **Pyramid coverage is the base-edge status only.** Line geometry of the pyramid base edges is
+  never compared: every successful base defers at `topology.brep_p8`, so only the failing
+  `Line::create_line_segment` statuses are compared.
+- `SmApiCreateBlendPrimitive` is still not difftested: it needs a B-rep with faces, which needs the
+  `SmBrep` construction units (`topology.brep_p3`/`p5`/`p8`) and `primitive.primitive_creation_*`.
+## heal.stitch_p2 (`SmStitch.cpp` part 2: `DoStitching`, `StitchIntoSolid`, `StitchIntoShell`, one-list `StitchVertexPairs`, `SplitEdgesWithVertices`; PR #205, 2026-10-17; partial, no disagreements)
+
+- **Co-port with `heal.stitch_p1` (#196).** p1 owns the `Stitch` struct, the callback and
+  the `SM_API` entry points; p2 adds `impl Stitch` members in `heal::stitch::p2` and wired
+  p1's three `UNPORTED(heal.stitch_p2)` API stubs (`SmApiStitchIntoSolid`,
+  `SmApiStitchIntoShell`, `SmApiStitchAdvanced`). The harness is p2's own (same B-rep
+  blocks and export as p1's, copied, so fixtures are interchangeable).
+- **Mostly deferred by design.** `DoStitching` starts with `SmBrep::Notify`
+  (`topology.brep_p2`), so every `DoStitching` case, every `StitchIntoShell` case with a
+  positive tolerance and the three API entry points defer there; `StitchIntoSolid` defers
+  at `SmBrep::CalculateBoundingBox` (`query.brep`). Neither has a passing case. When
+  those land, `DoStitching` runs into `GlueVertices` / `FindAndSetInfiniteRegion`
+  (`topology.brep_p5`), `SqueezeEdge` / `DeleteFace` (`topology.brep_p3`),
+  `GlueEdgesGeneral` (`topology.brep_p7`), `MakeVertexSplitEdge` (`topology.brep_p9`)
+  and `SmFace::IsLamina` / `IsDegenerate` / `Notify` (`topology.face_p3`); the runner
+  already emits the full outputs and the B-rep digest after the op.
+- **What the passes cover.** One-list `StitchVertexPairs`: the sorting, coincidence scan,
+  gap bookkeeping, `SelectTopologyToKeep` and the manifold / squeeze skips (the glue is
+  deferred). `SplitEdgesWithVertices`: the per-vertex `sm_TestAndSplitEdge` drops, far and
+  close-to-boundary outcomes (an interior split defers at `MakeVertexSplitEdge`).
+  `StitchIntoShell`: only the path where the doubling loop never runs (`max_tol <= 0`).
+- **Guards.** `-3` (upstream never returns): `StitchIntoShell` when `max_tol / 100`
+  underflows to zero (HANG-33, confirmed by a C++ run), `StitchIntoSolid` from a zero
+  or negative B-rep tolerance (HANG-24; a non-finite diagonal ends or skips the loop).
+  The FFI refuses a vertex repeated in the one-list `StitchVertexPairs` list (UB-178).
+  Upstream defects kept by the port: WR-186 (`DoStitching`'s sticky candidate flags),
+  WR-187 (a cancelled squeeze reported as done), UB-197 (stale edge after a failed glue with `m_bIgnoreProblems`).
