@@ -36,9 +36,14 @@
 //! - The u and v passes over a surface net run the same code as the curve passes on
 //!   rows (u) or on the transposed net (v); every control point goes through the same
 //!   arithmetic in the same order as upstream.
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so the clamp and knot-correction index arithmetic
+//!   cannot overflow.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
+use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::knots::MAX_DEGREE;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -178,6 +183,7 @@ fn clamp_dir<T: Clone>(
         .checked_sub(1)
         .ok_or_else(|| invalid(OP, "empty knot vector"))?;
     let m = signed(m, OP)?;
+    check_short_degree(p, OP)?;
     let p = signed(p, OP)?;
 
     // Find knot spans and set multiplicities of bounds (as knots).
@@ -353,6 +359,7 @@ fn correct_dir<T: Clone>(
     const OP: &str = OP_CORRECT;
     let mut nn = signed(n, OP)?;
     let mut mm = signed(m, OP)?;
+    check_short_degree(p, OP)?;
     let p = signed(p, OP)?;
 
     // Eliminate internal multiplicities greater than p.
@@ -884,5 +891,22 @@ mod tests {
         correct_surface_knots(&mut s).unwrap();
         assert_eq!(s.v_knots(), &[0.0, 0.0, 1.0, 1.0]);
         assert_eq!(s.indices().m, 1);
+    }
+
+    /// Fuzz regression: a huge degree overflowed the clamp / knot-correction index
+    /// arithmetic (and sized a huge allocation).
+    #[test]
+    fn huge_degree_is_an_error() {
+        let pw: Vec<CPoint> = (0..4)
+            .map(|i| CPoint::new(f64::from(i), 0.0, 0.0, NOW))
+            .collect();
+        let u = vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+        for p in [1usize << 31, i64::MAX as usize, usize::MAX] {
+            let mut c = Curve::new(pw.clone(), p, u.clone()).unwrap();
+            let r = clamp_curve(&mut c, [0.25, 0.75]);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+            let r = correct_curve_knots(&mut c);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        }
     }
 }

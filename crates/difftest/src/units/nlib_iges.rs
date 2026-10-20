@@ -284,7 +284,7 @@ fn cpoints(c: &[[f64; 4]]) -> Vec<CPoint> {
 }
 
 fn net_rows(net: &[[f64; 4]], size: [usize; 2]) -> Result<Vec<Vec<CPoint>>, HarnessError> {
-    if net.len() != size[0] * size[1] || size[1] == 0 {
+    if size[0].checked_mul(size[1]) != Some(net.len()) || size[1] == 0 {
         return Err(harness("net size mismatch"));
     }
     Ok(net.chunks(size[1]).map(cpoints).collect())
@@ -320,8 +320,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             u,
             v,
         } => {
-            let cols = k[1] + 1;
-            if w.len() != (k[0] + 1) * cols || pts.len() != w.len() {
+            let cols = k[1].checked_add(1).ok_or_else(|| harness("128: bad k"))?;
+            let rows = k[0].checked_add(1).ok_or_else(|| harness("128: bad k"))?;
+            if rows.checked_mul(cols) != Some(w.len()) || pts.len() != w.len() {
                 return Err(harness("128: net size mismatch"));
             }
             let w: Vec<Vec<f64>> = w.chunks(cols).map(<[f64]>::to_vec).collect();

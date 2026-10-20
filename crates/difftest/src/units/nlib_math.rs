@@ -362,8 +362,30 @@ fn split_layout(flat: &[f64]) -> Result<Output, HarnessError> {
     Ok(out)
 }
 
+/// True when some matrix of the inputs has storage rows of different lengths. The
+/// C++ side gets the flattened rows (a truncated row plus a longer one can still
+/// have the right total), the Rust side the rows themselves: not a valid matrix.
+fn has_ragged_matrix(v: &Value) -> bool {
+    match v {
+        Value::Object(o) => {
+            let ragged = o.contains_key("mtp")
+                && o.get("rows").and_then(Value::as_array).is_some_and(|rows| {
+                    let len = |r: &Value| r.as_array().map(Vec::len);
+                    rows.iter().any(|r| len(r) != rows.first().and_then(len))
+                });
+            ragged || o.values().any(has_ragged_matrix)
+        }
+        Value::Array(a) => a.iter().any(has_ragged_matrix),
+        _ => false,
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
+    let value = serde_json::to_value(i).map_err(|e| harness(format!("inputs: {e}")))?;
+    if has_ragged_matrix(&value) {
+        return Err(harness("matrix storage rows differ in length"));
+    }
     let out = match i {
         Inputs::PointOps {
             a,
@@ -509,13 +531,18 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
                 .map(|r| Output::new().values("sd", r))
         }
         Inputs::Realloc1d { kind, items, n, m } => {
-            let flat: Vec<f64> = items.iter().flatten().copied().collect();
-            let k = match kind {
-                Item1::Flag => 0,
-                Item1::Real => 1,
-                Item1::Pt => 2,
-                Item1::Cpt => 3,
+            let (k, width) = match kind {
+                Item1::Flag => (0, 1),
+                Item1::Real => (1, 1),
+                Item1::Pt => (2, 3),
+                Item1::Cpt => (3, 4),
             };
+            // Ragged items would shift the flattened data (the Rust side reads each
+            // item on its own): not a valid array.
+            if items.iter().any(|x| x.len() != width) {
+                return Err(harness("realloc1d: item width"));
+            }
+            let flat: Vec<f64> = items.iter().flatten().copied().collect();
             ffi::realloc(k, &flat, 0, 0, [*n, *m, 0, 0]).map(|r| Output::new().values("block", r))
         }
         Inputs::Realloc2d {
@@ -528,11 +555,17 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let rows = items.len();
             let cols = items.first().map_or(0, Vec::len);
-            let flat: Vec<f64> = items.iter().flatten().flatten().copied().collect();
-            let kd = match kind {
-                Item2::Real => 4,
-                Item2::Cpt => 5,
+            let (kd, width) = match kind {
+                Item2::Real => (4, 1),
+                Item2::Cpt => (5, 4),
             };
+            if items
+                .iter()
+                .any(|r| r.len() != cols || r.iter().any(|x| x.len() != width))
+            {
+                return Err(harness("realloc2d: ragged rows or items"));
+            }
+            let flat: Vec<f64> = items.iter().flatten().flatten().copied().collect();
             ffi::realloc(kd, &flat, rows, cols, [*n, *m, *k, *l])
                 .map(|r| Output::new().values("block", r))
         }

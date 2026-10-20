@@ -51,14 +51,21 @@
 //!   initialised (a [`cpts_from_srf_data`] matrix larger than the extracted row or
 //!   column) return [`SolidError::InvalidInput`] instead of undefined behaviour.
 //! - The `NL_STACKS` arguments and the routine-name strings have no counterpart.
+//! - Work arrays that cannot be reserved return [`NlibCode::Memory`] (upstream's
+//!   `NL_MEM_ERR` from a failed `N_Malloc`) instead of aborting. Index arithmetic on
+//!   caller counts (`n + p + 1`, `p + 1`, `2 * p`, ...) that would overflow `NL_INDEX`
+//!   (undefined behaviour upstream) returns [`SolidError::InvalidInput`]; where the
+//!   sum is only compared against the knot count, an overflowing sum counts as a
+//!   mismatch (`NL_INP_ERR`, as upstream's wrapped sum), and sums whose degree check
+//!   comes later are formed after that check (the order is not observable).
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::{basis_derivs, PTOL};
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::fit_arrays::{
-    alloc, at, at_mut, banded, basis, copy_knots, curve, hi, idx, mget, mset, out_of_range, put,
-    sg, Block,
+    add, alloc, at, at_mut, banded, basis, copy_knots, curve, hi, idx, mget, mset, out_of_range,
+    put, sg, Block,
 };
 use crate::nurbs::geom::{dist_cpt_cpt_homo, dist_pt_pt};
 use crate::nurbs::knots::{KnotVector, Side};
@@ -261,7 +268,7 @@ pub fn interp_knot_vector(u: &[f64], p: usize) -> Result<Vec<f64>> {
     const OP: &str = "nurbs::crv_fit::p1::interp_knot_vector";
     let n = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
-    let mut uk = alloc(n + p + 1, 0.0, OP)?;
+    let mut uk = alloc(add(add(n, p, OP)?, 1, OP)?, 0.0, OP)?;
 
     let (u0, un) = (at(u, 0, OP)?, at(u, n, OP)?);
     for i in 0..=p {
@@ -291,7 +298,7 @@ pub fn knot_vector_end_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
     let k = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
     let n = k + 2;
-    let mut uk = alloc(n + p + 1, 0.0, OP)?;
+    let mut uk = alloc(add(add(n, p, OP)?, 1, OP)?, 0.0, OP)?;
 
     let (u0, uk_end) = (at(u, 0, OP)?, at(u, k, OP)?);
     for i in 0..=p {
@@ -341,7 +348,7 @@ pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>>
 
     // Compute knot vector.
     let n = k + 1;
-    let mut uk = alloc(n + p + 1, 0.0, OP)?;
+    let mut uk = alloc(add(add(n, p, OP)?, 1, OP)?, 0.0, OP)?;
     let (u0, uk_end) = (at(u, 0, OP)?, at(u, k, OP)?);
     for i in 0..=p {
         put(&mut uk, i, u0, OP)?;
@@ -422,7 +429,7 @@ pub fn knot_vector_approx(u: &[f64], n: usize, p: usize) -> Result<Vec<f64>> {
     }
 
     // Set first and last p+1 knots to the first and last sample parameters.
-    let mut uk = alloc(n + p + 1, 0.0, OP)?;
+    let mut uk = alloc(add(add(n, p, OP)?, 1, OP)?, 0.0, OP)?;
     let (u0, um) = (at(u, 0, OP)?, at(u, m, OP)?);
     for i in 0..=p {
         put(&mut uk, i, u0, OP)?;
@@ -487,8 +494,9 @@ pub fn interp_given_params<P: FitPoint>(
 
     // Check for curve memory.
     let m = sg(knt.last_index(), OP)?;
-    let mc = n + p + 1;
-    if m != mc {
+    // An overflowing `n + p + 1` cannot equal `m` (upstream's wrapped sum does not).
+    let mc = n.checked_add(p).and_then(|x| x.checked_add(1));
+    if Some(m) != mc {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
@@ -559,10 +567,10 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
     let m = sg(knt.last_index(), OP)?;
     let uk = knt.knots();
     let n = kk + 2;
-    let mc = n + p + 1;
     if p < 2 || p > kk + 2 {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
+    let mc = n + p + 1;
     if m != mc {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
@@ -599,13 +607,13 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
 
     // Solve system of linear equations.
     let mut q = alloc(n, P::ZERO, OP)?;
-    let fact = (at(uk, p + 1, OP)? - at(uk, 1, OP)?) / p as f64;
+    let fact = (at(uk, add(p, 1, OP)?, OP)? - at(uk, 1, OP)?) / p as f64;
     put(&mut q, 0, at(a, 0, OP)?, OP)?;
     put(&mut q, 1, ds.scaled(fact), OP)?;
     for i in 2..=kk {
         put(&mut q, i, at(a, i - 1, OP)?, OP)?;
     }
-    let fact = (at(uk, n + p, OP)? - at(uk, n, OP)?) / p as f64;
+    let fact = (at(uk, add(n, p, OP)?, OP)? - at(uk, n, OP)?) / p as f64;
     put(&mut q, n - 1, de.scaled(fact), OP)?;
     put(&mut q, n, at(a, kk, OP)?, OP)?;
     let pw = P::for_back(&cm, &q)?;
@@ -638,10 +646,10 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
     let m = sg(knt.last_index(), OP)?;
     let uk = knt.knots();
     let n = kk + 1;
-    let mc = n + p + 1;
     if p < 2 || p > n {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
+    let mc = n + p + 1;
     if m != mc {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
@@ -690,7 +698,7 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
     let mut q = alloc(n, P::ZERO, OP)?;
     match whr {
         DerivEnd::Start => {
-            let fact = (at(uk, p + 1, OP)? - at(uk, 1, OP)?) / p as f64;
+            let fact = (at(uk, add(p, 1, OP)?, OP)? - at(uk, 1, OP)?) / p as f64;
             put(&mut q, 0, at(a, 0, OP)?, OP)?;
             put(&mut q, 1, t.scaled(fact), OP)?;
             for i in 2..=n {
@@ -698,7 +706,7 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
             }
         }
         DerivEnd::End => {
-            let fact = (at(uk, n + p, OP)? - at(uk, n, OP)?) / p as f64;
+            let fact = (at(uk, add(n, p, OP)?, OP)? - at(uk, n, OP)?) / p as f64;
             put(&mut q, n - 1, t.scaled(fact), OP)?;
             put(&mut q, n, at(a, kk, OP)?, OP)?;
             for i in 0..=n - 2 {
@@ -735,10 +743,10 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
     let m = sg(knt.last_index(), OP)?;
     let uk = knt.knots();
     let n = 2 * kk + 1;
-    let mc = n + p + 1;
     if !(2..=3).contains(&p) {
         return Err(SolidError::nlib(OP, NlibCode::Degree));
     }
+    let mc = n + p + 1;
     if m != mc {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
@@ -777,7 +785,7 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
 
     // Solve system of linear equations.
     let mut q = alloc(n, P::ZERO, OP)?;
-    let fact = (at(uk, p + 1, OP)? - at(uk, 1, OP)?) / p as f64;
+    let fact = (at(uk, add(p, 1, OP)?, OP)? - at(uk, 1, OP)?) / p as f64;
     put(&mut q, 0, at(a, 0, OP)?, OP)?;
     put(&mut q, 1, at(d, 0, OP)?.scaled(fact), OP)?;
     for i in 1..kk {
@@ -785,7 +793,7 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
         put(&mut q, ii, at(a, i, OP)?, OP)?;
         put(&mut q, ii + 1, at(d, i, OP)?, OP)?;
     }
-    let fact = (at(uk, n + p, OP)? - at(uk, n, OP)?) / p as f64;
+    let fact = (at(uk, add(n, p, OP)?, OP)? - at(uk, n, OP)?) / p as f64;
     put(&mut q, n - 1, at(d, kk, OP)?.scaled(fact), OP)?;
     put(&mut q, n, at(a, kk, OP)?, OP)?;
     let pw = P::for_back(&cm, &q)?;
@@ -824,7 +832,7 @@ pub fn approx_knots<P: FitPoint>(
     let mk = sg(knt.last_index(), OP)?;
 
     // Check curve memory.
-    let mc = n + p + 1;
+    let mc = add(add(n, p, OP)?, 1, OP)?;
     let uc = copy_knots(knt, mc, OP)?;
     let mut pw = alloc(n, CPoint::default(), OP)?;
 
@@ -998,13 +1006,13 @@ pub fn derivs_matrix<P: FitPoint>(
 
     // Solve system of linear equations.
     let mut q = alloc(n, P::ZERO, OP)?;
-    let fact = (at(uk, p + 1, OP)? - at(uk, 1, OP)?) / p as f64;
+    let fact = (at(uk, add(p, 1, OP)?, OP)? - at(uk, 1, OP)?) / p as f64;
     put(&mut q, 0, at(a, 0, OP)?, OP)?;
     put(&mut q, 1, ds.scaled(fact), OP)?;
     for i in 2..=k {
         put(&mut q, i, at(a, i - 1, OP)?, OP)?;
     }
-    let fact = (at(uk, n + p, OP)? - at(uk, n, OP)?) / p as f64;
+    let fact = (at(uk, add(n, p, OP)?, OP)? - at(uk, n, OP)?) / p as f64;
     put(&mut q, n - 1, de.scaled(fact), OP)?;
     put(&mut q, n, at(a, k, OP)?, OP)?;
     P::for_back(cm, &q)
@@ -1180,5 +1188,45 @@ mod tests {
         let knt = KnotVector::from_slice(&kv).unwrap();
         let w = derivs_matrix(&a[..1], 3, &knt, a[1], a[2], &cm).unwrap();
         assert_eq!(w.len(), 3);
+    }
+
+    /// Fuzz regressions: absurd degrees / counts return errors instead of
+    /// overflowing `NL_INDEX` arithmetic or aborting on allocation.
+    #[test]
+    fn absurd_degree_is_an_error() {
+        let u = [0.0, 0.5, 1.0];
+        let big = i64::MAX as usize;
+        assert!(interp_knot_vector(&u, big).is_err());
+        assert!(knot_vector_end_derivs(&u, big).is_err());
+        assert!(knot_vector_deriv(&u, big, DerivEnd::Start).is_err());
+        assert!(knot_vector_approx(&u, 2, big).is_err());
+        assert!(matches!(
+            interp_knot_vector(&u, 1 << 61),
+            Err(SolidError::Nlib {
+                code: NlibCode::Memory,
+                ..
+            })
+        ));
+        let a = pts(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let kv = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let knt = KnotVector::from_slice(&kv).unwrap();
+        // An overflowing n + p + 1 never matches the knot count: NL_INP_ERR.
+        assert!(matches!(
+            interp_given_params(&a, &u, &knt, big),
+            Err(SolidError::Nlib {
+                code: NlibCode::Input,
+                ..
+            })
+        ));
+        assert!(matches!(
+            interp_knots_and_derivs(&a, &u, &knt, big, a[0], a[1]),
+            Err(SolidError::Nlib {
+                code: NlibCode::Input,
+                ..
+            })
+        ));
+        assert!(approx_knots(&a, &u, &knt, big, big).is_err());
+        let cm = RealMatrix::new(4, 4, MatrixType::Full, 0).unwrap();
+        assert!(derivs_matrix(&a, big, &knt, a[0], a[1], &cm).is_err());
     }
 }

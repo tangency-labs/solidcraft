@@ -711,6 +711,7 @@ fn rust_matrix(m: &MatrixIn) -> Result<Result<RealMatrix, f64>, HarnessError> {
     let mut cm = RealMatrix::new(m.n, m.n, mtp, m.bw).map_err(|e| harness_err(&e))?;
     let (_, cols) = cm
         .storage_shape()
+        .filter(|&(_, cols)| cols > 0)
         .ok_or_else(|| harness("matrix storage"))?;
     for (k, v) in m.storage.iter().enumerate() {
         cm.set(k / cols, k % cols, *v)

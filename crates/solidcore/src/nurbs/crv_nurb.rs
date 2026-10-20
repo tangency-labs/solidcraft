@@ -61,6 +61,10 @@
 //!   as upstream; missing tolerances (upstream reads past `tols`) are `InvalidInput`.
 //! - The `NL_CAL_ERR` paths of unknown `NL_PARALLEL` / `NL_PERSPECTIVE` and
 //!   `NL_LEFT` / `NL_RIGHT` flags cannot be expressed with [`Projection`] / [`Side`].
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
+//!   degree cannot overflow.
 
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
@@ -68,6 +72,7 @@
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
+use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_geom::ToleranceKind;
 use crate::nurbs::geom::{
@@ -273,6 +278,7 @@ impl Curve {
         const OP: &str = "nurbs::crv_nurb::Curve::eval";
         let knt = self.knot_vector()?;
         let pw = self.cpts();
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
 
         // Check parameter.
@@ -324,6 +330,7 @@ impl Curve {
         const OP: &str = "nurbs::crv_nurb::Curve::derivs";
         const NP: usize = MAX_DEGREE + 1;
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
         let uk = self.knots();
@@ -694,6 +701,7 @@ impl Curve {
     /// knot vectors shorter than upstream indexes.
     pub fn reverse(&mut self) -> Result<()> {
         const OP: &str = "nurbs::crv_nurb::Curve::reverse";
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -730,6 +738,7 @@ impl Curve {
     /// upstream indexes them (`n + p + 1 > m`).
     pub fn reversed(&self) -> Result<Curve> {
         const OP: &str = "nurbs::crv_nurb::Curve::reversed";
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -794,6 +803,7 @@ impl Curve {
         const OP: &str = "nurbs::crv_nurb::Curve::linear_segs";
         let pw = self.cpts();
         let uk = self.knots();
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let m = sx(self.m(), OP)?;
 
@@ -909,6 +919,7 @@ impl Curve {
     /// Errors with the errors of [`Curve::eval`] and [`Curve::arc_length`].
     pub fn degen_segs(&self, tol: f64) -> Result<Vec<(f64, f64)>> {
         const OP: &str = "nurbs::crv_nurb::Curve::degen_segs";
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let uk = self.knots();
         let m = sx(self.m(), OP)?;
@@ -990,6 +1001,7 @@ impl Curve {
         const OP: &str = "nurbs::crv_nurb::Curve::get_type";
         let pw = self.cpts();
         let uk = self.knots();
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -1540,5 +1552,19 @@ mod tests {
         let mut r = quarter();
         r.reparam(2.0, 4.0).unwrap();
         assert_eq!(r.knots(), &[2.0, 2.0, 2.0, 4.0, 4.0, 4.0]);
+    }
+
+    /// Fuzz regression: a huge degree overflowed the index arithmetic of
+    /// `get_type` and `linear_segs`.
+    #[test]
+    fn huge_degree_is_an_error() {
+        let c = quarter();
+        for p in [1usize << 31, i64::MAX as usize, usize::MAX] {
+            let h = Curve::new(c.cpts().to_vec(), p, c.knots().to_vec()).unwrap();
+            let r = h.get_type(1e-6);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+            let r = h.linear_segs(1e-6);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        }
     }
 }

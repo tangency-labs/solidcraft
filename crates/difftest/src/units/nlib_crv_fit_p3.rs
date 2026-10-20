@@ -302,6 +302,10 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
                 ParamSource::Method(par_method(*par)?)
             };
             let mut slot = match cur {
+                // The C++ wrapper rejects such a curve; do not size a placeholder.
+                Some(c) if c.n > ffi::MAX_COUNT => {
+                    return Err(harness("existing curve: sizes"));
+                }
                 Some(c) => Some(
                     Curve::new(vec![CPoint::new(0.0, 0.0, 0.0, 0.0); c.n + 1], c.p, c.knots.clone())
                         .map_err(|e| harness(format!("existing curve: {e}")))?,

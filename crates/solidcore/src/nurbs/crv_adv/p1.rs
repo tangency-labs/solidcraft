@@ -43,7 +43,10 @@
 //! - `ST_curxcdr` with `NL_G2` searches for a parameter step by step and loops forever
 //!   when the step no longer changes the parameter (an extension distance far below
 //!   the curve's resolution, where every round repeats the last one); the port gives
-//!   up with [`SolidError::NotConverged`] there (`iterations` = the steps taken).
+//!   up with [`SolidError::NotConverged`] there (`iterations` = the steps taken). The
+//!   search takes about `arc length / extension` steps, so a vanishing extension
+//!   (e.g. `1e-300` of the curve length) runs practically forever upstream; the port
+//!   also gives up, the same way, after [`MAX_G2_STEPS`] steps.
 //! - `N_CptReflect` fails only for a plane normal that cannot be normalised, which the
 //!   extension routines never pass (they normalise it first); upstream ignores its
 //!   flag, the port propagates it.
@@ -56,11 +59,15 @@
 //!   the extension routines, extensions that do not extend), the routines return
 //!   [`SolidError::InvalidInput`] instead. For every input upstream handles without
 //!   undefined behaviour the results are the same, bit for bit.
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
+//!   degree cannot overflow.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::{basis_derivs, PTOL};
-use crate::nurbs::bezier::binomial;
+use crate::nurbs::bezier::{binomial, check_short_degree};
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_geom::{ToleranceKind, ITER_LIMIT};
 use crate::nurbs::geom::{cpt_reflect, dist_pt_pt, normalize, Plane};
@@ -79,6 +86,10 @@ pub const MAX_DIST_DEPTH: usize = 50;
 /// Deepest recursion of [`Curve::extend_by_param_dist_at_depth`] (upstream fails above
 /// it).
 pub const MAX_PARAM_DEPTH: usize = 10;
+
+/// Most steps of the `NL_G2` parameter search of [`Curve::extend_by_dist_at_depth`]
+/// (upstream takes about `arc length / extension` steps, unbounded).
+pub const MAX_G2_STEPS: usize = 100_000;
 
 /// `reason` of the `InvalidInput` error that stands for upstream's bare error flag
 /// (`NL_QUIT` without an `NL_ERROR` number).
@@ -333,6 +344,7 @@ impl Curve {
         const OP: &str = OP_EVAL_PT;
         let pw = self.cpts();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -363,6 +375,7 @@ impl Curve {
         const OP: &str = OP_DERIVS_AT_KNOT;
         let pw = self.cpts();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -501,6 +514,7 @@ impl Curve {
     pub fn max_2nd_deriv(&self) -> Result<f64> {
         const OP: &str = OP_MAX2;
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let pf = pu as f64;
 
@@ -616,6 +630,7 @@ impl Curve {
         let pw = self.cpts();
         let up = self.knots();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -682,8 +697,9 @@ impl Curve {
                             ur = upm;
                         }
                         steps += 1;
-                        if ur == ul {
-                            // Upstream repeats this step forever.
+                        if ur == ul || steps > MAX_G2_STEPS {
+                            // Upstream repeats this step forever (or for about
+                            // `d1 / ldst` steps).
                             return Err(depth_limit(OP, steps));
                         }
                         dr = self.arc_length(up0, ur, 0.005, ToleranceKind::Relative)?;
@@ -739,8 +755,9 @@ impl Curve {
                             ul = up0;
                         }
                         steps += 1;
-                        if ul == ur {
-                            // Upstream repeats this step forever.
+                        if ul == ur || steps > MAX_G2_STEPS {
+                            // Upstream repeats this step forever (or for about
+                            // `d1 / ldst` steps).
                             return Err(depth_limit(OP, steps));
                         }
                         dl = self.arc_length(ul, upm, 0.005, ToleranceKind::Relative)?;
@@ -1070,6 +1087,7 @@ impl Curve {
         let pw = self.cpts();
         let up = self.knots();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -1617,5 +1635,28 @@ mod tests {
         ));
         assert_eq!(Continuity::from_flag(4), Some(Continuity::Cmax));
         assert_eq!(CurveEnd::from_flag(2).map(CurveEnd::flag), Some(2));
+    }
+
+    /// Fuzz regressions: a degree near `i64::MAX` overflowed the index arithmetic of
+    /// the extension routines, and a vanishing `NL_G2` extension searched practically
+    /// forever.
+    #[test]
+    fn extensions_reject_huge_degree_and_vanishing_g2_distance() {
+        let c = line3(3);
+        for p in [1usize << 31, i64::MAX as usize, usize::MAX] {
+            let h = Curve::new(c.cpts().to_vec(), p, c.knots().to_vec()).unwrap();
+            for cont in [Continuity::G1, Continuity::G2, Continuity::Cmax] {
+                let r =
+                    h.extend_by_dist_at_depth(0.5, ToleranceKind::Relative, CurveEnd::End, cont, 0);
+                assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+                let r = h.extend_by_param_dist_at_depth(-0.5, CurveEnd::Start, cont, 0);
+                assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+            }
+        }
+        for end in [CurveEnd::Start, CurveEnd::End] {
+            let r =
+                c.extend_by_dist_at_depth(1e-300, ToleranceKind::Relative, end, Continuity::G2, 0);
+            assert!(matches!(r, Err(SolidError::NotConverged { .. })), "{r:?}");
+        }
     }
 }

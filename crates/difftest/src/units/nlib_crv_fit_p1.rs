@@ -203,7 +203,12 @@ fn chord_params(ptp: i32, pts: &[[f64; 4]]) -> Result<Vec<f64>, HarnessError> {
 
 /// Knot vector of `N_FitCalcKnotsDerivs` (upstream driver of
 /// `N_FitCrvFirstDerivAndKnots`), re-expressed here to build inputs.
-fn first_deriv_knots(u: &[f64], p: usize) -> Vec<f64> {
+/// A degree above [`MAX_DERIVED_DEGREE`] is a harness error (the knot vector would
+/// not fit in memory; upstream rejects every degree but 2 and 3 anyway).
+fn first_deriv_knots(u: &[f64], p: usize) -> Result<Vec<f64>, HarnessError> {
+    if p > MAX_DERIVED_DEGREE {
+        return Err(harness("first_derivs: degree too large to derive knots"));
+    }
     let k = u.len() - 1;
     let n = 2 * k + 1;
     let mut uk = vec![0.0; n + p + 2];
@@ -238,8 +243,11 @@ fn first_deriv_knots(u: &[f64], p: usize) -> Vec<f64> {
         }
         _ => {}
     }
-    monotone(uk)
+    Ok(monotone(uk))
 }
+
+/// Largest degree for which the runner derives a knot vector itself.
+const MAX_DERIVED_DEGREE: usize = 1 << 16;
 
 /// Chord-length parameters may overshoot `u[n]` by an ulp before the last one, and
 /// knots derived from them with it; keeps derived knots non-decreasing (the ffi
@@ -273,9 +281,12 @@ fn resolve(i: &Inputs) -> Result<Inputs, HarnessError> {
                 Some(k) => k,
                 None if p == 1 => {
                     // N_FitCrvInterp: degree 1 uses the parameters with doubled ends.
-                    let mut k = vec![u[0]];
+                    let (Some(&u0), Some(&un)) = (u.first(), u.last()) else {
+                        return Err(harness("interp: no parameters for knots"));
+                    };
+                    let mut k = vec![u0];
                     k.extend_from_slice(&u);
-                    k.push(u[u.len() - 1]);
+                    k.push(un);
                     monotone(k)
                 }
                 None => monotone(fit::interp_knot_vector(&u, p).map_err(|e| harness_err(&e))?),
@@ -353,7 +364,7 @@ fn resolve(i: &Inputs) -> Result<Inputs, HarnessError> {
             let u = params(ptp, &pts, &u)?;
             let knots = match knots {
                 Some(k) => k,
-                None if u.len() >= 2 => first_deriv_knots(&u, p),
+                None if u.len() >= 2 => first_deriv_knots(&u, p)?,
                 None => return Err(harness("first_derivs: need two points for knots")),
             };
             Inputs::FirstDerivs {
@@ -705,6 +716,7 @@ fn rust_matrix(m: &MatrixIn) -> Result<Result<RealMatrix, f64>, HarnessError> {
     let mut cm = RealMatrix::new(m.n, m.n, mtp, m.bw).map_err(|e| harness_err(&e))?;
     let (_, cols) = cm
         .storage_shape()
+        .filter(|&(_, cols)| cols > 0)
         .ok_or_else(|| harness("matrix storage"))?;
     for (k, v) in m.storage.iter().enumerate() {
         cm.set(k / cols, k % cols, *v)

@@ -20,9 +20,18 @@
 //!   returns [`SolidError::InvalidInput`] there. Every other array access is bounds
 //!   checked the same way (degree `0`, where upstream writes past the parameter array).
 //! - The `N_CrvCompress` step only trims storage and is kept for fidelity.
+//! - A curve degree or interpolation degree `deg` above
+//!   [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE) (impossible
+//!   upstream, where `NL_DEGREE` is a `short`) is [`SolidError::InvalidInput`], so
+//!   index arithmetic and allocations sized from a degree cannot overflow.
+//! - More than [`MAX_OFFSET_SAMPLES`] sample points in total is
+//!   [`SolidError::InvalidInput`]. Upstream samples any count, but the knot removal
+//!   that follows takes time quadratic in it (about 5 s for 23 000 samples, and
+//!   practically forever for the counts a pole or a tiny tolerance produce).
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::{max2, Vec3};
+use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_adv::p2::ConstrainedEnds;
 use crate::nurbs::crv_basic::{ConicType, Curve};
 use crate::nurbs::crv_common::{circ_arc, Arc};
@@ -37,6 +46,10 @@ use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{blend_pt, float_op_is_bad, FloatOp, MODEL_TOL};
 
 const OP: &str = "nurbs::crv_offset::Curve::offset_pt_sampling";
+
+/// Most sample points [`Curve::offset_pt_sampling`] takes on a free-form curve (the
+/// sum of the per-segment counts; the difftest guard allows 4000).
+pub const MAX_OFFSET_SAMPLES: isize = 16_384;
 
 /// Upstream `NL_UNITSPAN`.
 const UNIT_SPAN: Interval = Interval::new(0.0, 1.0);
@@ -110,6 +123,8 @@ impl Curve {
         par: OffsetParam,
         tol: f64,
     ) -> Result<Curve> {
+        check_short_degree(deg, OP)?;
+
         // Get curve type.
         let typ = self.get_type(MODEL_TOL)?;
 
@@ -162,6 +177,7 @@ impl Curve {
         // Offset free-form curve.
         let up = self.knots();
         let mp = sx(self.m(), OP)?;
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
 
         // Initialize.
@@ -194,6 +210,12 @@ impl Curve {
             let c = count(del)?;
             nu.push(c);
             mu = mu.checked_add(c).ok_or_else(unrepresentable)?;
+        }
+        if mu > MAX_OFFSET_SAMPLES {
+            return Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "too many sample points",
+            });
         }
 
         // Compute parameters.
@@ -381,5 +403,58 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// Fuzz regression: a negative weight (a pole) asked for 727 541 samples, and the
+    /// quadratic knot removal then ran practically forever; a huge `deg` overflowed.
+    #[test]
+    fn sample_count_and_degree_are_bounded() {
+        // The case of fuzz00366 (sweep `--fuzz 2000`): control point 5 has weight -1.
+        let pw = [
+            [0.36951137312380355, 1.7382532204389758, 0.5628709619734076],
+            [12.952027085779179, -4.973752671925807, 0.7789347719917435],
+            [33.302360218733476, -11.741039188433287, 0.9741795453940191],
+            [29.8611057374012, -9.406174233113662, 0.6244556071267372],
+            [79.77072958426271, -24.682018234069655, 1.2060780576480667],
+            [104.66389854976843, -26.779962001231308, -1.0],
+            [83.46567157568222, -19.803719016019436, 0.8313196531928522],
+            [119.10887201469666, -24.546586356911348, 1.0094490993583305],
+        ]
+        .iter()
+        .map(|&[x, y, w]| CPoint::new(x, y, 0.0, w))
+        .collect();
+        let u = vec![
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.28545366853925924,
+            0.5532644864792337,
+            0.7403247015519675,
+            0.8424203210022205,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        ];
+        let c = Curve::new(pw, 3, u).unwrap();
+        let r = c.offset_pt_sampling(
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            3,
+            false,
+            OffsetParam::Inherited,
+            0.11799393559359235,
+        );
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        let r = cubic().offset_pt_sampling(
+            Vec3::new(0.0, 0.0, 1.0),
+            0.1,
+            1 << 32,
+            false,
+            OffsetParam::Inherited,
+            0.01,
+        );
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
     }
 }

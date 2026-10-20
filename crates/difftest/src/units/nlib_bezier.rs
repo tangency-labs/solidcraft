@@ -582,6 +582,16 @@ fn emit<T>(o: &mut Vec<f64>, r: SolidResult<T>, put: impl FnOnce(&mut Vec<f64>, 
     }
 }
 
+/// Largest output buffer the runner allocates for a caller index.
+const MAX_BUF: usize = 1 << 16;
+
+/// Length `n + 1` of an output buffer indexed up to `n`, capped at [`MAX_BUF`] so absurd
+/// fuzzed indices (which the FFI guard rejects) cannot exhaust memory in the runner;
+/// the library then reports the out-of-range write itself.
+fn buf_len(n: usize) -> usize {
+    n.saturating_add(1).min(MAX_BUF)
+}
+
 fn pre_matrix(pre: bool, build: impl FnOnce() -> SolidResult<RealMatrix>) -> SolidResult<RealMatrix> {
     if pre {
         build()
@@ -601,7 +611,7 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
         }
         Inputs::Elevate { p, t, f, l, pre, pw } => {
             let pw = to_cpts(&pw.first(p + 1)?);
-            let mut qw = vec![CPoint::ZERO; l + 1];
+            let mut qw = vec![CPoint::ZERO; buf_len(*l)];
             let r = pre_matrix(*pre, || elevation_matrix(*p, *t))
                 .and_then(|dm| elevate_degree(&pw, *p, *t, &dm, *f, *l, &mut qw));
             emit(&mut o, r, |o, ()| {
@@ -619,7 +629,7 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             f,
             g,
         } => {
-            let mut fg = vec![0.0; (*e).max(p + q) + 1];
+            let mut fg = vec![0.0; buf_len((*e).max(p + q))];
             let r = pre_matrix(*pre, || product_matrix(*p, *q)).and_then(|pm| {
                 func_multiply_func(
                     f.get(..=*p).unwrap_or(&[]),
@@ -647,7 +657,7 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             pw,
         } => {
             let pw = to_cpts(&pw.first(q + 1)?);
-            let mut qw = vec![CPoint::ZERO; (*e).max(p + q) + 1];
+            let mut qw = vec![CPoint::ZERO; buf_len((*e).max(p + q))];
             let fv = f.get(..=*p).unwrap_or(&[]);
             let r = pre_matrix(*pre, || product_matrix(*p, *q)).and_then(|pm| {
                 if *four_d {
@@ -676,8 +686,8 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             let pw = to_net(net);
             let rows = net.len();
             let cols = net.first().map_or(0, Vec::len);
-            let qr = if d == Direction::U { l + 1 } else { rows };
-            let qc = if d == Direction::V { l + 1 } else { cols };
+            let qr = if d == Direction::U { buf_len(*l) } else { rows };
+            let qc = if d == Direction::V { buf_len(*l) } else { cols };
             let mut qw = vec![vec![CPoint::ZERO; qc]; qr];
             let res = pre_matrix(*pre, || elevation_matrix(*r, *t))
                 .and_then(|dm| srf_elevate_degree(&pw, *r, *t, &dm, d, *f, *l, *roc, &mut qw));
@@ -696,19 +706,20 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             emit(&mut o, eval_one_basis(*p, *i, *u), Vec::push);
         }
         Inputs::ReduceCoefs { p } => {
-            let c = degree_reduce_coefs(*p);
-            let r = mid(*p);
-            o.push(0.0);
-            o.extend(c.alf.iter().take(r + 1).skip(1));
-            o.extend(c.oma.iter().take(r + 1).skip(1));
-            if *p >= 2 {
-                o.extend(c.bet.iter().take(p - 1).skip(r));
-                o.extend(c.omb.iter().take(p - 1).skip(r));
-            }
+            emit(&mut o, degree_reduce_coefs(*p), |o, c| {
+                let r = mid(*p);
+                o.extend(c.alf.iter().take(r + 1).skip(1));
+                o.extend(c.oma.iter().take(r + 1).skip(1));
+                if *p >= 2 {
+                    o.extend(c.bet.iter().take(p - 1).skip(r));
+                    o.extend(c.omb.iter().take(p - 1).skip(r));
+                }
+            });
         }
         Inputs::Reduce { p, pw } => {
             let pw = to_cpts(&pw.first(p + 1)?);
-            emit(&mut o, reduce_degree(&pw, *p, &degree_reduce_coefs(*p)), |o, red| {
+            let r = degree_reduce_coefs(*p).and_then(|c| reduce_degree(&pw, *p, &c));
+            emit(&mut o, r, |o, red| {
                 for c in red.qw {
                     push_cpt(o, c);
                 }

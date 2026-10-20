@@ -63,6 +63,10 @@
 //!   different sizes in the sum of numerators), the routines return
 //!   [`SolidError::InvalidInput`] instead. For every input upstream handles without
 //!   undefined behaviour the results are the same, bit for bit.
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
+//!   degree cannot overflow.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
@@ -71,6 +75,7 @@ use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_adv::{compatible_knot_array_mult, increase_knot_mult};
 use crate::nurbs::basis_basic::PTOL;
+use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_adv::p1::{Continuity, CurveEnd};
 use crate::nurbs::crv_basic::{curve_from_num_and_denom, Curve};
 use crate::nurbs::crv_geom::ToleranceKind;
@@ -224,6 +229,7 @@ impl Curve {
         const OP: &str = "nurbs::crv_adv::p2::Curve::offset_max_2nd_deriv";
 
         // Get locals and decompose into Bezier segments.
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let bez = self.decompose_bez()?;
 
@@ -374,12 +380,15 @@ impl Curve {
         der: usize,
     ) -> Result<Curve> {
         const OP: &str = "nurbs::crv_adv::p2::Curve::remove_knots_deriv_constraints";
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let der = sx(der, OP)?;
         self.remove_knots_constrained(
             tol,
-            // Upstream's end test is `r >= n - der + 1` (the same for integers).
-            |r, n| (whr.start() && r <= p + der) || (whr.end() && r > n - der),
+            // Upstream's end test is `r >= n - der + 1` (the same for integers). A
+            // `p + der` past `isize::MAX` exceeds every index `r`, which the saturating
+            // sum keeps.
+            |r, n| (whr.start() && r <= p.saturating_add(der)) || (whr.end() && r > n - der),
             OP,
         )
     }
@@ -399,6 +408,7 @@ impl Curve {
         let pw = self.cpts();
         let uk = self.knots();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -596,6 +606,7 @@ impl Curve {
         // Get locals and check error.
         let pw = self.cpts();
         let uk = self.knots();
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -785,6 +796,7 @@ impl Curve {
         if !self.is_rational() {
             self.non_rat_to_rat();
         }
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -882,6 +894,7 @@ impl Curve {
         let pw = self.cpts();
         let up = self.knots();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -966,6 +979,7 @@ impl Curve {
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let old_span = Interval::new(get(self.knots(), 0, OP)?, get(self.knots(), m, OP)?);
         self.reparam_to_interval(UNIT_SPAN)?;
@@ -1294,5 +1308,22 @@ mod tests {
             .offset_max_2nd_deriv(0.5, Vec3::new(0.0, 0.0, 1.0))
             .unwrap();
         assert!(muu.is_finite() && muu > 0.0);
+    }
+
+    /// Fuzz regressions: a huge degree overflowed `non_rat_first_deriv`, and a huge
+    /// derivative order overflowed the start constraint `r <= p + der`.
+    #[test]
+    fn huge_degree_and_derivative_order_do_not_overflow() {
+        let c = cubic();
+        for p in [1usize << 31, i64::MAX as usize, usize::MAX] {
+            let h = Curve::new(c.cpts().to_vec(), p, c.knots().to_vec()).unwrap();
+            let r = h.non_rat_first_deriv(1);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+            let r = h.remove_knots_deriv_constraints(1e-3, ConstrainedEnds::Both, 1);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        }
+        let all = c.remove_knots_deriv_constraints(1e-3, ConstrainedEnds::Both, usize::MAX >> 1);
+        let start = c.remove_knots_deriv_constraints(1e-3, ConstrainedEnds::Start, 1 << 40);
+        assert!(all.is_ok() && start.is_ok());
     }
 }

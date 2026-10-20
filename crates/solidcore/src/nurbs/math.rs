@@ -1323,14 +1323,16 @@ impl RealMatrix {
         let sbw = bw / 2;
         match mta {
             MatrixType::LowerLeft => {
-                for i in 0..=n {
+                // Rows past `m` have no entries (empty inner loop upstream).
+                for i in 0..=n.min(m) {
                     for j in i..=m {
                         b.wr(i, j, a.rd(j, i, OP)?, OP)?;
                     }
                 }
             }
             MatrixType::UpperRight => {
-                for j in 0..=m {
+                // Columns past `n` have no entries (empty inner loop upstream).
+                for j in 0..=m.min(n) {
                     for i in j..=n {
                         b.wr(i, j, a.rd(j, i, OP)?, OP)?;
                     }
@@ -1396,15 +1398,17 @@ impl RealMatrix {
                 self.define(m, n, mtb, bw);
                 // B and A share storage: B[i][j] = A[j][i] element by element, in
                 // upstream's order.
+                // Outer indices past the other bound have empty inner loops
+                // upstream; they are skipped.
                 if mta == MatrixType::LowerLeft {
-                    for i in 0..=n {
+                    for i in 0..=n.min(m) {
                         for j in i..=m {
                             let v = self.rd(j, i, OP_TRANSPOSE)?;
                             self.wr(i, j, v, OP_TRANSPOSE)?;
                         }
                     }
                 } else {
-                    for j in 0..=m {
+                    for j in 0..=m.min(n) {
                         for i in j..=n {
                             let v = self.rd(j, i, OP_TRANSPOSE)?;
                             self.wr(i, j, v, OP_TRANSPOSE)?;
@@ -2538,5 +2542,21 @@ mod tests {
         realloc_2d(&mut b, 1, 1, 2, 0).unwrap();
         assert_eq!(b, vec![vec![1], vec![3], vec![0]]);
         assert!(realloc_1d(&mut vec![1.0], 3, 3).is_err());
+    }
+
+    /// Fuzz regression: a triangular matrix with a huge logical column count over
+    /// tiny storage is transposed without walking the empty outer iterations.
+    #[test]
+    fn transpose_triangular_huge_logical_size() {
+        let mut a = RealMatrix::from_rows(
+            0,
+            usize::MAX >> 1,
+            vec![vec![2.0]],
+            MatrixType::UpperRight,
+            0,
+        )
+        .unwrap();
+        a.transpose_in_place().unwrap();
+        assert_eq!(a.get(0, 0).unwrap(), 2.0);
     }
 }

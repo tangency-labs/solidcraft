@@ -41,6 +41,13 @@
 //! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number;
 //!   outputs upstream leaves partly written on error are not returned. The
 //!   `NL_STACKS` arguments and the routine-name strings have no counterpart.
+//! - Work arrays that cannot be reserved return [`NlibCode::Memory`] (upstream's
+//!   `NL_MEM_ERR` from a failed `N_Malloc`) instead of aborting. Index arithmetic on
+//!   caller counts (`n + p + 1`, `p + 1`, `2 * p`, ...) that would overflow `NL_INDEX`
+//!   (undefined behaviour upstream) returns [`SolidError::InvalidInput`]; where the
+//!   sum is only compared against the knot count, an overflowing sum counts as a
+//!   mismatch (`NL_INP_ERR`, as upstream's wrapped sum), and sums whose degree check
+//!   comes later are formed after that check (the order is not observable).
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
@@ -50,8 +57,8 @@ use crate::nurbs::crv_fit::p1::{
     interp_knot_vector, knot_vector_approx, param_values, DerivEnd, FitPoint, ParamMethod,
 };
 use crate::nurbs::fit_arrays::{
-    alloc, at, at_mut, banded, basis, curve, full, head, hi, idx, mget, mset, out_of_range, put,
-    sg, Block,
+    add, alloc, at, at_mut, banded, basis, curve, full, head, hi, idx, mget, mset, mul,
+    out_of_range, put, sg, Block,
 };
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::knots::{KnotVector, Side};
@@ -436,15 +443,17 @@ pub fn weighted_lst_sq_knots<P: LstSqPoint>(
     let uk = knt.knots();
     let mu = ru + su + 1;
     let mc = rc + sc + 1;
-    let mcur = n + p + 1;
 
-    if mc >= n || (mc + n) >= (mu + 1) {
+    // An overflowing `mc + n` exceeds `mu + 1`.
+    if mc >= n || mc.checked_add(n).is_none_or(|t| t > mu) {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if n < 1 || p > n {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
-    if mknt != mcur {
+    // An overflowing `n + p + 1` cannot equal `mknt`.
+    let mcur = n.checked_add(p).and_then(|t| t.checked_add(1));
+    if Some(mknt) != mcur {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
@@ -680,7 +689,7 @@ pub fn deriv_matrix<P: FitPoint>(
     let mut q = alloc(n, P::ZERO, OP)?;
     match whr {
         DerivEnd::Start => {
-            let fact = (at(uk, p + 1, OP)? - at(uk, 1, OP)?) / p as f64;
+            let fact = (at(uk, add(p, 1, OP)?, OP)? - at(uk, 1, OP)?) / p as f64;
             put(&mut q, 0, at(a, 0, OP)?, OP)?;
             put(&mut q, 1, t.scaled(fact), OP)?;
             for i in 2..=n {
@@ -688,7 +697,7 @@ pub fn deriv_matrix<P: FitPoint>(
             }
         }
         DerivEnd::End => {
-            let fact = (at(uk, n + p, OP)? - at(uk, n, OP)?) / p as f64;
+            let fact = (at(uk, add(n, p, OP)?, OP)? - at(uk, n, OP)?) / p as f64;
             put(&mut q, n - 1, t.scaled(fact), OP)?;
             put(&mut q, n, at(a, k, OP)?, OP)?;
             for i in 0..=n - 2 {
@@ -720,7 +729,7 @@ pub fn knots_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
 
     // Compute knot vector.
     let n = 2 * k + 1;
-    let mut uk = alloc(n + p + 1, 0.0, OP)?;
+    let mut uk = alloc(add(add(n, p, OP)?, 1, OP)?, 0.0, OP)?;
     let (u0, uk_end) = (at(u, 0, OP)?, at(u, k, OP)?);
     for i in 0..=p {
         put(&mut uk, i, u0, OP)?;
@@ -784,8 +793,8 @@ pub fn knots_high_end_derivs(u: &[f64], p: usize, k: usize, l: usize) -> Result<
     let l = sg(l, OP)?;
 
     // Compute knot vector.
-    let m = n + k + l;
-    let mut uk = alloc(m + p + 1, 0.0, OP)?;
+    let m = add(add(n, k, OP)?, l, OP)?;
+    let mut uk = alloc(add(add(m, p, OP)?, 1, OP)?, 0.0, OP)?;
     let (u0, un) = (at(u, 0, OP)?, at(u, n, OP)?);
     for i in 0..=p {
         put(&mut uk, i, u0, OP)?;
@@ -834,7 +843,7 @@ pub fn calc_matrix(
         MatrixEnds::Start | MatrixEnds::End => n + 1,
         MatrixEnds::Both => n + 2,
     };
-    let (bw, sbw) = if 2 * p <= k {
+    let (bw, sbw) = if mul(2, p, OP)? <= k {
         (2 * p + 1, p)
     } else {
         (2 * p - 1, p - 1)
@@ -1040,5 +1049,18 @@ mod tests {
         let t = Vec3::new(1.0, 0.0, 0.0);
         let w = deriv_matrix(&a, 3, &knt, t, DerivEnd::Start, &cm).unwrap();
         assert_eq!(w.len(), 7);
+    }
+
+    /// Fuzz regressions: absurd degrees / counts return errors.
+    #[test]
+    fn absurd_degree_is_an_error() {
+        let u = [0.0, 0.5, 1.0];
+        let big = i64::MAX as usize;
+        assert!(knots_derivs(&u, big).is_err());
+        assert!(knots_high_end_derivs(&u, 3, big, big).is_err());
+        assert!(knots_high_end_derivs(&u, big, 0, 0).is_err());
+        let kv = [0.0, 0.0, 1.0, 1.0];
+        let knt = KnotVector::from_slice(&kv).unwrap();
+        assert!(calc_matrix(&knt, big, &u, MatrixEnds::None).is_err());
     }
 }

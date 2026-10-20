@@ -33,7 +33,10 @@
 //! - Every array access is bounds checked: where upstream would read or write outside
 //!   its arrays (malformed curves: knot vectors that do not match the control points or
 //!   are not clamped, multiplicities above the degree, out-of-domain parameters of
-//!   [`Curve::extract_seg`], wrong indices given to [`Curve::remove_knot_max_err`]),
+//!   [`Curve::extract_seg`], wrong indices given to [`Curve::remove_knot_max_err`],
+//!   and [`Curve::extract_seg`] over a span that `N_BasisFindSpan` skips as too short:
+//!   for `U = [0,0,0,0,1e-300,..]`, `ul = 0` lies in span 4, `spr - mlr < spl`, and
+//!   upstream writes one knot past the `m + 1` it allocated for `UQ`),
 //!   the methods return [`SolidError::InvalidInput`] instead. For every input upstream
 //!   handles without undefined behaviour the results are the same, bit for bit.
 //! - `N_CrvDecomposeBez` returns a C array of curves and its highest index; the Rust
@@ -42,13 +45,19 @@
 //! - `N_CrvRemoveKnot` returns its error flag after finishing the removal when the last
 //!   `N_BasisFindGlobalMax` it called failed (it then assumes a maximum of `1`); the
 //!   Rust method returns only that error then, not the curve.
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
+//!   degree cannot overflow.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::basis_basic::find_global_max;
-use crate::nurbs::bezier::{elevate_degree as bez_elevate_degree, elevation_matrix};
+use crate::nurbs::bezier::{
+    check_short_degree, elevate_degree as bez_elevate_degree, elevation_matrix,
+};
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::dist_cpt_cpt_homo;
 use crate::nurbs::knots::{KnotVector, Side, MAX_DEGREE};
@@ -137,6 +146,7 @@ impl Curve {
         let pu = self.degree();
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -214,6 +224,7 @@ impl Curve {
         let pu = self.degree();
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let mut u = u;
 
@@ -303,6 +314,7 @@ impl Curve {
         let up = self.knots();
         let pu = self.degree();
         let m = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -439,6 +451,7 @@ impl Curve {
         let pu = self.degree();
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
         let r = sx(x.len(), OP)? - 1;
@@ -525,6 +538,7 @@ impl Curve {
         let up = self.knots();
         let pu = self.degree();
         let m0 = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -623,6 +637,7 @@ impl Curve {
         let pu = self.degree();
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knp = self.knot_vector()?;
         let rational = self.is_rational();
@@ -823,6 +838,7 @@ impl Curve {
         s: usize,
     ) -> Result<f64> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::remove_knot_max_err";
+        check_short_degree(p, OP)?;
         let p = sx(p, OP)?;
         let r = sx(r, OP)?;
         let s = sx(s, OP)?;
@@ -882,6 +898,7 @@ impl Curve {
         let pu = self.degree();
         let np = sx(self.n(), OP)?;
         let mp = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -1242,5 +1259,32 @@ mod tests {
         assert!(br < 1e-12);
         let br = cubic().remove_knot_max_err(4, 1).unwrap();
         assert!(br > 1e-3);
+    }
+
+    /// Fuzz regression: a huge degree overflowed `2 * p` in `remove_knot_max_err`.
+    #[test]
+    fn huge_degree_is_an_error() {
+        let c = cubic();
+        for p in [1usize << 31, i64::MAX as usize, usize::MAX] {
+            let h = Curve::new(c.cpts().to_vec(), p, c.knots().to_vec()).unwrap();
+            let r = h.remove_knot_max_err(4, 1);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+            let r = h.insert_knot(0.3, 1);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        }
+    }
+
+    /// Fuzz regression (`nlib.srf_adv_p6` sweep): a `1e-300` first interior knot makes
+    /// `extract_seg(0, 1e-300)` need one knot more than upstream allocates; the port
+    /// reports `InvalidInput` (upstream writes past `UQ`).
+    #[test]
+    fn extract_seg_over_skipped_tiny_span_is_invalid_input() {
+        let pw: Vec<CPoint> = (0..6)
+            .map(|i| CPoint::new(1.5 * f64::from(i), 0.0, 0.0, NOW))
+            .collect();
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1e-300, 6.0, 9.0, 9.0, 9.0, 9.0];
+        let c = Curve::new(pw, 3, u).unwrap();
+        let r = c.extract_seg(0.0, 1e-300);
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
     }
 }

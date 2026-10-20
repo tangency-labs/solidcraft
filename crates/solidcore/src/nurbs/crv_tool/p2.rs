@@ -42,6 +42,10 @@
 //! - `N_CrvRemoveDegenSegs` ignores the error flags of its `N_BasisFindSpan*` calls
 //!   (they fail only where upstream would index outside the knots); the port
 //!   propagates them.
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
+//!   degree cannot overflow.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
@@ -53,7 +57,9 @@ use crate::nurbs::basis_basic::{
     compatible_knot_array, compatible_knot_vectors_to_tol, find_all_span_maxima, SpanMaxima,
     COMPATIBLE_KNOT_TOL,
 };
-use crate::nurbs::bezier::{degree_reduce_coefs, reduce_degree as bez_reduce_degree};
+use crate::nurbs::bezier::{
+    check_short_degree, degree_reduce_coefs, reduce_degree as bez_reduce_degree,
+};
 use crate::nurbs::crv_basic::{make_rat_compatible, Curve};
 use crate::nurbs::geom::{dist_cpt_cpt_homo, Interval};
 use crate::nurbs::index::{get, oob, set, storage, sx, ux};
@@ -204,6 +210,7 @@ impl Curve {
         op: &'static str,
     ) -> Result<Curve> {
         let pu = self.degree();
+        check_short_degree(pu, op)?;
         let p = sx(pu, op)?;
         let mut n = sx(self.n(), op)?;
         let mut m = sx(self.m(), op)?;
@@ -505,6 +512,7 @@ impl Curve {
         let pu = self.degree();
         let np = sx(self.n(), OP)?;
         let mp = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
 
@@ -546,7 +554,7 @@ impl Curve {
         let mut max: Vec<f64> = storage(p + 1, OP)?;
 
         // Get degree reduction coefficients.
-        let coefs = degree_reduce_coefs(pu);
+        let coefs = degree_reduce_coefs(pu)?;
 
         // Initialize.
         let mut a = p;
@@ -846,6 +854,7 @@ impl Curve {
         const OP: &str = "nurbs::crv_tool::p2::Curve::remove_degen_segs";
         let up = self.knots();
         let pu = self.degree();
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let np = sx(self.n(), OP)?;
         let mp = sx(self.m(), OP)?;
@@ -1594,5 +1603,18 @@ mod tests {
     #[test]
     fn remove_degen_segs_none_found() {
         assert_eq!(cubic().remove_degen_segs(1e-9).unwrap(), None);
+    }
+
+    /// Fuzz regression: a huge degree overflowed `2 * p` in the knot removal.
+    #[test]
+    fn huge_degree_is_an_error() {
+        let c = cubic();
+        for p in [1usize << 31, i64::MAX as usize, usize::MAX] {
+            let h = Curve::new(c.cpts().to_vec(), p, c.knots().to_vec()).unwrap();
+            let r = h.remove_knots(1e-3);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+            let r = h.reduce_degree_once(1e-3);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        }
     }
 }

@@ -19,8 +19,11 @@
 //!   with [`arc_cpts_function`] and passes it in. The `NL_INDEX` result is `i64`
 //!   (`(NL_INDEX)ceil(dd)`; a value outside `i64` saturates).
 //! - Out-params become return values (the fitted curves). The `NL_STACKS` arguments
-//!   and the memory error paths have no counterpart. Errors are
-//!   [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number.
+//!   have no counterpart; a work array that cannot be reserved returns `NL_MEM_ERR`
+//!   as upstream's failed `N_Malloc` does. Errors are [`SolidError::Nlib`] values
+//!   with the upstream `NL_*_ERR` number. An `nc` so large that `nc + p + 1` or
+//!   `4 nc` overflows `NL_INDEX` (undefined behaviour upstream) returns
+//!   [`SolidError::InvalidInput`].
 //! - `N_ApproxCircArcWithCrvData`, degree 2: with fewer than four control points it
 //!   intersects the end tangent lines and, when they are parallel, returns success
 //!   with the middle control point uninitialised; the port fails with
@@ -46,7 +49,7 @@ use crate::nurbs::crv_fit::p1::{
 use crate::nurbs::crv_fit::p2::{approx_lst_sq, weighted_lst_sq_knots, WeightedData};
 use crate::nurbs::crv_fit::p3::{interp_end_derivs, ParamSource};
 use crate::nurbs::crv_geom::ToleranceKind;
-use crate::nurbs::fit_arrays::{alloc, at, idx, invalid, out_of_range, put, sg};
+use crate::nurbs::fit_arrays::{add, alloc, at, idx, invalid, mul, out_of_range, put, sg};
 use crate::nurbs::funcs_basic::SurfaceFunction;
 use crate::nurbs::geom::{
     isect_line_line, normalize, project_pt_line, Interval, LinePlaneIsect, LineSeg, PI,
@@ -237,8 +240,8 @@ fn lst_sq_data(
     p: i64,
 ) -> Result<LstSqData> {
     let op = OP_ARC;
-    let nk = nc + p + 1;
-    let np = 4 * nc;
+    let nk = add(add(nc, p, op)?, 1, op)?;
+    let np = mul(4, nc, op)?;
 
     let mut uk = alloc(nk, 0.0, op)?;
     for ii in 0..=p {
@@ -714,5 +717,14 @@ mod tests {
             }
         }
         assert!(approx_nurbs_with_non_rat_crv(&c, 0.0, 3, ParamSource::Inherited, false).is_err());
+    }
+
+    /// Fuzz regression: a control point count whose `nc + p + 1` / `4 nc` overflows
+    /// is an error, not a panic.
+    #[test]
+    fn absurd_cpt_count_is_an_error() {
+        let arc = circle_arc(10.0, 100.0);
+        assert!(approx_circ_arc_with_crv_data(&arc, 3, i64::MAX as usize).is_err());
+        assert!(approx_circ_arc_with_crv_data(&arc, 4, 1 << 62).is_err());
     }
 }

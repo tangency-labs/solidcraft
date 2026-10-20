@@ -37,6 +37,10 @@
 //!   values or are not clamped), the methods return [`SolidError::InvalidInput`]
 //!   instead. For every input upstream handles without undefined behaviour the results
 //!   are the same, bit for bit.
+//! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
+//!   (impossible upstream, where `NL_DEGREE` is a `short`) is
+//!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
+//!   degree cannot overflow.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `nurbs::index::{get, set}`, which reject negative or too-large indices.
@@ -44,7 +48,7 @@
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::basis_basic::{make_knots_compatible, PTOL};
 use crate::nurbs::bezier::{
-    func_multiply_crv, func_multiply_crv_4d, func_multiply_func, product_matrix,
+    check_short_degree, func_multiply_crv, func_multiply_crv_4d, func_multiply_func, product_matrix,
 };
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::funcs_basic::CurveFunction;
@@ -74,6 +78,7 @@ impl CurveFunction {
         let pu = self.degree();
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
+        check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
         let knt = self.knot_vector()?;
         let r = sx(x.len(), OP)? - 1;
@@ -161,6 +166,7 @@ impl CurveFunction {
         let u = self.knots();
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
+        check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
 
         // Check error.
@@ -330,10 +336,11 @@ fn multiply<G: Operand>(
     // Get new degree.
     let p = sx(fun.degree(), op)?;
     let q = sx(opg.degree(), op)?;
-    let pq = p + q;
-    if pq > sx(MAX_DEGREE, op)? {
-        return Err(SolidError::nlib(op, NlibCode::Degree));
-    }
+    // A sum past `isize::MAX` exceeds `NL_MAXDEG` too.
+    let pq = match p.checked_add(q) {
+        Some(pq) if pq <= sx(MAX_DEGREE, op)? => pq,
+        _ => return Err(SolidError::nlib(op, NlibCode::Degree)),
+    };
     let pqu = ux(pq, op)?;
 
     // Handle special case p=0 or q=0.
@@ -867,6 +874,42 @@ mod tests {
         let wprod = f.multiply_func(&mut wf.clone()).unwrap();
         for (a, b) in h4.cpts().iter().zip(wprod.values()) {
             assert!((a.w - b).abs() < 1e-12);
+        }
+    }
+
+    /// Fuzz regression: `p + q` overflowed for huge degrees; the sum is above
+    /// `NL_MAXDEG` either way.
+    #[test]
+    fn huge_degree_product_is_a_degree_error() {
+        let k = [0.0, 0.0, 1.0, 1.0];
+        // (`usize::MAX` does not fit upstream's signed index at all: `InvalidInput`.)
+        for p in [1usize << 31, i64::MAX as usize] {
+            let mut f = cfn(&[1.0, 2.0], p, &k);
+            let mut g = cfn(&[1.0, 2.0], 1, &k);
+            let r = f.multiply_func(&mut g);
+            assert!(
+                matches!(
+                    r,
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Degree,
+                        ..
+                    })
+                ),
+                "{r:?}"
+            );
+            let r = g.multiply_func(&mut f);
+            assert!(
+                matches!(
+                    r,
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Degree,
+                        ..
+                    })
+                ),
+                "{r:?}"
+            );
+            let r = f.deriv(1);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
         }
     }
 }
