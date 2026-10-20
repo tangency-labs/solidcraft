@@ -796,16 +796,22 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
         } else {
             None
         };
-        let local = quad
+        let delaunay = || {
+            let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| luv.get(r.clone())).collect();
+            let seeds = cdt::lattice(bbox, [f.h / f.speed[0], f.h / f.speed[1]], &polys, f.speed);
+            let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
+            let sag = cdt::Sag { eval: &eval, tol: f.rules.tol, h: f.h, turn: f.rules.turn, scale: f.speed };
+            cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false })
+        };
+        let grid = quad
             .or_else(|| if pc.holes.is_empty() { coons::coons_best(&luv, &lpos, f.speed, grid::MAX_FACE_GRID, f.h) } else { None })
-            .or_else(|| cutgrid::cut_grid(&luv, &ranges, &clip(f.us, bbox[0]), &clip(f.vs, bbox[1]), &[], f.speed))
-            .or_else(|| {
-                let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| luv.get(r.clone())).collect();
-                let seeds = cdt::lattice(bbox, [f.h / f.speed[0], f.h / f.speed[1]], &polys, f.speed);
-                let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
-                let sag = cdt::Sag { eval: &eval, tol: f.rules.tol, h: f.h, turn: f.rules.turn, scale: f.speed };
-                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false })
-            })?;
+            .or_else(|| cutgrid::cut_grid(&luv, &ranges, &clip(f.us, bbox[0]), &clip(f.vs, bbox[1]), &[], f.speed));
+        // A grid that leaves a curved surface far further than the tolerance (a patch with a
+        // corner too narrow for its four sides fans long triangles across it) gives way to
+        // Delaunay refined where it sags, on the same outline.
+        let curved = !matches!(s, EvalSurface::Plane { .. });
+        let grid = grid.filter(|(lextra, ltris)| !(curved && strays(s, &luv, lextra, ltris, STRAY * f.rules.tol)));
+        let local = grid.or_else(delaunay)?;
         let (lextra, ltris) = local;
         let base = u32::try_from(n + extra.len()).ok()?;
         let m = ids.len();
@@ -819,6 +825,27 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
         extra.extend(lextra);
     }
     Some((extra, tris))
+}
+
+/// How far past the chord tolerance a patch's grid may leave its surface before the patch is
+/// meshed by refined Delaunay instead.
+const STRAY: f64 = 8.0;
+
+/// Whether a triangle of the patch (`uv` its outline's parameters, `extra` the points added
+/// inside, `tris` indexing both in turn) lies further than `limit` from the surface at its centre.
+fn strays(s: &EvalSurface, uv: &[[f64; 2]], extra: &[[f64; 2]], tris: &[[u32; 3]], limit: f64) -> bool {
+    let at = |i: u32| -> Option<[f64; 2]> {
+        let i = i as usize;
+        uv.get(i).or_else(|| extra.get(i.checked_sub(uv.len())?)).copied()
+    };
+    let mut cache: HashMap<u32, Option<Vec3>> = HashMap::new();
+    let mut point = |i: u32| *cache.entry(i).or_insert_with(|| at(i).and_then(|q| s.derivs(q[0], q[1])).map(|d| d.0));
+    tris.iter().any(|t| {
+        let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { return false };
+        let (Some(pa), Some(pb), Some(pc)) = (point(t[0]), point(t[1]), point(t[2])) else { return false };
+        let centre = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
+        s.derivs(centre[0], centre[1]).is_some_and(|d| d.0.dist((pa + pb + pc) * (1.0 / 3.0)) > limit)
+    })
 }
 
 /// Seeds on the segment `a`–`b` in (u, v) (fractions strictly between 0 and 1): node spacing

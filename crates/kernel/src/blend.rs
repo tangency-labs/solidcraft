@@ -2226,11 +2226,21 @@ pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
         }
     }
     by_radius.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let mut cur = body.clone();
-    for (r, pts) in &by_radius {
-        cur = fillet(&cur, pts, *r)?;
-    }
-    Ok(cur)
+    let in_turn = |groups: &mut dyn Iterator<Item = &(f64, Vec<Vec3>)>| -> Result<Body> {
+        let mut cur = body.clone();
+        for (r, pts) in groups {
+            cur = fillet(&cur, pts, *r)?;
+        }
+        Ok(cur)
+    };
+    // The smallest first where the largest first is refused: a round alone may be refused where
+    // it ends on a face almost along its edge, yet build where it meets the end of an earlier
+    // round of the other kind there (a plate edge's round square to a wall's end, the foot's round
+    // first). The first refusal stands unless the second says more.
+    in_turn(&mut by_radius.iter()).or_else(|e| match by_radius.len() {
+        0 | 1 => Err(e),
+        _ => in_turn(&mut by_radius.iter().rev()).map_err(|e2| keep_size(e, e2)),
+    })
 }
 
 /// The points' edges (found as [`edge_ids`] finds them, on the body as the blends see it) grouped
