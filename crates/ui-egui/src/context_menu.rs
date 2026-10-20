@@ -1894,8 +1894,8 @@ fn tangent_chain(app: &mut SolveApp) {
         let Sel::Edge { body, index, .. } = s else { continue };
         let Some(b) = st.body(body) else { continue };
         let m = b.mesh();
-        // The chain a fillet of the edge takes (not over an earlier round's end).
-        for i in b.fillet_chain(*index).unwrap_or_else(|| m.tangent_chain(*index, 2f64.to_radians())) {
+        // Not over an earlier round's end, where a fillet of it stops.
+        for i in b.fillet_tangent_chain(*index) {
             let Some(e) = m.edges.get(i) else { continue };
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             let x = Sel::Edge { body: body.clone(), index: i, point: mid };

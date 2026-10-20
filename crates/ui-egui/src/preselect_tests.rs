@@ -3003,3 +3003,24 @@ fn fillet_tangent_chain_stops_at_an_earlier_rounds_end() {
         }
     }
 }
+
+#[test]
+fn fillet_tangent_chain_takes_no_more_than_the_mesh_chain() {
+    // The bracket's plate rounded 1 along its bottom edges beside the wall's end at x = 0: the
+    // end's bottom edge carries on tangentially into those rounds' end arcs and up the end's
+    // vertical edges (the plate's and the wall's, in one line), and the kernel's chain walks that
+    // loop. A fillet of the bottom edge alone takes the edge only (it ends in the rounds of its
+    // radius), so the dialog picks no more than the mesh's chain did: never the end's vertical
+    // edges, whose round is not supported.
+    let mut app = bracket();
+    app.run("solid.fillet", json!({"edges": [[45, 0, 0], [30, 30, 0]], "radius": 1})).unwrap();
+    let pick = edge(&app, Vec3::new(0.0, 5.0, 0.0));
+    let Sel::Edge { index, .. } = &pick else { panic!("an edge pick") };
+    let st = app.session.model.state();
+    let body = st.body("Body1").unwrap();
+    let (kernel, mesh) = (body.fillet_chain(*index).unwrap(), body.mesh().tangent_chain(*index, 2f64.to_radians()));
+    drop(st);
+    assert!(kernel.len() > mesh.len(), "the kernel's chain runs round the end: kernel {kernel:?}, mesh {mesh:?}");
+    let d = start(&mut app, vec![pick], "solid.fillet");
+    assert_eq!(d.inputs[0].items.len(), mesh.len());
+}

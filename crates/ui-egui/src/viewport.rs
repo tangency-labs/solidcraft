@@ -4597,10 +4597,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(b) = crate::open_meshing::shown_world(app).body(&body).cloned()
         {
             let m = b.mesh();
-            // The chain a fillet of the edge takes (not over an earlier round's end).
+            // Not over an earlier round's end, where a fillet of it stops.
             let items: Vec<Sel> = b
-                .fillet_chain(index)
-                .unwrap_or_else(|| m.tangent_chain(index, 2f64.to_radians()))
+                .fillet_tangent_chain(index)
                 .into_iter()
                 .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
                 .collect();
