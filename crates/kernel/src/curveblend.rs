@@ -2487,13 +2487,19 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             seam_subst.insert(seam.id(), crate::blend::retarget(seam, old, v, fit_tolerance)?);
         }
         // At a merge: the earlier round's contact with `T` shortened to `P*`, and `E`'s edge with the
-        // face beside the chain to `q_X` (the band's edge on `L` takes the rest).
+        // face beside the chain to `q_X` (the band's edge on `L` takes the rest). An earlier round
+        // the chain merges with at both its ends has its contact shortened at both.
         for m in &merges {
             let v = verts.get(m.k).ok_or_else(|| fail("vertex"))?;
             let top = if m.top == 1 { v1.get(m.k) } else { v2.get(m.k) }.ok_or_else(|| fail("vertex"))?;
             let other = if m.top == 1 { v2.get(m.k) } else { v1.get(m.k) }.ok_or_else(|| fail("vertex"))?;
-            seam_subst.insert(m.end.contact.id(), crate::blend::retarget(&m.end.contact, v, top, fit_tolerance)?);
-            seam_subst.insert(m.end.end_side.id(), crate::blend::retarget(&m.end.end_side, &m.end.u, other, fit_tolerance)?);
+            let contact = seam_subst.get(&m.end.contact.id()).cloned().unwrap_or_else(|| m.end.contact.clone());
+            seam_subst.insert(m.end.contact.id(), crate::blend::retarget(&contact, v, top, fit_tolerance)?);
+            if let Some(end_side) = &m.end.end_side {
+                let id = end_side.id();
+                let end_side = seam_subst.get(&id).cloned().unwrap_or_else(|| end_side.clone());
+                seam_subst.insert(id, crate::blend::retarget(&end_side, &m.end.u, other, fit_tolerance)?);
+            }
         }
         for (id, (seam, a, b)) in ends {
             if consumed.contains_key(&id) || merges.iter().any(|m| m.end.contact.id() == id || m.end.cap.id() == id) {
@@ -2553,7 +2559,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             // beside the chain gives way to `Γ_g` from `P*` to `u`. The end face `E`: its edge on
             // `L` with that face stops at `q_X`, the band's edge on `L` running on to `u`.
             let earlier: Vec<&MergeEnd> = merges.iter().filter(|m| m.g == fi).collect();
-            let ended: Vec<&MergeEnd> = merges.iter().filter(|m| m.end.end == f.id()).collect();
+            let ended: Vec<&MergeEnd> = merges.iter().filter(|m| m.end.end == f.id() && m.end.end_side.is_some()).collect();
             if !earlier.is_empty() || !ended.is_empty() {
                 if corners.iter().any(|k| !bands.contains_key(k)) || (!earlier.is_empty() && !ended.is_empty()) {
                     return Err(unsupported("an earlier round that ends at a merged corner and elsewhere on the edge"));
@@ -2634,6 +2640,8 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 out.push(f.clone());
                 continue;
             }
+            let flush: Vec<mt::Edge> =
+                merges.iter().filter(|m| m.end.end == f.id() && m.end.end_side.is_none()).filter_map(|m| bands.get(&m.k).map(|b| b.on_l.clone())).collect();
             let mut wires = Vec::new();
             for w in f.absolute_boundaries() {
                 let mut es = Vec::new();
@@ -2656,6 +2664,9 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 if collapsed_boundary(&es, fit_tolerance) {
                     return Err(too_large("the blend would consume a neighbouring face"));
                 }
+                // The face beside the chain that is also the wall's end at a merge: from the
+                // later round's contact to the earlier round's `u`, along the band's edge on `L`.
+                let es = if flush.is_empty() { es } else { crate::blend::close_gaps(es, &flush)? };
                 wires.push(mt::Wire::from(es));
             }
             let rebuilt = crate::heal::absolute_face(f, wires).ok_or_else(|| fail("a side face could not be rebuilt"))?;
