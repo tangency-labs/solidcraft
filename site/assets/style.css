@@ -194,3 +194,21 @@ td > a > code, td > code { white-space: nowrap; overflow-wrap: normal; }
   nav { margin-left: 0; }
   h1 { font-size: 1.4rem; }
 }
+
+/* chart picker on the overview, unit status history */
+.chartpick { margin: 0.4rem 0; }
+.chartpick label { display: inline-flex; flex-direction: column; font-size: 0.8rem; color: var(--text-2); gap: 2px; }
+.chartpick select { font: inherit; font-size: 0.9rem; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); min-width: 9rem; }
+.steps { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--surface-2);
+  border: 1px solid var(--border); margin-top: 0.4rem; }
+.steps i { display: block; height: 100%; }
+.steps i + i { border-left: 1px solid var(--surface); }
+.steps .st-none { background: transparent; }
+.steps .st-todo, .steps .st-claimed { background: var(--todo-bg); }
+.steps .st-partial { background: var(--partial); }
+.steps .st-green { background: var(--green); }
+.steps .st-blocked { background: var(--bad-ink); }
+.steps-axis { display: flex; justify-content: space-between; margin-top: 2px; }
+.steplist { list-style: none; padding: 0; margin: 0.4rem 0 0.8rem; display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; font-size: 0.85rem; }
+.steplist time { color: var(--text-2); font-variant-numeric: tabular-nums; }

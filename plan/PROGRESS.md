@@ -280,7 +280,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `query.face_p3` (1620 lines) — partial, 1199 cases
 - [ ] 🟡 `query.poly` (2119 lines) — partial, 671 cases
 - [ ] 🟡 `query.face_p1` (465 lines) — partial, 2224 cases
-- [ ] 🟡 `query.face_p4` (1432 lines) — partial, 459 cases
+- [ ] 🟡 `query.face_p4` (1432 lines) — partial, 500 cases
 - [ ] 🟡 `query.tess` (838 lines) — partial, 676 cases
 - [ ] 🔨 `query.brep` (517 lines) — in progress: #101 @0xlillith (draft)
 - [ ] 🟡 `query.api_queries` (809 lines) — partial, 1203 cases

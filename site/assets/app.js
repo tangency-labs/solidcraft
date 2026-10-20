@@ -1,4 +1,4 @@
-// solidcore progress site: table sorting, filtering and the chart tooltip. No dependencies.
+// solidcore progress site: table sorting, filtering, chart picker and chart tooltips. No dependencies.
 (function () {
   "use strict";
 
@@ -74,7 +74,22 @@
     apply();
   });
 
-  // ---- chart crosshair + tooltip
+  // ---- chart picker: <select data-charts=ID> shows the .chartset whose data-area matches.
+  document.querySelectorAll("select[data-charts]").forEach(function (sel) {
+    var root = document.getElementById(sel.getAttribute("data-charts"));
+    if (!root) return;
+    var pick = sel.closest(".chartpick");
+    if (pick) pick.hidden = false;
+    function show() {
+      root.querySelectorAll(".chartset").forEach(function (c) {
+        c.hidden = c.getAttribute("data-area") !== sel.value;
+      });
+    }
+    sel.addEventListener("change", show);
+    show();
+  });
+
+  // ---- chart crosshair + tooltip (one per svg.chart; several per page are fine)
   document.querySelectorAll("svg.chart[data-points]").forEach(function (svg) {
     var pts = JSON.parse(svg.getAttribute("data-points"));
     var x0 = +svg.getAttribute("data-x0"), x1 = +svg.getAttribute("data-x1");

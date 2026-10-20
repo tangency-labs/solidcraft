@@ -13,16 +13,18 @@ commit date of `HEAD`.
 
 | Page | Data |
 |------|------|
-| Overview (`index.html`) | `plan/modules.toml` via `harness/plan/progress.py` (`summary`, `is_ready`), claims from the "In progress" section of `plan/PROGRESS.md`, `reports/ssi-corpus.json`, and `plan/modules.toml` along `main`'s first-parent git history for the timeline |
+| Overview (`index.html`) | `plan/modules.toml` via `harness/plan/progress.py` (`summary`, `is_ready`), claims from the "In progress" section of `plan/PROGRESS.md`, `reports/ssi-corpus.json`, and `plan/modules.toml` along `main`'s first-parent git history for the timeline. The history is read once; overall, per-module and per-unit series come from the same pass |
+| Module pages (`areas/<module>.html`) | `plan/modules.toml` and its history: the same chart as the overview, over that module's units only |
 | Units (`units/index.html`) | `plan/modules.toml`, `harness/callgraph/units.json`, `reports/difftest/*.json` (`cases_*`, `deferred_by_unit`) |
-| Unit pages (`units/<id>.html`) | the above, plus the `//! | Rust | Upstream |` table in the module's file header |
+| Unit pages (`units/<id>.html`) | the above, plus the `//! | Rust | Upstream |` table in the module's file header and the unit's status history from the timeline |
 | Upstream issues (`issues.html`) | `plan/upstream-issues.md`, split at `#### <SERIES>-<n>.` headings |
 | SSI corpus (`ssi.html`) | `reports/ssi-corpus.json` |
 
 Text from the repository is HTML-escaped before a small markdown subset (inline code,
 bold, italic, http(s) links, nested `- ` lists) is applied, so raw HTML written in a PR
 never reaches the page. Charts are inline SVG; `site/assets/app.js` only sorts and
-filters tables and drives the chart tooltip. No external assets.
+filters tables, drives the chart tooltips and the overview's module picker (without JS the overview
+shows the all-units chart). No external assets.
 
 Deployment: `.github/workflows/pages.yml` rebuilds on every push to `main`, after a
 "Progress checklist" run that pushed a new `plan/PROGRESS.md` (those commits carry
