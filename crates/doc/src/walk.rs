@@ -336,7 +336,7 @@ impl Walk for PlaneRef {
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
                 // A plane seen from behind keeps its base's expressions (a sketch made with
                 // `flip` on an offset plane did not follow the offset's parameter).
-                PlaneRef::Flipped { base, .. } => p = base,
+                PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } => p = base,
                 PlaneRef::Placed { origin, .. } => {
                     for (label, e) in ["X", "Y", "Z"].into_iter().zip(origin) {
                         f((label, e, Kind::Length, ExprRole::Placement));
@@ -362,7 +362,7 @@ impl Walk for PlaneRef {
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
                 // A plane seen from behind keeps its base's expressions (a sketch made with
                 // `flip` on an offset plane did not follow the offset's parameter).
-                PlaneRef::Flipped { base, .. } => p = base,
+                PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } => p = base,
                 PlaneRef::Placed { origin, .. } => {
                     for (label, e) in ["X", "Y", "Z"].into_iter().zip(origin) {
                         f((label, e, Kind::Length, ExprRole::Placement));
@@ -395,6 +395,10 @@ impl PlaneRef {
         match self {
             Self::Construction { name } => f(Ref::Feature(name)),
             Self::Offset { base, .. } | Self::AtAngle { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
+            Self::ThroughPoint { base, point } => {
+                base.walk_feature_refs(f, depth + 1);
+                point.walk_feature_refs(f, depth + 1);
+            }
             Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs(f, depth + 1);
                 b.walk_feature_refs(f, depth + 1);
@@ -416,6 +420,10 @@ impl PlaneRef {
         match self {
             Self::Construction { name } => f(Ref::Feature(name)),
             Self::Offset { base, .. } | Self::AtAngle { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
+            Self::ThroughPoint { base, point } => {
+                base.walk_feature_refs_mut(f, depth + 1);
+                point.walk_feature_refs_mut(f, depth + 1);
+            }
             Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs_mut(f, depth + 1);
                 b.walk_feature_refs_mut(f, depth + 1);

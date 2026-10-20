@@ -505,3 +505,41 @@ fn ambiguity_error_names_the_other_origin_alias() {
         assert_eq!(inspected["plane"]["origin"], json!([0.0, 0.0, 0.0]));
     }
 }
+
+/// An offset plane through a point instead of at a distance: parallel to its base, through a
+/// vertex, a sketch point or a construction point, and moving with the point.
+#[test]
+fn offset_plane_through_a_point_follows_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "body_name": "Box"}));
+    // Through the box's top corner, parallel to XY: the top face's plane.
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "through": {"vertex": [40, 30, 20]}, "name": "Lid"}));
+    let lid = plane(&s, "Lid");
+    assert!(parallel(lid.normal(), Vec3::Z) && near(lid.origin, Vec3::new(0.0, 0.0, 20.0)), "{lid:?}");
+    // Through a point of a sketch on XZ, parallel to the box's side face at x = 40.
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XZ"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.point", json!({"point": [70, 5], "id": "mark"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [40, 15, 10]}, "through": {"sketch": sketch, "point": "mark"}, "name": "Side"}));
+    let side = plane(&s, "Side");
+    assert!(parallel(side.normal(), Vec3::X) && on_plane(&side, Vec3::new(70.0, 9.0, 3.0)), "{side:?}");
+    // Through a construction point, parallel to another construction plane.
+    run(&mut s, "construct.point.vertex", json!({"point": {"vertex": [0, 30, 20]}, "name": "Corner"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 5, "name": "Fore"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "Fore", "through": {"construct_point": "Corner"}, "name": "Back"}));
+    let back = plane(&s, "Back");
+    assert!(parallel(back.normal(), Vec3::Y) && on_plane(&back, Vec3::new(3.0, 30.0, 7.0)), "{back:?}");
+    // The box gets taller: the planes through its corners follow.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    assert!(on_plane(&plane(&s, "Lid"), Vec3::new(1.0, 2.0, 50.0)), "{:?}", plane(&s, "Lid"));
+    assert!(on_plane(&plane(&s, "Back"), Vec3::new(1.0, 30.0, 2.0)), "{:?}", plane(&s, "Back"));
+    // Saved and opened again, the planes come back where they were.
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session { doc: restored.into(), ..Default::default() };
+    cold.refresh();
+    assert!(near(plane(&cold, "Lid").origin, plane(&s, "Lid").origin));
+    assert!(near(plane(&cold, "Side").origin, plane(&s, "Side").origin));
+    // A distance and a point at once is refused.
+    assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
+}
