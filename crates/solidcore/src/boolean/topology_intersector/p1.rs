@@ -745,7 +745,7 @@ pub(super) fn surface_coincidence_check<O: ClassObject + SolutionObject>(
 /// `SmCurveClassification(pCurve, interval, NULL, tol)` (`cpUVCurve = NULL`; the remaining
 /// arguments default: no interval storage, the curve not owned and current, no surfaces),
 /// unit `intersect.curve_class_p4`.
-fn new_curve_classification<O: ClassObject>(
+pub(super) fn new_curve_classification<O: ClassObject>(
     k: &Kernel,
     curve: O,
     interval: &Extent1d,
@@ -772,7 +772,7 @@ fn new_curve_classification<O: ClassObject>(
 
 /// `SmCurveClassification::InsertTopologyIntersections(solutions, 0)` (unit
 /// `intersect.curve_class_p5`).
-fn cc_insert_topology_intersections<O: ClassObject + SolutionObject>(
+pub(super) fn cc_insert_topology_intersections<O: ClassObject + SolutionObject>(
     k: &Kernel,
     geometry: &impl IntersectorBrep<O>,
     cc: &mut CurveClassification<O>,

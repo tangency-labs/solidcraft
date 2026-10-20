@@ -7414,15 +7414,551 @@
       "pass": true,
       "source": "inline",
       "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_null_vertex",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_unmated",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_context_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_far_unmated",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_all_edges_mated",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 43
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_copy_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_copy_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_copy_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_copy_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_offset_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_offset_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_offset_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_offset_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_drop_relate_partly_mated",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "close_loop_crossed_mates",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "inline",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "close_loop_other_side",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "inline",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen00",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 28
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen01",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen02",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen03",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen04",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 22
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 20
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen06",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen07",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen08",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 22
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen09",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 39
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen12",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "inline",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen13",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen14",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen16",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen17",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen18",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen19",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen20",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen21",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen22",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 35
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen23",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 34
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen24",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen25",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen26",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen27",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen28",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen29",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "inline",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen30",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "inline",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen31",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen32",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 22
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen33",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen34",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen35",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen36",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen37",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen38",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen39",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 35
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen40",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "inline",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen41",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen42",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen43",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen44",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 31
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen45",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen46",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "close_loop_gen47",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 23
     }
   ],
   "cases_both_errored": 2,
-  "cases_deferred": 171,
+  "cases_deferred": 177,
   "cases_failed": 0,
-  "cases_passed": 670,
-  "cases_total": 841,
+  "cases_passed": 728,
+  "cases_total": 905,
   "deferred_by_unit": {
-    "query.brep": 41,
+    "query.brep": 47,
     "topology.brep_p1": 4,
     "topology.brep_p3": 8,
     "topology.face_p2": 75,

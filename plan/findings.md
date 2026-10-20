@@ -8212,6 +8212,48 @@ PR #203 (on main's #146). Part 2 of `SmTopologyIntersector.cpp`: `RegisterExisti
   --fuzz 2000` reports FUZZ-PASS with 3 `differs` notes, all `sm_SetEdgeClass` with a
   mutated tolerance of -1e300 (C++ classifies an end to `SM_PC_VERTEX`, the port to
   `SM_PC_EDGE`): part 1's code, untouched by this PR.
+- **CloseIntersectionLoop co-port.** `SmTopologyIntersector::CloseIntersectionLoop`
+  (`SmTopologyIntersector.cpp:6108-6354`, called from `SmMerge.cpp:2958`) and its only
+  callee `IIREdgeBrep` (`:2836-2971`) are listed by no unit in `units.json`; per the
+  overseer they are co-ported into this unit (`close_intersection_loop`,
+  `iir_edge_brep`). `IIREdgeBrep`'s `MergeCurveClasses` stays
+  `UNPORTED(boolean.topology_intersector_p3)` (draft #211 ports it). Script op 52 runs it;
+  it is not drawn by the generator (16 edge cases on a planar face and its copy plus 48
+  seeded scripts, `close_loop_*`, so the 841 earlier cases are unchanged); on success it
+  reports the other mate of each edge of the vertex (`GetMappedBrepObjects` cannot
+  follow an op that may change topology). 58 compare: 11
+  `SM_ERR_NULL_POINTER` early returns, 28 successes without new topology (every edge
+  mated, or the far vertices unmated), 19 that relate the edge pair whose midpoint drops
+  onto the mated vertices' only common edge; 6 reach the coincidence test and defer in
+  `BrepCurveSolve` (`SmBrep::CalculateBoundingBox`, `query.brep`). **Uncovered:** no
+  passing case reaches `BrepCurveSolve`, so the coincidence branch, `IIREdgeBrep` and the
+  second loop past its skips have zero compared cases, and no pass makes new topology;
+  every pass ends before the first `BrepCurveSolve`. The 19 drop-path passes compare a
+  real `Relate` (removing it fails exactly those 19). The drop's tolerance
+  (`2 * dMaxDist`) is not observable here: under `SM_SO_MINIMIZE` it does not gate
+  success (the intersection tolerance is `SM_BIG_DOUBLE`) and no snap vector is passed,
+  so it reaches only the global point solve's snapping, and `bSuccess` (the drop's only
+  use) does not change; a 0.5x mutant survives for that reason, and a near-tolerance
+  case would not tell them apart. The shim refuses a
+  vertex whose edges lack a curve or vertices (or, for the B-rep vertex, a primary edge
+  use) and the FFI requires both B-reps.
+- **Time-budget guard on `IntersectInsertRelate` (op 47): |approx| <= 0.1.** A defined
+  input, not undefined behaviour and not a hang: with a large approximation tolerance
+  the full upstream intersection finishes, but slowly (fuzz drew `approx = -1e300` on
+  `Mouse.smb` x `vase_rev.smb`: 39 s, over its 20 s limit). C++-side wall time of the
+  op-47 fixtures (the port defers op 47), both signs:
+
+  | fixture (generated case) | 1 | 10 | 1e3 | 1e6 |
+  |---|---|---|---|---|
+  | `Mouse.smb` x `vase_rev.smb` (gen0314) | 0.5 s | 5.1 / 9.8 s | 28.8 / 27.0 s | 20.1 / 20.5 s |
+  | `torus.smb` x `ellips_ts2.smb` (gen0111) | 0.4 s | 1.2 / 1.3 s | 1.8 / 1.9 s | 1.8 s |
+  | `box_with_large_fillet.smb` x `torus.smb` (iir) | 0.2 s | 0.4 s | 0.2 / 0.9 s | 0.2 / 0.9 s |
+  | `surf_extrude.smb` x `box_with_large_fillet.smb` (gen0101) | 0.1 s | 0.2 / 0.1 s | 0.1 s | 0.1 s |
+  | gen0070, gen0105, gen0143 | < 0.1 s | < 0.1 s | < 0.1 s | < 0.1 s |
+
+  |1| is the largest measured magnitude under 2 s on all of them; the guard sits 10x
+  below it. Generated tolerances are at most 1e-2, so no earlier case changes. No HANG
+  id: every run terminated.
 - Upstream issues: UB-184 (`RegisterExistingSSI` failure leaves the table's lists out of
   step), UB-175 [PSIRT] (`~SmProtoTopologyManager` use-after-free), HANG-25 (zero
   tolerance), WR-170 (copies of registered curves and a failed manager leak).
@@ -11118,6 +11160,16 @@ the real IntersectInsertRelate deferral, identity/nonidentity transform boundari
 notification identities and both operand callbacks with locked marks after error.
 
 Verification after batch #259: running on sc-builder-5; final summaries pending.
+
+Update (PR #281): CloseIntersectionLoop is now co-ported into
+boolean.topology_intersector_p2 (`TopologyIntersector::close_intersection_loop`), and
+`KernelManifoldIntersector::close_intersection_loop` calls it over the `ArenaPair`.
+The `ManifoldIntersector` method now takes the caller `AttributeStore` and has no
+default, so the table row above is historical. `ArenaPair` also gains
+`edge_normalized_evaluate`, the `IntersectorBrepP2` method this co-port adds
+(`brep_faces`, `brep_combine_coincident_vertices` and `fix_gaps(k, ..)` came with
+#274's integration in batch #305). All valid merge_p4 operand cases still stop first at merge_p1's
+`temporary_brep_transform` (`query.brep`), so no merge_p4 case reaches the loop yet.
 
 ## topology.vertexuse: extreme-coordinate C++ fuzz timeouts (PR #248)
 

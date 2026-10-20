@@ -5,7 +5,7 @@
 //
 // Part 2 runs on the same intersector object and two-B-rep script as part 1, so this file
 // includes part 1's shim (boolean_topology_intersector_p1.cpp) with SC_TI_EXTRA_OPS: every
-// op of part 1 works unchanged and the script ops 41 to 51 below are part 2's. The entry
+// op of part 1 works unchanged and the script ops 41 to 52 below are part 2's. The entry
 // point is sc_boolean_topology_intersector_p2_eval(op, path, in, n_in, out, cap, out_len);
 // layouts are documented in crates/solidcore-ffi/src/units/boolean_topology_intersector_p2.rs,
 // which validates every input (on top of part 1's validation).
@@ -28,6 +28,7 @@ enum TiScriptOp2 : int64_t
     S_FIXUP_SPLIT = 49,
     S_EDGE_EDGE = 50,
     S_EDGE_FACE_COIN = 51,
+    S_CLOSE_LOOP = 52,
 };
 
 bool is_vertex(const SmObject* p) { return p != nullptr && p->IsKindOf(SmVertex_TYPE); }
@@ -109,6 +110,21 @@ bool vertex_faces_ok(SmVertex* v)
             return false;
     return true;
 }
+// CloseIntersectionLoop dereferences the edges of both vertices (curves, vertices) and the
+// primary edge use of the B-rep vertex's edges (NormalizedEvaluate).
+bool close_loop_edges_ok(SmTopologyIntersector* ti, SmVertex* bv)
+{
+    if (!vertex_edges_ok(bv))
+        return false;
+    SmTArray<SmEdge*> es;
+    bv->GetEdges(es);
+    for (ULONG i = 0; i < es.GetSize(); i++)
+        if (es[i]->GetPrimaryEdgeuse() == nullptr)
+            return false;
+    SmObject* om = ti->GetOtherMate(bv);
+    return !is_vertex(om) || vertex_edges_ok((SmVertex*)om);
+}
+
 // FixGaps' scan up to its first squeeze candidate (read-only): whether CombineCoincidentVertices
 // would run with a null B-rep or a mate that is not a vertex (the steps before it return early).
 bool fix_gaps_first_candidate_ok(SmTopologyIntersector* ti, const SmTArray<SmVertex*>& verts)
@@ -473,6 +489,29 @@ bool run_extra_op(int64_t op, Rd& rd, Two& t, SmTopologyIntersector* ti, SmProto
         put_list(o, t, as_objs(sf));
         o.push_back(mx);
         o.push_back(mn);
+        return true;
+    }
+    case S_CLOSE_LOOP:
+    {
+        SmVertex* bv = (SmVertex*)rd_h(rd, t);
+        if (bv != nullptr && (!is_vertex(bv) || !close_loop_edges_ok(ti, bv)))
+        {
+            o.push_back(ST_NULL_DEREF);
+            return true;
+        }
+        SmBoolean made = FALSE;
+        SmStatus s = ti->CloseIntersectionLoop(bv, made);
+        o.push_back(st(s));
+        if (s != SM_SUCCESS)
+            return true;
+        o.push_back(flg(made));
+        // the relationships it made: the other mate of each edge of the vertex (op 6
+        // cannot follow an op that may change topology)
+        SmTArray<SmEdge*> es;
+        bv->GetEdges(es);
+        o.push_back((double)es.GetSize());
+        for (ULONG i = 0; i < es.GetSize(); i++)
+            t.put(o, ti->GetOtherMate(es[i]));
         return true;
     }
     default: return false;

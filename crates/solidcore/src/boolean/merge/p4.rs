@@ -280,22 +280,19 @@ pub trait ManifoldIntersector {
     /// Current `m_bTopologyDeleted`, including changes during a failed close.
     fn topology_deleted(&self) -> bool;
     /// `CloseIntersectionLoop(pVertex,bMadeNewTopology)`. The callgraph omits
-    /// this live callee; its proposed owner is `topology_intersector_p2` (see
-    /// `plan/findings.md`). The retry/cleanup tail stays at the call site.
+    /// this live callee; it is co-ported into `boolean.topology_intersector_p2`
+    /// (`TopologyIntersector::close_intersection_loop`). `made_new_topology` is
+    /// written only on success. Topology it inserts notifies through `attributes`.
+    /// The retry/cleanup tail stays at the call site.
     fn close_intersection_loop(
         &mut self,
-        _kernels: &mut BooleanKernels<'_>,
-        _primary: &mut Brep,
-        _other: &mut Brep,
-        _vertex: VertexId,
-        _made_new_topology: &mut bool,
-    ) -> Result<()> {
-        // UNPORTED(boolean.topology_intersector_p2): SmTopologyIntersector::CloseIntersectionLoop (absent from partial #203; overseer-owned follow-up)
-        Err(SolidError::unported(
-            "SmTopologyIntersector::CloseIntersectionLoop",
-            "boolean.topology_intersector_p2",
-        ))
-    }
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+        vertex: VertexId,
+        made_new_topology: &mut bool,
+    ) -> Result<()>;
     /// `FixGaps(sSingleVertices,bModifiedTopology,sDelVerts,sDelEdges)`.
     fn fix_gaps(
         &mut self,
@@ -488,7 +485,8 @@ fn mark_common(
             intersector.clear_topology_deleted();
             if manifold
                 && ignored(
-                    intersector.close_intersection_loop(kernels, primary, other, v, &mut made),
+                    intersector
+                        .close_intersection_loop(kernels, primary, other, attributes, v, &mut made),
                 )?
                 .is_none()
             {

@@ -8,7 +8,8 @@
 //! ([`super::boolean_topology_intersector_p1`]: B-rep inputs, handle selectors, record
 //! layout, prefix cutting, guards) whose ops may include part 2's (`remove_rel`,
 //! `squeeze`, `delete_faces`, `fix_gaps`, `intersect_topo`, `set_rels`, `iir`,
-//! `fixup_class`, `fixup_split`, `edge_edge`, `edge_face_coin`; shim ops 41 to 51). The
+//! `fixup_class`, `fixup_split`, `edge_edge`, `edge_face_coin`, `close_loop`; shim ops 41
+//! to 52). The
 //! C++ side runs through part 2's entry point, the Rust side through the same
 //! interpreter as part 1's, which dispatches part 2's ops to
 //! [`solidcore::boolean::topology_intersector::p2`]. `RegisterExistingSSI` is part 1's
@@ -18,14 +19,17 @@
 //! (so mates exist and conflict), then runs part 2's ops; classification pairs of the
 //! fix-ups are built on one edge's curve with fractions of its interval and vertex
 //! classifications naming the related vertices. Edge cases built in code cover the
-//! branches the generator rarely draws.
+//! branches the generator rarely draws. `CloseIntersectionLoop` (co-ported, op 52) is
+//! covered only by its own edge cases and seeded scripts (`close_loop_*`), so the
+//! generated cases are unchanged.
 //!
 //! **Deferred.** What reaches `SmBrep::GetFaces` (`topology.brep_p1`: every
 //! `IntersectTopology` and `IntersectInsertRelate`), `CombineCoincidentVertices` /
 //! `MakeEdgeInFace` (`topology.brep_p5`), `DeleteFace` (`topology.brep_p3`),
 //! `DeleteEdge` / `DeleteVertex` (`topology.brep_p4`), `MakeVertexSplitEdge`
 //! (`topology.brep_p9`), `SmFace::GetEdges` / `GetVertices` / `GetBrep`
-//! (`topology.face_p4`), `Point3DClassify` (`query.face_p1`) and the manager's
+//! (`topology.face_p4`), `Point3DClassify` (`query.face_p1`), `MergeCurveClasses`
+//! (`boolean.topology_intersector_p3`, through `IIREdgeBrep`) and the manager's
 //! construction at a zero approximation tolerance (`topology.brep_p1`).
 
 use serde_json::Value;
@@ -34,7 +38,8 @@ use solidcore_ffi::units::boolean_topology_intersector_p2 as ffi;
 
 use super::boolean_topology_intersector_p1::{
     gen_brep, gen_h, gen_list, gen_sel, gen_tol, run_cpp_with, run_rust, BrepIn, CcIn, Gen, Hin,
-    Inputs, IvlIn, OpIn, PciIn, K_EDGE, K_EDGE_CURVE, K_FACE, K_NULL, K_VERTEX, MIN_GENERATED,
+    Inputs, IvlIn, OpIn, PciIn, SrfIn, K_EDGE, K_EDGE_CURVE, K_FACE, K_NULL, K_VERTEX,
+    MIN_GENERATED,
 };
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
@@ -894,9 +899,162 @@ fn edge_cases() -> Vec<(String, Value)> {
         ),
     ));
 
+    out.extend(close_loop_cases());
     out.into_iter()
         .filter_map(|(n, v)| v.map(|v| (n, v)))
         .collect()
+}
+
+/// How many seeded `CloseIntersectionLoop` scripts [`close_loop_cases`] adds.
+const CLOSE_LOOP_GENERATED: u64 = 48;
+
+/// `CloseIntersectionLoop` (co-ported into this unit): its early returns, the loops over
+/// mated edges, the single-common-edge drop that relates the two edges and the
+/// coincidence test, on a planar face (4 vertices, 4 edges) and its copy, then
+/// [`CLOSE_LOOP_GENERATED`] seeded scripts on generated B-reps (their own seeds, so the
+/// generated cases above are unchanged). Op 52 reports the other mate of each edge of
+/// the vertex, so the relationships it makes are compared.
+fn close_loop_cases() -> Vec<(String, Option<Value>)> {
+    let v = |b: i64, i: i64| -> Hin { [b, i64::from(K_VERTEX), i] };
+    let e = |b: i64, i: i64| -> Hin { [b, i64::from(K_EDGE), i] };
+    let null: Hin = [-1, K_NULL, -1];
+    let face = |z: f64| BrepIn::Face {
+        surface: SrfIn::Plane {
+            o: [0.0, 0.0, z],
+            n: [0.0, 0.0, 1.0],
+        },
+        dom: [0.0, 0.0, 1.0, 1.0],
+    };
+    let relate = |a: Hin, b: Hin| OpIn::Relate { a, b };
+    let mut out: Vec<(String, Option<Value>)> = Vec::new();
+    let mut script = |name: &str, b: BrepIn, ctor: u8, ops: Vec<OpIn>| {
+        out.push((name.into(), inputs(face(0.0), Some(b), ctor, ops)));
+    };
+
+    // early returns: a null vertex, an unmated vertex, an intersector without maps
+    script(
+        "close_loop_null_vertex",
+        face(0.0),
+        0,
+        vec![OpIn::CloseLoop { v: null }],
+    );
+    script(
+        "close_loop_unmated",
+        face(0.0),
+        0,
+        vec![OpIn::CloseLoop { v: v(0, 0) }],
+    );
+    script(
+        "close_loop_context_only",
+        face(0.0),
+        1,
+        vec![OpIn::CloseLoop { v: v(0, 0) }],
+    );
+    // the far vertices unmated: both loops skip every edge
+    script(
+        "close_loop_far_unmated",
+        face(0.0),
+        0,
+        vec![relate(v(0, 0), v(1, 0)), OpIn::CloseLoop { v: v(0, 0) }],
+    );
+    // every edge mated: both loops skip every edge
+    let mut all = Vec::new();
+    for i in 0..4 {
+        all.push(relate(v(0, i), v(1, i)));
+    }
+    for i in 0..4 {
+        all.push(relate(e(0, i), e(1, i)));
+    }
+    let mut ops = all.clone();
+    ops.push(OpIn::CloseLoop { v: v(0, 0) });
+    script("close_loop_all_edges_mated", face(0.0), 0, ops);
+    // every vertex mated, no edge: the first edge's midpoint drops onto the copy's
+    // only common edge and the two edges are related (on the copy, and on a copy
+    // moved off the plane, so the drop distance is not zero)
+    for (tag, z) in [("copy", 0.0), ("offset", 1e-4)] {
+        for i in 0..4 {
+            let mut ops: Vec<OpIn> = (0..4).map(|j| relate(v(0, j), v(1, j))).collect();
+            ops.push(OpIn::CloseLoop { v: v(0, i) });
+            script(
+                &format!("close_loop_drop_relate_{tag}_{i}"),
+                face(z),
+                0,
+                ops,
+            );
+        }
+    }
+    // some edges already mated: the drop relates a remaining one
+    let mut ops: Vec<OpIn> = (0..4).map(|j| relate(v(0, j), v(1, j))).collect();
+    ops.push(relate(e(0, 0), e(1, 0)));
+    ops.push(OpIn::CloseLoop { v: v(0, 0) });
+    script("close_loop_drop_relate_partly_mated", face(0.0), 0, ops);
+    // crossed mates: the far vertex's mate shares no edge with the vertex's mate, or
+    // only the other B-rep's side is mated, which reaches the coincidence test
+    script(
+        "close_loop_crossed_mates",
+        face(0.0),
+        0,
+        vec![
+            relate(v(0, 0), v(1, 0)),
+            relate(v(0, 1), v(1, 2)),
+            relate(v(0, 3), v(1, 2)),
+            OpIn::CloseLoop { v: v(0, 0) },
+        ],
+    );
+    script(
+        "close_loop_other_side",
+        face(0.0),
+        0,
+        vec![
+            relate(v(0, 0), v(1, 0)),
+            relate(v(0, 2), v(1, 1)),
+            OpIn::CloseLoop { v: v(0, 0) },
+        ],
+    );
+
+    // seeded scripts on generated B-reps
+    for seed in 0..CLOSE_LOOP_GENERATED {
+        let mut rng = Rng::new(0xC105_E000 + seed);
+        let brep_a = gen_brep(&mut rng);
+        let brep_b = if rng.chance(0.7) {
+            brep_a.clone()
+        } else {
+            gen_brep(&mut rng)
+        };
+        let mut ops = Vec::new();
+        let mut first = None;
+        for _ in 0..=rng.below(5) {
+            let a = vtx(&mut rng, 0);
+            let b = if rng.chance(0.7) {
+                [1, a[1], a[2]]
+            } else {
+                vtx(&mut rng, 1)
+            };
+            first.get_or_insert(a);
+            ops.push(relate(a, b));
+        }
+        for _ in 0..rng.below(3) {
+            let a = edge(&mut rng, 0);
+            ops.push(relate(a, [1, a[1], a[2]]));
+        }
+        let bv = match (first, rng.below(10)) {
+            (_, 0) => null,
+            (Some(a), 1..=7) => a,
+            _ => vtx(&mut rng, 0),
+        };
+        ops.push(OpIn::CloseLoop { v: bv });
+        let value = serde_json::to_value(Inputs {
+            brep_a,
+            brep_b: Some(brep_b),
+            ctor: 0,
+            approx: 1e-5,
+            ang: 0.1,
+            ops,
+        })
+        .ok();
+        out.push((format!("close_loop_gen{seed:02}"), value));
+    }
+    out
 }
 
 // ---- the runner ---------------------------------------------------------------------------

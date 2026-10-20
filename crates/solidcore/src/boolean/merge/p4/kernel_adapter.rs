@@ -412,6 +412,43 @@ impl ManifoldIntersector for KernelManifoldIntersector {
         )
     }
 
+    fn close_intersection_loop(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+        vertex: VertexId,
+        made_new_topology: &mut bool,
+    ) -> Result<()> {
+        let vertex = arena_pair::encode(EntityRef::Vertex(vertex), false);
+        // IIREdgeBrep's MergeCurveClasses sets m_bTopologyDeleted on this same flag.
+        self.intersector.topology_deleted = self.topology_deleted;
+        Context::with_notification_context(kernels.primary, |k, context| {
+            let mut pair = ArenaPair::new(
+                primary,
+                Some(other),
+                &mut self.curves,
+                &mut self.extra_curves,
+                &mut self.records,
+                attributes,
+                cache_kernels(k, kernels.other.as_deref(), context),
+                context,
+                kernels.other.as_deref_mut().map(|k| &mut k.context),
+                self.namespace,
+            );
+            let result = self.merge.intersector.with_intersector(
+                &mut self.intersector,
+                arena_pair::encode,
+                arena_pair::decode,
+                |ti| ti.close_intersection_loop(k, &mut pair, Some(vertex)),
+            );
+            self.topology_deleted = self.intersector.topology_deleted;
+            *made_new_topology = result?;
+            Ok(())
+        })
+    }
+
     fn fix_gaps(
         &mut self,
         kernels: &mut BooleanKernels<'_>,
@@ -823,6 +860,42 @@ mod tests {
     fn face(b: &mut Brep) -> FaceId {
         let shell = b.add_shell().unwrap();
         b.add_face(shell).unwrap()
+    }
+
+    #[test]
+    fn close_intersection_loop_runs_the_co_ported_intersector() {
+        let mut adapter = KernelManifoldIntersector::new(0).unwrap();
+        let mut k = Kernel::default();
+        let mut kernels = BooleanKernels {
+            primary: &mut k,
+            other: None,
+        };
+        let mut a = Brep::new();
+        let v = a
+            .add_vertex_record(crate::topology::Vertex::default())
+            .unwrap();
+        let mut b = Brep::new();
+        let mut made = true;
+        // An unmated vertex is p2's NER early return; the flag is left alone.
+        let error = adapter
+            .close_intersection_loop(
+                &mut kernels,
+                &mut a,
+                &mut b,
+                &mut AttributeStore::new(),
+                v,
+                &mut made,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            SolidError::Upstream {
+                code: crate::error::SM_ERR_NULL_POINTER,
+                ..
+            }
+        ));
+        assert!(made);
+        assert!(!adapter.topology_deleted());
     }
 
     #[test]
