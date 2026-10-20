@@ -71,7 +71,9 @@ pub struct MassMeasure {
     pub bbox: Aabb3,
 }
 
-/// The volume a mesh encloses, taken about `o` ([`face_sums`]: a point in or near the body).
+/// The volume a mesh encloses, taken about `o` (a point in or near the body): a mesh's cracks (its
+/// faces' edges sampled apart) count for their distance from that point, so a small part far out
+/// would measure them many times over about the world's origin.
 pub(crate) fn mesh_volume_about(m: &Mesh, o: Vec3) -> f64 {
     let o = if o.is_finite() { o } else { Vec3::ZERO };
     m.triangles.iter().filter_map(|t| m.tri(t)).map(|[a, b, c]| (a - o).dot((b - o).cross(c - o))).sum::<f64>() / 6.0

@@ -633,7 +633,10 @@ fn volume_in(sel: &Selection, input: &Body, out: Body, size: Size) -> Result<Bod
             return Ok(out);
         }
     }
-    let (Ok(ma), Ok(mb)) = (crate::measure(input), crate::measure(&out)) else { return Ok(out) };
+    // Measured with the selection's middle at the origin: a mesh's cracks count for their distance
+    // from it, so a small part far out would measure them many times over.
+    let near = |b: &Body| crate::transform(b, -sel.centre, Vec3::ZERO, Vec3::Z, 0.0).and_then(|b| crate::measure(&b));
+    let (Ok(ma), Ok(mb)) = (near(input), near(&out)) else { return Ok(out) };
     let slack = ma.volume.abs() * 1e-4 + (ma.area + mb.area) * sel.size * 1e-5;
     let changed = (ma.volume - mb.volume).abs();
     if changed > bound * 1.02 + slack {
