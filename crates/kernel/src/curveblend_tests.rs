@@ -1630,22 +1630,23 @@ fn rounds_meeting_where_the_plate_side_is_square_to_the_wall_merge_in_any_order(
 }
 
 /// A straight wall (x 0 to 40, y 0 to 2, z 3 to 8) on a plate 3 thick, its ends flush with the
-/// plate's sides beneath them. The plate's sides leave the wall's ends at 30° to its trace, run
-/// straight for 4 to a sharp corner and on parallel to the wall. With a point on the wall's foot
-/// and on each slanted side's top edge, and the wall's ends.
-fn wall_on_a_trapezoid() -> (Body, Vec3, [Vec3; 2], [WallEnd; 2]) {
-    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+/// plate's sides beneath them. The plate's sides leave the wall's ends at `deg` to its trace, run
+/// straight for `side` to a sharp corner and on parallel to the wall. With a point on the wall's
+/// foot and on each slanted side's top edge (0.9 of the way along), and the wall's ends.
+fn wall_on_a_trapezoid(deg: f64, side: f64) -> (Body, Vec3, [Vec3; 2], [WallEnd; 2]) {
+    let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
     let plate = prism_at(
         Vec3::ZERO,
-        &[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (40.0 - 4.0 * c, 2.0 + 4.0 * s), (4.0 * c, 2.0 + 4.0 * s), (0.0, 2.0)],
+        &[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (40.0 - side * c, 2.0 + side * s), (side * c, 2.0 + side * s), (0.0, 2.0)],
         0.0,
         3.0,
     );
     let wall = prism_at(Vec3::ZERO, &[(0.0, 0.0), (40.0, 0.0), (40.0, 2.0), (0.0, 2.0)], 3.0, 8.0);
     let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
-    let tan = 30f64.to_radians().tan();
+    let tan = deg.to_radians().tan();
     let ends = [(Vec3::new(0.0, 2.0, 3.0), Vec3::X, Vec3::Y, tan), (Vec3::new(40.0, 2.0, 3.0), -Vec3::X, Vec3::Y, tan)];
-    (body, Vec3::new(20.0, 2.0, 3.0), [Vec3::new(3.6 * c, 2.0 + 3.6 * s, 3.0), Vec3::new(40.0 - 3.6 * c, 2.0 + 3.6 * s, 3.0)], ends)
+    let at = 0.9 * side;
+    (body, Vec3::new(20.0, 2.0, 3.0), [Vec3::new(at * c, 2.0 + at * s, 3.0), Vec3::new(40.0 - at * c, 2.0 + at * s, 3.0)], ends)
 }
 
 #[test]
@@ -1655,7 +1656,7 @@ fn rounds_meeting_at_a_wall_end_fit_alike_in_either_order_before_a_sharp_corner(
     // rb·cot 30° further on), so the band fits even where its corner on the top lies past the
     // side's 4. It fits by the same measure whichever round came first: every route builds it,
     // the larger round first or the smaller.
-    let (body, foot, tops, ends) = wall_on_a_trapezoid();
+    let (body, foot, tops, ends) = wall_on_a_trapezoid(30.0, 4.0);
     let theta = 30f64.to_radians();
     for (ra, rb) in [(1.0, 1.3), (1.0, 2.0), (1.6, 0.5)] {
         let footed = fillet(&body, &[foot], ra).unwrap();
@@ -1688,6 +1689,67 @@ fn rounds_meeting_at_a_wall_end_fit_alike_in_either_order_before_a_sharp_corner(
             assert!((mass(result) - mass(first)).abs() < 1e-6 * v_body, "{how}");
             assert!(same_vertices(result, first, 1e-6), "{how}: the vertices differ from the first route's");
         }
+    }
+}
+
+#[test]
+fn a_plate_edge_nearly_square_to_the_wall_merges_each_at_its_radius_either_size_first() {
+    // The plate's sides leave the wall's ends at 85°, so the wall's end runs 5° off the plate's
+    // side beneath it. The edge's round alone is refused there (it would end on a face almost
+    // along its edge), but after the foot's round it ends on that round's end and merges with it.
+    // Each at its radius builds that merge whichever radius is the larger.
+    let (body, foot, tops, ends) = wall_on_a_trapezoid(85.0, 15.0);
+    for (ra, rb) in [(1.0, 0.5), (0.5, 1.0)] {
+        let alone = fillet(&body, &tops, rb).map(|_| ()).unwrap_err().to_string();
+        assert!(alone.contains("an end face almost along the edge"), "{alone}");
+        let merged = fillet(&fillet(&body, &[foot], ra).unwrap(), &tops, rb).unwrap();
+        let how = format!("foot {ra} edge {rb}");
+        assert_merged(&merged, &ends, (ra, rb), 1e-6, &how);
+        let each = crate::fillet_each(&body, &[foot, tops[0], tops[1]], &[ra, rb, rb]).unwrap_or_else(|e| panic!("{how}: {e}"));
+        assert_merged(&each, &ends, (ra, rb), 1e-6, &format!("each at its radius, {how}"));
+        assert!(same_vertices(&each, &merged, 1e-6), "{how}");
+    }
+}
+
+#[test]
+fn the_rounds_trimmed_by_the_band_mesh_on_their_cylinders_at_narrow_corners() {
+    // At a plate's corner of 10° or 15° each round's edge with the band leaves its contact with
+    // the top at a narrow angle: the display mesh of both rounds stays on their cylinders there,
+    // to the chord tolerance, as each round alone does (a grid fanned across that corner left them
+    // by a hundred times as much).
+    let tol = 5e-5;
+    for (deg, ra, rb) in [(10.0f64, 0.5, 0.5), (15.0, 0.5, 1.0)] {
+        let (body, foot, tops, ends) = wall_on_a_trapezoid(deg, 15.0);
+        let merged = fillet(&fillet(&body, &[foot], ra).unwrap(), &tops, rb).unwrap();
+        assert_merged(&merged, &ends, (ra, rb), 1e-6, &format!("{deg}°"));
+        // Each round's cylinder at each end (a point on its axis, the axis, the radius) and `P*`.
+        let theta = deg.to_radians();
+        let rounds: Vec<(Vec3, Vec3, Vec3, f64, Vec3)> = ends
+            .iter()
+            .flat_map(|end| {
+                let (v, w, _, _) = *end;
+                let s = Vec3::new(w.x * theta.cos(), theta.sin(), 0.0);
+                let (m_w, m_s) = ((s - w * w.dot(s)).normalized().unwrap(), (w - s * w.dot(s)).normalized().unwrap());
+                let ([p_star, _, _], _) = merge_points(*end, ra, rb);
+                [(v + m_w * ra + Vec3::Z * ra, w, Vec3::Z, ra, p_star), (v + m_s * rb - Vec3::Z * rb, s, Vec3::Z, rb, p_star)]
+            })
+            .collect();
+        let off = |(a, d, _, r, _): &(Vec3, Vec3, Vec3, f64, Vec3), p: Vec3| {
+            let q = p - *a;
+            ((q - *d * q.dot(*d)).len() - r).abs()
+        };
+        let mesh = merged.display_plan(tol).unwrap().evaluate();
+        let mut checked = 0;
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            let corners = mesh.tri(t).unwrap();
+            let centre = (corners[0] + corners[1] + corners[2]) * (1.0 / 3.0);
+            // A triangle of a round near `P*`: its corners on that round's cylinder.
+            let Some(round) = rounds.iter().find(|x| x.4.dist(centre) < 1.5 && corners.iter().all(|c| off(x, *c) < 1e-7)) else { continue };
+            let gap = off(round, centre);
+            assert!(gap < 4.0 * tol, "{deg}° face {f}: {gap} off its round at {centre:?}");
+            checked += 1;
+        }
+        assert!(checked > 100, "{deg}°: {checked}");
     }
 }
 
