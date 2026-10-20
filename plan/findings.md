@@ -9131,7 +9131,7 @@ validation section below. These results do not certify the review fixes.
   not on exactness. Of the 7 lift cases above, the 4 on surfaces of revolution (gen0009,
   gen0148, gen0520, gen0683) pass again; gen0119 and gen0707 (`SmSurfOfExtrusion`) and gen0376
   (`SmSphere`) stay deferred: the Rust `SurfaceKind` has no extrusion or sphere variant to
-  import them as. Overall 861 cases, 552 pass (was 542), 0 fail, 309 deferred: 10
+  import them as (issue #76). Overall 861 cases, 552 pass (was 542), 0 fail, 309 deferred: 10
   `harness:analytic-geometry-export` deferrals pass (105-408 values: the 4 lifts plus
   gen0070, gen0178, gen0187, gen0597, gen0698, gen0767, whose B-reps' only inexact faces were
   revolutions) and 9 now defer on `intersect.surface_drop_curve`; 107 harness deferrals remain
