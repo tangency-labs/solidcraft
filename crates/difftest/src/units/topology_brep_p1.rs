@@ -65,7 +65,7 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 
 /// "Upstream would dereference null" in a status slot.
 const NULL_DEREF: f64 = -2.0;
-/// The shim's HANG-34 rejection of a corner blend (C++ not run; see `run_cpp`).
+/// The shim's HANG-39 rejection of a corner blend (C++ not run; see `run_cpp`).
 const HANG34_GUARD: f64 = -34.0;
 
 /// The type codes `IsKindOf` is asked about (as the shim's `KIND_TYPES`).
@@ -484,7 +484,7 @@ fn resolve(op: &OpIn, c: [usize; 10]) -> Option<OpIn> {
 /// `ParallelProj` angle tolerance or an approximation tolerance below the smallest normal
 /// double (non-positive: the projector subdivides to it; subnormal: upstream spins,
 /// HANG-32). (A `CornerBlend` tangency tolerance below 1e-20 is rejected by the shim,
-/// only where upstream reaches the cross-tangent approximation: HANG-34.)
+/// only where upstream reaches the cross-tangent approximation: HANG-39.)
 fn refused_input(op: &OpIn) -> Option<Output> {
     match op {
         OpIn::ParallelProj { tol, ang, .. }
@@ -893,7 +893,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let body = out.get(1..).ok_or_else(|| harness("c++: empty output"))?;
     if matches!(op, OpIn::CornerBlend { .. }) && body.first() == Some(&HANG34_GUARD) {
         return Ok(Output::rejected(
-            "HANG-34: a tangency tolerance below 1e-20 where upstream reaches the \
+            "HANG-39: a tangency tolerance below 1e-20 where upstream reaches the \
              cross-tangent approximation (tens of seconds or more): nothing runs on either side",
         ));
     }

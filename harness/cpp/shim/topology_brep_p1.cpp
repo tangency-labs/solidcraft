@@ -814,7 +814,7 @@ void attach(Rd& rd, Graph& g, int64_t id)
 // The replay keeps upstream's ordering, statuses and early returns, so it is TRUE exactly when
 // the real call reaches one of those dereferences. `reaches_tangents` reports whether the call
 // gets past the curve conversion into the cross-tangent approximation, the only place the
-// tangency tolerance is used (four sides with a neighbour surface, or more sides; HANG-34). The
+// tangency tolerance is used (four sides with a neighbour surface, or more sides; HANG-39). The
 // later MakeCurvesCompatible / EditParameterization statuses are not replayed, so it may report
 // a call that stops there.
 static bool corner_blend_refused(SmBrep* brep, const SmContext& ctx, const SmTArray<SmEdgeuse*>& eus,
@@ -1866,7 +1866,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 o.push_back(0.0); // upstream resets the output array first
                 break;
             }
-            // HANG-34: a tangency tolerance below what doubles resolve makes the cross-tangent
+            // HANG-39: a tangency tolerance below what doubles resolve makes the cross-tangent
             // approximation and the Coons knot merge run for tens of seconds or more; the case
             // is rejected only where upstream reaches that approximation
             if (reaches_tangents && ang < 1e-20)

@@ -344,7 +344,7 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
                 return Err(bad("fewer tangency flags than edge uses"));
             }
             rd.finite()?;
-            // (HANG-34: the shim rejects a tangency tolerance below 1e-20 only where
+            // (HANG-39: the shim rejects a tangency tolerance below 1e-20 only where
             // upstream reaches the cross-tangent approximation)
             rd.finite()?;
         }

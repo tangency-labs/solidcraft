@@ -16596,7 +16596,7 @@
   },
   {
    "name": "corner_blend_ang0_one_edgeuse",
-   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2488 (SmBrep::CreateCornerBlend, tangency tolerance 0: HANG-34 only past the early returns)",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2488 (SmBrep::CreateCornerBlend, tangency tolerance 0: HANG-39 only past the early returns)",
    "inputs": {
     "brep": {
      "file": "plane_circ.smb",
@@ -16614,7 +16614,7 @@
   },
   {
    "name": "corner_blend_ang0_no_tangency_null_check",
-   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2488 (SmBrep::CreateCornerBlend, tangency tolerance 0: HANG-34 only past the early returns)",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2488 (SmBrep::CreateCornerBlend, tangency tolerance 0: HANG-39 only past the early returns)",
    "inputs": {
     "brep": {
      "kind": "crv_on_surf_face",
@@ -16776,7 +16776,7 @@
   },
   {
    "name": "corner_blend_ang0_reaches_cross_tangents",
-   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2488 (SmBrep::CreateCornerBlend, tangency tolerance 0: HANG-34 only past the early returns)",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2488 (SmBrep::CreateCornerBlend, tangency tolerance 0: HANG-39 only past the early returns)",
    "inputs": {
     "brep": {
      "file": "plane_circ.smb",

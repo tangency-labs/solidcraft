@@ -1056,6 +1056,60 @@ impl TopologyObjects<H> for ArenaPair<'_> {
 }
 
 impl IntersectorBrepP2<H> for ArenaPair<'_> {
+    fn brep_faces(&self, brep: H) -> crate::Result<Vec<H>> {
+        let b = self.brep_r(brep)?;
+        Ok(bp1::faces(b, None)?
+            .into_iter()
+            .map(|f| hd(brep.b, K_FACE, f.index()))
+            .collect())
+    }
+    fn brep_combine_coincident_vertices(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        surviving: H,
+        to_delete: H,
+    ) -> crate::Result<Option<H>> {
+        if brep.kind != K_BREP {
+            return Err(invalid("not a B-rep handle"));
+        }
+        let vertex = |h: H| -> crate::Result<VertexId> {
+            if h.kind == K_VERTEX && h.b == brep.b {
+                Ok(vid(h))
+            } else {
+                Err(invalid("not a vertex of this B-rep"))
+            }
+        };
+        let (surviving, to_delete) = (vertex(surviving)?, vertex(to_delete)?);
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        let breps = &mut self.breps;
+        let b = breps
+            .get_mut(slot)
+            .and_then(Option::as_deref_mut)
+            .ok_or_else(|| invalid("handle names an absent B-rep"))?;
+        let mut notify = ed::NotifyEnv {
+            records: self.records,
+            attributes: self.attributes,
+            context: Some(if brep.b == 1 {
+                self.other_context
+                    .as_deref_mut()
+                    .unwrap_or(self.primary_context)
+            } else {
+                self.primary_context
+            }),
+            key_of: &|e| super::kernel_adapter::notification_key(self.namespace, brep.b == 1, e),
+        };
+        let mut deleted_edge = None;
+        crate::topology::brep::p5::combine_with_notifications(
+            k,
+            b,
+            surviving,
+            to_delete,
+            &mut deleted_edge,
+            Some(&mut notify),
+        )?;
+        Ok(deleted_edge.map(|e| hd(brep.b, K_EDGE, e.index())))
+    }
     fn vertex_edges(&self, vertex: H) -> crate::Result<Vec<H>> {
         let b = self.brep_r(vertex)?;
         Ok(vx::edges(b, vid(vertex), None)?

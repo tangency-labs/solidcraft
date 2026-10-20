@@ -595,6 +595,150 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "eye59_issue_repro",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#0 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_1e-09",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#1 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 417
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_1e-06",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#2 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 305
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#3 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 41
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_0.001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#4 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_0.01",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#5 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_0.1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#6 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#7 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#8 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_off_-1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#9 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_inplane_5_-3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#10 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_inplane_0_0.5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#11 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_inplane_-2_0.5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#12 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_rect_eyez_30",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#13 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_rect_eyez_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#14 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_rect_eyez_0.001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#15 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_rect_eyez_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#16 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "eye59_rect_eyez_-5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p9/eye_on_plane.json#17 (upstream solidcore#59: perspective eye on or near the view plane)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "cci_projection_nurb_self",
       "outcome": "pass",
       "pass": true,
@@ -24749,8 +24893,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3093,
-  "cases_total": 3093,
+  "cases_passed": 3111,
+  "cases_total": 3111,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

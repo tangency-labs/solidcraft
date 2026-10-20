@@ -375,7 +375,7 @@ impl ManifoldIntersector for KernelManifoldIntersector {
                     &mut self.intersector,
                     arena_pair::encode,
                     arena_pair::decode,
-                    |ti| ti.fix_gaps(&mut pair, &vertices),
+                    |ti| ti.fix_gaps(k, &mut pair, &vertices),
                 )
                 .and_then(|out| {
                     Ok(FixedGaps {
@@ -1034,16 +1034,21 @@ mod tests {
         adapter
             .delete_faces(&mut kernels, &mut a, &mut attrs, &[], Some(&[]))
             .unwrap();
+        // (SmBrep::GetFaces is wired since #274, so the walk now reaches the test's
+        // surface-less faces, which upstream dereferences)
         let err = adapter
             .intersect_insert_relate(&mut kernels, &mut a, &mut b, &mut attrs)
             .unwrap_err();
-        assert!(matches!(
-            err,
-            SolidError::Unported {
-                unit: "topology.brep_p1",
-                upstream: "SmBrep::GetFaces"
-            }
-        ));
+        assert!(
+            matches!(
+                err,
+                SolidError::InvalidInput {
+                    operation: "boolean::topology_intersector::p2::intersect_topology",
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
         assert!(adapter.intersector.proto_topology_manager().is_some());
         assert_eq!(adapter.merge.intersector.vertices.other(v), Some(ov));
         assert_eq!(adapter.merge.intersector.vertices.primary(ov), Some(v));
