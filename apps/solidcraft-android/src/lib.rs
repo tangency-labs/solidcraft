@@ -141,13 +141,13 @@ mod android {
         Services {
             pick_open: Some(Box::new({
                 let (app, targets) = (app.clone(), targets.clone());
-                move |_exts: &[&str]| Box::pin(saf::Picker::open(app.clone(), targets.clone()))
+                move |exts: &[&str]| Box::pin(saf::Picker::open(app.clone(), targets.clone(), exts))
             })),
             pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
                 if exts.contains(&solidcraft_engine::io::DESIGN_EXT) {
                     Box::pin(saf::Picker::design(app.clone(), targets.clone(), name))
                 } else {
-                    Box::pin(saf::Picker::export(app.clone(), targets.clone(), name))
+                    Box::pin(saf::Picker::export(app.clone(), targets.clone(), name, exts))
                 }
             })),
             ..Default::default()

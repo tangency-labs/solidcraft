@@ -264,12 +264,32 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     let result = file.write_all(bytes).and_then(|_| flush(&file));
     drop(file);
-    let result = result.and_then(|_| fs::hard_link(&tmp, path));
+    let result = result.and_then(|_| publish_no_replace(&tmp, path));
     let _ = fs::remove_file(&tmp);
     if result.is_ok() {
         sync_dir(path);
     }
     result
+}
+
+/// Move `tmp` onto `path` in one step, failing rather than replacing a file that appeared at
+/// `path` meanwhile. `renameat2(RENAME_NOREPLACE)` is the atomic way to do that on Linux (and
+/// Android, where the app's storage often refuses `hard_link` with `EPERM`); elsewhere a hard
+/// link is the portable no-clobber publish.
+fn publish_no_replace(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        // `EINVAL` (22) and `ENOSYS` (38) are the same on every Linux ABI (and Android).
+        const EINVAL: i32 = 22;
+        const ENOSYS: i32 = 38;
+        match rustix::fs::renameat_with(rustix::fs::CWD, tmp, rustix::fs::CWD, path, rustix::fs::RenameFlags::NOREPLACE) {
+            // A kernel or filesystem that does not know RENAME_NOREPLACE (ENOSYS) or refuses
+            // the flag (EINVAL): fall back to the portable publish below rather than failing.
+            Err(e) if matches!(e.raw_os_error(), EINVAL | ENOSYS) => {}
+            r => return r.map_err(std::io::Error::from),
+        }
+    }
+    fs::hard_link(tmp, path)
 }
 
 /// Leftover temporary files of saves that never finished (a crash part way), next to `path`

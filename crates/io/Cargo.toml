@@ -40,6 +40,12 @@ sha2 = { workspace = true }
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
+# `renameat2(RENAME_NOREPLACE)` to publish a new file without replacing one that appeared
+# meanwhile (src/safe_write.rs): Android's app storage often refuses the portable `hard_link`
+# with `EPERM`, so the rename is the only atomic no-clobber step there. Already in the tree.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
 # The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 gethostname = { workspace = true }

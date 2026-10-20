@@ -26,6 +26,9 @@ use std::path::{Path, PathBuf};
 const MAX_NAME: usize = 180;
 /// A free path search gives up after this many taken names; the picker then cancels.
 const NAME_TRIES: usize = 100;
+/// The only principal type that satisfies the system picker's `*/*` filter whatever the
+/// command wants (Android forbids a MIME type of exactly `*`).
+pub(crate) const ANY_TYPE: &str = "*/*";
 
 /// Where a picked document belongs once the engine has written its bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +118,46 @@ pub(crate) fn export_mime(ext: &str) -> &'static str {
     }
 }
 
+/// The principal mime type the picker's intent must carry: the system picker's own filter
+/// (`DocumentsUI` declares `*/*` for `OPEN_DOCUMENT`) matches no intent without one, and
+/// `startActivityForResult` then throws. `*/*` satisfies every command's filter; an export
+/// with a known type asks for it directly so its screen starts on the right file type.
+pub(crate) fn principal_mime(ext: &str) -> &'static str {
+    if ext.is_empty() { ANY_TYPE } else { export_mime(ext) }
+}
+
+/// The `EXTRA_MIME_TYPES` set a picker offers for `exts` (an extension list), `None` when
+/// there is nothing to refine `principal` with. Android requires the extra to be a strict
+/// refinement, so a type equal to the principal — and the `*` wildcard, which `principal`
+/// already covers — is dropped.
+pub(crate) fn extra_mime_types(principal: &str, exts: &[String]) -> Option<Vec<&'static str>> {
+    let refined = exts.iter().filter(|e| e.as_str() != "*").map(|e| export_mime(e)).filter(|t| *t != principal);
+    let types: Vec<&'static str> = refined.collect();
+    (!types.is_empty()).then_some(types)
+}
+
+/// The extension a picked file's materialized copy should carry: the provider name's own
+/// extension when it has one, else the uri's, else the first one the command offered (a
+/// provider may report a name without an extension — the engine reads the format from the
+/// path, so an `imports/1075` would be refused by `file.insert_step`, `doc.open`, …).
+pub(crate) fn materialized_ext(shown: &str, uri: &str, offered: &[String]) -> Option<String> {
+    let real = |name: &str| Path::new(name).extension().and_then(|e| e.to_str()).filter(|e| !e.is_empty()).map(str::to_ascii_lowercase);
+    real(shown)
+        .or_else(|| display_from_uri(uri).as_deref().and_then(real))
+        .or_else(|| offered.iter().find(|e| e.as_str() != "*").map(|e| e.to_ascii_lowercase()))
+}
+
+/// `name` with `ext` appended when it has none: the copy keeps the provider's name, but the
+/// engine reads the format from the path, so a bare `1075` would not be recognized. A name
+/// that already carries an extension is left alone (the provider's choice wins).
+pub(crate) fn with_ext(name: &str, ext: Option<&str>) -> String {
+    let name = sanitize_name(name, name, MAX_NAME);
+    match (Path::new(&name).extension(), ext) {
+        (None, Some(want)) => format!("{name}.{want}"),
+        _ => name,
+    }
+}
+
 /// The file name a document provider shows for a document, as far as the uri itself says:
 /// the last path segment of the percent-decoded uri, after its last `/` or `:` (a documents
 /// provider keeps names like `primary:Download/part.step` in one segment).
@@ -186,6 +229,10 @@ mod imp {
     const RESULT_OK: jint = -1;
     /// The documents query column that carries the name the provider shows.
     const DISPLAY_NAME: &str = "_display_name";
+    /// `Intent.CATEGORY_OPENABLE`: only documents the system can hand us as a stream.
+    const CATEGORY_OPENABLE: &str = "android.intent.category.OPENABLE";
+    /// `Intent.EXTRA_MIME_TYPES`: the extra types a multi-extension command accepts.
+    const EXTRA_MIME_TYPES: &str = "android.intent.extra.MIME_TYPES";
     /// One JNI array per write chunk: small enough to move without holding the world.
     const CHUNK: usize = 64 * 1024;
 
@@ -237,24 +284,55 @@ mod imp {
         kind: Kind,
         /// The suggested file name (empty for Open).
         name: String,
-        /// The mime type for the create screen ("" : let the provider suggest one).
+        /// The principal mime type for the screen (`*/*`: let the user choose any document).
         mime: &'static str,
+        /// The extensions the command accepts (`["*"]` for Open): the export temp takes the
+        /// first so the engine's own format check sees the format it was asked for, and all
+        /// of them become the picker's offered types. Owned: the picker outlives the caller.
+        exts: Vec<String>,
         request: jint,
         launched: bool,
     }
 
     impl Picker {
-        pub(crate) fn open(app: AndroidApp, targets: Rc<Targets>) -> Self {
-            Picker { app, targets, kind: Kind::Open, name: String::new(), mime: "", request: REQUEST_OPEN, launched: false }
+        pub(crate) fn open(app: AndroidApp, targets: Rc<Targets>, exts: &[&str]) -> Self {
+            Picker {
+                app,
+                targets,
+                kind: Kind::Open,
+                name: String::new(),
+                mime: ANY_TYPE,
+                exts: if exts.is_empty() { vec!["*".into()] } else { exts.iter().map(|e| (*e).to_string()).collect() },
+                request: REQUEST_OPEN,
+                launched: false,
+            }
         }
 
         pub(crate) fn design(app: AndroidApp, targets: Rc<Targets>, name: &str) -> Self {
-            Picker { app, targets, kind: Kind::Design, name: name.to_string(), mime: "", request: REQUEST_SAVE, launched: false }
+            Picker {
+                app,
+                targets,
+                kind: Kind::Design,
+                name: name.to_string(),
+                mime: ANY_TYPE,
+                exts: Vec::new(),
+                request: REQUEST_SAVE,
+                launched: false,
+            }
         }
 
-        pub(crate) fn export(app: AndroidApp, targets: Rc<Targets>, name: &str) -> Self {
+        pub(crate) fn export(app: AndroidApp, targets: Rc<Targets>, name: &str, exts: &[&str]) -> Self {
             let ext = name.rsplit('.').next().unwrap_or("");
-            Picker { app, targets, kind: Kind::Export, name: name.to_string(), mime: export_mime(ext), request: REQUEST_SAVE, launched: false }
+            Picker {
+                app,
+                targets,
+                kind: Kind::Export,
+                name: name.to_string(),
+                mime: principal_mime(ext),
+                exts: exts.iter().map(|e| (*e).to_string()).collect(),
+                request: REQUEST_SAVE,
+                launched: false,
+            }
         }
 
         /// The path the completion hands back: the materialized copy (Open), the engine's
@@ -265,9 +343,13 @@ mod imp {
                 Kind::Open => {
                     // Designs land beside the autosaves (Save then keeps that copy current,
                     // as the web build keeps its downloads); everything else is imported.
-                    let sub = if solidcraft_engine::io::is_design_path(&shown) { "designs" } else { "imports" };
+                    // The copy keeps a usable extension: a provider that reports only a name
+                    // (`1075`) would otherwise leave the engine unable to read the format.
+                    let ext = materialized_ext(&shown, uri, &self.exts);
+                    let name = with_ext(&shown, ext.as_deref());
+                    let sub = if solidcraft_engine::io::is_design_path(&name) { "designs" } else { "imports" };
                     let dir = recovery::data_dir()?.join(sub);
-                    let path = free_path(&dir, &shown, "imported")?;
+                    let path = free_path(&dir, &name, "imported")?;
                     let bytes = read_uri(&self.app, uri, solidcraft_engine::io::MAX_DESIGN_BYTES).ok()?;
                     if let Err(e) = std::fs::write(&path, &bytes) {
                         log::error!("Android: could not copy the picked document to {}: {e}", path.display());
@@ -284,10 +366,14 @@ mod imp {
                     Some(mirror.to_string_lossy().into_owned())
                 }
                 Kind::Export => {
+                    // The engine names the format from the path's extension, so the temporary
+                    // must carry the extension the command offered (`render.export` and
+                    // `file.export` both reject a name without it). The provider's own name is
+                    // display only and need not have one.
                     let dir = recovery::data_dir()?.join("exports");
-                    let temp = free_path(&dir, &shown, &self.name)?;
-                    let name = temp.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.name.clone());
-                    self.targets.upsert(Target::OneShot { uri: uri.to_string(), temp: temp.clone(), name });
+                    let ext = self.exts.first().map(String::as_str).unwrap_or("");
+                    let temp = free_path(&dir, &self.name, &format!("{}.{ext}", self.name))?;
+                    self.targets.upsert(Target::OneShot { uri: uri.to_string(), temp: temp.clone(), name: self.name.clone() });
                     Some(temp.to_string_lossy().into_owned())
                 }
             }
@@ -301,7 +387,7 @@ mod imp {
             let this = self.get_mut();
             if !this.launched {
                 this.launched = true;
-                launch(&this.app, this.kind, &this.name, this.mime, this.request);
+                launch(&this.app, this.kind, &this.name, this.mime, &this.exts, this.request);
                 // The answer of this launch can only arrive on a later poll; the picker's
                 // tick repaints every 50 ms until then.
                 return Poll::Pending;
@@ -325,20 +411,21 @@ mod imp {
     /// Open the system's document screen. Everything that must happen on the Java main
     /// thread — resolving our own class, building the intent, starting the activity — is
     /// posted there; a failure answers the future with a cancel instead of leaving it pending.
-    fn launch(app: &AndroidApp, kind: Kind, name: &str, mime: &str, request: jint) {
+    fn launch(app: &AndroidApp, kind: Kind, name: &str, mime: &str, exts: &[String], request: jint) {
         *ANSWER.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let app = app.clone();
         let name = name.to_string();
         let mime = mime.to_string();
+        let exts: Vec<String> = exts.iter().map(|e| (*e).to_string()).collect();
         app.clone().run_on_java_main_thread(Box::new(move || {
-            if let Err(e) = launch_on_main(&app, kind, &name, &mime, request) {
+            if let Err(e) = launch_on_main(&app, kind, &name, &mime, &exts, request) {
                 log::error!("Android: the file picker did not open: {e}");
                 *ANSWER.lock().unwrap_or_else(|err| err.into_inner()) = Some((request, 0, None));
             }
         }));
     }
 
-    fn launch_on_main(app: &AndroidApp, kind: Kind, name: &str, mime: &str, request: jint) -> Result<(), String> {
+    fn launch_on_main(app: &AndroidApp, kind: Kind, name: &str, mime: &str, exts: &[String], request: jint) -> Result<(), String> {
         with_env(app, |env| -> jni::errors::Result<Result<(), String>> {
             let activity = activity(env, app);
             // Before anything can be picked, and therefore before the shim can call the
@@ -354,6 +441,35 @@ mod imp {
             };
             let action = JString::new(env, action)?;
             let intent = env.new_object(jni_str!("android/content/Intent"), jni_sig!("(Ljava/lang/String;)V"), &[JValue::Object(&action)])?;
+            // The system picker's own filter requires a MIME type (`DocumentsUI` declares
+            // `*/*` for OPEN_DOCUMENT); an intent with none fails the match and
+            // `startActivityForResult` throws. `mime` is the principal (`*/*` for Open and
+            // designs, the export's own type otherwise); the command's extensions refine it
+            // through `EXTRA_MIME_TYPES` when they name a narrower set.
+            let offered = extra_mime_types(mime, exts);
+            let principal = JString::new(env, mime)?;
+            env.call_method(&intent, jni_str!("setType"), jni_sig!("(Ljava/lang/String;)Landroid/content/Intent;"), &[JValue::Object(&principal)])?;
+            let openable = JString::new(env, CATEGORY_OPENABLE)?;
+            env.call_method(
+                &intent,
+                jni_str!("addCategory"),
+                jni_sig!("(Ljava/lang/String;)Landroid/content/Intent;"),
+                &[JValue::Object(&openable)],
+            )?;
+            if let Some(offered) = offered {
+                let key = JString::new(env, EXTRA_MIME_TYPES)?;
+                let types = env.new_object_array(offered.len() as i32, jni_str!("java/lang/String"), JObject::null())?;
+                for (i, ty) in offered.iter().enumerate() {
+                    let ty = JString::new(env, ty)?;
+                    types.set_element(env, i, &ty)?;
+                }
+                env.call_method(
+                    &intent,
+                    jni_str!("putExtra"),
+                    jni_sig!("(Ljava/lang/String;[Ljava/lang/String;)Landroid/content/Intent;"),
+                    &[JValue::Object(&key), JValue::Object(&types)],
+                )?;
+            }
             if kind != Kind::Open {
                 let key = JString::new(env, "android.intent.extra.TITLE")?;
                 let title = JString::new(env, name)?;
@@ -363,15 +479,6 @@ mod imp {
                     jni_sig!("(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"),
                     &[JValue::Object(&key), JValue::Object(&title)],
                 )?;
-                if !mime.is_empty() {
-                    let mime = JString::new(env, mime)?;
-                    env.call_method(
-                        &intent,
-                        jni_str!("setType"),
-                        jni_sig!("(Ljava/lang/String;)Landroid/content/Intent;"),
-                        &[JValue::Object(&mime)],
-                    )?;
-                }
             }
             env.call_method(
                 &activity,
@@ -657,6 +764,49 @@ mod tests {
         assert_eq!(export_mime("step"), "application/octet-stream");
         assert_eq!(export_mime("solidcraft"), "application/octet-stream");
         assert_eq!(export_mime(""), "application/octet-stream");
+    }
+
+    #[test]
+    fn principal_mime_always_satisfies_the_pickers_own_filter() {
+        // A design save carries no extension: the principal type must still be one the
+        // system picker's `*/*` filter accepts (an intent without a type throws).
+        assert_eq!(principal_mime(""), ANY_TYPE);
+        assert_eq!(principal_mime("solidcraft"), "application/octet-stream");
+        assert_eq!(principal_mime("png"), "image/png");
+        assert_eq!(principal_mime("json"), "application/json");
+    }
+
+    #[test]
+    fn extra_mime_types_only_refines_a_principal_type() {
+        // Open offers `*`: the principal already covers it, so no extra is sent.
+        assert_eq!(extra_mime_types(ANY_TYPE, &["*".into()]), None);
+        // A single-type export repeats its principal: no extra.
+        assert_eq!(extra_mime_types("image/png", &["png".into()]), None);
+        // Save As offers both design and JSON: JSON refines the generic principal.
+        let exts = vec!["solidcraft".to_string(), "json".to_string()];
+        assert_eq!(extra_mime_types("application/octet-stream", &exts), Some(vec!["application/json"]));
+    }
+
+    #[test]
+    fn materialized_ext_recovers_the_engine_readable_extension() {
+        // The provider reports a bare name (the Android case that broke Insert STEP): the
+        // extension comes from the offered set so `insert_step`/`doc.open` can read it.
+        let offered = vec!["step".to_string(), "stp".to_string()];
+        assert_eq!(materialized_ext("1075", "content://x/1075", &offered).as_deref(), Some("step"));
+        // A provider name with its own extension wins over the offered set.
+        assert_eq!(materialized_ext("part.stp", "content://x/1", &offered).as_deref(), Some("stp"));
+        // No name, but the uri ends in one: use it.
+        assert_eq!(materialized_ext("", "content://x/part.step", &offered).as_deref(), Some("step"));
+        // Nothing to go on (`*` is not an extension).
+        assert_eq!(materialized_ext("1075", "content://x/1075", &["*".into()]), None);
+    }
+
+    #[test]
+    fn with_ext_only_fills_a_missing_extension() {
+        assert_eq!(with_ext("1075", Some("step")), "1075.step");
+        assert_eq!(with_ext("part.stp", Some("step")), "part.stp");
+        assert_eq!(with_ext("part.stp", None), "part.stp");
+        assert_eq!(with_ext("../../evil", Some("step")), "evil.step");
     }
 
     #[test]

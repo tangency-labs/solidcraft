@@ -1461,21 +1461,27 @@ impl SolveApp {
     }
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
-    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240).
+    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240). The
+    /// offered types let a host that reports only bare names recover the extension (Android's
+    /// SAF).
     pub(crate) fn pick_design_to_insert(&mut self) {
-        self.pick_open(|app, path| {
-            let Some(path) = path else { return };
-            if solidcraft_engine::io::is_design_path(&path) {
-                // Picked in the file dialog: its server is the user's choice.
-                let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-                let inserted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
-                if inserted.is_ok() {
-                    app.fit_view();
+        self.pick_open_for(
+            &["solidcraft", "solvecraft", "step", "stp", "igs", "iges", "fcstd", "3dm", "3mf", "stl", "obj", "glb", "gltf"],
+            |app, path| {
+                let Some(path) = path else { return };
+                if solidcraft_engine::io::is_design_path(&path) {
+                    // Picked in the file dialog: its server is the user's choice.
+                    let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
+                    let inserted =
+                        solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
+                    if inserted.is_ok() {
+                        app.fit_view();
+                    }
+                } else {
+                    app.insert_path_async(&path);
                 }
-            } else {
-                app.insert_path_async(&path);
-            }
-        });
+            },
+        );
     }
 
     /// A command that needs one choice from a short list: its menu under the button that started it
@@ -1749,7 +1755,15 @@ impl SolveApp {
             return;
         }
         if matches!(id, "file.insert_step" | "file.insert_mesh" | "pointcloud.insert") {
-            self.pick_open(|app, path| {
+            // The picker filters to the file types the command reads; a host that can only
+            // report a bare provider name (Android's SAF) also needs it to recover the
+            // extension the engine reads the format from.
+            let exts: &[&str] = match id {
+                "file.insert_step" => &["step", "stp", "igs", "iges", "fcstd", "3dm"],
+                "file.insert_mesh" => &["3mf", "stl", "obj", "glb", "gltf"],
+                _ => &["ply", "xyz", "pts"],
+            };
+            self.pick_open_for(exts, |app, path| {
                 if let Some(path) = path {
                     app.insert_path_async(&path);
                 }
