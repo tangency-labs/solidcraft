@@ -154,7 +154,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             // which only CalcFilletGeom builds: with solvers fresh from
             // SetFilletParameters upstream dereferences null rails.
             if sub == 0 && k > 0 {
-                return Err(bad("edge map with solvers whose geometry was not calculated"));
+                return Err(bad(
+                    "edge map with solvers whose geometry was not calculated",
+                ));
             }
             rd.box_block()?;
         }

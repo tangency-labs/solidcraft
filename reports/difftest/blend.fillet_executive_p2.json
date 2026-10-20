@@ -1,0 +1,2315 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#0",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#1",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#2",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#3",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#4",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#5",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_0_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#6",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#7",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#8",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#9",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#10",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#11",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#12",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_1_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#13",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#14",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#15",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#16",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#17",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#18",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#19",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_2_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#20",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#21",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#22",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#23",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#24",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#25",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#26",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_3_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#27",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#28",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#29",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#30",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#31",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#32",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#33",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_linear_4_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#34",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#35",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#36",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#37",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#38",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#39",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#40",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#41",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#42",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#43",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#44",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#45",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#46",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_12",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#47",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_13",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#48",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_14",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#49",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#50",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_16",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#51",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_17",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#52",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_18",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#53",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_19",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#54",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_20",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#55",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_21",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#56",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_22",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#57",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_23",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#58",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_24",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#59",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_25",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#60",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_26",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#61",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_27",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#62",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_28",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#63",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_29",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#64",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_30",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#65",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_31",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#66",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_32",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#67",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_33",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#68",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_34",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#69",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_35",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#70",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_36",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#71",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_37",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#72",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_38",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#73",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_39",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#74",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_40",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#75",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_41",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#76",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_42",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#77",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_43",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#78",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_44",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#79",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_45",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#80",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_46",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#81",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_47",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#82",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_48",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#83",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_49",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#84",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_50",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#85",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_51",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#86",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_52",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#87",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_53",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#88",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_54",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#89",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_55",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#90",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_56",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#91",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_57",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#92",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_58",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#93",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_59",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#94",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_60",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#95",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_61",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#96",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_62",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#97",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_63",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#98",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_64",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#99",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_65",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#100",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_66",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#101",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_67",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#102",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_68",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#103",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_69",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#104",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_70",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#105",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_71",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#106",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_72",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#107",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_73",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#108",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_74",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#109",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_75",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#110",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_76",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#111",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_77",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#112",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_78",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#113",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_79",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#114",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_80",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#115",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_81",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#116",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_82",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#117",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_83",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#118",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_84",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#119",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_85",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#120",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_86",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#121",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_87",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#122",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_88",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#123",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_89",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#124",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_90",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#125",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_91",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#126",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_92",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#127",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_93",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#128",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_94",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#129",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_95",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#130",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_96",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#131",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_97",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#132",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_98",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#133",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_99",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#134",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#135",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#136",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#137",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#138",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#139",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#140",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#141",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#142",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#143",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#144",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#145",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#146",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#147",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#148",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#149",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#150",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#151",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#152",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#153",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#154",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#155",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#156",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#157",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#158",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#159",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#160",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#161",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#162",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#163",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#164",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#165",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#166",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#167",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#168",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#169",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#170",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#171",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#172",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#173",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#174",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#175",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#176",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#177",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#178",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#179",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#180",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#181",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#182",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#183",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#184",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#185",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#186",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#187",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#188",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#189",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#190",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#191",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#192",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#193",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#194",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#195",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#196",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#197",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#198",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#199",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#200",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#201",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#202",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#203",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#204",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#205",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#206",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#207",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#208",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#209",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#210",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#211",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#212",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#213",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#214",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#215",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#216",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#217",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#218",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#219",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#220",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_map_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#221",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#222",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "law_elliptic_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#223",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "set_params_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#224",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "set_params_empty_null_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#225",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "set_params_empty_no_lists",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#226",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "set_params_empty_tols",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#227",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_mismatch_x",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#228",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_mismatch_r",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#229",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_mismatch_v",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#230",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "set_params_null_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#231",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_single_fsg_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#232",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_single_fsg_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#233",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_single_fsg_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#234",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_single_fsg_3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#235",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#236",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#237",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmConstantDistanceFS::SmConstantDistanceFS",
+        "unit": "blend.fillet_standard_solver_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#238",
+      "values_compared": 0
+    },
+    {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#239",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#240",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#241",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletErrorInfo::NoteError",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_per_edge_r6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#242",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_vr_null_laws",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#243",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmVariableRadiusFS::SmVariableRadiusFS",
+        "unit": "blend.fillet_standard_solver_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_vr_laws",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#244",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "set_params_box2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#245",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "exec_edge_map_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#246",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "exec_process_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#247",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "exec_process_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#248",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "exec_process_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#249",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "exec_process_3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#250",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "exec_collect_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#251",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "exec_collect_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#252",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "exec_collect_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#253",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "exec_collect_3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#254",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "temp_radius_const",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#255",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "temp_radius_vr",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#256",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletExecutive::AddFilletSurfaceGenerator",
+        "unit": "blend.fillet_executive_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "temp_radius_vr_flat",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#257",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097018",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097019",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097020",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097021",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097022",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097023",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097024",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097025",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097026",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097027",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097028",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097029",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097030",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097031",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097032",
+      "values_compared": 516
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13131445137653097033",
+      "values_compared": 6
+    }
+  ],
+  "cases_both_errored": 2,
+  "cases_deferred": 25,
+  "cases_failed": 0,
+  "cases_passed": 249,
+  "cases_total": 274,
+  "deferred_by_unit": {
+    "blend.fillet_executive_p1": 22,
+    "blend.fillet_standard_solver_p2": 2,
+    "topology.face_p2": 1
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "blend.fillet_executive_p2"
+}

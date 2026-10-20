@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::blend::fillet_executive::p3::{
     ContextMark, CornerView, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
-    TopoEdgeView,
+    StitchAttempt, StitchSettings, TopoEdgeView,
 };
 use solidcore::boolean::topology_intersector::p1::TopologyIntersector;
 use solidcore::geom::solution_array::{ObjectKind, SolutionObject};
@@ -62,7 +62,8 @@ fn missing<T>() -> SolidResult<T> {
 impl ExecutiveAccess<Handle> for Access {
     // This empty-B-rep fixture has no face handles or intersector world. These
     // required adapters reject nonexistent objects; they are not UNPORTED calls
-    // to the now-ported face p3 or topology intersector p2 implementations.
+    // to the now-ported face p3, topology intersector p2, stitch p2, fillet geom p4,
+    // fillet corner p3 or fillet solver p1 implementations.
     fn notify_face(
         &mut self,
         _: &mut Kernel,
@@ -87,6 +88,52 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut TopologyIntersector<Handle>,
         _: &[Handle],
         _: Option<&[Handle]>,
+    ) -> SolidResult<()> {
+        missing()
+    }
+    fn do_stitching(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: f64,
+        _: Option<&[Handle]>,
+        _: Option<&[Handle]>,
+        _: StitchSettings,
+        _: Option<&mut f64>,
+        _: Option<&mut f64>,
+    ) -> SolidResult<StitchAttempt> {
+        missing()
+    }
+    fn make_face_brep(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: Handle,
+        _: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        missing()
+    }
+    fn insert_geom_topology(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        missing()
+    }
+    fn calc_corner_geom(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        missing()
+    }
+    fn trim_rails(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &mut FilletExecutive<Handle>,
     ) -> SolidResult<()> {
         missing()
     }
@@ -335,10 +382,44 @@ impl ExecutiveAccess<Handle> for Access {
     fn edge_vertices(&self, _: Handle) -> SolidResult<(Option<Handle>, Option<Handle>)> {
         missing()
     }
-    fn variable_radius_solver(&self, _: Handle) -> SolidResult<Option<&solidcore::blend::fillet_standard_solver::p1::VariableRadiusFs>> {
+    fn variable_radius_solver(
+        &self,
+        _: Handle,
+    ) -> SolidResult<Option<&solidcore::blend::fillet_standard_solver::p1::VariableRadiusFs>> {
         missing()
     }
-    fn variable_radius_solver_mut(&mut self, _: Handle) -> SolidResult<Option<&mut solidcore::blend::fillet_standard_solver::p1::VariableRadiusFs>> {
+    fn variable_radius_solver_mut(
+        &mut self,
+        _: Handle,
+    ) -> SolidResult<Option<&mut solidcore::blend::fillet_standard_solver::p1::VariableRadiusFs>>
+    {
+        missing()
+    }
+    fn solver_edgeuse(&self, _: Handle, _: usize) -> SolidResult<Option<Handle>> {
+        missing()
+    }
+    fn corner_setback_distance(&self, _: Handle) -> SolidResult<f64> {
+        missing()
+    }
+    fn new_surface_generator(
+        &mut self,
+        _: &mut Kernel,
+        _: solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator,
+    ) -> SolidResult<Handle> {
+        missing()
+    }
+    fn new_constant_radius_solver(
+        &mut self,
+        _: &mut Kernel,
+        _: f64,
+        _: f64,
+        _: f64,
+        _: f64,
+        _: Handle,
+    ) -> SolidResult<Handle> {
+        missing()
+    }
+    fn set_surface_generator(&mut self, _: Handle, _: Handle) -> SolidResult<()> {
         missing()
     }
 }

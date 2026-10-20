@@ -25,6 +25,7 @@
 //! stage hooks borrow this live executive, never an adapter-owned duplicate.
 
 use crate::blend::fillet_geom::p1::FilletCornerType;
+use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::error::{Result, SolidError};
 use crate::geom::object::NotifyOperation;
@@ -407,13 +408,15 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     }
 
     /// Virtual `AdjustTopology` dispatch. The base, 4x3 and `NxN` implementations
-    /// belong to `blend.fillet_corner_p1`; `ConvexNxN` belongs to
-    /// `blend.fillet_corner_p2`, and Nx2 to `blend.fillet_corner_p3`.
-    /// Adapters must dispatch by concrete corner type and return that owner's
-    /// `Unported` while it is missing, never substitute the base success default.
+    /// belong to `blend.fillet_corner_p1`, and `ConvexNxN` to `blend.fillet_corner_p2`.
+    /// Nx2 (and `ConvexNxN`) go to the already ported
+    /// `blend::fillet_corner::p3::FilletCorner::adjust_topology` (fillet corner p3),
+    /// which runs `SmFilletNx2Corner::AdjustTopology` and returns
+    /// `blend.fillet_corner_p2`'s `Unported` for `ConvexNxN`. Adapters must dispatch
+    /// by concrete corner type and return that owner's `Unported` while it is
+    /// missing, never substitute the base success default.
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::AdjustTopology / SmFillet4x3Corner::AdjustTopology / SmFilletNxNCorner::AdjustTopology
     // UNPORTED(blend.fillet_corner_p2): SmFilletConvexNxNCorner::AdjustTopology
-    // UNPORTED(blend.fillet_corner_p3): SmFilletNx2Corner::AdjustTopology
     fn adjust_topology(
         &mut self,
         k: &mut Kernel,
@@ -422,13 +425,15 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     ) -> Result<()>;
 
     /// Virtual `AdjustTangentCorner` dispatch. The base belongs to
-    /// `blend.fillet_corner_p1`, `Nx1Closed` to `blend.fillet_corner_p2`, and Nx2 to
-    /// `blend.fillet_corner_p3`. Adapters must dispatch by concrete corner type
-    /// and return that owner's `Unported` while it is missing, never substitute
-    /// the base success default.
+    /// `blend.fillet_corner_p1`, and `Nx1Closed` to `blend.fillet_corner_p2`. Nx2 (and
+    /// `Nx1Closed`) go to the already ported
+    /// `blend::fillet_corner::p3::FilletCorner::adjust_tangent_corner` (fillet corner
+    /// p3), which runs `SmFilletNx2Corner::AdjustTangentCorner` and returns
+    /// `blend.fillet_corner_p2`'s `Unported` for `Nx1Closed`. Adapters must dispatch by
+    /// concrete corner type and return that owner's `Unported` while it is missing,
+    /// never substitute the base success default.
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::AdjustTangentCorner
     // UNPORTED(blend.fillet_corner_p2): SmFilletNx1ClosedCorner::AdjustTangentCorner
-    // UNPORTED(blend.fillet_corner_p3): SmFilletNx2Corner::AdjustTangentCorner
     fn adjust_tangent_corner(
         &mut self,
         k: &mut Kernel,
@@ -464,19 +469,17 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
 
-    /// `SmFilletCorner::CalcCornerGeom`; waiting for `blend.fillet_corner_p3`.
+    /// `SmFilletCorner::CalcCornerGeom()` (`SmFilletExecutive.cpp:2448`): delegate to
+    /// the already ported `blend::fillet_corner::p3::FilletCorner::calc_corner_geom`
+    /// (fillet corner p3) on the corner `corner` resolves to, with its `CornerEnv`
+    /// (the target and fillet B-reps and the executive's solvers and edge-use map).
+    /// Its status is returned unchanged; the caller handles it as upstream does.
     fn calc_corner_geom(
         &mut self,
-        _k: &mut Kernel,
-        _corner: O,
-        _executive: &mut FilletExecutive<O>,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_corner_p3): SmFilletCorner::CalcCornerGeom
-        Err(SolidError::unported(
-            "SmFilletCorner::CalcCornerGeom",
-            "blend.fillet_corner_p3",
-        ))
-    }
+        k: &mut Kernel,
+        corner: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
 
     /// Virtual `CalcFilletGeom` dispatch. The base belongs to
     /// `blend.fillet_solver_p4`; the `SurfaceSurfaceFS` override belongs to
@@ -491,19 +494,16 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
 
-    /// `SmFilletSolver::TrimRails`; waiting for `blend.fillet_solver_p1`.
+    /// `SmFilletSolver::TrimRails()` (`SmFilletExecutive.cpp:2350`): delegate to the
+    /// already ported `blend::fillet_solver::p1::FilletSolver::trim_rails` (fillet
+    /// solver p1) on the solver `solver` resolves to. Its status is returned
+    /// unchanged; the caller handles it as upstream does.
     fn trim_rails(
         &mut self,
-        _k: &mut Kernel,
-        _solver: O,
-        _executive: &mut FilletExecutive<O>,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::TrimRails
-        Err(SolidError::unported(
-            "SmFilletSolver::TrimRails",
-            "blend.fillet_solver_p1",
-        ))
-    }
+        k: &mut Kernel,
+        solver: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
 
     /// `SmFilletSolver::TestRollOver`; waiting for `blend.fillet_solver_p5`.
     fn test_rollover(
@@ -536,20 +536,19 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
 
-    /// `SmFilletGeom::MakeFaceBrep`; waiting for `blend.fillet_geom_p4`.
+    /// `SmFilletGeom::MakeFaceBrep(m_pFilletBrep)`: delegate to the already ported
+    /// `blend::fillet_geom::p4::FilletBrep::make_face_brep` (fillet geom p4) on the
+    /// fillet geometry `geom` resolves to, with the executive's solver table, the
+    /// fillet B-rep `brep` resolves to (the face is built there) and that B-rep's notify
+    /// environment. Its status is returned unchanged; the caller ignores a failure as
+    /// upstream does (`SmFilletExecutive.cpp:2519`).
     fn make_face_brep(
         &mut self,
-        _k: &mut Kernel,
-        _geom: O,
-        _brep: O,
-        _executive: &mut FilletExecutive<O>,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_geom_p4): SmFilletGeom::MakeFaceBrep
-        Err(SolidError::unported(
-            "SmFilletGeom::MakeFaceBrep",
-            "blend.fillet_geom_p4",
-        ))
-    }
+        k: &mut Kernel,
+        geom: O,
+        brep: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
 
     /// `SmBrep::StitchFaces`; waiting for `topology.brep_p4`.
     fn stitch_faces(
@@ -589,19 +588,17 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         executive.set_fillet_brep_edge_map(k, self)
     }
 
-    /// `SmFilletGeom::InsertIntersectionTopology`; waiting for `blend.fillet_geom_p4`.
+    /// `SmFilletGeom::InsertIntersectionTopology()`: delegate to the already ported
+    /// `blend::fillet_geom::p4::FilletBrep::insert_intersection_topology` (fillet geom
+    /// p4) on the fillet geometry `geom` resolves to, with the executive's solver table,
+    /// the target B-rep (`executive.target`) and the fillet B-rep
+    /// (`executive.fillet`). Its status propagates (`SER`, `SmFilletExecutive.cpp:3113`).
     fn insert_geom_topology(
         &mut self,
-        _k: &mut Kernel,
-        _geom: O,
-        _executive: &mut FilletExecutive<O>,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_geom_p4): SmFilletGeom::InsertIntersectionTopology
-        Err(SolidError::unported(
-            "SmFilletGeom::InsertIntersectionTopology",
-            "blend.fillet_geom_p4",
-        ))
-    }
+        k: &mut Kernel,
+        geom: O,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
 
     /// `SmFilletCorner::InsertIntersectionTopology`; waiting for `blend.fillet_corner_p1`.
     fn insert_corner_topology(
@@ -672,24 +669,42 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
 
-    /// `SmStitch::DoStitching`; waiting for `heal.stitch_p2`.
+    /// `SmStitch::DoStitching` (`SmFilletExecutive.cpp:3559-3576`). Delegate to the
+    /// already ported `heal::stitch::p2::Stitch::do_stitching` (heal stitch p2) on the
+    /// B-rep `brep` resolves to:
+    /// - build the `Stitch` with `DefaultStitchCallback` (upstream's base
+    ///   `SmStitchCallback`) and `tolerance` as its stitch tolerance, and copy every
+    ///   [`StitchSettings`] field onto the `Stitch` field of the same name;
+    /// - pass the candidate lists through (`DoFilleting` passes `None` for both);
+    /// - pass a `MinGapRequest` with `vertex` and `edge` set by whether
+    ///   `min_vertex_gap` and `min_edge_gap` are `Some` (both `false` from
+    ///   `DoFilleting`, whose call omits the min-gap out-params), writing the
+    ///   reported gaps back when requested;
+    /// - map `Stitching.{stitched_edges, lamina_edges, max_vertex_gap, max_edge_gap}`
+    ///   to [`StitchAttempt`]`.{stitched, lamina, max_vertex_gap, max_edge_gap}` with
+    ///   `status: None`; an error from `do_stitching` becomes `status: Some(error)`
+    ///   with zero counts and gaps (the outputs `DoStitching` initialises), so the
+    ///   retry loop sees it as upstream's `eStat`. Return `Err` only when the handle
+    ///   cannot be resolved.
+    ///
+    /// `Stitch` keeps no state between calls besides its options and tolerance, so
+    /// one `Stitch` per call matches upstream's single `sStitch` whose tolerance
+    /// `SetStitchTol3d` doubles between tries.
+    ///
+    /// Once this is wired to a live `Brep`, UB-197 (`DoStitching` keeps using an edge
+    /// that a failed glue deleted) applies: `DoFilleting` sets
+    /// `m_bIgnoreProblems = TRUE`, so a failed glue does not stop the stitch.
     fn do_stitching(
         &mut self,
-        _k: &mut Kernel,
-        _brep: O,
-        _tolerance: f64,
-        _candidate_vertices: Option<&[O]>,
-        _candidate_edges: Option<&[O]>,
-        _settings: StitchSettings,
-        _min_vertex_gap: Option<&mut f64>,
-        _min_edge_gap: Option<&mut f64>,
-    ) -> Result<StitchAttempt> {
-        // UNPORTED(heal.stitch_p2): SmStitch::DoStitching
-        Err(SolidError::unported(
-            "SmStitch::DoStitching",
-            "heal.stitch_p2",
-        ))
-    }
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        candidate_vertices: Option<&[O]>,
+        candidate_edges: Option<&[O]>,
+        settings: StitchSettings,
+        min_vertex_gap: Option<&mut f64>,
+        min_edge_gap: Option<&mut f64>,
+    ) -> Result<StitchAttempt>;
 
     /// `SmFilletExecutive::RemoveTopoEdges`; waiting for `blend.fillet_executive_p1`.
     fn remove_topo_edges(
@@ -766,16 +781,14 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         solver: O,
     ) -> Result<Option<&mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs>>;
 
-    /// `SmFilletSolver::GetEdgeuse(lIndex)`; waiting for `blend.fillet_solver_p1`.
-    fn solver_edgeuse(&self, _solver: O, _index: usize) -> Result<Option<O>> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::GetEdgeuse
-        Err(SolidError::unported(
-            "SmFilletSolver::GetEdgeuse",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// `SmFilletSolver::GetEdgeuse(lIndex)`: delegate to the solver's
+    /// `FilletSolver::edgeuse` (`blend.fillet_solver_p1`).
+    fn solver_edgeuse(&self, solver: O, index: usize) -> Result<Option<O>>;
 
     /// `SmFilletSolver::GetFilletCorner(lIndex)`; waiting for `blend.fillet_solver_p2`.
+    /// A vertex without a corner (`SmFilletCorner::Create` returned `NULL`) yields
+    /// `None`; upstream returns its raw `m_vVertexCornerMap` edge-use array cast to a
+    /// corner (UB-209).
     fn solver_corner(&self, _solver: O, _index: usize) -> Result<Option<O>> {
         // UNPORTED(blend.fillet_solver_p2): SmFilletSolver::GetFilletCorner
         Err(SolidError::unported(
@@ -794,8 +807,9 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
 
-    /// `SmFilletCorner::GetTangentFilletSolver(pFS)`; waiting for
-    /// `blend.fillet_corner_p1`.
+    /// `SmFilletCorner::GetTangentFilletSolver(pFS)` (virtual); waiting for
+    /// `blend.fillet_corner_p1` (the base, `SmFillet1x1Corner`, `SmFillet2x2Corner`) and
+    /// `blend.fillet_corner_p2` (`SmFilletNx1ClosedCorner`, `SmFilletNx2Corner`).
     fn corner_tangent_solver(&self, _corner: O, _solver: O) -> Result<Option<O>> {
         // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetTangentFilletSolver
         Err(SolidError::unported(
@@ -804,72 +818,80 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
 
-    /// `SmFilletCorner::GetSetBackDist`; waiting for `blend.fillet_corner_p1`.
-    fn corner_setback_distance(&self, _corner: O) -> Result<f64> {
-        // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetSetBackDist
-        Err(SolidError::unported(
-            "SmFilletCorner::GetSetBackDist",
-            "blend.fillet_corner_p1",
-        ))
-    }
+    /// `SmFilletCorner::GetSetBackDist()`: the inline read of `m_dSetBackDist`
+    /// (`FilletCorner::set_back_dist`).
+    fn corner_setback_distance(&self, corner: O) -> Result<f64>;
 
     /// `new SmLinearCrossSectionFSG` / `SmCircularCrossSectionFSG(bApproximateArcs,
     /// dTolPercentRadius, bMirror, bComplement)` / `SmBlendCurveCrossSectionFSG(
-    /// dBlendScale, lContinuity)` in the executive context; waiting for
-    /// `blend.fillet_solver_p1`.
+    /// dBlendScale, lContinuity)` in the executive context: store `generator` (the
+    /// `blend.fillet_solver_p1` record) and return its handle.
     fn new_surface_generator(
         &mut self,
-        _k: &mut Kernel,
-        _spec: super::p2::SurfaceGeneratorSpec,
-    ) -> Result<O> {
-        // UNPORTED(blend.fillet_solver_p1): SmLinearCrossSectionFSG::SmLinearCrossSectionFSG / SmCircularCrossSectionFSG::SmCircularCrossSectionFSG / SmBlendCurveCrossSectionFSG::SmBlendCurveCrossSectionFSG
-        Err(SolidError::unported(
-            "SmFilletSurfaceGenerator constructors",
-            "blend.fillet_solver_p1",
-        ))
-    }
+        k: &mut Kernel,
+        generator: FilletSurfaceGenerator,
+    ) -> Result<O>;
+
+    /// `new SmConstantRadiusFS(ctx, dApproxTol, dAngTolRad, dTanTolRad, dRadius, pEU)`:
+    /// delegate to `fillet_standard_solver::p1::constant_radius_from_edgeuse` on the
+    /// B-rep of `edgeuse` (no second radius) and return the new solver's handle.
+    fn new_constant_radius_solver(
+        &mut self,
+        k: &mut Kernel,
+        approx_tol: f64,
+        ang_tol_rad: f64,
+        tan_tol_rad: f64,
+        radius: f64,
+        edgeuse: O,
+    ) -> Result<O>;
 
     /// The fillet solver constructors `SetFilletParameters` and `SurfaceSurfaceFillet`
-    /// call, dispatched on the spec: `SmConstantRadiusFS` (unit
-    /// `blend.fillet_standard_solver_p1`), `SmConstantDistanceFS`, `SmVariableRadiusFS`
-    /// and `SmSurfaceSurfaceFS` (unit `blend.fillet_standard_solver_p2`). Adapters must
-    /// return the owning unit's `Unported` while it is missing.
-    // UNPORTED(blend.fillet_standard_solver_p1): SmConstantRadiusFS::SmConstantRadiusFS
-    // UNPORTED(blend.fillet_standard_solver_p2): SmConstantDistanceFS::SmConstantDistanceFS / SmVariableRadiusFS::SmVariableRadiusFS / SmSurfaceSurfaceFS::SmSurfaceSurfaceFS
+    /// call, dispatched on the spec: `SmConstantRadiusFS` through
+    /// [`ExecutiveAccess::new_constant_radius_solver`]; `SmConstantDistanceFS`,
+    /// `SmVariableRadiusFS` and `SmSurfaceSurfaceFS` wait for
+    /// `blend.fillet_standard_solver_p2`.
     fn new_fillet_solver(
         &mut self,
-        _k: &mut Kernel,
+        k: &mut Kernel,
         spec: &super::p2::SolverSpec<'_, O>,
     ) -> Result<O> {
-        Err(match spec {
-            super::p2::SolverSpec::ConstantRadius { .. } => SolidError::unported(
-                "SmConstantRadiusFS::SmConstantRadiusFS",
-                "blend.fillet_standard_solver_p1",
+        match *spec {
+            super::p2::SolverSpec::ConstantRadius {
+                approx_tol,
+                ang_tol_rad,
+                tan_tol_rad,
+                radius,
+                edgeuse,
+            } => self.new_constant_radius_solver(
+                k,
+                approx_tol,
+                ang_tol_rad,
+                tan_tol_rad,
+                radius,
+                edgeuse,
             ),
-            super::p2::SolverSpec::ConstantDistance { .. } => SolidError::unported(
+            // UNPORTED(blend.fillet_standard_solver_p2): SmConstantDistanceFS::SmConstantDistanceFS
+            super::p2::SolverSpec::ConstantDistance { .. } => Err(SolidError::unported(
                 "SmConstantDistanceFS::SmConstantDistanceFS",
                 "blend.fillet_standard_solver_p2",
-            ),
-            super::p2::SolverSpec::VariableRadius { .. } => SolidError::unported(
+            )),
+            // UNPORTED(blend.fillet_standard_solver_p2): SmVariableRadiusFS::SmVariableRadiusFS
+            super::p2::SolverSpec::VariableRadius { .. } => Err(SolidError::unported(
                 "SmVariableRadiusFS::SmVariableRadiusFS",
                 "blend.fillet_standard_solver_p2",
-            ),
-            super::p2::SolverSpec::SurfaceSurface { .. } => SolidError::unported(
+            )),
+            // UNPORTED(blend.fillet_standard_solver_p2): SmSurfaceSurfaceFS::SmSurfaceSurfaceFS
+            super::p2::SolverSpec::SurfaceSurface { .. } => Err(SolidError::unported(
                 "SmSurfaceSurfaceFS::SmSurfaceSurfaceFS",
                 "blend.fillet_standard_solver_p2",
-            ),
-        })
+            )),
+        }
     }
 
-    /// `SmFilletSolver::SetFilletSurfaceGenerator(pFSG)`; waiting for
-    /// `blend.fillet_solver_p1`.
-    fn set_surface_generator(&mut self, _solver: O, _generator: O) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::SetFilletSurfaceGenerator
-        Err(SolidError::unported(
-            "SmFilletSolver::SetFilletSurfaceGenerator",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// `SmFilletSolver::SetFilletSurfaceGenerator(pFSG)`: delegate to
+    /// `FilletSolver::set_fillet_surface_generator` (`blend.fillet_solver_p1`) with
+    /// the generator's record.
+    fn set_surface_generator(&mut self, solver: O, generator: O) -> Result<()>;
 }
 
 /// A mark lock's context identity and mark type; the adapter keeps its real
@@ -882,8 +904,8 @@ pub struct ContextMark {
     pub mark_type: crate::geom::context::MarkType,
 }
 
-/// The actual `SmStitch` switches used by `DoFilleting`. Constructor defaults are
-/// explicit; p3 changes only `do_region_nesting` and `ignore_problems` to true.
+/// The `SmStitch` switches passed to [`ExecutiveAccess::do_stitching`]. `Default` is
+/// the configuration `DoFilleting` builds.
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)] // upstream independent switches
 pub struct StitchSettings {
