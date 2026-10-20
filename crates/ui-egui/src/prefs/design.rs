@@ -2,6 +2,8 @@
 use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let response = setting::joint_moving_first(app, ui);
+    crate::scenario::publish_rect("prefs:joint_moving_first", response.rect);
     let t = Tokens::get();
     ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
     ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {

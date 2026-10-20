@@ -425,8 +425,8 @@ component frame.
 
 Each alignment picker only offers references on its primary origin's exact occurrence.
 Hovering or clicking the other component leaves the confirmed reference and pose unchanged.
-A circular hole rim shows the centre marker, labelled **Circle center alignment** in Center
-mode or **Circle axis** in Axis mode. A unique adjacent cylinder supplies the persistent
+A circular hole rim shows the **Circle center alignment** marker; cylindrical face and
+construction-axis references show their direction. A unique adjacent cylinder supplies the persistent
 identity even when raw edge history is inexact. Multiple possible cylinders are refused
 rather than choosing one arbitrarily.
 
@@ -436,23 +436,31 @@ With both references empty, hovering only highlights geometry and shows snap mar
 Click the first reference before hovering the second to preview its temporary solution;
 leaving restores the confirmed solution. Wrong-component and degenerate picks are ignored.
 
-Circular references have explicit **Center** and **Axis** modes. Center stores the cylindrical
+Circular rim references automatically use their center. The reference stores the cylindrical
 face and the adjacent face naming the picked rim. Its clocking direction is the vector from
 the primary origin to that circle centre, projected into the joint plane. Thus another hole
 can orient two plates even when the hole axes are parallel. The centre is recomputed when
-geometry changes; a lost/ambiguous rim or a centre on the primary axis is refused. Axis keeps
-direction-only semantics and refuses an axis parallel to the primary joint axis. Existing
-saved axis references reopen in Axis mode; changing one to Center requires picking its rim.
+geometry changes; a lost/ambiguous rim or a centre on the primary axis is refused. Construction
+axes and cylindrical face directions retain direction semantics and refuse parallel axes.
+Previously saved directional references remain compatible without being reinterpreted.
 Assembly motion displays the solved body as solid and its original placement as the ghost;
 it never treats display-mesh volume drift as material removal.
 
-Each **Invert alignment** checkbox reverses only its own direction. The authored **Angle**
+One **Invert alignment** checkbox reverses the relative secondary orientation. The authored **Angle**
 expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
 After choosing the primary origins, picking and highlighting continue on the solved placement.
 An incomplete or invalid secondary input keeps the last valid pose while explaining the error.
 Once its counterpart is confirmed, hovering a valid reference previews that candidate
 temporarily; leaving it restores the authored pose, and only a click fills the selection.
 Cancel discards the operation; accepted edits can be undone.
+
+Preferences > Design offers **Select moving component first**, off by default. Off preserves
+the fixed-then-moving primary pick order; on reverses the two primary input rows while the
+backend keeps the same fixed/moving origins. The preference is captured when a new Joint
+command opens: changing it never reorders a dialog in progress or an existing joint.
+Secondary alignment always starts with the actual moving component, independently of this
+preference. A hovered circular rim stays selectable across preview updates and small pointer
+movements within that hole's projected footprint; leaving that region restores the confirmed pose.
 
 References keep persistent geometry names or feature/curve identities through save/reopen,
 geometry changes and independent component copies. Missing, ambiguous, wrong-component,

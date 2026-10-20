@@ -147,8 +147,8 @@ pub struct JointForm {
     pub alignment_origin_problem: Option<&'static str>,
     pub alignment_origins: Option<[u64; 2]>,
     pub alignment_revision: u64,
-    /// Explicit semantics for circular picks; old saved axes retain Axis mode.
-    pub circle_center: [bool; 2],
+    /// Backend A/B -> primary UI row, captured when this creation dialog opens.
+    pub primary_order: [usize; 2],
 }
 
 impl JointForm {
@@ -171,7 +171,7 @@ impl JointForm {
             alignment_origin_problem: None,
             alignment_origins: None,
             alignment_revision: 0,
-            circle_center: [true; 2],
+            primary_order: [0, 1],
         }
     }
 
@@ -223,15 +223,22 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let s = &app.session;
     let (asm, inputs) = match id {
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
-        "joint.create" => (
-            Asm::Joint(Box::new(JointForm::new(false))),
-            vec![
-                SelInput::new("Component 1", SNAPS, false),
-                SelInput::new("Component 2", SNAPS, false),
-                SelInput::new("Alignment 1 (optional)", ALIGNMENTS, false),
-                SelInput::new("Alignment 2 (optional)", ALIGNMENTS, false),
-            ],
-        ),
+        "joint.create" => {
+            let mut form = JointForm::new(false);
+            let moving_first = app.preferences.joint_moving_first;
+            if moving_first {
+                form.primary_order = [1, 0];
+            }
+            (
+                Asm::Joint(Box::new(form)),
+                vec![
+                    SelInput::new(if moving_first { "Moving component" } else { "Fixed component" }, SNAPS, false),
+                    SelInput::new(if moving_first { "Fixed component" } else { "Moving component" }, SNAPS, false),
+                    SelInput::new("Alignment 1 (optional)", ALIGNMENTS, false),
+                    SelInput::new("Alignment 2 (optional)", ALIGNMENTS, false),
+                ],
+            )
+        }
         "joint.as_built" => {
             (Asm::Joint(Box::new(JointForm::new(true))), vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)])
         }
@@ -347,7 +354,6 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
         {
             f.alignment[i] = Some(json!({"reference":reference,"occurrence":origin.occurrence}));
             f.reverse_alignment[i] = *reverse;
-            f.circle_center[i] = matches!(reference, solidcraft_engine::doc::joints::AlignmentRef::CircleCenter(_));
         }
     }
     // An offset or angle typed as an expression shows (and is sent back) as that expression, so
@@ -632,13 +638,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
             f.fit_limits();
             if !f.as_built {
-                for (i, label) in ["Invert alignment 1", "Invert alignment 2"].into_iter().enumerate() {
-                    let side = f.alignment_order[i];
-                    let selected = f.alignment[side].is_some() || !sel_items(inputs, i + if f.editing.is_some() { 0 } else { 2 }).is_empty();
-                    form_row(ui, label, |ui| {
-                        let response = ui.add_enabled(selected, egui::Checkbox::new(&mut f.reverse_alignment[side], ""));
-                        crate::scenario::publish_handle(&format!("dialog:invert-alignment:{}", i + 1), response.rect.center());
-                    });
+                let selected = f.alignment_order.iter().enumerate().find_map(|(row, side)| {
+                    (f.alignment[*side].is_some() || !sel_items(inputs, row + if f.editing.is_some() { 0 } else { 2 }).is_empty()).then_some(*side)
+                });
+                let mut reverse = f.reverse_alignment[0] ^ f.reverse_alignment[1];
+                form_row(ui, "Invert alignment", |ui| {
+                    let response = ui.add_enabled(selected.is_some(), egui::Checkbox::new(&mut reverse, ""));
+                    if response.changed() && let Some(side) = selected { f.reverse_alignment[side] = !f.reverse_alignment[side]; }
+                    crate::scenario::publish_handle("dialog:invert-alignment", response.rect.center());
+                });
+                if let Some(problem) = f.alignment_origin_problem {
+                    form_row(ui, "", |ui| { ui.label(RichText::new(problem).color(t.warning)); });
                 }
                 enter |= expr_row(ui, "Angle", &mut f.angle);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
@@ -955,7 +965,7 @@ fn alignment_occurrences(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Opt
     }
     let mut out = [0; 2];
     for (side, item) in out.iter_mut().enumerate() {
-        let picked = inputs.get(side)?.items.first()?;
+        let picked = inputs.get(f.primary_order[side])?.items.first()?;
         *item = alignment_occurrence(s, picked)?;
         if snap_of(s, picked)?.param["occurrence"].as_u64() != Some(*item) {
             return None;
@@ -1162,7 +1172,7 @@ pub(crate) fn alignment_accepts(s: &Session, d: &Dialog, sel: &Sel) -> bool {
     let expected = if let Some(id) = f.editing {
         s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| if side == 0 { j.a.occurrence } else { j.b.occurrence })
     } else {
-        d.inputs.get(side).and_then(|i| i.items.first()).and_then(|primary| {
+        d.inputs.get(f.primary_order[side]).and_then(|i| i.items.first()).and_then(|primary| {
             let path = alignment_occurrence(s, primary)?;
             (snap_of(s, primary)?.param["occurrence"].as_u64() == Some(path)).then_some(path)
         })
@@ -1186,25 +1196,26 @@ fn primary_alignment_frame(s: &Session, d: &Dialog, side: usize) -> Option<(Vec3
             solidcraft_engine::doc::apply_vector(&placement, Vec3::new(frame[2][0], frame[2][1], frame[2][2])),
         ));
     }
-    let snap = snap_of(s, d.inputs.get(side)?.items.first()?)?;
+    let snap = snap_of(s, d.inputs.get(f.primary_order[side])?.items.first()?)?;
     Some((snap.at, snap.z))
 }
 
 /// Cheap geometry validation before a candidate is highlighted or committed; the engine
 /// still independently validates every persisted identity and projection.
 fn alignment_projection_valid(s: &Session, d: &Dialog, sel: &Sel, side: usize) -> bool {
-    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    let Kind::Assembly(Asm::Joint(_)) = &d.kind else { return false };
     let Some((origin, z)) = primary_alignment_frame(s, d, side) else { return false };
+    let center_pick = matches!(sel, Sel::Edge { .. });
     let st = s.world_state();
     let vector = (|| -> Option<Vec3> {
         match sel {
             Sel::Edge { body, index, .. } => {
-                alignment_pick(s, sel, f.circle_center[side]).ok()?;
+                alignment_pick(s, sel, center_pick).ok()?;
                 let b = st.body(body)?;
                 let mesh = b.mesh();
                 let points = mesh.edges.get(*index)?;
                 if let Some((center, normal)) = circle_of(points) {
-                    if f.circle_center[side] {
+                    if center_pick {
                         Some(center - origin)
                     } else {
                         let cylinders: Vec<_> = mesh
@@ -1227,7 +1238,7 @@ fn alignment_projection_valid(s: &Session, d: &Dialog, sel: &Sel, side: usize) -
                 }
             }
             Sel::Face { body, index, .. } => {
-                alignment_pick(s, sel, f.circle_center[side]).ok()?;
+                alignment_pick(s, sel, center_pick).ok()?;
                 let b = st.body(body)?;
                 match solidcraft_engine::kernel::face_surface(&b.body, *index)? {
                     solidcraft_engine::kernel::FaceSurface::Plane { normal, .. } => Some(*normal),
@@ -1381,19 +1392,10 @@ fn alignment_params(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Result<[
         let row = f.alignment_order.iter().position(|s| *s == side).ok_or("invalid alignment order")?;
         let picked = sel_items(inputs, row + if f.editing.is_some() { 0 } else { 2 }).first();
         *slot = match picked {
-            Some(sel) => Some(alignment_pick(s, sel, f.circle_center[side])?),
+            Some(sel) => Some(alignment_pick(s, sel, matches!(sel, Sel::Edge { .. }))?),
             None => f.alignment[side].clone(),
         };
         if let Some(value) = slot {
-            if picked.is_none() {
-                match (value["reference"]["type"].as_str(), f.circle_center[side]) {
-                    (Some("circle_center"), false) => {
-                        value["reference"] = json!({"type":"cylinder","name":value["reference"]["name"]});
-                    }
-                    (Some("cylinder"), true) => return Err("pick a circular rim to change this saved axis into a Center reference".into()),
-                    _ => {}
-                }
-            }
             value["reverse"] = json!(f.reverse_alignment[side]);
         }
     }
@@ -1514,10 +1516,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 return Ok(cmd("joint.as_built", p));
             }
-            let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
+            let (a, b) = (snap(f.primary_order[0], "fixed component's joint origin")?, snap(f.primary_order[1], "moving component's joint origin")?);
             for (side, origin) in [&a, &b].into_iter().enumerate() {
                 if alignment.iter().any(Option::is_some) {
-                    let picked = sel_items(inputs, side).first().ok_or("select the primary face origin first")?;
+                    let picked = sel_items(inputs, f.primary_order[side]).first().ok_or("select the primary face origin first")?;
                     if alignment_occurrence(s, picked).map(|o| json!(o)) != Some(origin.param["occurrence"].clone()) {
                         return Err("this primary origin aliases another instance; select an unambiguous occurrence before adding alignment".into());
                     }
@@ -1721,12 +1723,13 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     let aligning = alignment_side(&d.kind, d.active).is_some();
-    let center_frame = alignment_side(&d.kind, d.active).and_then(|side| {
-        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
-        f.circle_center[side].then(|| primary_alignment_frame(&app.session, d, side)).flatten()
-    });
     let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
+    let center_frame = under
+        .as_ref()
+        .filter(|sel| matches!(sel, Sel::Edge { .. }))
+        .and_then(|_| alignment_side(&d.kind, d.active))
+        .and_then(|side| primary_alignment_frame(&app.session, d, side));
     let t = Tokens::get();
     let Kind::Assembly(k) = &mut d.kind else { return };
     if let Asm::Interference { overlaps, .. } = k {

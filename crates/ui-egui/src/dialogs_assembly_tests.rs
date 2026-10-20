@@ -37,6 +37,65 @@ fn rim(s: &Session, body: &str, center: Vec3) -> (crate::viewport::Hit, Sel) {
 }
 
 #[test]
+fn secondary_alignment_primary_pick_preference_defaults_off_and_persists_transactions() {
+    let old: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(serde_json::to_value(old).unwrap()["joint_moving_first"], false);
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.prefs", json!({"open":"Design"}));
+    let checkbox = crate::scenario::rect_of("prefs:joint_moving_first").unwrap().center();
+    h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], true);
+    let mut restored = SolveApp::new(Session::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert_eq!(serde_json::to_value(&restored.preferences).unwrap()["joint_moving_first"], true);
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], false);
+    h.call("ui.prefs", json!({"open":"Design","joint_moving_first":true}));
+    h.call("ui.prefs", json!({"button":"apply"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], false);
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], true);
+}
+
+#[test]
+fn secondary_alignment_primary_pick_preference_normalizes_both_sequences_and_snapshots_the_dialog() {
+    for moving_first in [false, true] {
+        let mut app = round_plates();
+        let mut settings = serde_json::to_value(&app.preferences).unwrap();
+        settings["joint_moving_first"] = json!(moving_first);
+        app.preferences = serde_json::from_value(settings).unwrap();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        assert_eq!(d.inputs[0].label, if moving_first { "Moving component" } else { "Fixed component" });
+        let (_, a) = rim(&app.session, "Body1", Vec3::new(20.0, 20.0, 10.0));
+        let (_, b) = rim(&app.session, "Body2", Vec3::new(170.0, 20.0, 0.0));
+        let picks = if moving_first { [b, a] } else { [a, b] };
+        d.pick(&app.session, picks[0].clone());
+        assert_eq!(d.active, 1);
+        let mut settings = serde_json::to_value(&app.preferences).unwrap();
+        settings["joint_moving_first"] = json!(!moving_first);
+        app.preferences = serde_json::from_value(settings).unwrap();
+        d.pick(&app.session, picks[1].clone());
+        assert_eq!(d.active, 2);
+        let p = apply_commands(&app, &d).unwrap()[0].1.clone();
+        assert_eq!(p["a"]["occurrence"], occ(&app, "A"));
+        assert_eq!(p["b"]["occurrence"], occ(&app, "B"));
+        let (_, moving) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+        d.pick(&app.session, moving);
+        let p = apply_commands(&app, &d).unwrap()[0].1.clone();
+        assert!(p["b_alignment"]["reference"]["name"].is_string());
+        crate::dialogs::run_dialog(&mut app, &d).unwrap();
+        let before = app.session.doc.clone();
+        let edit = edit_joint(&app, before.assembly.joints[0].id).unwrap();
+        let commands = apply_commands(&app, &edit).unwrap();
+        let mut scratch = app.session.scratch();
+        scratch.execute(&commands[0].0, &commands[0].1).unwrap();
+        assert_eq!(scratch.doc.assembly.joints, before.assembly.joints);
+    }
+}
+
+#[test]
 fn secondary_alignment_primary_hole_rim_clicks_persist_round_origins_before_alignment() {
     for reverse in [false, true] {
         let mut app = round_plates();
@@ -212,7 +271,7 @@ fn secondary_alignment_round_origins_zero_then_one_confirmed_hover_leave_and_cli
 }
 
 #[test]
-fn secondary_alignment_circle_mode_widgets_distinguish_center_and_parallel_axis() {
+fn secondary_alignment_circle_centers_are_automatic_without_technical_mode_widgets() {
     let mut h = crate::scenario::Harness::new();
     h.app = round_plates();
     h.app.start("joint.create");
@@ -223,18 +282,15 @@ fn secondary_alignment_circle_mode_widgets_distinguish_center_and_parallel_axis(
     h.app.dialog = Some(d);
     h.frames(3);
     let (hit, _) = rim(&h.app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
-    h.step(&json!({"click":{"handle":"dialog:circle-axis:1"}})).unwrap();
-    h.frames(2);
-    assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &hit).is_none(), "parallel Axis is refused before a click");
-    h.step(&json!({"click":{"handle":"dialog:circle-center:1"}})).unwrap();
-    h.frames(2);
+    assert!(h.step(&json!({"click":{"handle":"dialog:circle-axis:1"}})).is_err(), "Axis mode must not be offered");
+    assert!(h.step(&json!({"click":{"handle":"dialog:circle-center:1"}})).is_err(), "Center is automatic, not a mode control");
     assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &hit).is_some());
     let (same, _) = rim(&h.app.session, "Body2", Vec3::new(170.0, 20.0, 10.0));
     assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &same).is_none(), "coincident center cannot define clocking");
 }
 
 #[test]
-fn secondary_alignment_hole_contour_uses_persistent_cylinder_axis_and_center_affordance() {
+fn secondary_alignment_cylinder_face_keeps_directional_reference_compatibility() {
     let mut app = two_boxes();
     app.run("component.activate", json!({"component":"A"})).unwrap();
     app.run("parameters.change", json!({"name":"holeDiameter","expression":"6 mm"})).unwrap();
@@ -247,14 +303,8 @@ fn secondary_alignment_hole_contour_uses_persistent_cylinder_axis_and_center_aff
     }
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
     d.active = 3;
-    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
-        f.circle_center[0] = false;
-    }
-    let state = app.session.model.state();
-    let body = state.body("Body1").unwrap();
-    let mesh = body.mesh();
-    let index = mesh.edges.iter().position(|e| circle_of(e).is_some() && e.iter().all(|p| (p.z - 10.0).abs() < 1e-6)).unwrap();
-    let hit = crate::viewport::Hit::Edge { body: "Body1".into(), index, mid: mesh.edges[index][0] };
+    let Sel::Face { body, index, point } = face_sel(&app.session, Vec3::new(13.0, 10.0, 9.0)).unwrap() else { panic!() };
+    let hit = crate::viewport::Hit::Face { body, index, point };
     let sel = d.candidate(&app.session, &hit).unwrap();
     let snap = snap_of(&app.session, &sel).unwrap();
     assert_eq!(snap.kind, SnapKind::CircleCenter);
@@ -493,6 +543,39 @@ fn secondary_alignment_feedback_primary_repick_maps_from_preview_to_author_frame
 }
 
 #[test]
+fn secondary_alignment_circle_hover_survives_preview_and_small_motion_until_real_leave() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = round_plates();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    let (_, moving) = rim(&h.app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    d.pick(&h.app.session, moving);
+    let (hit, selected) = rim(&h.app.session, "Body1", Vec3::new(80.0, 20.0, 10.0));
+    let Sel::Edge { point, .. } = &selected else { panic!() };
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let at = proj.to_screen(*point).unwrap();
+    let candidate = Some((hit.clone(), Some(selected.clone())));
+    assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at), candidate.clone()), candidate);
+    h.app.viewport.hover = Some(hit);
+    settle_alignment_update(&mut h.app, &egui::Context::default());
+    for _ in 0..8 {
+        assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(0.5, 0.5)), None), candidate);
+    }
+    let kept = crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(0.5, 0.5)), None).unwrap().1.unwrap();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, kept);
+    let p = apply_commands(&h.app, &d).unwrap()[0].1.clone();
+    assert_eq!(p["a_alignment"]["reference"]["type"], "circle_center");
+    h.app.dialog = Some(d);
+    assert!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(100.0, 100.0)), None).is_none());
+}
+
+#[test]
 fn secondary_alignment_feedback_stationary_hover_keeps_identity_until_pointer_moves() {
     let mut h = crate::scenario::Harness::new();
     h.app = two_boxes();
@@ -639,7 +722,7 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
 }
 
 #[test]
-fn secondary_alignment_widgets_invert_independently_and_clear_saved_references() {
+fn secondary_alignment_single_inversion_keeps_component_flip_and_clear_saved_references() {
     let mut h = crate::scenario::Harness::new();
     h.app = two_boxes();
     h.app.start("joint.create");
@@ -650,13 +733,13 @@ fn secondary_alignment_widgets_invert_independently_and_clear_saved_references()
     h.app.dialog = Some(d);
     h.frames(3);
     let before = h.app.session.doc.clone();
-    for side in [1, 2] {
-        h.step(&json!({"click":{"handle":format!("dialog:invert-alignment:{side}")}})).unwrap();
-        h.frames(3);
-        let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
-        assert_eq!(p["b_alignment"]["reverse"], true);
-        assert_eq!(p["a_alignment"]["reverse"], side == 2);
-    }
+    h.step(&json!({"click":{"handle":"dialog:invert-alignment"}})).unwrap();
+    h.frames(3);
+    let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+    assert_eq!(p["b_alignment"]["reverse"], true);
+    assert_eq!(p["a_alignment"]["reverse"], false);
+    assert_eq!(p["flip"], false);
+    assert!(h.step(&json!({"click":{"handle":"dialog:invert-alignment:2"}})).is_err());
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
     h.frames(2);

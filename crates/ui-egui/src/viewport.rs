@@ -85,7 +85,7 @@ pub struct ViewportState {
     pub(crate) middle_clicked: bool,
     /// The last pick (its key and hits): reused while nothing it depends on changed.
     last_pick: Option<(u64, Vec<Hit>)>,
-    alignment_hover: Option<(u64, Option<(Hit, Option<Sel>)>)>,
+    alignment_hover: Option<(u64, Pos2, Option<Rect>, Option<(Hit, Option<Sel>)>)>,
     pub rect: Option<Rect>,
     pub(crate) layout: Option<crate::viewport_layout::Layout>,
     pub(crate) palette_rect: Option<Rect>,
@@ -2870,6 +2870,31 @@ pub fn delete_selection(app: &mut SolveApp) {
 }
 
 /// Keep a joint's transient reference stable while its own geometry moves under the pointer.
+fn alignment_circle_region(app: &SolveApp, proj: &Proj, candidate: &Option<(Hit, Option<Sel>)>) -> Option<Rect> {
+    let (hit, Some(sel @ Sel::Edge { body, index, .. })) = candidate.as_ref()? else { return None };
+    let dialog = app.dialog.as_ref()?;
+    dialog.candidate(&app.session, hit)?;
+    let snap = crate::dialogs_assembly::snap_of(&app.session, sel)?;
+    if !snap.param.get("circle").is_some_and(serde_json::Value::is_string) {
+        return None;
+    }
+    let state = interaction_state(app);
+    let mesh = state.body(body)?.mesh();
+    let edge = mesh.edges.get(*index)?;
+    let (center, normal) = crate::dialogs_assembly::circle_of(edge)?;
+    let radius = center.dist(*edge.first()?);
+    let x = normal.any_perp();
+    let y = normal.cross(x);
+    let mut rect = Rect::NOTHING;
+    for i in 0..32 {
+        let angle = f64::from(i) * std::f64::consts::TAU / 32.0;
+        rect.extend_with(proj.to_screen(center + (x * angle.cos() + y * angle.sin()) * radius)?);
+    }
+    // The circle's projected footprint, including its center marker and the normal
+    // edge-picking margin. This is geometry-bound, never a timeout/global sticky pick.
+    Some(rect.expand(6.0))
+}
+
 pub(crate) fn stable_alignment_hover(
     app: &mut SolveApp,
     proj: &Proj,
@@ -2885,8 +2910,6 @@ pub(crate) fn stable_alignment_hover(
     // would alternate between the authored and hovered poses. Only real pointer/view/input
     // changes choose another identity; drawing/highlighting still use its current geometry.
     let mut hash = std::collections::hash_map::DefaultHasher::new();
-    pointer.x.to_bits().hash(&mut hash);
-    pointer.y.to_bits().hash(&mut hash);
     dialog.highlight_key().hash(&mut hash);
     app.session.revision.hash(&mut hash);
     for value in
@@ -2898,12 +2921,28 @@ pub(crate) fn stable_alignment_hover(
         value.to_bits().hash(&mut hash);
     }
     let key = hash.finish();
-    if let Some((old, kept)) = &app.viewport.alignment_hover
+    if let Some((old, anchor, region, kept)) = &app.viewport.alignment_hover
         && *old == key
     {
-        return kept.clone();
+        if let Some(region) = region {
+            let valid = alignment_circle_region(app, proj, kept);
+            let same = match (&candidate, kept) {
+                (None, _) => true,
+                (Some((_, Some(a))), Some((_, Some(b)))) => {
+                    crate::dialogs_assembly::snap_of(&app.session, a).map(|s| s.param)
+                        == crate::dialogs_assembly::snap_of(&app.session, b).map(|s| s.param)
+                }
+                _ => false,
+            };
+            if same && valid.is_some_and(|now| region.contains(pointer) || now.contains(pointer)) {
+                return kept.clone();
+            }
+        } else if *anchor == pointer {
+            return kept.clone();
+        }
     }
-    app.viewport.alignment_hover = Some((key, candidate.clone()));
+    let region = alignment_circle_region(app, proj, &candidate);
+    app.viewport.alignment_hover = Some((key, pointer, region, candidate.clone()));
     candidate
 }
 

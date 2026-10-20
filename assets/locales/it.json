@@ -1070,6 +1070,7 @@
   "search.valid": "Valido",
   "settings.display_quality_note": "I livelli più fini rendono più uniformi le facce curve e gli spigoli e richiedono più tempo per la mesh. Cambia solo la vista, mai il progetto o le esportazioni.",
   "settings.frame_rate_note": "Mostra i fotogrammi al secondo nell'angolo inferiore destro della vista.",
+  "settings.joint_moving_first": "Seleziona prima il componente da spostare",
   "settings.measure_axis_distances": "Mostra distanze X/Y/Z",
   "settings.measure_axis_distances_help": "Mostra le componenti lungo gli assi globali accanto alla distanza totale quando Misura è aperto.",
   "settings.msaa_applies_on_restart": "L'antialiasing verrà applicato al prossimo avvio di SolidCraft",
