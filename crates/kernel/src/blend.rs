@@ -1734,6 +1734,24 @@ fn tangent_faces(solid: &Solid, edge: &mt::Edge) -> bool {
 
 /// The chain of edges continuing `edge` smoothly at its ends (its ids): closed, or open where
 /// the next edge turns sharply.
+/// The edges a fillet of edge `index` (as in [`Body::tessellate`]'s `edges`) takes with it: its
+/// smooth chain, ending where the fillet's does (at the end of an earlier round of the other kind
+/// it meets, not over that round's end and on up the wall). For the dialog's tangent chain, so
+/// what it shows picked is what the fillet rounds. `None` for a mesh body or no such edge.
+pub fn fillet_chain(body: &Body, index: usize) -> Option<Vec<usize>> {
+    if body.is_mesh() {
+        return None;
+    }
+    guard("fillet chain", || {
+        let all = Body::unique_edges(&body.solid);
+        let Some(edge) = all.get(index) else { return Ok(None) };
+        let Some(ids) = smooth_chain(&body.solid, edge) else { return Ok(None) };
+        Ok(Some(ids.iter().filter_map(|id| all.iter().position(|e| e.id() == *id)).collect()))
+    })
+    .ok()
+    .flatten()
+}
+
 pub(crate) fn smooth_chain(solid: &Solid, edge: &mt::Edge) -> Option<Vec<mt::EdgeID>> {
     smooth_chain_within(solid, edge, &|_| true)
 }
