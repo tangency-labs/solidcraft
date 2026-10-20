@@ -785,3 +785,45 @@ pub struct NavigateResult {
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;
+
+/// Select a ground-shadow style, or retain the existing on/off/toggle request.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum GroundShadowParams {
+    Mode(GroundShadowChoice),
+    Toggle(GroundShadowToggle),
+    /// Legacy null parameters mean toggle, as an empty object does.
+    LegacyToggle(()),
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroundShadowChoice {
+    pub mode: GroundShadowMode,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroundShadowToggle {
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum GroundShadowMode {
+    Off,
+    Ellipse,
+    Projected,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GroundShadowReply {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<GroundShadowMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
