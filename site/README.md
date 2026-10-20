@@ -17,6 +17,7 @@ commit date of `HEAD`.
 | Module pages (`areas/<module>.html`) | `plan/modules.toml` and its history: the same chart as the overview, over that module's units only |
 | Units (`units/index.html`) | `plan/modules.toml`, `harness/callgraph/units.json`, `reports/difftest/*.json` (`cases_*`, `deferred_by_unit`) |
 | Unit pages (`units/<id>.html`) | the above, plus the `//! | Rust | Upstream |` table in the module's file header and the unit's status history from the timeline |
+| Dependency graph (`graph.html`, `assets/graph.json`) | `plan/modules.toml` (`depends_on`, `layer`, status) and claims; lists of ready and most-blocking units are rendered server-side, the graph by `site/assets/graph.js` |
 | Upstream issues (`issues.html`) | `plan/upstream-issues.md`, split at `#### <SERIES>-<n>.` headings |
 | SSI corpus (`ssi.html`) | `reports/ssi-corpus.json` |
 
@@ -24,7 +25,8 @@ Text from the repository is HTML-escaped before a small markdown subset (inline 
 bold, italic, http(s) links, nested `- ` lists) is applied, so raw HTML written in a PR
 never reaches the page. Charts are inline SVG; `site/assets/app.js` only sorts and
 filters tables, drives the chart tooltips and the overview's module picker (without JS the overview
-shows the all-units chart). No external assets.
+shows the all-units chart). The only third-party code is d3-force (ISC), vendored under
+`site/assets/vendor/` and used only by the graph page (see `ATTRIBUTION.md`). No external assets.
 
 Deployment: `.github/workflows/pages.yml` rebuilds on every push to `main`, after a
 "Progress checklist" run that pushed a new `plan/PROGRESS.md` (those commits carry

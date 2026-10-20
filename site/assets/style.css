@@ -212,3 +212,46 @@ td > a > code, td > code { white-space: nowrap; overflow-wrap: normal; }
 .steps-axis { display: flex; justify-content: space-between; margin-top: 2px; }
 .steplist { list-style: none; padding: 0; margin: 0.4rem 0 0.8rem; display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; font-size: 0.85rem; }
 .steplist time { color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* dependency graph (graph.html) */
+:root { --up: #2a78d6; --down: #b8509e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --up: #5d9ff0; --down: #e08ad0; } }
+:root[data-theme="dark"] { --up: #5d9ff0; --down: #e08ad0; }
+.gsw { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px;
+  background: var(--todo-bg); border: 1.5px solid var(--muted); }
+.gsw.done { background: var(--green); border-color: var(--green); }
+.gsw.partial { background: var(--partial); border-color: var(--partial); }
+.gsw.ready { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.gsw.claimed { border: 3px solid var(--claimed); }
+.gsw.blocked { border-color: var(--bad-ink); }
+.gsw.up { background: var(--up); border-color: var(--up); }
+.gsw.down { background: var(--down); border-color: var(--down); }
+.graphbox { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden; margin-top: 0.4rem; }
+#graph { display: block; width: 100%; height: 70vh; min-height: 360px; touch-action: none; cursor: grab; user-select: none; }
+#graph .band { fill: transparent; }
+#graph .band.odd { fill: var(--surface-2); }
+#graph .blabel { fill: var(--text-2); font-size: 26px; font-weight: 600; }
+#graph .edges line { stroke: var(--muted); stroke-width: 0.6; opacity: 0.12; }
+#graph .n { cursor: pointer; }
+#graph .n .dot { fill: var(--todo-bg); stroke: var(--muted); stroke-width: 1.2; }
+#graph .n.s-green .dot { fill: var(--green); stroke: var(--surface); }
+#graph .n.s-partial .dot { fill: var(--partial); stroke: var(--surface); }
+#graph .n.k-claimed .dot { stroke: var(--claimed); stroke-width: 3; }
+#graph .n.k-blocked .dot { stroke: var(--bad-ink); stroke-width: 2; }
+#graph .n .ring { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+#graph.focus .n, #graph.searching .n { opacity: 0.18; }
+#graph.focus .edges line { opacity: 0.06; }
+#graph.focus .n.up, #graph.focus .n.down, #graph.focus .n.sel, #graph.searching .n.hit { opacity: 1; }
+#graph .n.up .dot { stroke: var(--up); stroke-width: 2.5; }
+#graph .n.down .dot { stroke: var(--down); stroke-width: 2.5; }
+#graph .n.sel .dot { stroke: var(--text); stroke-width: 3; }
+#graph .n.hit .dot { stroke: var(--text); stroke-width: 2.5; }
+#graph.focus .edges line.up { stroke: var(--up); stroke-width: 1.4; opacity: 0.9; }
+#graph.focus .edges line.down { stroke: var(--down); stroke-width: 1.4; opacity: 0.9; }
+#graph .n.out { opacity: 0.06 !important; pointer-events: none; }
+#graph .edges line.out { opacity: 0.02 !important; }
+.ginfo { margin: 0.6rem 0 0; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; font-size: 0.9rem; overflow-wrap: anywhere; }
+.ginfo p { margin: 0.2rem 0; }
+@media (max-width: 640px) { #graph { height: 60vh; } }

@@ -300,10 +300,12 @@ def parse_issues():
 
 # ---------------------------------------------------------------- page shell
 
-def page(title, body, depth, nav, head_sha, head_date, description="", path=""):
+def page(title, body, depth, nav, head_sha, head_date, description="", path="", scripts=()):
     up = "../" * depth
     links = [("index.html", "Overview", "overview"), ("units/index.html", "Units", "units"),
+             ("graph.html", "Graph", "graph"),
              ("issues.html", "Upstream issues", "issues"), ("ssi.html", "SSI corpus", "ssi")]
+    extra_js = "".join(f'\n<script src="{up}assets/{js}"></script>' for js in scripts)
     navhtml = "".join(
         f'<a href="{up}{href}"{" aria-current=\"page\"" if key == nav else ""}>{label}</a>'
         for href, label, key in links)
@@ -344,7 +346,7 @@ def page(title, body, depth, nav, head_sha, head_date, description="", path=""):
 </main>
 <footer class="wrap">Generated from <a href="{REPO_URL}/tree/{head_sha}"><code>{short}</code></a>
 ({esc(head_date)}) by <code>site/build.py</code>. Apache-2.0. Not affiliated with or endorsed by NVIDIA.</footer>
-<script src="{up}assets/app.js"></script>
+<script src="{up}assets/app.js"></script>{extra_js}
 </body>
 </html>
 """
@@ -465,6 +467,113 @@ def status_steps(hist, t0, t1):
             f'<ol class="steplist">{items}</ol>')
 
 
+# ---------------------------------------------------------------- dependency graph
+
+DONE = ("green", "partial")
+
+
+def graph_kind(u, status):
+    """done / claimed / ready / waiting / blocked, for the graph legend and counts."""
+    if u["status"] in DONE:
+        return "done"
+    if u["status"] == "claimed":
+        return "claimed"
+    if u["status"] == "blocked":
+        return "blocked"
+    return "ready" if progress.is_ready(u, status) else "waiting"
+
+
+def build_graph(out, units, status, dependents, mods, head_sha):
+    """Write assets/graph.json (units and their depends_on edges); return page data.
+
+    `blocking` counts the not-done units that depend on a unit, directly or not.
+    """
+    by_id = {u["id"]: u for u in units}
+
+    def blocking(uid):
+        seen, stack = set(), [uid]
+        while stack:
+            for d in dependents.get(stack.pop(), []):
+                if d not in seen and status.get(d) not in DONE:
+                    seen.add(d)
+                    stack.append(d)
+        return len(seen)
+
+    nodes = []
+    for u in sorted(units, key=lambda u: (u["layer"], u["id"])):
+        kind = graph_kind(u, status)
+        nodes.append({
+            "id": u["id"], "area": progress.module(u), "layer": u["layer"], "status": u["status"],
+            "kind": kind, "lines": u["est_lines"], "claim": u.get("claim", ""),
+            "ready": u["status"] not in DONE and all(status.get(d) in DONE for d in u["depends_on"]),
+            "blocked_by": sum(1 for d in u["depends_on"] if status.get(d) not in DONE),
+            "blocking": blocking(u["id"]) if u["status"] not in DONE else 0,
+            "deps": sorted(d for d in u["depends_on"] if d in by_id),
+        })
+    areas = [m for m in mods if any(n["area"] == m for n in nodes)]
+    data = {"commit": head_sha, "areas": areas, "nodes": nodes}
+    (out / "assets/graph.json").write_text(json.dumps(data, separators=(",", ":"), sort_keys=True))
+    return {"nodes": nodes, "areas": areas,
+            "edges": sum(len(n["deps"]) for n in nodes),
+            "count": collections.Counter(n["kind"] for n in nodes)}
+
+
+def graph_body(g):
+    nodes, count = g["nodes"], g["count"]
+    ready = [n for n in nodes if n["kind"] == "ready"]
+    ready.sort(key=lambda n: (-n["blocking"], n["layer"], n["id"]))
+    todo = sorted((n for n in nodes if n["kind"] != "done"), key=lambda n: (-n["blocking"], n["layer"], n["id"]))[:15]
+
+    def row(n):
+        claim = f'<div class="small">claimed: {inline(n["claim"])}</div>' if n["claim"] else ""
+        return (f'<tr><td><a href="units/{esc(n["id"])}.html"><code>{esc(n["id"])}</code></a>{claim}</td>'
+                f'<td>{badge(n["status"])}</td><td class=num>{fmt_int(n["lines"])}</td>'
+                f'<td class=num>{n["blocked_by"]}</td><td class=num>{n["blocking"]}</td></tr>')
+
+    head = ('<thead><tr><th data-sort="text">Unit</th><th data-sort="text">Status</th><th data-sort="num">Lines</th>'
+            '<th data-sort="num">Blocked by</th><th data-sort="num">Blocking</th></tr></thead>')
+    area_opts = "".join(f'<option value="{esc(m)}">{esc(m)}</option>' for m in g["areas"])
+    tiles = "".join(
+        f'<div class="tile"><div class="k"><i class="gsw {k}"></i>{label}</div><div class="v">{count[k]}</div>'
+        f'<div class="sub">{sub}</div></div>'
+        for k, label, sub in [("done", "done", "green or partial"),
+                              ("ready", "ready", "todo, every dependency done"),
+                              ("claimed", "claimed", f"todo with an open port: PR ({sum(1 for n in nodes if n['kind'] == 'claimed' and n['ready'])} with every dependency done)"),
+                              ("waiting", "waiting", "todo, a dependency not done")]
+        + ([("blocked", "blocked", "see notes")] if count["blocked"] else []))
+    return f"""
+<h1>Dependency graph</h1>
+<p class="muted">{len(nodes)} units and their {fmt_int(g['edges'])} <code>depends_on</code> edges from
+<code>plan/modules.toml</code> (soft dependencies are not drawn). Columns are the unit's layer, rows group
+units by module. Data: <a href="assets/graph.json"><code>assets/graph.json</code></a>.</p>
+<section class="kpis">{tiles}</section>
+<div class="graphui" hidden>
+<div class="filters">
+<label>Search <input type="search" id="g-search" placeholder="unit id"></label>
+<label>Module <select id="g-area"><option value="">all</option>{area_opts}</select></label>
+<span class="count small">Scroll or pinch to zoom, drag to pan. Click a unit for its dependencies and dependents.</span>
+</div>
+<div class="legend">
+<span><i class="gsw done"></i>green</span><span><i class="gsw partial"></i>partial</span>
+<span><i class="gsw todo"></i>todo</span><span><i class="gsw ready"></i>every dependency done (ready)</span>
+<span><i class="gsw claimed"></i>claimed (open PR)</span>
+<span><i class="gsw up"></i>dependency of selection</span><span><i class="gsw down"></i>dependent of selection</span>
+</div>
+<div class="graphbox"><svg id="graph" role="img" aria-labelledby="graph-title"><title id="graph-title">Port units and
+their dependencies</title></svg><div class="tip" hidden></div></div>
+<div id="g-info" class="ginfo" aria-live="polite"><p class="muted">No unit selected.</p></div>
+</div>
+<noscript><p class="muted">The interactive graph needs JavaScript; the lists below have the same data.</p></noscript>
+<h2>Ready to claim</h2>
+<p class="muted">Todo units whose hard dependencies are all green or partial, most-blocking first. Claim one
+with a draft PR titled <code>port: &lt;unit id&gt;</code> (<a href="{REPO_URL}/blob/main/AGENTS.md">how</a>).</p>
+{('<div class="scroll"><table class="sortable">' + head + '<tbody>' + ''.join(row(n) for n in ready) + '</tbody></table></div>') if ready else '<p class="muted">None right now.</p>'}
+<h2>Most-blocking unfinished units</h2>
+<p class="muted">Units not yet green or partial, by how many unfinished units depend on them (directly or not).</p>
+{('<div class="scroll"><table class="sortable">' + head + '<tbody>' + ''.join(row(n) for n in todo) + '</tbody></table></div>') if todo else '<p class="muted">None.</p>'}
+"""
+
+
 # ---------------------------------------------------------------- pages
 
 def build(out):
@@ -499,8 +608,9 @@ def build(out):
     (out / "units").mkdir(parents=True)
     (out / "areas").mkdir()
     (out / "assets").mkdir()
-    for f in ("style.css", "app.js", "og-image.png"):
+    for f in ("style.css", "app.js", "graph.js", "og-image.png"):
         shutil.copy(ROOT / "site/assets" / f, out / "assets" / f)
+    shutil.copytree(ROOT / "site/assets/vendor", out / "assets/vendor")
     shutil.copy(ROOT / "assets/logo.svg", out / "assets/logo.svg")
     P = lambda *a, **k: page(*a, head_sha=head_sha, head_date=head_date, **k)  # noqa: E731
 
@@ -598,6 +708,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <h2>Elsewhere</h2>
 <ul>
 <li><a href="units/index.html">All {len(units)} units</a>, with difftest results and blockers.</li>
+<li><a href="graph.html">Dependency graph</a>: what is ready to claim and what blocks the most.</li>
 <li><a href="issues.html">{len(issues)} upstream issues</a> found while porting.</li>
 <li><a href="{REPO_URL}">Repository</a>: <a href="{REPO_URL}/blob/main/AGENTS.md">how to port a unit</a>,
 <a href="{REPO_URL}/blob/main/plan/PROGRESS.md">checklist</a>.</li>
@@ -781,6 +892,12 @@ counts). Click a column heading to sort.</p>
 <p class="tests">{tests}</p>
 """
         write(f"units/{uid}.html", P(f"{uid} · solidcore", body, 1, "units", path=f"units/{uid}.html"))
+
+    # ---- dependency graph
+    gstats = build_graph(out, units, status, dependents, mods, head_sha)
+    write("graph.html", P("Dependency graph · solidcore", graph_body(gstats), 0, "graph", path="graph.html",
+                          description="Port units of solidcore and their dependencies, by status.",
+                          scripts=("vendor/d3-force.bundle.min.js", "graph.js")))
 
     # ---- issues
     sc = collections.Counter(e["series"] for e in issues)

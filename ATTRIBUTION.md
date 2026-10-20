@@ -77,3 +77,15 @@ These are fetched at run time (never committed) and used only by difftest's
   *ACM Transactions on Graphics* 42(6), Article 211, 2023. Licence: CC-BY.
 - Use: the corpus' 25 `y23_*` cases come from this paper (its published data, or surface
   pairs reconstructed from its figures); each such case cites it in its `source` field.
+
+## Progress site
+
+### d3-force
+
+- Packages: `d3-force` 3.0.0 with its dependencies `d3-dispatch` 3.0.1, `d3-quadtree` 3.0.1
+  and `d3-timer` 3.0.1, from npm (<https://github.com/d3/d3-force>)
+- Licence: ISC (see [`site/assets/vendor/LICENSE-d3.txt`](site/assets/vendor/LICENSE-d3.txt))
+- Copyright: (c) 2010-2021 Mike Bostock
+- Use: the unmodified `dist/*.min.js` files, concatenated into
+  `site/assets/vendor/d3-force.bundle.min.js`, lay out the dependency graph on the
+  progress site (`graph.html`). They are served with the site and not loaded from a CDN.
