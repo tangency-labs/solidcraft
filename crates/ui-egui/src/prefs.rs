@@ -1562,6 +1562,10 @@ preference_settings! {
     /// Custom instructions (#8220): text the agent chat adds to its system note when a session
     /// starts (`agent_chat::acp::system_note`). No page reset discards this user-authored text.
     agent_instructions: String = String::new();
+    /// Compact output for agents connected through the MCP server (`solidcraft-cli mcp`, docs/mcp.md):
+    /// `inspect_design` summarises sketches and tool JSON is not pretty-printed. Off: as always.
+    /// The server asks once per agent session (`mcp.options`), so a change applies to the next one.
+    mcp_compact: bool = false, PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
@@ -2927,7 +2931,10 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
                 ui_kit::settings_page(ui, show);
             }
         }
-        PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
+        PAGE_ASSISTANT => {
+            crate::agent_chat::settings::page(app, ui);
+            crate::agent_chat::settings::mcp_section(app, ui);
+        }
         PAGE_PLUGINS => crate::plugins::page(app, ui),
         PAGE_GENERAL => general::show(app, ui),
         PAGE_APPEARANCE => interface::appearance(app, ui, t),
@@ -6599,6 +6606,24 @@ mod tests {
         app.ui.dark = false;
         super::apply(&mut app, &ctx);
         assert!(!app.ui.dark, "an explicit theme does not follow the desktop");
+    }
+
+    /// Compact output for MCP agents: off by default, a checkbox on the AI page (there with the
+    /// chat off too), reported to the bridged MCP server as `mcp.options`, reset by Restore Defaults.
+    #[test]
+    fn mcp_compact_output_is_an_ai_preference_the_server_reads() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false}));
+        h.call("ui.prefs", json!({"ai_features": false, "open": "AI"}));
+        h.frames(3);
+        let at = crate::scenario::handle_at("prefs:mcp_compact").expect("the checkbox is on the AI page with the chat off");
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        assert!(h.app.preferences.mcp_compact);
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": true}));
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false}));
     }
 
     /// Theme files (#2255): a built-in one and an imported one turn on through `ui.prefs`, the

@@ -153,10 +153,20 @@ file dialogs are never limited.
 
 ### Compact output
 
-`solidcraft-cli mcp --compact`, or the environment variable `SOLIDCRAFT_MCP_COMPACT=1` (`true`,
-`yes` and `on` work too; `0`, `false`, `no`, `off` or empty leave it off; any other value is an
-error at start-up), turns on compact output for agents that pay for every byte. It is off by
-default, and then every tool behaves as described below. With it on:
+Compact output is for agents that pay for every byte. It is off by default, and then every tool
+behaves as described below. Any one of these turns it on:
+
+- **Preferences › AI › Agents through MCP › Compact output** in the app, for every server bridged
+  to it (`--connect`, and the agents its chat starts). The server asks the app (`mcp.options` on
+  the [control channel](control-protocol.md)) when the agent first lists or calls a tool, and
+  keeps the answer for the session, so the tools it listed keep their shape: a change applies to
+  agent sessions started after it. An app that is not running yet is asked again on the next call.
+- `solidcraft-cli mcp --compact`.
+- The environment variable `SOLIDCRAFT_MCP_COMPACT=1` (`true`, `yes` and `on` work too; `0`,
+  `false`, `no`, `off` or empty leave it off; any other value is an error at start-up).
+
+The command line can only turn it on: with the preference on, a server started without
+`--compact` is compact too. With it on:
 
 - `inspect_design` summarises each sketch (`id`, `name`, `plane`, the number of `points`,
   `curves`, `constraints` and `profiles`, `dof`, `status`, `visible`) instead of returning its

@@ -3794,3 +3794,67 @@ fn compact_inspect_design_summarises_sketches_unless_asked() {
     let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(!text.contains('\n') && serde_json::from_str::<Value>(text).is_ok(), "{text}");
 }
+
+/// A headless design behind an "app" whose `mcp.options` answers are `replies`, one per question
+/// (the last one repeats), counting the questions in `asked`.
+struct AppWithPrefs {
+    inner: Headless,
+    replies: Vec<Result<Option<Value>, String>>,
+    asked: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl crate::Backend for AppWithPrefs {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.inner.call(method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn describe(&self) -> String {
+        "test app".into()
+    }
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        let n = self.asked.get();
+        self.asked.set(n + 1);
+        self.replies.get(n).or(self.replies.last()).cloned().unwrap_or(Ok(None))
+    }
+}
+
+fn inspect_design_is_compact(s: &mut Server) -> bool {
+    let listed = call(s, 1, "tools/list", json!({}));
+    let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
+    def["inputSchema"]["properties"]["bodies"].is_object()
+}
+
+/// The app's Preferences turn compact output on for a bridged server; it asks until the app
+/// answers once (here: not running at first), then keeps that answer for the session.
+#[test]
+fn compact_output_follows_the_apps_preference() {
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let app = |replies: Vec<Result<Option<Value>, String>>| {
+        Box::new(AppWithPrefs { inner: Headless::default(), replies, asked: asked.clone() }) as Box<dyn crate::Backend>
+    };
+    let not_running = Err(format!("{} 127.0.0.1:7878 (refused)", crate::backend::NOT_RUNNING));
+
+    let mut s = Server::new(app(vec![not_running.clone(), Ok(Some(json!({"compact": true}))), Ok(Some(json!({"compact": false})))]));
+    assert!(!inspect_design_is_compact(&mut s), "not known yet: the server's own options (off)");
+    assert!(inspect_design_is_compact(&mut s), "the app answered: compact");
+    assert!(inspect_design_is_compact(&mut s), "kept for the session");
+    let r = raw_tool(&mut s, "measure", json!({}));
+    assert!(!r["result"]["content"][0]["text"].as_str().unwrap_or("\n").contains('\n'), "tool calls follow it too: {r}");
+    assert_eq!(asked.get(), 2, "not asked again once answered");
+
+    // An app from before the setting, or with it off: off.
+    asked.set(0);
+    let mut s = Server::new(app(vec![Ok(None)]));
+    assert!(!inspect_design_is_compact(&mut s) && !inspect_design_is_compact(&mut s));
+    assert_eq!(asked.get(), 1);
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))]));
+    assert!(!inspect_design_is_compact(&mut s));
+
+    // The command line turns it on whatever the app says.
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true });
+    assert!(inspect_design_is_compact(&mut s));
+    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
+    assert!(inspect_design_is_compact(&mut s));
+}

@@ -1,7 +1,8 @@
 //! How the MCP server shapes what its tools return. Off by default: every option keeps the
-//! behaviour the server had before it. [`Options::resolve`] is the one place that decides, so a
-//! later source (an app Preferences setting sent over the control channel, say) only changes
-//! what it is given.
+//! behaviour the server had before it. Two places turn an option on: the server's own command
+//! line and environment ([`Options::resolve`]), and, when the server is bridged to the app, the
+//! app's Preferences (AI › MCP agents), which it reports as `mcp.options` ([`Options::from_app`]).
+//! Either one is enough ([`Options::or`]).
 
 /// The environment variable that turns on compact output: `1`, `true`, `yes` or `on`
 /// (`0`, `false`, `no`, `off` or empty: off). `solidcraft-cli mcp --compact` does the same.
@@ -38,6 +39,17 @@ impl Options {
         Self::resolve(args.iter().any(|a| a == COMPACT_FLAG), std::env::var(COMPACT_ENV).ok().as_deref())
     }
 
+    /// The options the app reports in its `mcp.options` reply (`{"compact": bool}`); a field
+    /// missing or of another type is off.
+    pub fn from_app(reply: &serde_json::Value) -> Self {
+        Self { compact: reply.get("compact").and_then(serde_json::Value::as_bool).unwrap_or(false) }
+    }
+
+    /// Each option on when it is on in `self` or in `other`.
+    pub fn or(self, other: Self) -> Self {
+        Self { compact: self.compact || other.compact }
+    }
+
     /// Tool JSON as text: compact, or pretty-printed (the default).
     pub(crate) fn json_text(self, v: &serde_json::Value) -> String {
         if self.compact { v.to_string() } else { serde_json::to_string_pretty(v).unwrap_or_default() }
@@ -61,5 +73,18 @@ mod tests {
         assert_eq!(Options::resolve(true, None), Ok(Options { compact: true }));
         assert_eq!(Options::resolve(true, Some("0")), Ok(Options { compact: true }), "the flag wins");
         assert!(Options::resolve(false, Some("maybe")).is_err_and(|e| e.contains(COMPACT_ENV)));
+    }
+
+    #[test]
+    fn the_app_or_the_command_line_turns_it_on() {
+        let off = Options::default();
+        let on = Options { compact: true };
+        assert_eq!(Options::from_app(&serde_json::json!({"compact": true})), on);
+        for reply in [serde_json::json!({}), serde_json::json!({"compact": "yes"}), serde_json::json!(null), serde_json::json!({"compact": false})] {
+            assert_eq!(Options::from_app(&reply), off, "{reply}");
+        }
+        assert_eq!(off.or(off), off);
+        assert_eq!(off.or(on), on);
+        assert_eq!(on.or(off), on);
     }
 }

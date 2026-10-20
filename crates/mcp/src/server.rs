@@ -62,7 +62,10 @@ pub struct Server {
     backend: Box<dyn Backend>,
     initialized: bool,
     scope: Option<PathScope>,
+    /// The options from the command line and environment.
     options: Options,
+    /// The options the app's Preferences ask for, once it has answered (`None`: not yet).
+    app_options: Option<Options>,
 }
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -97,7 +100,7 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false, scope: None, options: Options::default() }
+        Self { backend, initialized: false, scope: None, options: Options::default(), app_options: None }
     }
     /// Confine the files tool calls may reach to `scope` (`None`: anywhere). `solidcraft-cli mcp`
     /// always sets one unless started with `--allow-any-path` (docs/mcp.md).
@@ -106,10 +109,22 @@ impl Server {
         self
     }
     /// Shape tool output with `options` (default: as always; `solidcraft-cli mcp --compact` or
-    /// `SOLIDCRAFT_MCP_COMPACT=1` turn on compact output, docs/mcp.md).
+    /// `SOLIDCRAFT_MCP_COMPACT=1` turn on compact output, docs/mcp.md). The app's Preferences can
+    /// turn an option on too ([`Server::options`]).
     pub fn with_options(mut self, options: Options) -> Self {
         self.options = options;
         self
+    }
+    /// The options tools use now: the server's own, with what the app's Preferences turn on. The
+    /// app is asked until it answers once (it may start after the server, or be busy), and its
+    /// answer then holds for this session, so the tools an agent listed keep their shape.
+    pub fn options(&mut self) -> Options {
+        if self.app_options.is_none()
+            && let Ok(reply) = self.backend.app_options()
+        {
+            self.app_options = Some(reply.as_ref().map(Options::from_app).unwrap_or_default());
+        }
+        self.options.or(self.app_options.unwrap_or_default())
     }
     pub fn backend(&mut self) -> &mut dyn Backend {
         self.backend.as_mut()
@@ -228,20 +243,21 @@ impl Server {
                 }))
             }
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({"tools": tool_definitions_with(self.options)})),
+            "tools/list" => Ok(json!({"tools": tool_definitions_with(self.options())})),
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "missing tool `name`".to_string()))?;
                 let args = match params.get("arguments") {
                     None | Some(Value::Null) => json!({}),
                     Some(a) => a.clone(),
                 };
-                check_arguments_with(name, &args, self.options).map_err(|e| (INVALID_PARAMS, e))?;
+                let options = self.options();
+                check_arguments_with(name, &args, options).map_err(|e| (INVALID_PARAMS, e))?;
                 // The open design's folder counts, and goes on counting for the rest of this run
                 // when a save-as or open moves the design elsewhere (#7181).
                 let open = self.backend.design_path();
                 self.scope = self.scope.take().map(|s| s.with_design(open.as_deref()));
                 let scope = self.scope.clone();
-                let (backend, options) = (self.backend.as_mut(), self.options);
+                let backend = self.backend.as_mut();
                 let mut result = vfs::scoped(scope, || call_tool_with(backend, name, &args, options));
                 // So does the folder of each design file the call opened or saved: the call reached
                 // it, so it was one of the agent's folders already. Only paths given in full: a
