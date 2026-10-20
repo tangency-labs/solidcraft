@@ -30,6 +30,11 @@ impl TabThrough {
         });
     }
 
+    /// Selection chips use Enter to apply their dialog, rather than only activating the chip.
+    pub(crate) fn has_focus(&self, ctx: &egui::Context) -> bool {
+        ctx.memory(|memory| self.selections.iter().any(|(_, id)| memory.has_focus(*id)))
+    }
+
     /// Keyboard focus and pointer activation must select the same canvas input.
     pub(crate) fn selection(&mut self, index: usize, response: &egui::Response) -> bool {
         if let Some((_, id)) = self.selections.iter_mut().find(|(slot, _)| *slot == index) {
