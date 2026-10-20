@@ -415,6 +415,14 @@ pub fn run_child(args: &[String]) -> ExitCode {
             .location()
             .map(|l| format!(" at {}:{}", l.file(), l.line()))
             .unwrap_or_default();
+        // `DIFFTEST_FUZZ_BACKTRACE=1`: also print the panic's backtrace to stderr, to
+        // locate a panic inside the library (e.g. `capacity overflow` in `alloc`).
+        if std::env::var_os("DIFFTEST_FUZZ_BACKTRACE").is_some() {
+            eprintln!(
+                "panic: {msg}{at}\n{}",
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
         *LAST_PANIC.lock().unwrap_or_else(PoisonError::into_inner) = format!("{msg}{at}");
     }));
     for (i, c) in cases.iter().enumerate() {
@@ -430,6 +438,17 @@ pub fn run_child(args: &[String]) -> ExitCode {
         };
         println!("{MARK}start {i} cpp");
         let cpp = call(|| unit.run_cpp(&case));
+        // `DIFFTEST_FUZZ_TRACE=1`: report the C++ side's outcome before the Rust side runs,
+        // so a Rust hang or abort can be told apart from a guard-rejected input.
+        if std::env::var_os("DIFFTEST_FUZZ_TRACE").is_some() {
+            let what = match &cpp {
+                Side::Done(o) if o.rejected.is_some() => "rejected-fixture".to_string(),
+                Side::Done(_) => "done".to_string(),
+                Side::Harness(m) => format!("harness-error {}", one_line(m)),
+                Side::Panic(m) => format!("panic {}", one_line(m)),
+            };
+            eprintln!("@cpp {i} {what}");
+        }
         let rust = if matches!(&cpp, Side::Done(c) if c.rejected.is_some()) {
             // Rust never runs on a fixture the C++ constructor refused.
             Side::Harness(String::new())
