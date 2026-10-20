@@ -366,6 +366,13 @@ fn fs_ao_depth(i: TOut, @builtin(front_facing) front: bool) -> AoDepth {
     return opaque_depth(i, front);
 }
 
+// The virtual ground preserves the viewport background; only contact occlusion is blended.
+@fragment
+fn fs_ground_ao(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return vec4<f32>(0.0, 0.0, 0.0, 1.0 - occlusion(i));
+}
+
 /// The AO prepass's depth of an opaque surface's fragment.
 fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }

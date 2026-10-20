@@ -40,6 +40,10 @@ mod removed_later_tests;
 mod plane_target_tests;
 
 #[cfg(test)]
+#[path = "viewport_ground_tests.rs"]
+mod ground_tests;
+
+#[cfg(test)]
 #[path = "viewport_refine_wait_tests.rs"]
 mod refine_wait_tests;
 
@@ -1713,6 +1717,11 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         *b = made;
     }
     sc.instanced = instances.finish(app);
+    if app.ui.visual_style != 2 {
+        let bounds = ground_bounds(app, &st);
+        let radius = (bounds.diagonal() * 0.04).clamp(1e-4, 1e6) as f32;
+        sc.ground_ao = solidcraft_gpu::view::GroundAo::new(bounds, ground_height(bounds), app.cam.up, radius);
+    }
     // Section: the outline of each body where the plane cuts it, in the view's text colour (#4146).
     if let Some((o, n)) = section_plane(app) {
         let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
@@ -1983,7 +1992,7 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
         return geometry;
     }
     let mut scene = GpuScene::default();
-    ground_shadow(&mut scene, app, st);
+    ground_shadow(&mut scene, app, ground_bounds(app, st));
     let geometry = ShadowGeometry { key, state: st.clone(), bytes: std::sync::Arc::new(scene.shadow), palette: scene.palette };
     if let Ok(mut cache) = app.viewport.shadow.lock() {
         *cache = Some(geometry.clone());
@@ -1992,7 +2001,7 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
 }
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
-fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) {
+fn ground_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> solidcraft_engine::geom::Aabb3 {
     // The bodies' box in the camera's Z-up frame (the ground is its XY plane).
     let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
     let boxes = body_bounds(app, st);
@@ -2009,12 +2018,21 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &std::sync::Arc<solidcra
             b.add(app.cam.to_frame(p));
         }
     }
+    b
+}
+
+/// Both ground effects use the original ellipse's plane, independent of the origin grid.
+fn ground_height(bounds: solidcraft_engine::geom::Aabb3) -> f64 {
+    bounds.min.z - 1e-3 * (1.0 + bounds.diagonal())
+}
+
+fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::Aabb3) {
     if b.is_empty() {
         return;
     }
     let size = b.size();
     let c = b.center();
-    let z = b.min.z - 1e-3 * (1.0 + b.diagonal());
+    let z = ground_height(b);
     let (rx, ry) = (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15);
     if !(rx > 0.0 && ry > 0.0) {
         return;
@@ -4707,6 +4725,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             pv_key: app.preview.key,
             pv_slot: app.preview.slot.clone(),
             pv_hide: app.preview.rolled_back,
+            preview_bounds: (app.preview.active && !app.preview.rolled_back).then_some(app.preview.bounds),
             clip: section_clip(app),
             cap: {
                 let [r, g, b, _] = t.section_cap.to_normalized_gamma_f32();
@@ -7140,7 +7159,7 @@ mod tests {
         session.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10}))?;
         let app = SolveApp::new(session, crate::Services::default());
         let mut scene = GpuScene::default();
-        ground_shadow(&mut scene, &app, &crate::open_meshing::session_world(&app.session));
+        ground_shadow(&mut scene, &app, ground_bounds(&app, &crate::open_meshing::session_world(&app.session)));
         assert!(scene.trans.is_empty(), "the ground shadow must not trigger order-independent transparency");
         assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
         let shadow_alpha = |v: &[u8]| {
@@ -8696,6 +8715,7 @@ mod tests {
                     pv_key: 0,
                     pv_slot: none(),
                     pv_hide: false,
+                    preview_bounds: None,
                     view_proj: proj.vp.to_f32(),
                     back: proj.cam.back().to_f32(),
                     size_px: [w as f32, h as f32],

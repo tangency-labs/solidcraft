@@ -107,6 +107,7 @@ impl Renderer {
             pv_key: 4,
             pv_slot: slot(None),
             pv_hide: false,
+            preview_bounds: None,
             view_proj: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],

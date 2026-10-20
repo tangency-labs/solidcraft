@@ -375,6 +375,36 @@ struct Offscreen<'a> {
     ao_samples: u32,
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn render_ao_offscreen(
+    scene: GpuScene,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    tess: Option<&str>,
+    ao_radius: f32,
+) -> Option<Vec<u8>> {
+    offscreen(
+        scene,
+        None,
+        view_proj,
+        back,
+        eye,
+        size,
+        Offscreen {
+            tess,
+            product: false,
+            srgb: false,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa: 1.0,
+            ao_radius,
+            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        },
+    )
+}
+
 /// [`render_offscreen`] of a scene supersampled `ssaa` times (1: off).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn render_offscreen_ssaa(
@@ -461,6 +491,7 @@ fn offscreen(
         pv_key: 0,
         pv_slot: none(),
         pv_hide: false,
+        preview_bounds: None,
         view_proj,
         back,
         size_px: [size as f32; 2],
