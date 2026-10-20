@@ -57,6 +57,8 @@ circle_tt	false
 circle_ttt	false
 close	false
 coil	false
+colored_components	false
+colored_components_off	false
 combine	false
 compare	false
 component	false

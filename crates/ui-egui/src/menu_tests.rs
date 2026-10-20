@@ -339,6 +339,24 @@ fn move_shortcut_respects_grounding_and_keeps_body_selection_as_a_body_move() {
 }
 
 #[test]
+fn component_and_occurrence_menus_cycle_shared_identification_color() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let id = app.run("component.create", json!({"name":"Part"})).unwrap()["component"].as_u64().unwrap();
+    let original = app.session.doc.component_identification_color(id);
+    assert!(app.session.colored_components.is_none());
+    act(&mut app, &Target::Component { id }, "Cycle Component Color");
+    let next = app.session.doc.component_identification_color(id);
+    assert_ne!(original, next);
+    assert!(app.session.colored_components.is_some());
+    assert!(app.dialog.is_none());
+    let occurrence = app.session.doc.occurrence_of(id).unwrap().id;
+    act(&mut app, &Target::Occurrence { path: vec![occurrence] }, "Cycle Component Color");
+    assert_ne!(app.session.doc.component_identification_color(id), next);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.component_identification_color(id), next);
+}
+
+#[test]
 fn pick_runs_an_item_of_the_open_menu() {
     let mut app = sample_app();
     assert!(context_menu::pick(&mut app, "Fit").is_err(), "no menu open");
@@ -1150,22 +1168,4 @@ fn narrow_overflow_submenu_keeps_opening_click_and_accepts_the_next_click() {
     assert!(crate::scenario::handle_at("toolbar:solid.extrude").is_some());
     h.step(&json!({"click":{"handle":"toolbar:solid.extrude"}})).unwrap();
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Extrude { .. })));
-}
-
-#[test]
-fn component_and_occurrence_menus_cycle_shared_identification_color() {
-    let mut app = SolveApp::new(Session::default(), Services::default());
-    let id = app.run("component.create", json!({"name":"Part"})).unwrap()["component"].as_u64().unwrap();
-    let original = app.session.doc.component_identification_color(id);
-    assert!(app.session.colored_components.is_none());
-    act(&mut app, &Target::Component { id }, "Cycle Component Color");
-    let next = app.session.doc.component_identification_color(id);
-    assert_ne!(original, next);
-    assert!(app.session.colored_components.is_some());
-    assert!(app.dialog.is_none());
-    let occurrence = app.session.doc.occurrence_of(id).unwrap().id;
-    act(&mut app, &Target::Occurrence { path: vec![occurrence] }, "Cycle Component Color");
-    assert_ne!(app.session.doc.component_identification_color(id), next);
-    app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(app.session.doc.component_identification_color(id), next);
 }
