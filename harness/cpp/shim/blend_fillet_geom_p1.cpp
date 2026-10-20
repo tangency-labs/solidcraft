@@ -38,6 +38,7 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
+#include <SmCircle.h>
 #include <SmCone.h>
 #include <SmContext.h>
 #include <SmEdge.h>

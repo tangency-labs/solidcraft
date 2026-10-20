@@ -926,28 +926,34 @@ impl FilletCorner {
             return Err(SolidError::sm_err(OP_3X2));
         }
 
-        // get onEdge and onExtended curves
-        let mut curve1 = env
-            .pseudo
-            .brep()
-            .edge(fe_on_extended_edge)?
-            .curve
-            .as_ref()
-            .and_then(bspline_part)
-            .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
-        let mut curve2 = env
-            .pseudo
-            .brep()
-            .edge(fe_on_edge)?
-            .curve
-            .as_ref()
-            .and_then(bspline_part)
-            .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
+        // get onEdge and onExtended curves (SM_CAST_PTR(SmBSplineCurve, ..): the analytic
+        // curves derived from SmBSplineCurve pass)
+        let bspline_curve = |pseudo: &FilletBrep, e: EdgeId| -> Result<Curve> {
+            pseudo
+                .brep()
+                .edge(e)?
+                .curve
+                .as_ref()
+                .filter(|c| {
+                    matches!(
+                        c.kind(),
+                        CurveKind::BSpline(_)
+                            | CurveKind::Line(_)
+                            | CurveKind::Ellipse(_)
+                            | CurveKind::Hyperbola(_)
+                            | CurveKind::Parabola(_)
+                    )
+                })
+                .cloned()
+                .ok_or_else(|| SolidError::null_pointer(OP_3X2))
+        };
+        let mut curve1 = bspline_curve(env.pseudo, fe_on_extended_edge)?;
+        let mut curve2 = bspline_curve(env.pseudo, fe_on_edge)?;
 
-        // join the 2 curves
-        curve1.join_with(true, &mut curve2, false, None)?;
-        store_bspline(env.pseudo.brep_mut(), fe_on_extended_edge, curve1.clone())?;
-        store_bspline(env.pseudo.brep_mut(), fe_on_edge, curve2)?;
+        // join the 2 curves (JoinWith is virtual: SmLine and SmEllipse override it)
+        join_with(env.k, &mut curve1, true, &mut curve2, false)?;
+        env.pseudo.brep_mut().edge_mut(fe_on_extended_edge)?.curve = Some(curve1.clone());
+        env.pseudo.brep_mut().edge_mut(fe_on_edge)?.curve = Some(curve2);
 
         // Combine two edges
         self.edges.remove(found_index);
@@ -1688,21 +1694,48 @@ fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
     }
 }
 
-/// Stores a joined curve back on a pseudo-B-rep edge (the edge owns the curve upstream,
-/// so `JoinWith` changes it in place).
-fn store_bspline(brep: &mut Brep, e: EdgeId, c: BSplineCurve) -> Result<()> {
-    let slot = &mut brep.edge_mut(e)?.curve;
-    match slot.as_mut().map(Curve::kind_mut) {
-        Some(CurveKind::BSpline(b)) => *b = c,
-        Some(CurveKind::Line(l)) => l.base = c,
-        // the analytic kinds derived from SmBSplineCurve keep their kind, as upstream's
-        // in-place JoinWith on the SmBSplineCurve part does (mirrors `bspline_part`)
-        Some(CurveKind::Ellipse(l)) => *l.base_mut() = c,
-        Some(CurveKind::Hyperbola(l)) => *l.base_mut() = c,
-        Some(CurveKind::Parabola(l)) => *l.base_mut() = c,
-        _ => *slot = Some(Curve::from(c)),
+/// `SmBSplineCurve::JoinWith` (virtual) on an edge's curve: the `SmLine` and `SmEllipse`
+/// overrides for those kinds, the B-spline join on the `SmBSplineCurve` part otherwise.
+fn join_with(
+    k: &Kernel,
+    this: &mut Curve,
+    this_at_end: bool,
+    other: &mut Curve,
+    other_at_end: bool,
+) -> Result<()> {
+    let owner = this.owner();
+    match this.kind_mut() {
+        CurveKind::Line(l) => {
+            l.join_with(u64::from(this_at_end), other, u64::from(other_at_end), None)
+        }
+        CurveKind::Ellipse(e) => e.join_with(
+            k,
+            u64::from(this_at_end),
+            other,
+            u64::from(other_at_end),
+            None,
+            owner,
+        ),
+        kind => {
+            let this_base =
+                bspline_part_mut(kind).ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
+            let other_base = bspline_part_mut(other.kind_mut())
+                .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
+            this_base.join_with(this_at_end, other_base, other_at_end, None)
+        }
     }
-    Ok(())
+}
+
+/// The `SmBSplineCurve` part of a curve, mutable (mirrors [`bspline_part`]).
+fn bspline_part_mut(kind: &mut CurveKind) -> Option<&mut BSplineCurve> {
+    match kind {
+        CurveKind::BSpline(c) => Some(c),
+        CurveKind::Line(c) => Some(&mut c.base),
+        CurveKind::Ellipse(c) => Some(c.base_mut()),
+        CurveKind::Hyperbola(c) => Some(c.base_mut()),
+        CurveKind::Parabola(c) => Some(c.base_mut()),
+        _ => None,
+    }
 }
 
 /// `sm_TestG1Continuity` (unit `blend.fillet_corner_p1`).

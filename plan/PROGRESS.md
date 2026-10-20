@@ -341,7 +341,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_solver_p2` (1939 lines) — in progress: #249 @froglemonade2 (draft)
 - [ ] 🔨 `blend.fillet_solver_p3` (1112 lines) — in progress: #236 @denelson1-dot (ready for review)
 - [ ] 🔨 `blend.fillet_geom_p3` (1032 lines) — in progress: #242 @denelson1-dot (ready for review)
-- [ ] 🟡 `blend.fillet_geom_p4` (2074 lines) — partial, 370 cases
+- [ ] 🟡 `blend.fillet_geom_p4` (2074 lines) — partial, 398 cases
 - [ ] 🔨 `blend.fillet_geom_p6` (1813 lines) — in progress: #247 @brett19 (ready for review)
 - [ ] 🔨 `blend.fillet_standard_solver_p2` (1989 lines) — in progress: #265 @froglemonade2 (draft)
 - [ ] 🟡 `blend.fillet_corner_p3` (1697 lines) — partial, 768 cases

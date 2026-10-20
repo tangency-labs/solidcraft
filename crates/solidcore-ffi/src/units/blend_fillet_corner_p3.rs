@@ -31,7 +31,11 @@
 //!   v1 s0 s1)..`: the vertex use of pseudo edge `edge`'s primary edge use (`0`) or mate
 //!   (`1`) gets curve parameter `t`, UV positions and as `m_apUserPointer` the surfaces of
 //!   target faces `s0`, `s1` (`-1` NULL)), then original faces (`n (edge face)..`:
-//!   `SetOriginalFace` of a pseudo edge to a target face). Output: `-2` (refused), `-3` (not run), else
+//!   `SetOriginalFace` of a pseudo edge to a target face), line edges (`n edge..`: the pseudo
+//!   edge's curve becomes a real `SmLine` through its end points) and arc edges (`n (edge cx
+//!   cy cz r d0 d1)..`: the curve becomes a real `SmCircle` centred at `c` with axes X, Y,
+//!   radius `r` > `SM_EFF_ZERO` and degree domain `[d0, d1]` within `[-360, 360]`, of
+//!   length in `(SM_EFF_ZERO, 360 + SM_EFF_ZERO]`). Output: `-2` (refused), `-3` (not run), else
 //!   the op status, `n_verts verts.. n_edges edges.. bevel blending chamfer degenerate
 //!   const_rad adjusted ext_patch setback n_surfs` and the model export of
 //!   `blend.fillet_geom_p1`.
@@ -197,6 +201,31 @@ pub fn validate_corner(input: &[f64]) -> Result<(), FfiError> {
     for _ in 0..no {
         rd.opt_index(b.ne())?.ok_or_else(|| bad("original face: edge -1"))?;
         rd.opt_index(b.nf)?.ok_or_else(|| bad("original face: face -1"))?;
+    }
+    let nl = rd.index(MAX_LIST)?;
+    for _ in 0..nl {
+        rd.opt_index(b.ne())?.ok_or_else(|| bad("line edge: edge -1"))?;
+    }
+    let na = rd.index(MAX_LIST)?;
+    for _ in 0..na {
+        rd.opt_index(b.ne())?.ok_or_else(|| bad("arc edge: edge -1"))?;
+        rd.finites(3)?;
+        // SmCircle asserts dRadius > SM_EFF_ZERO and takes a domain in [-360, 360];
+        // SmEllipse asserts its length is in (SM_EFF_ZERO, 360 + SM_EFF_ZERO]
+        let r = rd.finite()?;
+        if r <= 1.0e-12 {
+            return Err(bad("arc edge: radius"));
+        }
+        let d = rd.finites(2)?;
+        if let [d0, d1] = d[..] {
+            if !(-360.0..=360.0).contains(&d0)
+                || !(-360.0..=360.0).contains(&d1)
+                || d1 - d0 <= 1.0e-12
+                || d1 - d0 > 360.0 + 1.0e-12
+            {
+                return Err(bad("arc edge: domain"));
+            }
+        }
     }
     rd.done()
 }

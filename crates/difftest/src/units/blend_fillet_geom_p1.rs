@@ -1179,8 +1179,13 @@ pub(crate) fn status(e: &SolidError) -> f64 {
 }
 
 pub(crate) fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
+    // the SmBSplineCurve part, as the shim's IsKindOf(SmBSplineCurve_TYPE) test takes it
     let bs = match c.map(Curve::kind) {
         Some(CurveKind::BSpline(bs)) => Some(bs),
+        Some(CurveKind::Line(l)) => Some(l.base()),
+        Some(CurveKind::Ellipse(e)) => Some(e.base()),
+        Some(CurveKind::Hyperbola(h)) => Some(h.base()),
+        Some(CurveKind::Parabola(p)) => Some(p.base()),
         _ => None,
     };
     let Some(cur) = bs.and_then(BSplineCurve::gw_nurb) else {

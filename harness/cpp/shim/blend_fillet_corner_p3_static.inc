@@ -188,12 +188,17 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
         SmBSplineCurve* c2 = SM_CAST_PTR(SmBSplineCurve, onEdge->GetCurve());
         if (c1 == NULL || c2 == NULL)
             return 0.0;
-        // JoinWith on copies: a failure returns before anything changes
-        SmBSplineCurve* k1 = NULL;
-        SmBSplineCurve* k2 = NULL;
+        // JoinWith on copies: a failure returns before anything changes. The virtual
+        // Copy(ctx, SmCurve*&) keeps the derived kind (SmLine, SmEllipse), so the copy runs
+        // the same JoinWith override as upstream; Copy(ctx, SmBSplineCurve*&) would slice
+        // it to an SmBSplineCurve.
+        SmCurve* k1 = NULL;
+        SmCurve* k2 = NULL;
         SmStatus cs1 = c1->Copy(M.ctx, k1);
         SmStatus cs2 = c2->Copy(M.ctx, k2);
-        SmStatus js = (cs1 == SM_SUCCESS && cs2 == SM_SUCCESS && k1 && k2) ? k1->JoinWith(1, k2, 0) : SM_ERR;
+        SmBSplineCurve* b1 = SM_CAST_PTR(SmBSplineCurve, k1);
+        SmBSplineCurve* b2 = SM_CAST_PTR(SmBSplineCurve, k2);
+        SmStatus js = (cs1 == SM_SUCCESS && cs2 == SM_SUCCESS && b1 && b2) ? b1->JoinWith(1, b2, 0) : SM_ERR;
         delete k1;
         delete k2;
         if (js != SM_SUCCESS)
@@ -423,6 +428,39 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
             break;
         }
         e->SetOriginalFace(M.targetFaces[(size_t)f]);
+    }
+    // pseudo edges whose curve becomes a real SmLine through its end points
+    int64_t nl = rd.idx();
+    for (int64_t i = 0; i < nl && !rd.bad && ok; ++i)
+    {
+        SmFilletEdge* e = M.edge(rd.idx());
+        SmBSplineCurve* bc = e ? SM_CAST_PTR(SmBSplineCurve, e->GetCurve()) : NULL;
+        if (bc == NULL)
+        {
+            ok = false;
+            break;
+        }
+        SmPoint3d a, b;
+        bc->GetEnds(a, b);
+        SmLine* l = new (M.ctx) SmLine(a, b, 3, &M.ctx);
+        l->GetOrCreateGwNurbPointer();
+        e->SetCurve(l, TRUE);
+    }
+    // pseudo edges whose curve becomes a real SmCircle (SmEllipse::JoinWith in 3x2)
+    int64_t na = rd.idx();
+    for (int64_t i = 0; i < na && !rd.bad && ok; ++i)
+    {
+        SmFilletEdge* e = M.edge(rd.idx());
+        double cx = rd.num(), cy = rd.num(), cz = rd.num(), r = rd.num(), d0 = rd.num(), d1 = rd.num();
+        if (e == NULL)
+        {
+            ok = false;
+            break;
+        }
+        SmCircle* c = new (M.ctx) SmCircle(SmPoint3d(cx, cy, cz), SmVector3d(1, 0, 0), SmVector3d(0, 1, 0),
+                                           SmExtent1d(d0, d1), r, 3, &M.ctx);
+        c->GetOrCreateGwNurbPointer();
+        e->SetCurve(c, TRUE);
     }
     SmVertex* vertex = NULL;
     if (vEdge >= 0)
