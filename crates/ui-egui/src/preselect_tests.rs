@@ -739,6 +739,56 @@ fn face_then_extrude_press_pulls_it() {
     assert!(cmds[0].1.get("face").is_some());
 }
 
+/// Press Pull on a hole's wall offsets it, rather than refusing it as Extrude does (#2873).
+#[test]
+fn curved_face_then_press_pull_offsets_it() {
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.cylinder", "params": {"radius": 5, "height": 20, "base": [20, 15, 0], "operation": "cut"}}
+    ]));
+    let st = app.session.model.state();
+    let wall = st.body("Body1").unwrap().body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_none()).unwrap().index;
+    drop(st);
+    let d = start(&mut app, vec![Sel::Face { body: "Body1".into(), index: wall, point: Vec3::new(25.0, 15.0, 10.0) }], "solid.press_pull");
+    assert!(matches!(d.kind, Kind::OffsetFaces { .. }));
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "solid.offset_face");
+}
+
+/// Press Pull with nothing selected: a click on a hole's wall reopens it as Offset Face, a click
+/// on the top keeps the extrude (#2873).
+#[test]
+fn press_pull_then_curved_face_offsets_it() {
+    let script = json!([
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.cylinder", "params": {"radius": 5, "height": 20, "base": [20, 15, 0], "operation": "cut"}}
+    ]);
+    let mut app = app_with(script.clone());
+    let st = app.session.model.state();
+    let wall = st.body("Body1").unwrap().body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_none()).unwrap().index;
+    drop(st);
+    app.start("solid.press_pull");
+    assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
+    let p = Vec3::new(25.0, 15.0, 10.0);
+    let hit = crate::viewport::Hit::Face { body: "Body1".into(), index: wall, point: p };
+    crate::viewport::dialog_pick(&mut app, &hit, Sel::Face { body: "Body1".into(), index: wall, point: p });
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::OffsetFaces { .. }));
+    // Both halves of the hole's wall.
+    assert_eq!(d.inputs[0].items.len(), 2);
+
+    let mut app = app_with(script);
+    app.start("solid.press_pull");
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let hit = crate::viewport::Hit::Face {
+        body: "Body1".into(),
+        index: if let Sel::Face { index, .. } = &top { *index } else { 0 },
+        point: Vec3::new(5.0, 5.0, 20.0),
+    };
+    crate::viewport::dialog_pick(&mut app, &hit, top);
+    assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
+}
+
 #[test]
 fn faces_then_shell_and_face_then_hole() {
     let mut app = boxed();

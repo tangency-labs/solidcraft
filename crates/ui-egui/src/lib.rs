@@ -1075,10 +1075,29 @@ impl SolveApp {
             self.cancel_sketch();
             return;
         }
-        // Press Pull: edges get a fillet, faces and profiles an extrude.
+        // Press Pull: edges get a fillet, curved faces an offset, planar faces and profiles an extrude.
         if id == "solid.press_pull" {
-            let edges = self.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Edge { .. }));
-            return self.start(if edges { "solid.fillet" } else { "solid.extrude" });
+            let sel = &self.session.selection;
+            let edges = sel.iter().any(|s| matches!(s, solidcraft_engine::Sel::Edge { .. }));
+            let curved = sel.iter().any(
+                |s| matches!(s, solidcraft_engine::Sel::Face { body, index, .. } if dialogs::planar_face(&self.session, body, *index).is_none()),
+            );
+            if edges {
+                return self.start("solid.fillet");
+            }
+            if curved {
+                return self.start("solid.offset_face");
+            }
+            let empty = sel.is_empty();
+            self.start("solid.extrude");
+            if empty
+                && let Some(d) = &mut self.dialog
+                && let Some(input) = d.inputs.first_mut()
+            {
+                input.accept |= selection::FACES | selection::EDGES;
+                d.press_pull = true;
+            }
+            return;
         }
         if let Some(spec) = solidcraft_engine::find_command(id)
             && (tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some())

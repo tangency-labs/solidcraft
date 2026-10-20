@@ -117,7 +117,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Scale { factor, .. }) {
             factor: String = "2".into() => factor.to_string(),
         } => json!({"factor": factor});
-        OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", PLANAR_FACES, true)],
+        OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => distance.to_string(),
         } => json!({"distance": distance});
@@ -451,6 +451,9 @@ pub struct Dialog {
     pub(crate) chain_applied: bool,
     /// Shell feedback is derived from the picks, never saved as additional face references.
     shell_chain: std::cell::RefCell<Option<ShellChain>>,
+    /// An extrude Press Pull opened with nothing selected: its first pick may be a curved face or
+    /// an edge, which reopens Press Pull on it (an offset or a fillet).
+    pub press_pull: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -629,6 +632,7 @@ impl Dialog {
             picked_edges: Vec::new(),
             chain_applied,
             shell_chain: Default::default(),
+            press_pull: false,
         }
     }
 
@@ -3739,7 +3743,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
         }
         Kind::OffsetFaces { .. } => {
-            need(0, "planar faces")?;
+            need(0, "faces")?;
             ("solid.offset_face", json!({"faces": face_points(0)}))
         }
         Kind::Thread { designation, length, suggested, .. } => {

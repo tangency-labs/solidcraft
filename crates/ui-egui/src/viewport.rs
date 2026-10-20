@@ -2043,6 +2043,21 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     if app.applying.is_some() {
         return;
     }
+    // Press Pull's first pick of a curved face or an edge reopens it as an offset or a fillet.
+    if let Some(d) = &app.dialog
+        && d.press_pull
+        && d.inputs.first().is_some_and(|i| i.items.is_empty())
+        && match &sel {
+            Sel::Edge { .. } => true,
+            Sel::Face { body, index, .. } => crate::dialogs::planar_face(&app.session, body, *index).is_none(),
+            _ => false,
+        }
+    {
+        crate::dialogs::cancel(app);
+        app.session.selection = vec![sel];
+        app.start("solid.press_pull");
+        return;
+    }
     let Some(mut d) = app.dialog.take() else { return };
     // With holes moving by clicking (Preferences), a Single hole picked again on its face moves there.
     if app.preferences.hole_moves && crate::hole_place::pick_moves(&mut d, &app.session, &sel) {

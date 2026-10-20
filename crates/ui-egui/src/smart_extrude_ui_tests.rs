@@ -123,3 +123,31 @@ fn an_explicit_reverse_keeps_the_operation() {
     drag_to(&mut h, 2.0);
     assert_eq!(state(&h), (1, JOIN, false));
 }
+
+/// Press Pull on a hole's wall shows an arrow along the wall's normal: dragged 2 mm towards the
+/// axis, the 5 mm hole closes to 3 mm (#2873).
+#[test]
+fn press_pull_drags_a_hole_wall() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius":5,"height":20,"base":[20,15,0],"operation":"cut"})).unwrap();
+    let st = h.app.session.model.state();
+    let wall = st.body("Body1").unwrap().body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_none()).unwrap().index;
+    drop(st);
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let p = solidcraft_engine::geom::Vec3::new(25.0, 15.0, 10.0);
+    h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: "Body1".into(), index: wall, point: p }];
+    h.step(&json!({"start":"solid.press_pull"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"drag":[{"handle":"arrow"},{"world":[23,15,10]}]})).unwrap();
+    h.frames(2);
+    let Some(Dialog { kind: Kind::OffsetFaces { distance }, .. }) = &h.app.dialog else { panic!("offset dialog: {:?}", h.app.dialog) };
+    let d = h.app.session.doc.eval(distance, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((d - 2.0).abs() < 0.05, "{distance}");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    let v = volume(&h);
+    assert!((v - (24000.0 - std::f64::consts::PI * 9.0 * 20.0)).abs() / v < 5e-4, "{v}");
+}
