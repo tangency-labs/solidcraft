@@ -171,6 +171,12 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     assistant(&mut h, &mut requested);
 
     ribbon(&mut h, &mut requested);
+    h.app.start("inspect.colored_components");
+    h.frames(2);
+    click(&mut h, "panel:INSPECT:CHECK");
+    collect(&mut h, "component colors enabled", &mut requested);
+    escape(&mut h);
+    h.app.start("inspect.colored_components");
     click(&mut h, "appbar:file");
     assert!(h.widget("Export Current View as DXF…").is_some(), "painted File rows retain accessible action labels");
     collect(&mut h, "File", &mut requested);
