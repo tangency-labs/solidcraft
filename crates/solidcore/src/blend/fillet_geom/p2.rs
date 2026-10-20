@@ -366,6 +366,31 @@ fn corner_type(corner: FilletCornerId) -> Result<FilletCornerType> {
     )
 }
 
+/// The `SmBSplineCurve` (base) of a curve kind derived from it (`SmLine`,
+/// `SmEllipse`/`SmCircle`, `SmHyperbola`, `SmParabola`), `None` for the others.
+const fn b_spline_base(c: &Curve) -> Option<&BSplineCurve> {
+    match c.kind() {
+        CurveKind::BSpline(b) => Some(b),
+        CurveKind::Line(l) => Some(l.base()),
+        CurveKind::Ellipse(e) => Some(e.base()),
+        CurveKind::Hyperbola(h) => Some(h.base()),
+        CurveKind::Parabola(p) => Some(p.base()),
+        _ => None,
+    }
+}
+
+/// [`b_spline_base`], mutably: the receiver of a non-virtual `SmBSplineCurve` method.
+fn b_spline_base_mut(c: &mut Curve) -> Option<&mut BSplineCurve> {
+    match c.kind_mut() {
+        CurveKind::BSpline(b) => Some(b),
+        CurveKind::Line(l) => Some(l.base_mut()),
+        CurveKind::Ellipse(e) => Some(e.base_mut()),
+        CurveKind::Hyperbola(h) => Some(h.base_mut()),
+        CurveKind::Parabola(p) => Some(p.base_mut()),
+        _ => None,
+    }
+}
+
 /// `SmFilletConcaveNxNCorner::TestRailRailInterpolationCurve` (unit
 /// `blend.fillet_corner_p1`).
 fn corner_test_rail_rail_interpolation_curve(
@@ -1982,7 +2007,9 @@ impl FilletBrep {
             interpolate_endpts_and_tangents(start_pnt, end_pnt, &mut start_vec, &mut end_vec, 3)?
         };
 
-        let mut curve_3d: Option<BSplineCurve>;
+        // p3DCurve, an SmBSplineCurve: a B-spline, or the line / conic iso curve
+        // LiftCurve's sm_ExtractIsoCurve makes
+        let mut curve_3d: Option<Curve>;
         let mut uv_curve: Option<Curve>;
         if create_crv_on_3d {
             // Compute UV-curve by projecting 3d curve onto the surface
@@ -1994,10 +2021,7 @@ impl FilletBrep {
                 return Err(SolidError::sm_err(OP));
             }
             uv_curve = uv_curves.into_iter().next();
-            curve_3d = match c3.into_kind() {
-                CurveKind::BSpline(b) => Some(b),
-                _ => None,
-            };
+            curve_3d = Some(c3);
         } else {
             let mut uv = new_curve;
             // its status is ignored upstream
@@ -2023,25 +2047,16 @@ impl FilletBrep {
 
             // Reparametrize the curve with arc-length for non-blend type
             if fsg_type != FilletSurfaceGeneratorType::BlendCurve {
-                c3.reparametrize_with_arc_length()?;
+                b_spline_base_mut(&mut c3)
+                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .reparametrize_with_arc_length()?;
                 // Reproject the 3d curve back onto the surface
-                let c3c = Curve::from(c3);
-                let uv_curves = surface_drop_curve(
-                    k,
-                    face_srf,
-                    &uv_domain,
-                    &c3c,
-                    &c3c.natural_interval(),
-                    tol,
-                )?;
+                let uv_curves =
+                    surface_drop_curve(k, face_srf, &uv_domain, &c3, &c3.natural_interval(), tol)?;
                 if uv_curves.len() != 1 {
                     return Err(SolidError::sm_err(OP));
                 }
                 uv_curve = uv_curves.into_iter().next();
-                c3 = match c3c.into_kind() {
-                    CurveKind::BSpline(b) => b,
-                    _ => return Err(SolidError::null_pointer(OP)),
-                };
             }
             curve_3d = Some(c3);
         }
@@ -2050,6 +2065,7 @@ impl FilletBrep {
             if corner_type(corner)? == FilletCornerType::NByNConcave {
                 let c3 = curve_3d
                     .as_ref()
+                    .and_then(b_spline_base)
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
                 // Test and see if this edge intersects with the original corner
                 if corner_test_rail_rail_interpolation_curve(corner, c3)? {
@@ -2114,7 +2130,7 @@ impl FilletBrep {
         // set p3DCurve as this FilletEdge's geometry (side effect: the edge uses' UV
         // trim curves go), then the mate edge use's UV curve
         let curve_3d = curve_3d.ok_or_else(|| SolidError::null_pointer(OP))?;
-        set_edge_curve(self.brep_mut(), e, Some(Curve::from(curve_3d)))?;
+        set_edge_curve(self.brep_mut(), e, Some(curve_3d))?;
         let mate_eu = primary_edgeuse(self.brep(), e)?
             .and_then(|p| eu1::mate(self.brep(), p).ok().flatten())
             .ok_or_else(|| SolidError::null_pointer(OP))?;

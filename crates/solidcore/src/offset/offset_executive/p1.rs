@@ -1784,9 +1784,18 @@ mod tests {
         assert_eq!(to_split, vec![whole]);
         assert_eq!(brep.edges().len(), edges);
         assert!(!kernel.context.doing_boolean());
-        // A strict interior break splits, up to the B-rep's ADD notification.
+        // A strict interior break splits; the scan then reads the split use's CCW edge
+        // use, which this hand-built wire use leaves unlinked (upstream would dereference
+        // NULL), so it stops there with SM_ERR_NULL_POINTER.
         let (result, _) = insert(&mut brep, &mut kernel, &[max_break]);
-        assert_dependency(result, "SmBrep::Notify", "topology.brep_p2");
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream {
+                code: crate::error::SM_ERR_NULL_POINTER,
+                ..
+            })
+        ));
+        assert_eq!(brep.edges().len(), edges + 1);
     }
 
     #[test]
@@ -1818,11 +1827,16 @@ mod tests {
         executive.relate_edgeuses(b, whole);
         brep.set_editing_enabled(true);
         executive.set_offset_brep(brep);
-        assert_dependency(
+        // The split completes; the unlinked CCW edge use of the hand-built wire use then
+        // stops the scan (see break_insertion_skips_boundaries_and_continues_past_refused_splits).
+        assert!(matches!(
             sync(&mut executive, Some(a), Some(b)),
-            "SmBrep::Notify",
-            "topology.brep_p2",
-        );
+            Err(SolidError::Upstream {
+                code: crate::error::SM_ERR_NULL_POINTER,
+                ..
+            })
+        ));
+        assert_eq!(executive.offset_brep().unwrap().edges().len(), 3);
         assert_eq!(executive.offset_edgeuse(a), Some(part));
         assert_eq!(executive.offset_edgeuse(b), Some(whole));
     }
@@ -2147,17 +2161,12 @@ mod tests {
             executive.set_offset_brep(Brep::new());
             executive.set_create_offset_solid(solid);
             executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
-            // StitchIntoShell defers at DoStitching's first Notify, StitchIntoSolid at
-            // its bounding box
-            let (symbol, owner) = if solid {
-                ("SmBrep::Notify", "topology.brep_p2")
-            } else {
-                ("SmBrep::CalculateBoundingBox", "query.brep")
-            };
+            // StitchIntoShell (past DoStitching's first Notify) and StitchIntoSolid both
+            // defer at the B-rep bounding box
             assert_dependency(
                 executive.piecewise_merge(&mut kernel, &mut original),
-                symbol,
-                owner,
+                "SmBrep::CalculateBoundingBox",
+                "query.brep",
             );
             assert!(executive.offset_brep().is_none());
             assert_eq!(executive.offset_edgeuse(EdgeuseId::from_index(1)), None);

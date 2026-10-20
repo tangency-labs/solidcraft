@@ -19,15 +19,15 @@
 //! Deferred: `Cache_FaceProps_Stage2` on closed surfaces (`SmFace::HasSeamProblem`,
 //! `topology.face_p4`), `Cache_FaceProps_Stage3` past its op gate
 //! (`SmFace::ClassifyLoops`, `query.face_p4`), `Make_UVTrimCurves` making curves
-//! (`topology.face_p3`), `Fix_InfiniteRegion`, `HealBrep` and `SmApiHealBrep` on a
-//! B-rep (`topology.brep_p1`), and whatever the p2 steps before them defer.
+//! (`topology.face_p3`), `SmApiHealBrep` on a box (the Rust side cannot build it:
+//! `SmApiCreateBox`, `primitive.api_primitives`), and whatever the p2 steps before them
+//! defer (`Fix_InfiniteRegion` and `HealBrep` included).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::heal::heal_data::p1::api_heal_brep;
 use solidcore::kernel::Kernel;
-use solidcore::topology::Brep;
 use solidcore::SolidError;
 use solidcore_ffi::units::heal_heal_data_p1 as ffi;
 
@@ -89,14 +89,18 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Script(s) => p2_rust(s),
         Inputs::Api { api } => {
             let mut k = Kernel::default();
-            // The box is not built: `SmApiHealBrep` on a B-rep stops at its first
-            // callee (`SmBrep::HealBrep`, topology.brep_p1) before reading it. When
-            // that lands, build the box with the ported `SmApiCreateBox` and compare
-            // its status here.
-            let mut b = Brep::default();
+            // The C++ side heals a box made by `SmApiCreateBox`, which the Rust side
+            // cannot build yet (unit primitive.api_primitives): healing any stand-in
+            // B-rep would compare a different input. Build the box with the ported
+            // `SmApiCreateBox` when that lands and compare its status here.
             let r = match api.box_size {
                 None => api_heal_brep(&mut k, None),
-                Some(_) => api_heal_brep(&mut k, Some(&mut b)),
+                Some(_) => {
+                    return Ok(Output::deferred(
+                        "primitive.api_primitives",
+                        "SmApiCreateBox",
+                    ));
+                }
             };
             Ok(match r {
                 Ok(()) => Output::new().values("out", vec![0.0, 0.0]),

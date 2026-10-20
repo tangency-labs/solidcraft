@@ -454,8 +454,11 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     match i.op {
         OpIn::Make => {}
         OpIn::Closure { do_infinite } => {
+            // harness env: the runner holds no attribute state (default region
+            // records, empty store; see RegionNotifyState)
+            let mut state = solidcore::topology::brep::p2::RegionNotifyState::new(&b);
             for &e in &g.edges.items {
-                match test_closure_split_region(&mut k, &mut b, do_infinite, e) {
+                match test_closure_split_region(&mut k, &mut b, &mut state.env(), do_infinite, e) {
                     Ok(r) => {
                         out.push(Item::Int(0));
                         out.push(Item::Int(r.new_shells.len() as i64));

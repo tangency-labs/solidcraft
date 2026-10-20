@@ -1130,16 +1130,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "net_set_curve_delete_notify_e0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#1 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -1494,16 +1490,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "net_set_curve_delete_notify_e1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#46 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -1858,16 +1850,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "net_set_curve_delete_notify_e2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#91 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -2222,16 +2210,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "net_set_curve_delete_notify_e3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#136 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -2586,16 +2570,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "net_set_curve_delete_notify_e4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edge/network.json#181 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_topology)",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -14529,13 +14509,12 @@
     }
   ],
   "cases_both_errored": 186,
-  "cases_deferred": 11,
+  "cases_deferred": 6,
   "cases_failed": 0,
-  "cases_passed": 1776,
+  "cases_passed": 1781,
   "cases_total": 1787,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p3": 6,
-    "topology.brep_p2": 5
+    "intersect.surface_drop_lib_p3": 6
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -54,6 +54,11 @@
 //!   on the same surface object (`SmHCR.cpp:1264-1266`, pointer equality). A port face
 //!   owns its surface record, so the object is identified by the surface's owner
 //!   (`SmSurface::m_pOwner`); see `same_surface`. Surface data is never compared.
+//! - `SmBrep::MergeCurvesOnSurface` of `ComputeSilhouettes` is
+//!   `topology::brep::p2::merge_curves_on_surface` through the B-rep cache's
+//!   classification world (`query.brep`, as in `topology.brep_p10`), so
+//!   [`Hcr::compute_silhouettes`] and [`Hcr::compute_global_visibility`] take the
+//!   kernel mutably.
 //! - `IsPointVisible` keeps the ray tracer's surface set and grid and rebuilds the
 //!   tracer (which borrows the surfaces) for each ray.
 //! - `DrawVisibleCurves`, `IsConcaveSilhouette` and `IsFrontFacingFace` are not owned by
@@ -270,21 +275,27 @@ fn add_deleted_surface(brep: &mut Brep, surface: &Surface) {
     brep.add_deleted_surface(surface.clone());
 }
 
-/// `SmBrep::MergeCurvesOnSurface` (unit `topology.brep_p2`): the new faces and the
-/// edges of the curves.
+/// `MergeCurvesOnSurface(*pSurface, m_dThisApproxTol3d, s3DCurves, &sUVBSCurves,
+/// sNewFaces, sEdges, TRUE)` (`SmHCR.cpp:1229`): the edges of the curves, through the
+/// B-rep cache's classification world (`query.brep`) as in `topology.brep_p10`.
 fn merge_curves_on_surface(
+    k: &mut Kernel,
     brep: &mut Brep,
     face: FaceId,
     approx_tol_3d: f64,
     curves: &[Curve],
     uv_curves: &[Curve],
 ) -> Result<Vec<EdgeId>> {
-    let _ = (brep, face, approx_tol_3d, curves, uv_curves);
-    // UNPORTED(topology.brep_p2): SmBrep::MergeCurvesOnSurface
-    Err(SolidError::unported(
-        "SmBrep::MergeCurvesOnSurface",
-        "topology.brep_p2",
-    ))
+    let (_, edges) = crate::topology::brep::p10::merge_curves_on_surface(
+        k,
+        brep,
+        face,
+        approx_tol_3d,
+        curves,
+        uv_curves,
+        true,
+    )?;
+    Ok(edges)
 }
 
 /// `SmEdgeuse::EvaluateBinormal(t, FALSE, ..)` (unit `topology.edgeuse_p3`): binormal,
@@ -726,7 +737,7 @@ impl Hcr {
     ///
     /// Those of [`Hcr::compute_edge_visibility`], of the curve copies and of the scene
     /// B-rep queries.
-    pub fn compute_global_visibility(&mut self, k: &Kernel) -> Result<()> {
+    pub fn compute_global_visibility(&mut self, k: &mut Kernel) -> Result<()> {
         // Find silhouette curves on faces
         ignore_status(self.compute_silhouettes(k))?;
 
@@ -979,7 +990,7 @@ impl Hcr {
     ///
     /// Those of the scene B-rep queries; [`SolidError::Unported`] from the silhouette
     /// curve walk.
-    pub fn compute_silhouettes(&mut self, k: &Kernel) -> Result<()> {
+    pub fn compute_silhouettes(&mut self, k: &mut Kernel) -> Result<()> {
         // Get SceneBrep Surfaces
         let surfaces = brep_surfaces(&self.scene)?;
         for f in surfaces {
@@ -1012,6 +1023,7 @@ impl Hcr {
             };
             // Turn the curves into Edges in this surface's face.
             let Some(edges) = ignored(merge_curves_on_surface(
+                k,
                 &mut self.scene,
                 f,
                 self.approx_tol_3d,

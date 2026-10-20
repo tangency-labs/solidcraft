@@ -4,8 +4,9 @@
 //! `source/SM_API/src/SmApiBrep.cpp`). Rust: `solidcore::boolean::api_brep`.
 //!
 //! A case is one API call (`api` plus its arguments). Operands are boxes
-//! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); those constructors are unit
-//! `primitive.api_primitives`, not ported yet, so the Rust side passes empty B-reps:
+//! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); those constructors stop at
+//! `SmPrimitiveCreation` (unit `primitive.primitive_creation_p1`, not ported yet), so
+//! the Rust side passes empty B-reps:
 //! every path that reads an operand is deferred anyway. Both sides produce `status`
 //! (`0` = `SM_SUCCESS`, else the `SmStatus`: `1007` `SM_ERR_INVALID_INPUT`; `-1` on the
 //! Rust side for an error upstream cannot produce) and `record` (the op's outputs after
@@ -15,7 +16,7 @@
 //! points, short lists and operations other than union / intersection / difference /
 //! merge for `SmApiMergeBreps`, which must leave the list untouched). Cases that pass
 //! validation reach `SmMerge` and are deferred on the Rust side (`boolean.merge_p2`,
-//! `topology.brep_p2`, `topology.brep_p3`). Every run has at least [`MIN_GENERATED`] generated cases.
+//! `primitive.primitive_creation_p1`, `topology.brep_p3`). Every run has at least [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -329,12 +330,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Ok(()) if v.is_empty() => {
                     Ok(Output::new().int("status", 0).ints("record", vec![0]))
                 }
-                // The output record requires IsManifoldSolid for each resulting
-                // operand. Stand-ins are never inspected for a fake shape value.
-                // UNPORTED(topology.brep_p2): SmBrep::IsManifoldSolid
+                // The output record reads each resulting operand (its counts and
+                // IsManifoldSolid, topology.brep_p2), and the Rust operands are empty
+                // stand-ins: the box and sphere constructors stop at
+                // SmPrimitiveCreation, so stand-ins are never inspected for a fake value.
+                // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::CreateBox / CreateSphere
                 Ok(()) => Ok(Output::deferred(
-                    "topology.brep_p2",
-                    "SmBrep::IsManifoldSolid",
+                    "primitive.primitive_creation_p1",
+                    "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
                 )),
                 Err(error) => Ok(err_output(&error)),
             }

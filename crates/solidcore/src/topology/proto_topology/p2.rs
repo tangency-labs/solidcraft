@@ -2056,6 +2056,7 @@ mod tests {
     use crate::intersect::point_class::{ClassGeometry, ClassObjectKind};
     use crate::surface::surface::Surface;
     use crate::surface::volume::Volume;
+    use crate::topology::Brep;
 
     /// Pool handles: an index and a kind.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2187,7 +2188,9 @@ mod tests {
 
     fn manager() -> ProtoTopologyManager<H> {
         let b = H(100, ClassObjectKind::Other);
-        ProtoTopologyManager::new(b, b, b, 1e-5, 1e-3, -1.0).unwrap()
+        let e = Brep::new();
+        ProtoTopologyManager::new(&Kernel::default(), (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0)
+            .unwrap()
     }
 
     fn region_pc(o: H) -> PointClassification<H> {

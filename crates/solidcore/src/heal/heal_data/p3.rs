@@ -329,10 +329,23 @@ impl<O: LoopObject> HealData<O> {
             FixSplitedgeAtseam,
             self.fix_split_edges_at_seam(k, b, marks, lock, HealerOpType::FixSplitedgeAtseam)
         );
-        step!(
-            FixBadsheets,
-            self.fix_bad_sheets(k, b, marks, lock, HealerOpType::FixBadsheets)
-        );
+        step!(FixBadsheets, {
+            // The heal path carries no attribute state at any level (no AttributeStore,
+            // no SmTopology records), so SmSAGObject attribute propagation during
+            // healing is not modelled anywhere in heal: the region split's
+            // SmBrep::Notify runs on default region records and an empty store. Thread
+            // an env from heal_targets once heal gains an AttributeStore
+            // (plan/findings.md, heal.heal_data_p3).
+            let mut state = crate::topology::brep::p2::RegionNotifyState::new(b);
+            self.fix_bad_sheets(
+                k,
+                b,
+                marks,
+                &mut state.env(),
+                lock,
+                HealerOpType::FixBadsheets,
+            )
+        });
         step!(
             CacheFaceprops3,
             self.cache_face_props_stage3(k, b, HealerOpType::CacheFaceprops3)
@@ -441,9 +454,12 @@ impl<O: LoopObject> HealData<O> {
     }
 }
 
-// The context callback, not a mutation's nominal inputs/outputs, owns these lists.
-// Arena-only callers currently cannot map arbitrary notification ObjectKeys back
-// to typed ids. Do not fabricate such identities if a real mutation emits events.
+// The context callback, not a mutation's nominal inputs/outputs, owns these lists
+// (`SmTrackTopologyChanges`, then `UpdateTargetLists(GetRmList(), GetAddList(), ..)`).
+// The edits run without a notification environment, so part 5 notifies through
+// `topology.brep_p2`'s arena state: every event names its object by
+// `loopuse::notify_ref`, which `entity_of_notify_key` inverts. A key it did not issue
+// is an error, never a guessed identity.
 fn capture_changes<T>(
     k: &mut Kernel,
     b: &mut Brep,
@@ -473,13 +489,21 @@ fn capture_changes<T>(
     if let Some(error) = failure {
         return Err(error);
     }
-    if !lists.rm_list.is_empty() || !lists.add_list.is_empty() {
-        // UNPORTED(topology.brep_p2): SmBrep::Notify
-        // The owning notification adapter must expose its actual key-to-id map;
-        // arena index encodings are not interchangeable with ObjectKey identities.
-        return Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"));
-    }
-    Ok((value, Changes::default()))
+    let decode = |key| {
+        loopuse::entity_of_notify_key(key)
+            .ok_or_else(|| invalid("tracked object without an arena identity"))
+    };
+    let removed = lists
+        .rm_list
+        .iter()
+        .map(|&key| decode(key))
+        .collect::<Result<Vec<_>>>()?;
+    let added = lists
+        .add_list
+        .iter()
+        .map(|&key| decode(key).map(Some))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((value, Changes { removed, added }))
 }
 
 fn combine_vertices(k: &mut Kernel, b: &mut Brep, a: VertexId, d: VertexId) -> Result<Changes> {
@@ -1208,9 +1232,18 @@ mod tests {
     }
 
     #[test]
-    fn catch_up_restores_state_after_unported_callee() {
+    fn catch_up_restores_state_after_failed_callee() {
         let mut k = Kernel::default();
         let mut b = Brep::default();
+        // a face whose tolerance SmBrep::SetTolerance raises (SmFace::SetTolerance):
+        // B-rep and face tolerances below the estimate
+        let f = b
+            .add_face_record(crate::topology::Face::new(
+                crate::topology::ShellId::from_index(0),
+            ))
+            .unwrap();
+        b.face_mut(f).unwrap().tolerance = 0.0;
+        b.set_tolerance(0.0);
         let mut h = HealData::<L>::new();
         h.old_face_cnt = 7;
         h.old_edge_cnt = 8;
@@ -1218,12 +1251,11 @@ mod tests {
         h.stop_heal_op = HealerOpType::All;
         h.done_heal_op = HealerOpType::FixTolsizes;
         h.recursion_count = 3;
-        // Even a null add entry enters native catch-up. Fix_TolSizes still asks
-        // the B-rep for its model-size estimate, despite empty target arrays.
-        let e = h
-            .update_target_lists(&mut k, &mut b, &[], &[None], HealerOpType::All)
-            .unwrap_err();
-        assert!(e.is_unported());
+        // Even a null add entry enters native catch-up. Fix_TolSizes still sets the
+        // B-rep and face tolerances, despite empty target arrays.
+        h.update_target_lists(&mut k, &mut b, &[], &[None], HealerOpType::All)
+            .unwrap();
+        assert_eq!((b.tolerance(), b.face(f).unwrap().tolerance), (1e-5, 1e-5));
         assert_eq!(
             (h.old_face_cnt, h.old_edge_cnt, h.old_vertex_cnt),
             (7, 8, 9)
@@ -1231,6 +1263,22 @@ mod tests {
         assert_eq!(
             (h.stop_heal_op, h.done_heal_op),
             (HealerOpType::All, HealerOpType::FixTolsizes)
+        );
+        assert_eq!(h.recursion_count, 3);
+        // A catch-up through Fix_InfiniteRegions fails on this region-less B-rep and
+        // restores the same state.
+        h.done_heal_op = HealerOpType::FixInfiniteRegions;
+        let e = h
+            .update_target_lists(&mut k, &mut b, &[], &[None], HealerOpType::All)
+            .unwrap_err();
+        assert!(matches!(e, SolidError::InvalidInput { .. }));
+        assert_eq!(
+            (h.old_face_cnt, h.old_edge_cnt, h.old_vertex_cnt),
+            (7, 8, 9)
+        );
+        assert_eq!(
+            (h.stop_heal_op, h.done_heal_op),
+            (HealerOpType::All, HealerOpType::FixInfiniteRegions)
         );
         assert_eq!(h.recursion_count, 3);
         // Both nested and outer mark locks are released on a failed pass.

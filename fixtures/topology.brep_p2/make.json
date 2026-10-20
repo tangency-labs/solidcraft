@@ -1,0 +1,1344 @@
+{
+ "cases": [
+  {
+   "name": "make_net_0_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_0_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_0_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_1_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_1_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_1_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_2_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_2_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 2,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_2_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 2,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_net_same_vertex",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 0
+   }
+  },
+  {
+   "name": "make_wire_0_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_0_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_0_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_1_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_1_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_1_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_2_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_2_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 2,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_2_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 2,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_wire_same_vertex",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 0
+   }
+  },
+  {
+   "name": "make_plane10_0_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_0_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_0_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_1_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_1_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_1_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_2_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_2_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 2,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_2_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 2,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane10_same_vertex",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 0
+   }
+  },
+  {
+   "name": "make_plane_square_0_r-1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_0_r0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_0_r1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_1_r-1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_1_r0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_1_r1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_2_r-1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_2_r0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_2_r1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_plane_square_same_vertex",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 0
+   }
+  },
+  {
+   "name": "make_sphere_0_r-1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_0_r0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_0_r1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_1_r-1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_1_r0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_1_r1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_2_r-1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_2_r0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": 0,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_2_r1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": 1,
+    "v1": 0,
+    "v2": 1
+   }
+  },
+  {
+   "name": "make_sphere_same_vertex",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "make",
+    "which": 2,
+    "region": -1,
+    "v1": 0,
+    "v2": 0
+   }
+  }
+ ]
+}

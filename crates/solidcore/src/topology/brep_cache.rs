@@ -129,6 +129,18 @@ impl<O> BrepCache<O> {
     pub const fn surface_tree(&self) -> Option<&Tree<O>> {
         self.surfaces.as_ref()
     }
+    /// Mutable `GetVertexTree` (the tree a B-rep notification edits).
+    pub fn vertex_tree_mut(&mut self) -> Option<&mut Tree<O>> {
+        self.vertices.as_mut()
+    }
+    /// Mutable `GetCurveTree` (the tree a B-rep notification edits).
+    pub fn curve_tree_mut(&mut self) -> Option<&mut Tree<O>> {
+        self.curves.as_mut()
+    }
+    /// Mutable `GetSurfaceTree` (the tree a B-rep notification edits).
+    pub fn surface_tree_mut(&mut self) -> Option<&mut Tree<O>> {
+        self.surfaces.as_mut()
+    }
 }
 
 impl<O: Copy + PartialEq> BrepCache<O> {

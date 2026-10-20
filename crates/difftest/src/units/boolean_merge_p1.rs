@@ -15,10 +15,11 @@ use solidcore::geom::context::{Context, NotifyCallback};
 use solidcore::geom::object::{NotifyOperation, ObjectRef};
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
+use solidcore::topology::shell::ShellMembers;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::{
-    ArenaId, Brep, EdgeId, EdgeuseOwner, FaceId, FaceuseId, LoopuseStart, RegionId, VertexId,
-    VertexuseOwner,
+    ArenaId, Brep, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, LoopId, LoopuseId,
+    LoopuseStart, RegionId, ShellId, VertexId, VertexuseId, VertexuseOwner,
 };
 use solidcore::SolidError;
 use solidcore_ffi::units::{boolean_merge_p1 as ffi, topology_vertexuse as fixture};
@@ -108,7 +109,270 @@ fn obj(k: u64, t: i64) -> ObjectRef {
 fn id<I: ArenaId>(v: Option<I>) -> i64 {
     v.map_or(-1, |v| i64::from(v.index()))
 }
+/// One kind's records in first-seen order of [`Canon::of`] and each arena index's
+/// position in it.
+pub(crate) struct Order<I> {
+    items: Vec<I>,
+    index: BTreeMap<u32, i64>,
+}
+impl<I: ArenaId + Copy> Order<I> {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            index: BTreeMap::new(),
+        }
+    }
+    fn add(&mut self, id: Option<I>) {
+        if let Some(id) = id {
+            if !self.index.contains_key(&id.index()) {
+                self.index.insert(id.index(), self.items.len() as i64);
+                self.items.push(id);
+            }
+        }
+    }
+    /// The canonical number of `id` (`-1` for none).
+    pub(crate) fn of(&self, id: Option<I>) -> i64 {
+        id.map_or(-1, |v| self.index.get(&v.index()).copied().unwrap_or(-3))
+    }
+    /// [`Order::of`] for a record slot holding an arena index (negative: none).
+    pub(crate) fn of_slot(&self, slot: f64) -> f64 {
+        if slot < 0.0 {
+            return slot;
+        }
+        self.index.get(&(slot as u32)).copied().unwrap_or(-3) as f64
+    }
+}
+/// Canonical record numbering: the shims export a B-rep by walking it from its regions
+/// and edge list (`sc_edgeuse_graph.h` `walk`), so a C++ import numbers records in
+/// first-seen order, while Rust arenas append new records. Both sides are renumbered
+/// by the same walk (the shim's, from the B-rep's regions in arena order and the edge
+/// list; on an imported C++ export it is the identity), so records created by the op
+/// compare by position in the topology, not by allocation order. Records the walk
+/// does not reach follow in arena order.
+pub(crate) struct Canon {
+    pub(crate) regions: Order<RegionId>,
+    pub(crate) shells: Order<ShellId>,
+    pub(crate) faceuses: Order<FaceuseId>,
+    pub(crate) faces: Order<FaceId>,
+    pub(crate) loopuses: Order<LoopuseId>,
+    pub(crate) loops: Order<LoopId>,
+    pub(crate) edgeuses: Order<EdgeuseId>,
+    pub(crate) edges: Order<EdgeId>,
+    pub(crate) vertexuses: Order<VertexuseId>,
+    pub(crate) vertices: Order<VertexId>,
+}
+impl Canon {
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn of(b: &Brep) -> Self {
+        let mut g = Self {
+            regions: Order::new(),
+            shells: Order::new(),
+            faceuses: Order::new(),
+            faces: Order::new(),
+            loopuses: Order::new(),
+            loops: Order::new(),
+            edgeuses: Order::new(),
+            edges: Order::new(),
+            vertexuses: Order::new(),
+            vertices: Order::new(),
+        };
+        for (id, r) in b.regions().iter() {
+            if r.in_brep {
+                g.regions.add(Some(id));
+            }
+        }
+        for &e in b.edge_list() {
+            g.edges.add(Some(e));
+        }
+        let (mut r, mut s, mut fu, mut lu, mut eu, mut vu, mut l, mut e, mut v) =
+            (0, 0, 0, 0, 0, 0, 0, 0, 0);
+        let mut more = true;
+        while more {
+            more = false;
+            while let Some(&id) = g.regions.items.get(r) {
+                if let Ok(rec) = b.region(id) {
+                    for &x in &rec.shells {
+                        g.shells.add(Some(x));
+                    }
+                }
+                r += 1;
+                more = true;
+            }
+            while let Some(&id) = g.shells.items.get(s) {
+                if let Ok(rec) = b.shell(id) {
+                    match &rec.members {
+                        ShellMembers::Faceuses(list) => {
+                            for &x in list {
+                                g.faceuses.add(Some(x));
+                            }
+                        }
+                        ShellMembers::Edgeuse(x) => g.edgeuses.add(Some(*x)),
+                        ShellMembers::Vertexuse(x) => g.vertexuses.add(Some(*x)),
+                        ShellMembers::Empty => {}
+                    }
+                }
+                s += 1;
+                more = true;
+            }
+            while let Some(&id) = g.faceuses.items.get(fu) {
+                if let Ok(rec) = b.faceuse(id) {
+                    g.faces.add(rec.face);
+                    g.faceuses.add(rec.mate);
+                    for &x in &rec.loopuses {
+                        g.loopuses.add(Some(x));
+                    }
+                }
+                fu += 1;
+                more = true;
+            }
+            while let Some(&id) = g.loopuses.items.get(lu) {
+                if let Ok(rec) = b.loopuse(id) {
+                    g.loops.add(rec.loop_);
+                    g.loopuses.add(rec.mate);
+                    match rec.start {
+                        LoopuseStart::Edgeuse(start) => {
+                            g.edgeuses.add(start);
+                            // the CCW walk of an edge loop
+                            let mut q = start;
+                            let mut k = 0;
+                            while let Some(x) = q {
+                                if k > b.edgeuses().len() {
+                                    break;
+                                }
+                                g.edgeuses.add(Some(x));
+                                q = b.edgeuse(x).ok().and_then(|x| x.ccw);
+                                if q == start {
+                                    break;
+                                }
+                                k += 1;
+                            }
+                        }
+                        LoopuseStart::Vertexuse(x) => g.vertexuses.add(x),
+                        LoopuseStart::Unknown => {}
+                    }
+                }
+                lu += 1;
+                more = true;
+            }
+            while let Some(&id) = g.edgeuses.items.get(eu) {
+                if let Ok(rec) = b.edgeuse(id) {
+                    g.edges.add(rec.edge);
+                    match rec.owner {
+                        EdgeuseOwner::Loopuse(x) => g.loopuses.add(x),
+                        EdgeuseOwner::Shell(x) => g.shells.add(x),
+                        EdgeuseOwner::Unknown => {}
+                    }
+                    g.edgeuses.add(rec.cw);
+                    g.edgeuses.add(rec.ccw);
+                    g.vertexuses.add(rec.vertexuse);
+                    // GetNext / GetLast: the neighbours in the edge's circular list
+                    let list = rec
+                        .edge
+                        .and_then(|x| b.edge(x).ok())
+                        .map_or(&[][..], |x| x.edgeuses.as_slice());
+                    if let Some(at) = list.iter().position(|&x| x == id) {
+                        let n = list.len();
+                        g.edgeuses.add(list.get((at + 1) % n).copied());
+                        g.edgeuses.add(list.get((at + n - 1) % n).copied());
+                    }
+                }
+                eu += 1;
+                more = true;
+            }
+            while let Some(&id) = g.edges.items.get(e) {
+                if let Ok(rec) = b.edge(id) {
+                    for &x in &rec.edgeuses {
+                        g.edgeuses.add(Some(x));
+                    }
+                }
+                e += 1;
+                more = true;
+            }
+            while let Some(&id) = g.vertexuses.items.get(vu) {
+                if let Ok(rec) = b.vertexuse(id) {
+                    g.vertices.add(rec.vertex);
+                    match rec.owner {
+                        VertexuseOwner::Edgeuse(x) => g.edgeuses.add(x),
+                        VertexuseOwner::Loopuse(x) => g.loopuses.add(x),
+                        VertexuseOwner::Shell(x) => g.shells.add(x),
+                        VertexuseOwner::Unknown => {}
+                    }
+                }
+                vu += 1;
+                more = true;
+            }
+            while let Some(&id) = g.vertices.items.get(v) {
+                if let Ok(rec) = b.vertex(id) {
+                    for &x in &rec.vertexuses {
+                        g.vertexuses.add(Some(x));
+                    }
+                }
+                v += 1;
+                more = true;
+            }
+            while let Some(&id) = g.loops.items.get(l) {
+                if let Ok(rec) = b.loop_(id) {
+                    g.loopuses.add(rec.loopuse);
+                }
+                l += 1;
+                more = true;
+            }
+            if !more {
+                // unreachable records, in arena order, then walk on from them
+                let before = g.len();
+                for (id, _) in b.regions().iter() {
+                    g.regions.add(Some(id));
+                }
+                for (id, _) in b.shells().iter() {
+                    g.shells.add(Some(id));
+                }
+                for (id, _) in b.faceuses().iter() {
+                    g.faceuses.add(Some(id));
+                }
+                for (id, _) in b.faces().iter() {
+                    g.faces.add(Some(id));
+                }
+                for (id, _) in b.loopuses().iter() {
+                    g.loopuses.add(Some(id));
+                }
+                for (id, _) in b.loops().iter() {
+                    g.loops.add(Some(id));
+                }
+                for (id, _) in b.edgeuses().iter() {
+                    g.edgeuses.add(Some(id));
+                }
+                for (id, _) in b.edges().iter() {
+                    g.edges.add(Some(id));
+                }
+                for (id, _) in b.vertexuses().iter() {
+                    g.vertexuses.add(Some(id));
+                }
+                for (id, _) in b.vertices().iter() {
+                    g.vertices.add(Some(id));
+                }
+                more = g.len() != before;
+            }
+        }
+        g
+    }
+    fn len(&self) -> usize {
+        self.regions.items.len()
+            + self.shells.items.len()
+            + self.faceuses.items.len()
+            + self.faces.items.len()
+            + self.loopuses.items.len()
+            + self.loops.items.len()
+            + self.edgeuses.items.len()
+            + self.edges.items.len()
+            + self.vertexuses.items.len()
+            + self.vertices.items.len()
+    }
+}
+/// The B-rep's records and links in [`Canon`] numbering, after `record` (which the
+/// caller has already put in that numbering, see [`Canon::of`]).
+#[allow(clippy::too_many_lines)]
 pub(crate) fn graph(b: &Brep, record: Vec<f64>) -> Output {
+    let c = Canon::of(b);
     let mut ints = vec![
         b.regions().len() as i64,
         b.shells().len() as i64,
@@ -121,97 +385,162 @@ pub(crate) fn graph(b: &Brep, record: Vec<f64>) -> Output {
         b.vertexuses().len() as i64,
         b.vertices().len() as i64,
     ];
-    for (_, r) in b.regions().iter() {
+    let regions: Vec<_> = c
+        .regions
+        .items
+        .iter()
+        .filter_map(|&x| b.region(x).ok())
+        .collect();
+    let shells: Vec<_> = c
+        .shells
+        .items
+        .iter()
+        .filter_map(|&x| b.shell(x).ok())
+        .collect();
+    let faceuses: Vec<_> = c
+        .faceuses
+        .items
+        .iter()
+        .filter_map(|&x| b.faceuse(x).ok())
+        .collect();
+    let faces: Vec<_> = c
+        .faces
+        .items
+        .iter()
+        .filter_map(|&x| b.face(x).ok())
+        .collect();
+    let loopuses: Vec<_> = c
+        .loopuses
+        .items
+        .iter()
+        .filter_map(|&x| b.loopuse(x).ok())
+        .collect();
+    let loops: Vec<_> = c
+        .loops
+        .items
+        .iter()
+        .filter_map(|&x| b.loop_(x).ok())
+        .collect();
+    let edgeuses: Vec<_> = c
+        .edgeuses
+        .items
+        .iter()
+        .filter_map(|&x| b.edgeuse(x).ok())
+        .collect();
+    let edges: Vec<_> = c
+        .edges
+        .items
+        .iter()
+        .filter_map(|&x| b.edge(x).ok())
+        .collect();
+    let vertexuses: Vec<_> = c
+        .vertexuses
+        .items
+        .iter()
+        .filter_map(|&x| b.vertexuse(x).ok())
+        .collect();
+    let vertices: Vec<_> = c
+        .vertices
+        .items
+        .iter()
+        .filter_map(|&x| b.vertex(x).ok())
+        .collect();
+    for r in &regions {
         ints.push(i64::from(r.in_brep));
     }
-    for (_, f) in b.faces().iter() {
+    for f in &faces {
         ints.extend([
-            i64::from(f.shell.index()),
-            id(f.faceuse),
+            c.shells.of(Some(f.shell)),
+            c.faceuses.of(f.faceuse),
             i64::from(f.rectangular_trim),
             f.loops.len() as i64,
         ]);
-        ints.extend(f.loops.iter().map(|v| i64::from(v.index())));
+        ints.extend(f.loops.iter().map(|&v| c.loops.of(Some(v))));
     }
-    for (_, l) in b.loops().iter() {
+    for l in &loops {
         ints.extend([
-            i64::from(l.face.index()),
-            id(l.loopuse),
+            c.faces.of(Some(l.face)),
+            c.loopuses.of(l.loopuse),
             l.edges.len() as i64,
         ]);
         for e in &l.edges {
-            ints.extend([i64::from(e.edge.index()), i64::from(e.forward)]);
+            ints.extend([c.edges.of(Some(e.edge)), i64::from(e.forward)]);
         }
     }
-    for (_, l) in b.loopuses().iter() {
+    for l in &loopuses {
         ints.extend(match l.start {
             LoopuseStart::Unknown => [0, -1],
-            LoopuseStart::Edgeuse(e) => [1, id(e)],
-            LoopuseStart::Vertexuse(v) => [2, id(v)],
+            LoopuseStart::Edgeuse(e) => [1, c.edgeuses.of(e)],
+            LoopuseStart::Vertexuse(v) => [2, c.vertexuses.of(v)],
         });
     }
-    for (_, e) in b.edgeuses().iter() {
+    for e in &edgeuses {
         ints.extend(match e.owner {
             EdgeuseOwner::Unknown => [0, -1],
-            EdgeuseOwner::Loopuse(l) => [1, id(l)],
-            EdgeuseOwner::Shell(sh) => [2, id(sh)],
+            EdgeuseOwner::Loopuse(l) => [1, c.loopuses.of(l)],
+            EdgeuseOwner::Shell(sh) => [2, c.shells.of(sh)],
         });
     }
-    for (_, v) in b.vertexuses().iter() {
-        ints.push(id(v.vertex));
+    for v in &vertexuses {
+        ints.push(c.vertices.of(v.vertex));
         ints.extend(match v.owner {
             VertexuseOwner::Unknown => [0, -1],
-            VertexuseOwner::Edgeuse(e) => [1, id(e)],
-            VertexuseOwner::Loopuse(l) => [2, id(l)],
-            VertexuseOwner::Shell(sh) => [3, id(sh)],
+            VertexuseOwner::Edgeuse(e) => [1, c.edgeuses.of(e)],
+            VertexuseOwner::Loopuse(l) => [2, c.loopuses.of(l)],
+            VertexuseOwner::Shell(sh) => [3, c.shells.of(sh)],
         });
     }
-    for (_, s) in b.shells().iter() {
-        ints.push(id(s.region));
+    for s in &shells {
+        ints.push(c.regions.of(s.region));
         ints.push(s.faces.len() as i64);
-        ints.extend(s.faces.iter().map(|v| i64::from(v.index())));
+        ints.extend(s.faces.iter().map(|&v| c.faces.of(Some(v))));
     }
-    for (_, f) in b.faceuses().iter() {
+    for f in &faceuses {
         ints.extend([
-            id(f.shell),
-            id(f.face),
-            id(f.mate),
+            c.shells.of(f.shell),
+            c.faces.of(f.face),
+            c.faceuses.of(f.mate),
             f.orientation as i64,
             f.loopuses.len() as i64,
         ]);
-        ints.extend(f.loopuses.iter().map(|v| i64::from(v.index())));
+        ints.extend(f.loopuses.iter().map(|&v| c.loopuses.of(Some(v))));
     }
-    for (_, l) in b.loopuses().iter() {
-        ints.extend([id(l.faceuse), id(l.loop_), id(l.mate), l.orientation as i64]);
-    }
-    for (_, e) in b.edges().iter() {
-        ints.push(e.edgeuses.len() as i64);
-        ints.extend(e.edgeuses.iter().map(|v| i64::from(v.index())));
-    }
-    for (_, e) in b.edgeuses().iter() {
+    for l in &loopuses {
         ints.extend([
-            id(e.edge),
-            id(e.ccw),
-            id(e.cw),
-            id(e.vertexuse),
+            c.faceuses.of(l.faceuse),
+            c.loops.of(l.loop_),
+            c.loopuses.of(l.mate),
+            l.orientation as i64,
+        ]);
+    }
+    for e in &edges {
+        ints.push(e.edgeuses.len() as i64);
+        ints.extend(e.edgeuses.iter().map(|&v| c.edgeuses.of(Some(v))));
+    }
+    for e in &edgeuses {
+        ints.extend([
+            c.edges.of(e.edge),
+            c.edgeuses.of(e.ccw),
+            c.edgeuses.of(e.cw),
+            c.vertexuses.of(e.vertexuse),
             e.orientation as i64,
         ]);
     }
     let mut values = Vec::new();
-    for (_, v) in b.vertexuses().iter() {
+    for v in &vertexuses {
         values.extend([v.uv_point.x, v.uv_point.y]);
     }
-    for (_, v) in b.vertices().iter() {
+    for v in &vertices {
         values.extend([v.point.x, v.point.y, v.point.z, v.tolerance]);
         ints.push(v.vertexuses.len() as i64);
-        ints.extend(v.vertexuses.iter().map(|v| i64::from(v.index())));
+        ints.extend(v.vertexuses.iter().map(|&x| c.vertexuses.of(Some(x))));
     }
-    for (_, f) in b.faces().iter() {
+    for f in &faces {
         let a = f.uv_domain.min();
         let z = f.uv_domain.max();
         values.extend([a.x, a.y, z.x, z.y, f.tolerance]);
     }
-    for (_, e) in b.edges().iter() {
+    for e in &edges {
         values.extend([e.interval.min(), e.interval.max(), e.tolerance]);
     }
     Output::new()
@@ -375,6 +704,16 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
             dst.set_all_flags(1);
             records.insert(ObjectKey(1), src);
             records.insert(ObjectKey(2), dst);
+            // a copy's new vertex: its own (default) record, as an upstream object's
+            let fresh = 300 + b.vertices().len() as u64;
+            records.insert(ObjectKey(fresh), Topology::new());
+            let vertex_key = |v: VertexId| {
+                if v == dest {
+                    2
+                } else {
+                    300 + u64::from(v.index())
+                }
+            };
             let h = attrs.insert(Attribute::long(555, 29, Behavior::Copy))?;
             attrs.add_attribute(ObjectKey(1), h)?;
             let result = port::merge_vertex(
@@ -388,7 +727,7 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
                     attributes: &mut attrs,
                     source_key: &|_| obj(1, 16021),
                     destination_key: &|e| match e {
-                        solidcore::EntityRef::Vertex(_) => obj(2, 16021),
+                        solidcore::EntityRef::Vertex(v) => obj(vertex_key(v), 16021),
                         solidcore::EntityRef::Vertexuse(v) => {
                             obj(100 + u64::from(v.index()), 16006)
                         }
@@ -397,23 +736,35 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
                 },
                 Some(&mut context),
             )?;
-            out.push(result.map_or(-1.0, |v| f64::from(v.index())));
-            if result.is_some() {
+            // the shim's `fresh.find(9, result)` of a walk after the op
+            out.push(result.map_or(-1.0, |v| Canon::of(b).vertices.of(Some(v)) as f64));
+            if let Some(v) = result {
+                let key = ObjectKey(vertex_key(v));
                 out.push(
                     records
-                        .get(&ObjectKey(2))
+                        .get(&key)
                         .ok_or_else(|| SolidError::null_pointer("difftest::merge_copy"))?
                         .all_flags() as f64,
                 );
                 out.push(
                     attrs
-                        .find_attribute(ObjectKey(2), 555)
+                        .find_attribute(key, 555)
                         .and_then(|h| attrs.get(h))
                         .and_then(Attribute::long_value)
                         .unwrap_or(-1) as f64,
                 );
             }
+            // the shim's recorder knows the source, the destination and the two B-reps
+            // only (`-99` for any other object)
+            let start = out.len();
             append_events(&context, &mut out)?;
+            if let Some(events) = out.get_mut(start + 1..) {
+                for (j, x) in events.iter_mut().enumerate() {
+                    if j % 5 != 0 && *x >= 100.0 {
+                        *x = -99.0;
+                    }
+                }
+            }
         }
         4 => {
             let mut attrs = AttributeStore::new();
@@ -501,12 +852,8 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
             )?;
         }
         8 | 9 => {
-            let sec = solidcore::topology::EdgeuseId::from_index(
-                u32::from(a) % b.edgeuses().len() as u32,
-            );
-            let cls = solidcore::topology::EdgeuseId::from_index(
-                u32::from(c) % other.edgeuses().len() as u32,
-            );
+            let sec = EdgeuseId::from_index(u32::from(a) % b.edgeuses().len() as u32);
+            let cls = EdgeuseId::from_index(u32::from(c) % other.edgeuses().len() as u32);
             let edge = b
                 .edgeuse(sec)?
                 .edge

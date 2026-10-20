@@ -179,7 +179,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245061",
-      "values_compared": 39
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -215,7 +215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245065",
-      "values_compared": 56
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -242,16 +242,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0016",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245069",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -259,7 +255,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245070",
-      "values_compared": 29
+      "values_compared": 30
     },
     {
       "deferred": {
@@ -338,16 +334,12 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245080",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -371,7 +363,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245083",
-      "values_compared": 24
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -411,7 +403,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245088",
-      "values_compared": 26
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -459,7 +451,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245094",
-      "values_compared": 44
+      "values_compared": 45
     },
     {
       "deferred": {
@@ -487,7 +479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245097",
-      "values_compared": 3
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -535,7 +527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245103",
-      "values_compared": 37
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -646,16 +638,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245117",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -794,16 +782,12 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0081",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245134",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -859,7 +843,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245140",
-      "values_compared": 11
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -915,7 +899,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245147",
-      "values_compared": 3
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -999,7 +983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245157",
-      "values_compared": 54
+      "values_compared": 55
     },
     {
       "deferred": {
@@ -1083,7 +1067,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245167",
-      "values_compared": 24
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1099,7 +1083,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245169",
-      "values_compared": 27
+      "values_compared": 28
     },
     {
       "max_rel_err": 0.0,
@@ -1151,7 +1135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245175",
-      "values_compared": 17
+      "values_compared": 18
     },
     {
       "both_errored": true,
@@ -1264,7 +1248,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245187",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -1288,7 +1272,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245190",
-      "values_compared": 29
+      "values_compared": 30
     },
     {
       "deferred": {
@@ -1332,7 +1316,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245195",
-      "values_compared": 39
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -1356,7 +1340,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245198",
-      "values_compared": 41
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -1508,7 +1492,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245215",
-      "values_compared": 9
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1548,7 +1532,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245220",
-      "values_compared": 36
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -1564,7 +1548,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245222",
-      "values_compared": 78
+      "values_compared": 79
     },
     {
       "max_rel_err": 0.0,
@@ -1700,7 +1684,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245238",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -1708,7 +1692,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245239",
-      "values_compared": 14
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -1724,7 +1708,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245241",
-      "values_compared": 21
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -1776,7 +1760,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245247",
-      "values_compared": 21
+      "values_compared": 22
     },
     {
       "deferred": {
@@ -1816,7 +1800,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245251",
-      "values_compared": 26
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1900,7 +1884,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245261",
-      "values_compared": 65
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -1932,7 +1916,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245265",
-      "values_compared": 34
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -1964,7 +1948,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245269",
-      "values_compared": 19
+      "values_compared": 20
     },
     {
       "deferred": {
@@ -1984,7 +1968,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245271",
-      "values_compared": 55
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -2032,12 +2016,12 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245277",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0225",
@@ -2080,7 +2064,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245282",
-      "values_compared": 21
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -2120,7 +2104,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245287",
-      "values_compared": 42
+      "values_compared": 43
     },
     {
       "deferred": {
@@ -2140,7 +2124,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245289",
-      "values_compared": 33
+      "values_compared": 34
     },
     {
       "max_rel_err": 0.0,
@@ -2236,7 +2220,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245301",
-      "values_compared": 40
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -2263,16 +2247,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0252",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245305",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -2380,7 +2360,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245318",
-      "values_compared": 29
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -2396,7 +2376,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245320",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -2460,7 +2440,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245327",
-      "values_compared": 3
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -2531,16 +2511,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0283",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245336",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -2564,7 +2540,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245339",
-      "values_compared": 35
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -2612,7 +2588,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245345",
-      "values_compared": 11
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2620,7 +2596,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245346",
-      "values_compared": 19
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -2675,28 +2651,20 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0300",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245353",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245354",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -2796,7 +2764,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245365",
-      "values_compared": 39
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2876,7 +2844,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245375",
-      "values_compared": 37
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -2887,16 +2855,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0324",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245377",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "deferred": {
@@ -2948,7 +2912,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245383",
-      "values_compared": 18
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -3044,7 +3008,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245394",
-      "values_compared": 33
+      "values_compared": 34
     },
     {
       "max_rel_err": 0.0,
@@ -3108,7 +3072,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245402",
-      "values_compared": 14
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -3192,7 +3156,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245412",
-      "values_compared": 22
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -3320,7 +3284,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245427",
-      "values_compared": 11
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3352,7 +3316,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245431",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -3411,16 +3375,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0386",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245439",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -3452,7 +3412,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245443",
-      "values_compared": 64
+      "values_compared": 65
     },
     {
       "deferred": {
@@ -3480,7 +3440,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245446",
-      "values_compared": 17
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3488,7 +3448,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245447",
-      "values_compared": 27
+      "values_compared": 28
     },
     {
       "max_rel_err": 0.0,
@@ -3560,7 +3520,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245456",
-      "values_compared": 46
+      "values_compared": 47
     },
     {
       "deferred": {
@@ -3583,16 +3543,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0406",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245459",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3635,16 +3591,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0412",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245465",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -3684,7 +3636,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245470",
-      "values_compared": 45
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -3692,7 +3644,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245471",
-      "values_compared": 19
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -3724,7 +3676,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245475",
-      "values_compared": 39
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -3740,7 +3692,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245477",
-      "values_compared": 30
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -3856,7 +3808,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245491",
-      "values_compared": 3
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3940,7 +3892,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245500",
-      "values_compared": 13
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -3996,7 +3948,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245507",
-      "values_compared": 28
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -4059,16 +4011,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0462",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245515",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -4136,7 +4084,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245523",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -4256,7 +4204,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245537",
-      "values_compared": 36
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -4264,7 +4212,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245538",
-      "values_compared": 55
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -4324,7 +4272,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245545",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -4356,7 +4304,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245549",
-      "values_compared": 22
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -4380,7 +4328,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245552",
-      "values_compared": 38
+      "values_compared": 39
     },
     {
       "deferred": {
@@ -4448,7 +4396,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245560",
-      "values_compared": 17
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -4553,7 +4501,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245572",
-      "values_compared": 19
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -4601,7 +4549,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245578",
-      "values_compared": 45
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -4665,7 +4613,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245586",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -4673,7 +4621,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245587",
-      "values_compared": 14
+      "values_compared": 15
     },
     {
       "deferred": {
@@ -4809,7 +4757,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245603",
-      "values_compared": 12
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -4885,7 +4833,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245612",
-      "values_compared": 37
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -4925,7 +4873,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245617",
-      "values_compared": 12
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -5009,7 +4957,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245627",
-      "values_compared": 38
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -5181,7 +5129,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245647",
-      "values_compared": 38
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -5197,7 +5145,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245649",
-      "values_compared": 16
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -5329,7 +5277,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245665",
-      "values_compared": 47
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -5369,7 +5317,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245670",
-      "values_compared": 54
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -5469,7 +5417,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245681",
-      "values_compared": 30
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -5477,7 +5425,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245682",
-      "values_compared": 20
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -5493,7 +5441,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245684",
-      "values_compared": 30
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -5680,16 +5628,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0652",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245705",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "max_rel_err": 0.0,
@@ -5805,7 +5749,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245718",
-      "values_compared": 32
+      "values_compared": 33
     },
     {
       "max_rel_err": 0.0,
@@ -5829,7 +5773,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245721",
-      "values_compared": 13
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -5853,7 +5797,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245724",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -5969,7 +5913,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245737",
-      "values_compared": 56
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -6004,16 +5948,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0689",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245742",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -6029,7 +5969,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245744",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -6045,7 +5985,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245746",
-      "values_compared": 27
+      "values_compared": 28
     },
     {
       "max_rel_err": 0.0,
@@ -6097,7 +6037,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245752",
-      "values_compared": 15
+      "values_compared": 16
     },
     {
       "deferred": {
@@ -6124,16 +6064,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0702",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245755",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -6144,16 +6080,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0704",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245757",
-      "values_compared": 0
+      "values_compared": 20
     },
     {
       "max_rel_err": 0.0,
@@ -6164,16 +6096,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0706",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245759",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "deferred": {
@@ -6237,7 +6165,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245766",
-      "values_compared": 36
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -6253,7 +6181,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245768",
-      "values_compared": 31
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -6321,7 +6249,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245776",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -6405,7 +6333,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245786",
-      "values_compared": 41
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -6441,7 +6369,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245790",
-      "values_compared": 17
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -6501,7 +6429,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245797",
-      "values_compared": 56
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -6517,7 +6445,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245799",
-      "values_compared": 27
+      "values_compared": 28
     },
     {
       "deferred": {
@@ -6646,7 +6574,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245813",
-      "values_compared": 20
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -6654,7 +6582,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245814",
-      "values_compared": 20
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -6690,7 +6618,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245818",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -6765,16 +6693,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0774",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2894394785303245827",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -6790,7 +6714,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245829",
-      "values_compared": 25
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -6850,7 +6774,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245836",
-      "values_compared": 36
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -6902,7 +6826,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2894394785303245842",
-      "values_compared": 13
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -7118,7 +7042,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "inline",
-      "values_compared": 11
+      "values_compared": 12
     },
     {
       "deferred": {
@@ -7133,16 +7057,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "files_manager_zero_tol",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -7194,14 +7114,13 @@
     }
   ],
   "cases_both_errored": 3,
-  "cases_deferred": 137,
+  "cases_deferred": 117,
   "cases_failed": 0,
-  "cases_passed": 693,
-  "cases_total": 830,
+  "cases_passed": 710,
+  "cases_total": 827,
   "deferred_by_unit": {
-    "query.brep": 16,
+    "query.brep": 17,
     "query.face_p1": 7,
-    "topology.brep_p2": 21,
     "topology.face_p2": 82,
     "topology.face_p4": 11
   },

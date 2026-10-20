@@ -1673,6 +1673,7 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
             mgr = new (t.brep[0]) SmProtoTopologyManager(t.brep[0], t.brep[1], ti, capture, override_tol);
             ti->*ti_get(TiMgr()) = mgr;
             o.push_back(0.0);
+            o.push_back((double)mgr->GetTolerance());
             break;
         }
         case S_RESOLVE:

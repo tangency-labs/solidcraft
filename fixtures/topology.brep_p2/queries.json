@@ -1,0 +1,1654 @@
+{
+ "cases": [
+  {
+   "name": "query_net_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_net_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_net_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_net_3",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_net_4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_net_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_wire_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_wire_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_wire_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_wire_3",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_wire_4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_wire_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_plane10_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_plane10_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_plane10_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_plane10_3",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_plane10_4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_plane10_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_Mouse_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_Mouse_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_Mouse_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_Mouse_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_Mouse_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_Mouse_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_Endcap_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_Endcap_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_Endcap_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_Endcap_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_Endcap_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_Endcap_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_box_with_large_fillet_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_box_with_large_fillet_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_box_with_large_fillet_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_box_with_large_fillet_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_box_with_large_fillet_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_box_with_large_fillet_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_cone_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_cone_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_cone_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_cone_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_cone_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_cone_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_disk_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_disk_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_disk_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_disk_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_disk_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_disk_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_ellips_ts2_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_ellips_ts2_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_ellips_ts2_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_ellips_ts2_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_ellips_ts2_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_ellips_ts2_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_plane_circ_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_plane_circ_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_plane_circ_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_plane_circ_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_plane_circ_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_plane_circ_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_plane_square_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_plane_square_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_plane_square_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_plane_square_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_plane_square_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_plane_square_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_sphere_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_sphere_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_sphere_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_sphere_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_sphere_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_sphere_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_surf_extrude_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_surf_extrude_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_surf_extrude_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_surf_extrude_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_surf_extrude_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_surf_extrude_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_surf_rev_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_surf_rev_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_surf_rev_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_surf_rev_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_surf_rev_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_surf_rev_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_surf_sphere150_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_surf_sphere150_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_surf_sphere150_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_surf_sphere150_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_surf_sphere150_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_surf_sphere150_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_torus_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_torus_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_torus_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_torus_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_torus_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_torus_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_toruswvy_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_toruswvy_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_toruswvy_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_toruswvy_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_toruswvy_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_toruswvy_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  },
+  {
+   "name": "query_vase_rev_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "query",
+    "which": 0
+   }
+  },
+  {
+   "name": "query_vase_rev_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "query",
+    "which": 1
+   }
+  },
+  {
+   "name": "query_vase_rev_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "query",
+    "which": 2
+   }
+  },
+  {
+   "name": "query_vase_rev_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "query",
+    "which": 3
+   }
+  },
+  {
+   "name": "query_vase_rev_4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "query",
+    "which": 4
+   }
+  },
+  {
+   "name": "query_vase_rev_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "query",
+    "which": 5
+   }
+  }
+ ]
+}

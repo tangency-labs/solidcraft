@@ -269,7 +269,7 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 /// Whether `t` is the type of an `SmCurve` class (`IsKindOf(SmCurve_TYPE)` of an
 /// object of that type).
-fn is_curve_class(t: i64) -> bool {
+pub fn is_curve_class(t: i64) -> bool {
     CURVE_CLASS_TYPES.contains(&t)
 }
 

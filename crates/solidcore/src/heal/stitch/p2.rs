@@ -34,7 +34,8 @@
 //! - `DoStitching` collects the modified faces (`sModifiedFaces`) as upstream, though
 //!   only commented-out code reads them; its `dMinEdgeLength` is dropped for the same
 //!   reason (the lengths are still computed).
-//! - The calls into `SmBrep::Notify` (`topology.brep_p2`), `CalculateBoundingBox`
+//! - `SmBrep::Notify(SM_NO_PRE_EDIT)` is `super::p1::brep_notify_pre_edit`
+//!   (`topology::brep::p2::notify`). The calls into `CalculateBoundingBox`
 //!   (`query.brep`), `DeleteFace`, `SqueezeEdge` (`topology.brep_p3`), `GlueVertices`,
 //!   `FindAndSetInfiniteRegion` (`topology.brep_p5`), `GlueEdgesGeneral`
 //!   (`topology.brep_p7`), `MakeVertexSplitEdge` (`topology.brep_p9`, through

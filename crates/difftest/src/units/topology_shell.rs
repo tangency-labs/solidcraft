@@ -154,7 +154,7 @@ impl solidcore::intersect::point_class::ClassObject for NoRayObject {
 impl solidcore::topology::shell::ShellRayWorld<NoRayObject> for EmptyRayWorld {
     // Harness-limited: a non-empty boundary-face shape needs the B-rep's cached
     // geometry (`topology::brep_cache::BrepObjects` over a built `BrepCache`, which
-    // is `query.brep`) plus `SmBrep::LocalCurveSector` (`topology.brep_p2`). The
+    // is `query.brep`) plus a world overriding `shell_ray_sector` with `topology::brep::p2::local_curve_sector`. The
     // cases whose C++ run reaches that stage are deferred, never compared here;
     // swap this world for `BrepObjects` when those units are ported.
     fn shell_ray_shape(

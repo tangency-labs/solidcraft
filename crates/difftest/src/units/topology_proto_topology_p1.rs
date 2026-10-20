@@ -66,18 +66,19 @@ use solidcore::surface::volume::Volume;
 use solidcore::topology::proto_topology::p1::api_transform::{
     self as api, PolyBrepTarget, PolyBrepTransform, TransformObject,
 };
-use solidcore::topology::proto_topology::p1::assembly::{self as asm_mod, Assembly, AssemblyInstance};
+use solidcore::topology::proto_topology::p1::assembly::{
+    self as asm_mod, Assembly, AssemblyInstance,
+};
 use solidcore::topology::proto_topology::p1::owning_topology as own_mod;
 use solidcore::topology::proto_topology::p1::proto::{self as proto_mod};
-use solidcore::topology::proto_topology::p2::ProtoBrep;
 use solidcore::topology::proto_topology::p1::{
     destroy_topology, CopyBrepMap, EdgeDefId, EdgeDefinition, OwningRecords, OwningTopology,
     ProtoEdgeId, ProtoFaceId, ProtoGeometry, ProtoTopology, ProtoTopologyManager, ProtoVertexId,
-    VertexDefId,
-    VertexDefinition,
+    VertexDefId, VertexDefinition,
 };
-use solidcore::topology::proto_topology::p3::NoMates;
+use solidcore::topology::proto_topology::p2::ProtoBrep;
 use solidcore::topology::topology::{Topology, TopologyRecords};
+use solidcore::topology::Brep;
 use solidcore::SolidError;
 use solidcore_ffi::units::topology_proto_topology_p1::{
     self as ffi, kind, list_op as lop, pool as pk, proto_op as p, proto_op_p2 as q, slot, tobj,
@@ -184,11 +185,17 @@ pub(super) struct SurfIn {
 #[serde(rename_all = "snake_case")]
 pub(super) enum ObjIn {
     Curve(CurveIn),
-    Plane { o: [f64; 3], n: [f64; 3] },
+    Plane {
+        o: [f64; 3],
+        n: [f64; 3],
+    },
     Bsurf(SurfIn),
     Vertex,
     /// A vertex with a point and a stored zone tolerance.
-    VertexAt { p: [f64; 3], tol: f64 },
+    VertexAt {
+        p: [f64; 3],
+        tol: f64,
+    },
     /// A bare edge on pool curve `c`.
     Edge(usize),
     /// A bare face on pool surface `s`.
@@ -196,7 +203,12 @@ pub(super) enum ObjIn {
     Region,
     Loop,
     /// A bare edge on pool curve `c` with interval `[a, b]` and zone tolerance `tol`.
-    EdgeIvl { c: usize, a: f64, b: f64, tol: f64 },
+    EdgeIvl {
+        c: usize,
+        a: f64,
+        b: f64,
+        tol: f64,
+    },
     /// A bare vertex with zone tolerance `tol`.
     VertexTol(f64),
 }
@@ -205,31 +217,66 @@ pub(super) enum ObjIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum TObjIn {
-    Curve { owned: bool, c: CurveIn },
-    Plane { owned: bool, o: [f64; 3], n: [f64; 3] },
-    Bsurf { owned: bool, s: SurfIn },
+    Curve {
+        owned: bool,
+        c: CurveIn,
+    },
+    Plane {
+        owned: bool,
+        o: [f64; 3],
+        n: [f64; 3],
+    },
+    Bsurf {
+        owned: bool,
+        s: SurfIn,
+    },
     Brep,
     /// An empty `SmPolyBrep`.
     Poly,
     /// An `SmPolyBrep` with poly vertices `x y z tol` (1 to 4).
-    PolyPts { pts: Vec<[f64; 4]> },
+    PolyPts {
+        pts: Vec<[f64; 4]>,
+    },
     Other,
     Null,
     /// An `SmCompositeCurve` of the curves.
-    Composite { owned: bool, cs: Vec<CurveIn> },
+    Composite {
+        owned: bool,
+        cs: Vec<CurveIn>,
+    },
     /// An `SmCrvOnSurf`: the UV line from `a` to `b` on a B-spline surface.
-    CrvOnSurf { owned: bool, s: SurfIn, a: [f64; 2], b: [f64; 2] },
+    CrvOnSurf {
+        owned: bool,
+        s: SurfIn,
+        a: [f64; 2],
+        b: [f64; 2],
+    },
 }
 
 /// A transform call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum TOpIn {
-    Transform { o: [f64; 3], x: [f64; 3], y: [f64; 3] },
-    Scale { s: [f64; 3] },
-    ScaleByPt { r: [f64; 3], s: [f64; 3] },
-    Translate { v: [f64; 3] },
-    Rotate { r: [f64; 3], a: [f64; 3], deg: f64 },
+    Transform {
+        o: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+    },
+    Scale {
+        s: [f64; 3],
+    },
+    ScaleByPt {
+        r: [f64; 3],
+        s: [f64; 3],
+    },
+    Translate {
+        v: [f64; 3],
+    },
+    Rotate {
+        r: [f64; 3],
+        a: [f64; 3],
+        deg: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,8 +501,15 @@ fn v3(p: [f64; 3]) -> Vec3 {
 pub(super) fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
     match c {
         CurveIn::Bspline(bs) => {
-            let n = bs.cpts.len().checked_sub(1).ok_or_else(|| harness("no points"))?;
-            let m = bs.u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
+            let n = bs
+                .cpts
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| harness("no points"))?;
+            let m =
+                bs.u.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("no knots"))?;
             let mut cur =
                 allocate_nurb_curve(n, bs.p, m).map_err(|e| harness(format!("curve: {e}")))?;
             for (d, s) in cur.cpts_mut().iter_mut().zip(&bs.cpts) {
@@ -498,8 +552,12 @@ pub(super) fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
             };
             let domain = Extent1d::from_min_max(c.domain[0], c.domain[1]);
             let e = match c.ry {
-                Some(ry) => Ellipse::new(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, ry, &opts),
-                None => Ellipse::new_circle(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, &opts),
+                Some(ry) => {
+                    Ellipse::new(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, ry, &opts)
+                }
+                None => {
+                    Ellipse::new_circle(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, &opts)
+                }
             }
             .map_err(|e| harness(format!("conic: {e}")))?;
             Ok(Curve::from(e))
@@ -511,7 +569,11 @@ fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     let sur = NurbSurface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("surface: {e}")))?;
@@ -645,7 +707,10 @@ impl TopologyRecords for ListStore {
         self.slots.get(usize::try_from(key.0).ok()?)?.rec.as_ref()
     }
     fn topology_mut(&mut self, key: ObjectKey) -> Option<&mut Topology> {
-        self.slots.get_mut(usize::try_from(key.0).ok()?)?.rec.as_mut()
+        self.slots
+            .get_mut(usize::try_from(key.0).ok()?)?
+            .rec
+            .as_mut()
     }
 }
 
@@ -880,7 +945,8 @@ fn run_list(slots: &[i64], ops: &[[i64; 5]]) -> Result<Vec<f64>, Fail> {
                     skip = true;
                 } else {
                     let h = s.list(a).list();
-                    if h.is_some_and(|h| s.rec(h).next().is_some()) && !s.walk_terminates(a, false) {
+                    if h.is_some_and(|h| s.rec(h).next().is_some()) && !s.walk_terminates(a, false)
+                    {
                         skip = true;
                     } else {
                         let mut l = s.list(a);
@@ -1144,7 +1210,11 @@ pub(super) enum PObj {
     Curve(Curve),
     Surface(Surface),
     /// A bare edge: its curve's pool index, interval and zone tolerance.
-    Edge { curve: usize, ivl: Extent1d, tol: f64 },
+    Edge {
+        curve: usize,
+        ivl: Extent1d,
+        tol: f64,
+    },
     /// A bare vertex or face: its zone tolerance.
     Tol(f64),
     /// A vertex with a point and a zone tolerance.
@@ -1156,6 +1226,25 @@ pub(super) struct Pool {
     pub(super) objs: Vec<PObj>,
     pub(super) kinds: Vec<i64>,
     pub(super) alive: Vec<bool>,
+}
+
+/// The pool holds proto-topology objects, not a B-rep arena: it cannot glue. The glue
+/// op skips every script whose vertices would be glued (the `p::GLUE` op), so this
+/// refusal is never reached by a compared case.
+impl solidcore::topology::proto_topology::p3::BrepGlue<H> for Pool {
+    fn glue_vertices(
+        &mut self,
+        _k: &mut Kernel,
+        _brep: H,
+        _v1: H,
+        _v2: H,
+        _opt_wire_edges_in_brep: Option<&[H]>,
+    ) -> solidcore::Result<()> {
+        Err(SolidError::invalid_input(
+            "difftest::topology_proto_topology_p1::Pool",
+            "the pool has no B-rep arena to glue in",
+        ))
+    }
 }
 
 impl ClassGeometry<H> for Pool {
@@ -1217,7 +1306,10 @@ impl ProtoTopology<H> for Pool {
         Ok(Vec::new())
     }
     fn edge_start_vertex(&self, _edge: H) -> solidcore::Result<Option<H>> {
-        Err(SolidError::invalid_input("difftest::pool", "bare edge has no primary edge use"))
+        Err(SolidError::invalid_input(
+            "difftest::pool",
+            "bare edge has no primary edge use",
+        ))
     }
     fn edge_other_vertex(&self, _edge: H, _vertex: Option<H>) -> solidcore::Result<Option<H>> {
         Ok(None)
@@ -1253,7 +1345,9 @@ impl ProtoBrep<H> for Pool {
     }
     fn topology_tolerance(&self, topo: H) -> Option<f64> {
         match self.objs.get(topo.0) {
-            Some(PObj::Edge { tol, .. } | PObj::Tol(tol) | PObj::VertexPt(_, tol)) if self.live_h(topo) => {
+            Some(PObj::Edge { tol, .. } | PObj::Tol(tol) | PObj::VertexPt(_, tol))
+                if self.live_h(topo) =>
+            {
                 Some(*tol)
             }
             _ => None,
@@ -1341,7 +1435,10 @@ impl Pool {
             )
     }
     pub(super) fn h(&self, i: i64) -> H {
-        H(i as usize, class_kind_of(self.kinds.get(i as usize).copied().unwrap_or(-1)))
+        H(
+            i as usize,
+            class_kind_of(self.kinds.get(i as usize).copied().unwrap_or(-1)),
+        )
     }
     pub(super) fn id(&self, h: Option<H>) -> f64 {
         match h {
@@ -1528,25 +1625,37 @@ impl ProtoRun {
     pub(super) fn invariant(&self) -> bool {
         let m = &self.mgr;
         if self.mgr_alive
-            && (m.proto_vertices().iter().any(|&x| m.proto_vertex(x).is_none())
+            && (m
+                .proto_vertices()
+                .iter()
+                .any(|&x| m.proto_vertex(x).is_none())
                 || m.proto_edges().iter().any(|&x| m.proto_edge(x).is_none())
                 || m.proto_faces().iter().any(|&x| m.proto_face(x).is_none()))
         {
             return false;
         }
         for i in 0..self.n_vd {
-            let Some(v) = m.vertex_def(VertexDefId::from_index(i)) else { continue };
-            if v.proto_vertex().is_some_and(|x| m.proto_vertex(x).is_none()) {
+            let Some(v) = m.vertex_def(VertexDefId::from_index(i)) else {
+                continue;
+            };
+            if v.proto_vertex()
+                .is_some_and(|x| m.proto_vertex(x).is_none())
+            {
                 return false;
             }
             for w in 1..=2 {
-                if v.brep_point_classif(w).object().is_some_and(|ob| !self.pool.live_h(ob)) {
+                if v.brep_point_classif(w)
+                    .object()
+                    .is_some_and(|ob| !self.pool.live_h(ob))
+                {
                     return false;
                 }
             }
         }
         for i in 0..self.n_ed {
-            let Some(e) = m.edge_def(EdgeDefId::from_index(i)) else { continue };
+            let Some(e) = m.edge_def(EdgeDefId::from_index(i)) else {
+                continue;
+            };
             if e.proto_edge().is_some_and(|x| m.proto_edge(x).is_none()) {
                 return false;
             }
@@ -1558,29 +1667,46 @@ impl ProtoRun {
             }
         }
         for i in 0..self.n_pv {
-            let Some(v) = m.proto_vertex(ProtoVertexId::from_index(i)) else { continue };
-            if v.vertex_definitions().iter().any(|&x| m.vertex_def(x).is_none())
+            let Some(v) = m.proto_vertex(ProtoVertexId::from_index(i)) else {
+                continue;
+            };
+            if v.vertex_definitions()
+                .iter()
+                .any(|&x| m.vertex_def(x).is_none())
                 || v.proto_edges().iter().any(|&x| m.proto_edge(x).is_none())
             {
                 return false;
             }
         }
         for i in 0..self.n_pe {
-            let Some(e) = m.proto_edge(ProtoEdgeId::from_index(i)) else { continue };
+            let Some(e) = m.proto_edge(ProtoEdgeId::from_index(i)) else {
+                continue;
+            };
             let dead_pv = |x: Option<ProtoVertexId>| x.is_some_and(|x| m.proto_vertex(x).is_none());
             if dead_pv(e.start_proto_vertex()) || dead_pv(e.end_proto_vertex()) {
                 return false;
             }
-            if e.edge_definitions().iter().any(|&x| m.edge_def(x).is_none())
-                || e.overlapping_pes().iter().any(|&x| m.proto_edge(x).is_none())
-                || e.coinc_proto_faces().iter().any(|&x| m.proto_face(x).is_none())
+            if e.edge_definitions()
+                .iter()
+                .any(|&x| m.edge_def(x).is_none())
+                || e.overlapping_pes()
+                    .iter()
+                    .any(|&x| m.proto_edge(x).is_none())
+                || e.coinc_proto_faces()
+                    .iter()
+                    .any(|&x| m.proto_face(x).is_none())
             {
                 return false;
             }
         }
         for i in 0..self.n_pf {
-            let Some(f) = m.proto_face(ProtoFaceId::from_index(i)) else { continue };
-            if f.coinc_proto_edges().iter().any(|&x| m.proto_edge(x).is_none()) {
+            let Some(f) = m.proto_face(ProtoFaceId::from_index(i)) else {
+                continue;
+            };
+            if f.coinc_proto_edges()
+                .iter()
+                .any(|&x| m.proto_edge(x).is_none())
+            {
                 return false;
             }
         }
@@ -1594,7 +1720,10 @@ impl ProtoRun {
             let Some(d) = self.mgr.edge_def(EdgeDefId::from_index(i)) else {
                 continue;
             };
-            for c in [d.xsect_curve_3d(), d.xsect_uv_curve(1), d.xsect_uv_curve(2)].into_iter().flatten() {
+            for c in [d.xsect_curve_3d(), d.xsect_uv_curve(1), d.xsect_uv_curve(2)]
+                .into_iter()
+                .flatten()
+            {
                 if !self.pool.live_h(c) || seen.contains(&c) {
                     return false;
                 }
@@ -1633,12 +1762,19 @@ impl ProtoRun {
     /// Creating a proto vertex reads an uninitialised position when `sm_FindPositionFromPCs`
     /// fails for two classifications that can be imprinted: such inputs are refused (the
     /// shim's `position_ok`).
-    fn position_ok(&self, a: &PointClassification<H>, c: &PointClassification<H>) -> Result<bool, Fail> {
+    fn position_ok(
+        &self,
+        a: &PointClassification<H>,
+        c: &PointClassification<H>,
+    ) -> Result<bool, Fail> {
         if !(proto_mod::can_imprint(a.point_class()) && proto_mod::can_imprint(c.point_class())) {
             return Ok(true);
         }
         let (mut x, mut y) = (*a, *c);
-        Ok(st(proto_mod::find_position_from_pcs(&self.k, &self.pool, &mut x, &mut y))?.is_ok())
+        Ok(st(proto_mod::find_position_from_pcs(
+            &self.k, &self.pool, &mut x, &mut y,
+        ))?
+        .is_ok())
     }
 
     /// Kills the curves an op deleted; their ids, sorted.
@@ -1879,7 +2015,9 @@ fn run_proto(
             ObjIn::Bsurf(s) => (PObj::Surface(build_surface(s)?), pk::BSURF),
             ObjIn::Vertex => (PObj::Tol(0.0), pk::VERTEX),
             ObjIn::VertexTol(tol) => (PObj::Tol(zone_tol3d(&k, *tol)), pk::VERTEX),
-            ObjIn::VertexAt { p, tol } => (PObj::VertexPt(v3(*p), zone_tol3d(&k, *tol)), pk::VERTEX),
+            ObjIn::VertexAt { p, tol } => {
+                (PObj::VertexPt(v3(*p), zone_tol3d(&k, *tol)), pk::VERTEX)
+            }
             ObjIn::Edge(c) => {
                 if !pool.is_curve(*c as i64) {
                     return Err(harness("edge curve").into());
@@ -1923,7 +2061,17 @@ fn run_proto(
     let brep2 = H(100_001, ClassObjectKind::Other);
     let ti = H(100_002, ClassObjectKind::Other);
     let ti_tol = approx_tol;
-    let mgr = match st(ProtoTopologyManager::new(brep1, brep2, ti, ti_tol, capture, override_tol))? {
+    // two empty B-reps, as the shim's
+    let (b1, b2) = (Brep::new(), Brep::new());
+    let mgr = match st(ProtoTopologyManager::new(
+        &k,
+        (brep1, &b1),
+        (brep2, &b2),
+        ti,
+        ti_tol,
+        capture,
+        override_tol,
+    ))? {
         Ok(m) => m,
         Err(s) => return Err(harness(format!("manager: status {s}")).into()),
     };
@@ -1974,7 +2122,9 @@ fn run_proto(
                 let tol = rd.num();
                 match (pc1, pc2) {
                     (Some(pc1), Some(pc2)) if !skip => {
-                        let res = r.mgr.new_proto_vertex_with_pcs(k, &r.pool, &pc1, &pc2, pt, tol);
+                        let res = r
+                            .mgr
+                            .new_proto_vertex_with_pcs(k, &r.pool, &pc1, &pc2, pt, tol);
                         match st(res)? {
                             Ok(id) => {
                                 r.n_pv += 1;
@@ -2499,7 +2649,9 @@ fn run_proto(
             p::MGR_REMOVE_VD => {
                 let d = r.vd(rd.idx());
                 let flag = rd.flag();
-                let owner = d.and_then(|d| r.mgr.vertex_def(d)).and_then(VertexDefinition::proto_vertex);
+                let owner = d
+                    .and_then(|d| r.mgr.vertex_def(d))
+                    .and_then(VertexDefinition::proto_vertex);
                 match (d, owner) {
                     (Some(d), Some(owner)) if !skip => {
                         let mut left: Vec<VertexDefId> = r
@@ -2562,11 +2714,17 @@ fn run_proto(
                     let e = r.mgr.edge_def(d).cloned();
                     let pre: Vec<H> = e
                         .iter()
-                        .flat_map(|e| [e.xsect_curve_3d(), e.xsect_uv_curve(1), e.xsect_uv_curve(2)])
+                        .flat_map(|e| {
+                            [e.xsect_curve_3d(), e.xsect_uv_curve(1), e.xsect_uv_curve(2)]
+                        })
                         .flatten()
                         .collect();
                     if unique_live(&pre, |c| r.pool.live_h(c)) {
-                        let deleted = r.mgr.edge_def_mut(d).map(EdgeDefinition::destruct).unwrap_or_default();
+                        let deleted = r
+                            .mgr
+                            .edge_def_mut(d)
+                            .map(EdgeDefinition::destruct)
+                            .unwrap_or_default();
                         out.push(deleted.len() as f64);
                         out.extend(deleted.iter().map(|&c| r.pool.id(Some(c))));
                         for c in deleted {
@@ -2603,7 +2761,11 @@ fn run_proto(
             },
             p::DELETE_PE => match r.pe(rd.idx()) {
                 Some(e) if !skip => {
-                    let eds = r.mgr.proto_edge(e).map(|x| x.edge_definitions().to_vec()).unwrap_or_default();
+                    let eds = r
+                        .mgr
+                        .proto_edge(e)
+                        .map(|x| x.edge_definitions().to_vec())
+                        .unwrap_or_default();
                     let mut curves = Vec::new();
                     for &d in &eds {
                         if let Some(x) = r.mgr.edge_def(d) {
@@ -2627,7 +2789,11 @@ fn run_proto(
             },
             p::DELETE_PV => match r.pv(rd.idx()) {
                 Some(v) if !skip => {
-                    let vds = r.mgr.proto_vertex(v).map(|x| x.vertex_definitions().to_vec()).unwrap_or_default();
+                    let vds = r
+                        .mgr
+                        .proto_vertex(v)
+                        .map(|x| x.vertex_definitions().to_vec())
+                        .unwrap_or_default();
                     if unique_live(&vds, |x| r.mgr.vertex_def(x).is_some()) {
                         r.mgr.delete_proto_vertex_object(v);
                     } else {
@@ -2718,7 +2884,9 @@ fn run_proto(
             }
             p::VD_RESOLVE => {
                 let d = r.vd(rd.idx());
-                let has_pv = d.and_then(|d| r.mgr.vertex_def(d)).and_then(VertexDefinition::proto_vertex);
+                let has_pv = d
+                    .and_then(|d| r.mgr.vertex_def(d))
+                    .and_then(VertexDefinition::proto_vertex);
                 match (d, has_pv) {
                     (Some(d), Some(_)) if !skip => {
                         let res = r.mgr.resolve_vertex_definition(k, &r.pool, d);
@@ -2730,7 +2898,10 @@ fn run_proto(
                             }
                         };
                         out.push(f64::from(sres));
-                        let pos = r.mgr.vertex_def(d).map_or(Vec3::UNDEF, VertexDefinition::position);
+                        let pos = r
+                            .mgr
+                            .vertex_def(d)
+                            .map_or(Vec3::UNDEF, VertexDefinition::position);
                         put_vec(&mut out, pos);
                     }
                     _ => skip = true,
@@ -2746,7 +2917,9 @@ fn run_proto(
             },
             p::VD_NUM_PES => {
                 let d = r.vd(rd.idx());
-                let has_pv = d.and_then(|d| r.mgr.vertex_def(d)).and_then(VertexDefinition::proto_vertex);
+                let has_pv = d
+                    .and_then(|d| r.mgr.vertex_def(d))
+                    .and_then(VertexDefinition::proto_vertex);
                 match (d, has_pv) {
                     (Some(d), Some(_)) if !skip => match st(r.mgr.vertex_def_num_proto_edges(d))? {
                         Ok(n) => out.push(n as f64),
@@ -2797,7 +2970,9 @@ fn run_proto(
                 let d = r.ed(rd.idx());
                 let v = r.pv_or_null(rd.idx(), &mut ok);
                 let e = d.and_then(|d| r.mgr.edge_def(d));
-                let pe = e.and_then(EdgeDefinition::proto_edge).and_then(|x| r.mgr.proto_edge(x));
+                let pe = e
+                    .and_then(EdgeDefinition::proto_edge)
+                    .and_then(|x| r.mgr.proto_edge(x));
                 match (d, e, pe) {
                     (Some(d), Some(e), Some(pe)) if !skip && ok => {
                         if (v == pe.start_proto_vertex() || v == pe.end_proto_vertex())
@@ -2827,7 +3002,9 @@ fn run_proto(
                 let a = rd.num();
                 let bb = rd.num();
                 let rev = rd.flag();
-                let has_c = d.and_then(|d| r.mgr.edge_def(d)).is_some_and(|e| e.xsect_curve_3d().is_some());
+                let has_c = d
+                    .and_then(|d| r.mgr.edge_def(d))
+                    .is_some_and(|e| e.xsect_curve_3d().is_some());
                 match d {
                     // a zero-length domain is refused (HANG-12)
                     Some(d) if !skip && has_c && a != bb => {
@@ -2873,7 +3050,8 @@ fn run_proto(
                         } else {
                             match r.pe(j).and_then(|e| r.mgr.proto_edge(e)) {
                                 Some(e) => {
-                                    if between(v1, v2, e.start_proto_vertex(), e.end_proto_vertex()) {
+                                    if between(v1, v2, e.start_proto_vertex(), e.end_proto_vertex())
+                                    {
                                         defs.extend_from_slice(e.edge_definitions());
                                     }
                                 }
@@ -2888,7 +3066,12 @@ fn run_proto(
                             match e.proto_edge().and_then(|x| r.mgr.proto_edge(x)) {
                                 None => skip = true,
                                 Some(pe) => {
-                                    let bt = between(v1, v2, pe.start_proto_vertex(), pe.end_proto_vertex());
+                                    let bt = between(
+                                        v1,
+                                        v2,
+                                        pe.start_proto_vertex(),
+                                        pe.end_proto_vertex(),
+                                    );
                                     if bt
                                         && e.xsect_curve_3d() != c
                                         && (e.xsect_curve_3d().is_none() || c.is_none())
@@ -2997,12 +3180,18 @@ fn run_proto(
                         }
                         if reached {
                             if ee.edge_definitions().is_empty() {
-                                let end = if at_start { ee.start_proto_vertex() } else { ee.end_proto_vertex() };
+                                let end = if at_start {
+                                    ee.start_proto_vertex()
+                                } else {
+                                    ee.end_proto_vertex()
+                                };
                                 if end.is_none() {
                                     skip = true;
                                 }
                             } else if ee.edge_definitions().iter().any(|&d| {
-                                r.mgr.edge_def(d).is_none_or(|x| x.xsect_curve_3d().is_none())
+                                r.mgr
+                                    .edge_def(d)
+                                    .is_none_or(|x| x.xsect_curve_3d().is_none())
                             }) {
                                 skip = true;
                             }
@@ -3030,15 +3219,28 @@ fn run_proto(
                     Some((eid, ee)) if !skip && (0..=3).contains(&mode) => {
                         if mode != 0
                             && ee.edge_definitions().iter().any(|&d| {
-                                r.mgr.edge_def(d).is_none_or(|x| x.xsect_curve_3d().is_none())
+                                r.mgr
+                                    .edge_def(d)
+                                    .is_none_or(|x| x.xsect_curve_3d().is_none())
                             })
                         {
                             skip = true;
                         } else {
                             let res = if op == p::PE_EVAL {
-                                r.mgr.proto_edge_evaluate(&r.pool, eid, t, mode & 1 != 0, mode & 2 != 0)
+                                r.mgr.proto_edge_evaluate(
+                                    &r.pool,
+                                    eid,
+                                    t,
+                                    mode & 1 != 0,
+                                    mode & 2 != 0,
+                                )
                             } else {
-                                r.mgr.proto_edge_evaluate_mid(&r.pool, eid, mode & 1 != 0, mode & 2 != 0)
+                                r.mgr.proto_edge_evaluate_mid(
+                                    &r.pool,
+                                    eid,
+                                    mode & 1 != 0,
+                                    mode & 2 != 0,
+                                )
                             };
                             put_eval(&mut out, st(res)?, mode);
                         }
@@ -3101,15 +3303,21 @@ fn run_proto(
                                     skip = true;
                                 }
                                 for &x in vv.vertex_definitions() {
-                                    let fv = r.mgr.vertex_def(x).and_then(|y| y.final_vertex(w as i32));
-                                    if fv.is_some() && connect_crashes(&r.pool, e.src_topo(w as i32), fv) {
+                                    let fv =
+                                        r.mgr.vertex_def(x).and_then(|y| y.final_vertex(w as i32));
+                                    if fv.is_some()
+                                        && connect_crashes(&r.pool, e.src_topo(w as i32), fv)
+                                    {
                                         skip = true;
                                     }
                                 }
                             }
                         }
                         if !skip {
-                            match st(r.mgr.proto_vertex_final_vertex(&r.pool, v, w as i32, d, at_start))? {
+                            match st(r
+                                .mgr
+                                .proto_vertex_final_vertex(&r.pool, v, w as i32, d, at_start))?
+                            {
                                 Ok(x) => out.push(r.pool.id(x)),
                                 Err(s) => status = s,
                             }
@@ -3194,19 +3402,30 @@ fn run_proto(
                         let mut cc = CurveClassification::new(k);
                         cc.set_curve(cc_curve, false);
                         cc.set_src_zone_tol_3d(zone_tol3d(k, cc_tol));
-                        let mut ci1 = CurveInterval::with_interval(k, &Extent1d::from_min_max(a, bb), Some(&cc));
+                        let mut ci1 = CurveInterval::with_interval(
+                            k,
+                            &Extent1d::from_min_max(a, bb),
+                            Some(&cc),
+                        );
                         ci1.mid = m1;
                         if op == p::ARE_OVERLAPPING {
                             let e = d.and_then(|d| r.mgr.edge_def(d));
                             match e {
-                                Some(e) => match st(proto_mod::are_overlapping(k, &r.pool, &cc, &ci1, e))? {
-                                    Ok(f) => out.push(b(f)),
-                                    Err(s) => status = s,
-                                },
+                                Some(e) => {
+                                    match st(proto_mod::are_overlapping(k, &r.pool, &cc, &ci1, e))?
+                                    {
+                                        Ok(f) => out.push(b(f)),
+                                        Err(s) => status = s,
+                                    }
+                                }
                                 None => skip = true,
                             }
                         } else if let Some(m2) = m2 {
-                            let mut ci2 = CurveInterval::with_interval(k, &Extent1d::from_min_max(a, bb), None);
+                            let mut ci2 = CurveInterval::with_interval(
+                                k,
+                                &Extent1d::from_min_max(a, bb),
+                                None,
+                            );
                             ci2.mid = m2;
                             if m1.edge_object().is_some() || m2.edge_object().is_some() {
                                 if let Ok(all) = r.mgr.all_edge_definitions() {
@@ -3235,7 +3454,10 @@ fn run_proto(
                                 }
                             }
                             if !skip {
-                                match st(r.mgr.check_overlapping_proto_edges(k, &r.pool, &cc, &ci1, &ci2))? {
+                                match st(r
+                                    .mgr
+                                    .check_overlapping_proto_edges(k, &r.pool, &cc, &ci1, &ci2))?
+                                {
                                     Ok(res) => {
                                         out.push(res.len() as f64);
                                         out.extend(res.iter().map(|&x| r.pe_id(x)));
@@ -3258,7 +3480,8 @@ fn run_proto(
                     (Some(d1), Some(d2)) if !skip => {
                         let (e1, e2) = (r.mgr.edge_def(d1), r.mgr.edge_def(d2));
                         if let (Some(e1), Some(e2)) = (e1, e2) {
-                            let same = e1.src_topo(1) == e2.src_topo(1) && e1.src_topo(2) == e2.src_topo(2);
+                            let same = e1.src_topo(1) == e2.src_topo(1)
+                                && e1.src_topo(2) == e2.src_topo(2);
                             if !same
                                 && (connect_crashes(&r.pool, e1.src_topo(1), e2.src_topo(1))
                                     || connect_crashes(&r.pool, e1.src_topo(2), e2.src_topo(2)))
@@ -3287,16 +3510,19 @@ fn run_proto(
                         if let Some(ee) = r.mgr.proto_edge(e) {
                             if ee.start_proto_vertex() != Some(v)
                                 && ee.end_proto_vertex() != Some(v)
-                                && ee
-                                    .edge_definitions()
-                                    .first()
-                                    .is_some_and(|&d| r.mgr.edge_def(d).is_none_or(|x| x.xsect_curve_3d().is_none()))
+                                && ee.edge_definitions().first().is_some_and(|&d| {
+                                    r.mgr
+                                        .edge_def(d)
+                                        .is_none_or(|x| x.xsect_curve_3d().is_none())
+                                })
                             {
                                 skip = true;
                             }
                         }
                         if !skip {
-                            let res = r.mgr.remove_coincident_no_edge_proto_vertex(k, &r.pool, e, v);
+                            let res = r
+                                .mgr
+                                .remove_coincident_no_edge_proto_vertex(k, &r.pool, e, v);
                             match st(res)? {
                                 Ok(f) => out.push(b(f)),
                                 Err(s) => {
@@ -3317,7 +3543,9 @@ fn run_proto(
                     Some((eid, ee)) if !skip && ok => {
                         if sv.is_none() {
                             if ee.edge_definitions().iter().any(|&d| {
-                                r.mgr.edge_def(d).is_none_or(|x| x.xsect_curve_3d().is_none())
+                                r.mgr
+                                    .edge_def(d)
+                                    .is_none_or(|x| x.xsect_curve_3d().is_none())
                             }) {
                                 skip = true;
                             }
@@ -3343,7 +3571,9 @@ fn run_proto(
                 let pc2 = r.read_pc(&mut rd);
                 match (pc1, pc2) {
                     (Some(mut pc1), Some(mut pc2)) if !skip => {
-                        let (pt, dev) = match st(proto_mod::find_position_from_pcs(k, &r.pool, &mut pc1, &mut pc2))? {
+                        let (pt, dev) = match st(proto_mod::find_position_from_pcs(
+                            k, &r.pool, &mut pc1, &mut pc2,
+                        ))? {
                             Ok(x) => (x.position, x.deviation),
                             Err(s) => {
                                 status = s;
@@ -3387,7 +3617,13 @@ fn run_proto(
                     skip = true;
                 } else {
                     let dom = Extent1d::from_min_max(a, bb);
-                    match st(proto_mod::is_interior(&r.pool, c, &dom, t, zone_tol3d(k, tol)))? {
+                    match st(proto_mod::is_interior(
+                        &r.pool,
+                        c,
+                        &dom,
+                        t,
+                        zone_tol3d(k, tol),
+                    ))? {
                         Ok(f) => out.push(b(f)),
                         Err(s) => status = s,
                     }
@@ -3420,7 +3656,9 @@ fn run_proto(
             p::CAN_IMPRINT => {
                 let c = rd.idx();
                 match PointClassType::from_code(c as i32) {
-                    Some(t) if !skip && (100..=110).contains(&c) => out.push(b(proto_mod::can_imprint(t))),
+                    Some(t) if !skip && (100..=110).contains(&c) => {
+                        out.push(b(proto_mod::can_imprint(t)));
+                    }
                     _ => skip = true,
                 }
             }
@@ -3452,7 +3690,9 @@ fn run_proto(
                 };
                 match (pc1, pc2) {
                     (Some(mut a), Some(mut c)) if !skip && pos_ok => {
-                        let called = st3(r.mgr.find_or_create_proto_vertex_pcs(k, &r.pool, &mut a, &mut c))?;
+                        let called = st3(r
+                            .mgr
+                            .find_or_create_proto_vertex_pcs(k, &r.pool, &mut a, &mut c))?;
                         super::topology_proto_topology_p2::sync_counts(&mut r);
                         match called {
                             Ok((pv, created)) => {
@@ -3474,10 +3714,14 @@ fn run_proto(
                 let cc_tol = rd.num();
                 let a = rd.num();
                 let bb = rd.num();
-                let pcs: Vec<Option<PointClassification<H>>> = (0..6).map(|_| r.read_pc(&mut rd)).collect();
+                let pcs: Vec<Option<PointClassification<H>>> =
+                    (0..6).map(|_| r.read_pc(&mut rd)).collect();
                 let mut pos_ok = true;
                 for i in 0..3 {
-                    if let (Some(a), Some(c)) = (pcs.get(i).and_then(Option::as_ref), pcs.get(i + 3).and_then(Option::as_ref)) {
+                    if let (Some(a), Some(c)) = (
+                        pcs.get(i).and_then(Option::as_ref),
+                        pcs.get(i + 3).and_then(Option::as_ref),
+                    ) {
                         pos_ok &= r.position_ok(a, c)?;
                     }
                 }
@@ -3486,13 +3730,18 @@ fn run_proto(
                     || cc_curve.is_none()
                     || a > bb
                     || pcs.iter().any(Option::is_none)
-                    || pcs.iter().flatten().all(|pc| proto_mod::can_imprint(pc.point_class()))
+                    || pcs
+                        .iter()
+                        .flatten()
+                        .all(|pc| proto_mod::can_imprint(pc.point_class()))
                     || !pos_ok
                 {
                     skip = true;
                 } else {
                     let p: Vec<PointClassification<H>> = pcs.into_iter().flatten().collect();
-                    let Ok::<[PointClassification<H>; 6], _>([p0, p1, p2, p3, p4, p5]) = p.try_into() else {
+                    let Ok::<[PointClassification<H>; 6], _>([p0, p1, p2, p3, p4, p5]) =
+                        p.try_into()
+                    else {
                         return Err(harness("six classifications").into());
                     };
                     let mut cc = CurveClassification::new(k);
@@ -3534,7 +3783,15 @@ fn run_proto(
                         }
                     }
                     if !skip {
-                        let called = st3(r.mgr.find_or_create_proto_edge(k, &mut r.pool, approx_tol, &cc, &mut ci1, &cc, &mut ci2))?;
+                        let called = st3(r.mgr.find_or_create_proto_edge(
+                            k,
+                            &mut r.pool,
+                            approx_tol,
+                            &cc,
+                            &mut ci1,
+                            &cc,
+                            &mut ci2,
+                        ))?;
                         super::topology_proto_topology_p2::sync_counts(&mut r);
                         match called {
                             Ok((pe, created)) => {
@@ -3596,11 +3853,21 @@ fn run_proto(
                             .edge_def(d)
                             .and_then(EdgeDefinition::proto_edge)
                             .is_some_and(|pe| r.mgr.proto_edge(pe).is_some());
-                        let has_curve = r.mgr.edge_def(d).is_some_and(|x| x.xsect_curve_3d().is_some());
+                        let has_curve = r
+                            .mgr
+                            .edge_def(d)
+                            .is_some_and(|x| x.xsect_curve_3d().is_some());
                         if interior && (!has_curve || !pe_live || !r.ed_curves_unique()) {
                             skip = true;
                         } else {
-                            let called = st3(r.mgr.edge_definition_split(k, &mut r.pool, d, t, Some(mid), Some(top)))?;
+                            let called = st3(r.mgr.edge_definition_split(
+                                k,
+                                &mut r.pool,
+                                d,
+                                t,
+                                Some(mid),
+                                Some(top),
+                            ))?;
                             super::topology_proto_topology_p2::sync_counts(&mut r);
                             match called {
                                 Ok((vd, ed)) => {
@@ -3644,7 +3911,8 @@ fn run_proto(
                         if guard {
                             skip = true;
                         } else {
-                            let called = st3(r.mgr.split_intersecting_proto_edges(k, &mut r.pool, e1, e2))?;
+                            let called =
+                                st3(r.mgr.split_intersecting_proto_edges(k, &mut r.pool, e1, e2))?;
                             super::topology_proto_topology_p2::sync_counts(&mut r);
                             match called {
                                 Ok(deleted) => {
@@ -3666,7 +3934,10 @@ fn run_proto(
                 if !skip {
                     let m = &r.mgr;
                     for &pv in m.proto_vertices() {
-                        let vds = m.proto_vertex(pv).map(|x| x.vertex_definitions().to_vec()).unwrap_or_default();
+                        let vds = m
+                            .proto_vertex(pv)
+                            .map(|x| x.vertex_definitions().to_vec())
+                            .unwrap_or_default();
                         for &vd in vds.iter().skip(1) {
                             let first = vds.first().and_then(|&f| m.vertex_def(f));
                             let this = m.vertex_def(vd);
@@ -3674,9 +3945,12 @@ fn run_proto(
                                 // only the paths that do not glue run: a pair of final vertices
                                 // must be one vertex or two vertices with points that are far
                                 // apart (a bare stand-in has no usable point; a glue needs a B-rep)
-                                if let (Some(a1), Some(b1), Some(a2), Some(b2)) =
-                                    (f.final_vertex(1), t.final_vertex(1), f.final_vertex(2), t.final_vertex(2))
-                                {
+                                if let (Some(a1), Some(b1), Some(a2), Some(b2)) = (
+                                    f.final_vertex(1),
+                                    t.final_vertex(1),
+                                    f.final_vertex(2),
+                                    t.final_vertex(2),
+                                ) {
                                     for (x, y) in [(a1, b1), (a2, b2)] {
                                         match (r.pool.point_of(x), r.pool.point_of(y)) {
                                             (Some(px), Some(py)) => {
@@ -3701,10 +3975,11 @@ fn run_proto(
                     }
                     if !skip {
                         // (the shim's intersector relates nothing: GetOtherMate is always null)
-                        let glued = r
-                            .mgr
-                            .glue_coincident_brep_vertices(k, &r.pool, &mut NoMates);
-                        match st3(glued)? {
+                        match st3(r.mgr.glue_coincident_brep_vertices(
+                            &mut r.k,
+                            &mut r.pool,
+                            &mut solidcore::topology::proto_topology::p3::NoMates,
+                        ))? {
                             Ok(deleted) => {
                                 let ids = r.kill_curves(deleted);
                                 out.push(ids.len() as f64);
@@ -3741,9 +4016,14 @@ fn run_proto(
                         }
                     }
                     for &e in &grp {
-                        let live_pv = |pv: Option<ProtoVertexId>| pv.is_some_and(|v| m.proto_vertex(v).is_some());
+                        let live_pv = |pv: Option<ProtoVertexId>| {
+                            pv.is_some_and(|v| m.proto_vertex(v).is_some())
+                        };
                         match m.proto_edge(e) {
-                            Some(x) if live_pv(x.start_proto_vertex()) && live_pv(x.end_proto_vertex()) => {
+                            Some(x)
+                                if live_pv(x.start_proto_vertex())
+                                    && live_pv(x.end_proto_vertex()) =>
+                            {
                                 if !r.listed_with_ends(e) {
                                     skip = true;
                                     continue;
@@ -3757,7 +4037,9 @@ fn run_proto(
                                         skip = true;
                                     }
                                     match m.proto_edge(o) {
-                                        Some(oe) if oe.overlapping_pes().contains(&e) => group.push(o),
+                                        Some(oe) if oe.overlapping_pes().contains(&e) => {
+                                            group.push(o);
+                                        }
                                         _ => skip = true,
                                     }
                                 }
@@ -3782,9 +4064,13 @@ fn run_proto(
                                     continue;
                                 }
                                 // a vertex left without edges but with definitions is deleted
-                                for v in [x.start_proto_vertex(), x.end_proto_vertex()].into_iter().flatten() {
+                                for v in [x.start_proto_vertex(), x.end_proto_vertex()]
+                                    .into_iter()
+                                    .flatten()
+                                {
                                     if let Some(pv) = m.proto_vertex(v) {
-                                        let left = pv.proto_edges().iter().any(|pe| !grp.contains(pe));
+                                        let left =
+                                            pv.proto_edges().iter().any(|pe| !grp.contains(pe));
                                         if !left && pv.num_vertex_definitions() > 0 {
                                             skip = true;
                                         }
@@ -3806,7 +4092,10 @@ fn run_proto(
                     }
                     for i in 0..r.n_pf {
                         if let Some(f) = m.proto_face(ProtoFaceId::from_index(i)) {
-                            if f.coinc_proto_edges().iter().any(|&e| m.proto_edge(e).is_none()) {
+                            if f.coinc_proto_edges()
+                                .iter()
+                                .any(|&e| m.proto_edge(e).is_none())
+                            {
                                 skip = true;
                             }
                         }
@@ -3814,7 +4103,11 @@ fn run_proto(
                     if skip || !r.ed_curves_unique() {
                         skip = true;
                     } else {
-                        match st3(r.mgr.resolve_overlapping_proto_edges(k, &mut r.pool, approx_tol))? {
+                        match st3(r.mgr.resolve_overlapping_proto_edges(
+                            k,
+                            &mut r.pool,
+                            approx_tol,
+                        ))? {
                             Ok(deleted) => {
                                 let ids = r.kill_curves(deleted);
                                 out.push(ids.len() as f64);
@@ -3829,7 +4122,14 @@ fn run_proto(
                 }
             }
             op if (q::FIRST..=q::LAST).contains(&op) => {
-                super::topology_proto_topology_p2::run_op(&mut r, &mut rd, op, &mut out, &mut status, &mut skip)?;
+                super::topology_proto_topology_p2::run_op(
+                    &mut r,
+                    &mut rd,
+                    op,
+                    &mut out,
+                    &mut status,
+                    &mut skip,
+                )?;
             }
             _ => return Err(harness("proto op").into()),
         }
@@ -3914,14 +4214,25 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
             let net = s
                 .net
                 .iter()
-                .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+                .map(|row| {
+                    row.iter()
+                        .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                        .collect()
+                })
                 .collect();
             let sur = NurbSurface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
                 .map_err(|e| harness(format!("surface: {e}")))?;
             let mut bs = BSplineSurface::from_nurb(sur, false);
             *bs.out_of_bounds_enabled_mut() = s.oob;
-            let c = CrvOnSurf::from_uv_line(&k, Point2::new(a[0], a[1]), Point2::new(bb[0], bb[1]), bs, None, 0)
-                .map_err(|e| harness(format!("crv on surf: {e}")))?;
+            let c = CrvOnSurf::from_uv_line(
+                &k,
+                Point2::new(a[0], a[1]),
+                Point2::new(bb[0], bb[1]),
+                bs,
+                None,
+                0,
+            )
+            .map_err(|e| harness(format!("crv on surf: {e}")))?;
             let mut c = Curve::from(c);
             if *owned {
                 let _ = c.set_owner(Some(ANCHOR), None);
@@ -3943,12 +4254,19 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
             key: ObjectKey(0),
         },
     };
-    let mut poly_target = poly.as_mut().map(|b| PolyBrepTarget { brep: b, env: &mut env });
-    let mut brep = solidcore::topology::Brep::new();
+    let mut poly_target = poly.as_mut().map(|b| PolyBrepTarget {
+        brep: b,
+        env: &mut env,
+    });
+    let mut brep = Brep::new();
     let target = match obj {
-        TObjIn::Composite { .. } | TObjIn::CrvOnSurf { .. } => special.as_mut().map(TransformObject::Curve),
+        TObjIn::Composite { .. } | TObjIn::CrvOnSurf { .. } => {
+            special.as_mut().map(TransformObject::Curve)
+        }
         TObjIn::Curve { .. } => curve.as_mut().map(TransformObject::Curve),
-        TObjIn::Plane { .. } | TObjIn::Bsurf { .. } => surface.as_mut().map(TransformObject::Surface),
+        TObjIn::Plane { .. } | TObjIn::Bsurf { .. } => {
+            surface.as_mut().map(TransformObject::Surface)
+        }
         TObjIn::Brep => Some(TransformObject::Brep(&mut brep)),
         TObjIn::Poly | TObjIn::PolyPts { .. } => poly_target
             .as_mut()
@@ -3989,8 +4307,12 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         let vs = b.poly_vertices();
         o.push(vs.len() as f64);
         for v in vs {
-            let q = b.vertex_point(v).map_err(|e| harness(format!("poly vertex: {e}")))?;
-            let t = b.vertex_tolerance(v).map_err(|e| harness(format!("poly vertex: {e}")))?;
+            let q = b
+                .vertex_point(v)
+                .map_err(|e| harness(format!("poly vertex: {e}")))?;
+            let t = b
+                .vertex_tolerance(v)
+                .map_err(|e| harness(format!("poly vertex: {e}")))?;
             o.extend([q.x, q.y, q.z, t]);
         }
     }
@@ -4013,9 +4335,7 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
 
 pub(super) fn rust(s: &Script) -> Result<Output, HarnessError> {
     match rust_run(s) {
-        Ok(v) => {
-            Ok(Output::new().values("out", v))
-        }
+        Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
     }
@@ -4033,10 +4353,20 @@ fn gen_bspline(rng: &mut Rng, scale: f64) -> BSplineIn {
     let n = p + rng.below(5) as usize;
     let rational = rng.chance(0.25);
     let two_d = rng.chance(0.08);
-    let a = if rng.chance(0.5) { 0.0 } else { rng.uniform(-5.0, 5.0) };
-    let len = if rng.chance(0.5) { 1.0 } else { rng.uniform(0.1, 10.0) };
+    let a = if rng.chance(0.5) {
+        0.0
+    } else {
+        rng.uniform(-5.0, 5.0)
+    };
+    let len = if rng.chance(0.5) {
+        1.0
+    } else {
+        rng.uniform(0.1, 10.0)
+    };
     let mut u = vec![a; p + 1];
-    let mut ks: Vec<f64> = (0..n - p).map(|_| a + len * rng.uniform(0.05, 0.95)).collect();
+    let mut ks: Vec<f64> = (0..n - p)
+        .map(|_| a + len * rng.uniform(0.05, 0.95))
+        .collect();
     ks.sort_by(f64::total_cmp);
     u.extend(ks);
     u.extend(vec![a + len; p + 1]);
@@ -4112,10 +4442,20 @@ pub(super) fn gen_surface(rng: &mut Rng, scale: f64) -> SurfIn {
     let n = p + rng.below(2) as usize;
     let m = q + rng.below(2) as usize;
     let knots = |rng: &mut Rng, deg: usize, cnt: usize| {
-        let a = if rng.chance(0.6) { 0.0 } else { rng.uniform(-2.0, 2.0) };
-        let l = if rng.chance(0.6) { 1.0 } else { rng.uniform(0.5, 5.0) };
+        let a = if rng.chance(0.6) {
+            0.0
+        } else {
+            rng.uniform(-2.0, 2.0)
+        };
+        let l = if rng.chance(0.6) {
+            1.0
+        } else {
+            rng.uniform(0.5, 5.0)
+        };
         let mut k = vec![a; deg + 1];
-        let mut inner: Vec<f64> = (0..cnt - deg).map(|_| a + l * rng.uniform(0.1, 0.9)).collect();
+        let mut inner: Vec<f64> = (0..cnt - deg)
+            .map(|_| a + l * rng.uniform(0.1, 0.9))
+            .collect();
         inner.sort_by(f64::total_cmp);
         k.extend(inner);
         k.extend(vec![a + l; deg + 1]);
@@ -4217,7 +4557,11 @@ fn gen_list(rng: &mut Rng) -> Script {
     // instances into assemblies first
     for &i in &insts {
         if let Some(&a) = rng.choose(&asms) {
-            let comp = if rng.chance(0.5) { pick(rng, &asms) } else { -1 };
+            let comp = if rng.chance(0.5) {
+                pick(rng, &asms)
+            } else {
+                -1
+            };
             ops.push([lop::INST_NEW, i, a, comp, i64::from(rng.chance(0.3))]);
         }
     }
@@ -4233,7 +4577,11 @@ fn gen_list(rng: &mut Rng) -> Script {
             13..=15 => [lop::REMOVE, a, x, 0, 0],
             16..=17 => [lop::IS_IN_LIST, a, x, 0, 0],
             18..=20 => {
-                let attr = if rng.chance(0.5) { -1 } else { rng.below(4) as i64 };
+                let attr = if rng.chance(0.5) {
+                    -1
+                } else {
+                    rng.below(4) as i64
+                };
                 let tgt = if rng.chance(0.6) { -1 } else { x };
                 [lop::GET_ALL, a, attr, tgt, 0]
             }
@@ -4242,7 +4590,13 @@ fn gen_list(rng: &mut Rng) -> Script {
             23 => [lop::SET_LIST, a, x, 0, 0],
             24 => [lop::DESTROY, x, 0, 0, 0],
             25 => [lop::ASM_INSTANCES, pick(rng, &asms), 0, 0, 0],
-            26 => [lop::ASM_REMOVE_INSTANCE, pick(rng, &asms), pick(rng, &insts), 0, 0],
+            26 => [
+                lop::ASM_REMOVE_INSTANCE,
+                pick(rng, &asms),
+                pick(rng, &insts),
+                0,
+                0,
+            ],
             27 => [lop::INST_PARENT, pick(rng, &insts), 0, 0, 0],
             28..=29 => [lop::MAP_SET, x, c, 0, 0],
             30..=31 => [lop::MAP_GET, x, 0, 0, 0],
@@ -4325,20 +4679,44 @@ impl PGen {
     /// A point classification on a curve or surface (comparable), sometimes on topology.
     fn pc(&self, rng: &mut Rng, topo_ok: bool) -> Vec<f64> {
         let tol = gen_tol(rng, self.scale);
-        let gap = if rng.chance(0.3) { 0.0 } else { rng.uniform(0.0, 0.1) * self.scale };
+        let gap = if rng.chance(0.3) {
+            0.0
+        } else {
+            rng.uniform(0.0, 0.1) * self.scale
+        };
         let r = rng.below(20);
         if r < 9 && !self.curves.is_empty() {
             let c = self.curve(rng);
-            let flags = if rng.chance(0.85) { 1.0 } else { 0.0 } + if rng.chance(0.5) { 4.0 } else { 0.0 };
+            let flags =
+                if rng.chance(0.85) { 1.0 } else { 0.0 } + if rng.chance(0.5) { 4.0 } else { 0.0 };
             return vec![106.0, c, tol, flags, self.param(rng, c), 0.0, 0.0, gap];
         }
         if r < 13 && !self.surfs.is_empty() {
             let s = Self::of(rng, &self.surfs);
-            let flags = if rng.chance(0.96) { 2.0 } else { 0.0 } + if rng.chance(0.5) { 4.0 } else { 0.0 };
-            return vec![107.0, s, tol, flags, 0.0, rng.uniform(-0.2, 1.2), rng.uniform(-0.2, 1.2), gap];
+            let flags =
+                if rng.chance(0.96) { 2.0 } else { 0.0 } + if rng.chance(0.5) { 4.0 } else { 0.0 };
+            return vec![
+                107.0,
+                s,
+                tol,
+                flags,
+                0.0,
+                rng.uniform(-0.2, 1.2),
+                rng.uniform(-0.2, 1.2),
+                gap,
+            ];
         }
         if r < 15 {
-            return vec![*rng.choose(&[100.0, 110.0]).unwrap_or(&100.0), -1.0, tol, 0.0, 0.0, 0.0, 0.0, gap];
+            return vec![
+                *rng.choose(&[100.0, 110.0]).unwrap_or(&100.0),
+                -1.0,
+                tol,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                gap,
+            ];
         }
         if topo_ok {
             let (cls, set) = match rng.below(4) {
@@ -4349,7 +4727,16 @@ impl PGen {
             };
             let ob = Self::of(rng, &set);
             if ob >= 0.0 {
-                return vec![cls, ob, tol, f64::from(rng.below(8) as u32), rng.unit(), rng.unit(), rng.unit(), gap];
+                return vec![
+                    cls,
+                    ob,
+                    tol,
+                    f64::from(rng.below(8) as u32),
+                    rng.unit(),
+                    rng.unit(),
+                    rng.unit(),
+                    gap,
+                ];
             }
         }
         vec![100.0, -1.0, tol, 0.0, 0.0, 0.0, 0.0, gap]
@@ -4388,7 +4775,10 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
     // a near-duplicate of the first curve (overlaps, same-curve checks)
     if rng.chance(0.6) {
         if let Some(ObjIn::Curve(c)) = objects.first().cloned() {
-            g.domains.insert(objects.len() as i64, g.domains.get(&0).copied().unwrap_or([0.0, 1.0]));
+            g.domains.insert(
+                objects.len() as i64,
+                g.domains.get(&0).copied().unwrap_or([0.0, 1.0]),
+            );
             g.curves.push(objects.len() as i64);
             objects.push(ObjIn::Curve(c));
         }
@@ -4411,7 +4801,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             let q = g.point(rng);
             if let Some(slot) = objects.last_mut() {
                 *slot = ObjIn::VertexAt {
-                    p: [q[0] + 5.0 * (f64::from(i) + 1.0) * g.scale.max(1.0), q[1], q[2]],
+                    p: [
+                        q[0] + 5.0 * (f64::from(i) + 1.0) * g.scale.max(1.0),
+                        q[1],
+                        q[2],
+                    ],
                     tol: gen_tol(rng, g.scale),
                 };
             }
@@ -4440,7 +4834,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
     objects.push(ObjIn::Face(plane as usize));
     for _ in 0..2 {
         g.others.push(objects.len() as i64);
-        objects.push(if rng.chance(0.5) { ObjIn::Region } else { ObjIn::Loop });
+        objects.push(if rng.chance(0.5) {
+            ObjIn::Region
+        } else {
+            ObjIn::Loop
+        });
     }
     for _ in 0..4 {
         let c = gen_curve(rng, scale);
@@ -4507,7 +4905,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
         }
         for _ in 0..=rng.below(2) {
             let c3 = if rng.chance(0.9) { c } else { g.curve(rng) };
-            let dd = if rng.chance(0.7) { d } else { g.sub_domain(rng, c3) };
+            let dd = if rng.chance(0.7) {
+                d
+            } else {
+                g.sub_domain(rng, c3)
+            };
             let s1 = g.topo(rng);
             let s2 = g.topo(rng);
             let uv1 = if rng.chance(0.2) { g.curve(rng) } else { -1.0 };
@@ -4535,7 +4937,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
         v.extend(g.pc(rng, false));
         v.extend(g.point(rng));
         v.push(gen_tol(rng, scale));
-        v.push(if rng.chance(0.5) { 0.0 } else { rng.uniform(0.0, 0.1) * scale });
+        v.push(if rng.chance(0.5) {
+            0.0
+        } else {
+            rng.uniform(0.0, 0.1) * scale
+        });
         let owner = PGen::id(rng, g.n_pv);
         v.push(owner);
         ops.push(v);
@@ -4547,7 +4953,13 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
     // a coincident proto face
     if rng.chance(0.5) && g.n_pe > 0 {
         let f = PGen::of(rng, &g.faces);
-        ops.push(vec![p::PF_CREATE as f64, f, -1.0, 1.0, PGen::id(rng, g.n_pe)]);
+        ops.push(vec![
+            p::PF_CREATE as f64,
+            f,
+            -1.0,
+            1.0,
+            PGen::id(rng, g.n_pe),
+        ]);
         g.n_pf += 1;
     }
     let n_ops = 6 + rng.below(30);
@@ -4560,22 +4972,67 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
         // ops on kinds not made yet are mostly replaced (a refusal ends the script)
         let need = |c: i64| -> i64 {
             match c {
-                p::PE_COPY | p::MGR_ADD_PE | p::PE_CLEAR_EDS | p::MGR_REMOVE_PE | p::PE_GROUP
-                | p::PE_ADD_OVERLAP | p::PE_APPEND_OVERLAPS | p::PE_SET_START | p::PE_SET_END
-                | p::PE_SET_IVL | p::PE_REPLACE_PV | p::PE_END_POS | p::PE_END_POS_PV | p::PE_EVAL
-                | p::PE_EVAL_MID | p::PE_IS_SAME | p::WHICH_PV | p::MGR_REMOVE_NOEDGE_PV | p::PE_SPLIT
+                p::PE_COPY
+                | p::MGR_ADD_PE
+                | p::PE_CLEAR_EDS
+                | p::MGR_REMOVE_PE
+                | p::PE_GROUP
+                | p::PE_ADD_OVERLAP
+                | p::PE_APPEND_OVERLAPS
+                | p::PE_SET_START
+                | p::PE_SET_END
+                | p::PE_SET_IVL
+                | p::PE_REPLACE_PV
+                | p::PE_END_POS
+                | p::PE_END_POS_PV
+                | p::PE_EVAL
+                | p::PE_EVAL_MID
+                | p::PE_IS_SAME
+                | p::WHICH_PV
+                | p::MGR_REMOVE_NOEDGE_PV
+                | p::PE_SPLIT
                 | p::SPLIT_INT => g.n_pe,
                 p::MGR_ADD_PF | p::PE_RELATE_PF | p::PF_SET_SRC => g.n_pf.min(g.n_pe.max(1)),
-                p::PV_ADD_VD | p::PV_REMOVE_VD | p::VD_SET_SRC | p::VD_SET_FINAL | p::VD_SET_POS
-                | p::VD_SET_PV | p::MGR_REMOVE_VD | p::VD_RESOLVE | p::VD_SET_POINT_PARAMS
+                p::PV_ADD_VD
+                | p::PV_REMOVE_VD
+                | p::VD_SET_SRC
+                | p::VD_SET_FINAL
+                | p::VD_SET_POS
+                | p::VD_SET_PV
+                | p::MGR_REMOVE_VD
+                | p::VD_RESOLVE
+                | p::VD_SET_POINT_PARAMS
                 | p::VD_NUM_PES => g.n_vd,
-                p::MGR_ADD_PV | p::PV_CLEAR_VDS | p::MGR_REMOVE_PV | p::PV_COMBINE | p::PV_FIND_MATCH
-                | p::PV_CLOSEST | p::PV_FINAL_VTX | p::PV_ADD_PE | p::PV_REMOVE_PE => g.n_pv,
-                p::ED_COPY | p::ED_SET_C3 | p::ED_SET_UV | p::ED_SET_PE | p::ED_SET_IVL
-                | p::ED_SET_IVL_MINMAX | p::ED_SET_SRC | p::ED_SET_FINAL | p::ED_REVERSE
-                | p::ED_START_END_PV | p::ED_EVAL | p::ED_EVAL_MID | p::ED_END_POS
-                | p::ED_END_POS_PV | p::ED_REPARAM | p::ED_IS_SAME | p::ED_IS_INTERIOR
-                | p::MGR_CAN_COMBINE | p::ARE_OVERLAPPING | p::PE_ADD_ED | p::PE_REMOVE_ED
+                p::MGR_ADD_PV
+                | p::PV_CLEAR_VDS
+                | p::MGR_REMOVE_PV
+                | p::PV_COMBINE
+                | p::PV_FIND_MATCH
+                | p::PV_CLOSEST
+                | p::PV_FINAL_VTX
+                | p::PV_ADD_PE
+                | p::PV_REMOVE_PE => g.n_pv,
+                p::ED_COPY
+                | p::ED_SET_C3
+                | p::ED_SET_UV
+                | p::ED_SET_PE
+                | p::ED_SET_IVL
+                | p::ED_SET_IVL_MINMAX
+                | p::ED_SET_SRC
+                | p::ED_SET_FINAL
+                | p::ED_REVERSE
+                | p::ED_START_END_PV
+                | p::ED_EVAL
+                | p::ED_EVAL_MID
+                | p::ED_END_POS
+                | p::ED_END_POS_PV
+                | p::ED_REPARAM
+                | p::ED_IS_SAME
+                | p::ED_IS_INTERIOR
+                | p::MGR_CAN_COMBINE
+                | p::ARE_OVERLAPPING
+                | p::PE_ADD_ED
+                | p::PE_REMOVE_ED
                 | p::ED_SPLIT => g.n_ed,
                 _ => 1,
             }
@@ -4584,14 +5041,20 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             continue;
         }
         // deletions of objects nothing else refers to (otherwise the shim refuses them)
-        if matches!(code, p::ED_DESTRUCT | p::DELETE_ED | p::DELETE_PE | p::DELETE_PV | p::DELETE_VD)
-            && rng.chance(0.8)
+        if matches!(
+            code,
+            p::ED_DESTRUCT | p::DELETE_ED | p::DELETE_PE | p::DELETE_PV | p::DELETE_VD
+        ) && rng.chance(0.8)
         {
             match code {
                 p::ED_DESTRUCT | p::DELETE_ED | p::DELETE_PE => {
                     let Some(c) = g.scratch.pop() else { continue };
                     let d = g.domains.get(&c).copied().unwrap_or([0.0, 1.0]);
-                    let uv = if rng.chance(0.3) { g.scratch.pop().map_or(-1.0, |x| x as f64) } else { -1.0 };
+                    let uv = if rng.chance(0.3) {
+                        g.scratch.pop().map_or(-1.0, |x| x as f64)
+                    } else {
+                        -1.0
+                    };
                     let pe = if code == p::DELETE_PE {
                         ops.push(vec![p::PE_NEW as f64, -1.0, -1.0, d[0], d[1]]);
                         g.n_pe += 1;
@@ -4599,8 +5062,16 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                     } else {
                         -1.0
                     };
-                    let s1 = if rng.chance(0.6) { PGen::of(rng, &g.edges) } else { g.topo(rng) };
-                    let s2 = if rng.chance(0.4) { PGen::of(rng, &g.edges) } else { g.topo(rng) };
+                    let s1 = if rng.chance(0.6) {
+                        PGen::of(rng, &g.edges)
+                    } else {
+                        g.topo(rng)
+                    };
+                    let s2 = if rng.chance(0.4) {
+                        PGen::of(rng, &g.edges)
+                    } else {
+                        g.topo(rng)
+                    };
                     ops.push(vec![
                         p::ED_NEW as f64,
                         c as f64,
@@ -4666,7 +5137,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                 v.extend(g.pc(rng, true));
                 v.extend(g.point(rng));
                 v.push(gen_tol(rng, scale));
-                v.push(if rng.chance(0.5) { 0.0 } else { rng.uniform(-0.1, 0.1) * scale });
+                v.push(if rng.chance(0.5) {
+                    0.0
+                } else {
+                    rng.uniform(-0.1, 0.1) * scale
+                });
                 v.push(idv(rng, g.n_pv));
                 g.n_vd += 1;
             }
@@ -4686,7 +5161,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                 v.extend([c, d[0], d[1], g.topo(rng), g.topo(rng), gen_tol(rng, scale)]);
                 v.push(if rng.chance(0.2) { g.curve(rng) } else { -1.0 });
                 v.push(if rng.chance(0.2) { g.curve(rng) } else { -1.0 });
-                v.push(if rng.chance(0.8) { idv(rng, g.n_pe) } else { -1.0 });
+                v.push(if rng.chance(0.8) {
+                    idv(rng, g.n_pe)
+                } else {
+                    -1.0
+                });
                 g.n_ed += 1;
             }
             p::ED_COPY => {
@@ -4694,7 +5173,13 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                 g.n_ed += 1;
             }
             p::PF_NEW | p::PF_CREATE => {
-                let f = |rng: &mut Rng| if rng.chance(0.7) { PGen::of(rng, &g.faces) } else { -1.0 };
+                let f = |rng: &mut Rng| {
+                    if rng.chance(0.7) {
+                        PGen::of(rng, &g.faces)
+                    } else {
+                        -1.0
+                    }
+                };
                 v.extend([f(rng), f(rng)]);
                 let n = rng.below(3);
                 v.push(n as f64);
@@ -4703,12 +5188,20 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                 }
                 g.n_pf += 1;
             }
-            p::MGR_ADD_PV | p::PV_CLEAR_VDS | p::MGR_REMOVE_PV | p::DELETE_PV => v.push(idv(rng, g.n_pv)),
+            p::MGR_ADD_PV | p::PV_CLEAR_VDS | p::MGR_REMOVE_PV | p::DELETE_PV => {
+                v.push(idv(rng, g.n_pv));
+            }
             p::MGR_ADD_PE | p::PE_CLEAR_EDS | p::MGR_REMOVE_PE | p::DELETE_PE | p::PE_GROUP => {
                 v.push(idv(rng, g.n_pe));
             }
             p::MGR_ADD_PF => v.push(idv(rng, g.n_pf)),
-            p::MGR_RESET | p::MGR_ALL_VDS | p::MGR_ALL_EDS | p::MGR_TYPE | p::MGR_GET | p::GLUE | p::RESOLVE => {}
+            p::MGR_RESET
+            | p::MGR_ALL_VDS
+            | p::MGR_ALL_EDS
+            | p::MGR_TYPE
+            | p::MGR_GET
+            | p::GLUE
+            | p::RESOLVE => {}
             p::MGR_DESTROY => {
                 if rng.chance(0.7) {
                     continue;
@@ -4736,7 +5229,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             }
             p::PE_REPLACE_PV => v.extend([idv(rng, g.n_pe), idv(rng, g.n_pv), idv(rng, g.n_pv)]),
             p::PE_RELATE_PF => v.extend([idv(rng, g.n_pe), idv(rng, g.n_pf)]),
-            p::PF_SET_SRC => v.extend([idv(rng, g.n_pf), f64::from(1 + rng.below(2) as u32), g.topo(rng)]),
+            p::PF_SET_SRC => v.extend([
+                idv(rng, g.n_pf),
+                f64::from(1 + rng.below(2) as u32),
+                g.topo(rng),
+            ]),
             p::VD_SET_SRC => {
                 let (cls, set) = match rng.below(5) {
                     0 => (101.0, g.others.clone()),
@@ -4745,11 +5242,19 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                     3 => (104.0, g.vertices.clone()),
                     _ => (100.0, Vec::new()),
                 };
-                let ob = if set.is_empty() { -1.0 } else { PGen::of(rng, &set) };
+                let ob = if set.is_empty() {
+                    -1.0
+                } else {
+                    PGen::of(rng, &set)
+                };
                 v.extend([idv(rng, g.n_vd), f64::from(rng.below(4) as u32), cls, ob]);
             }
             p::VD_SET_FINAL => {
-                let ob = if rng.chance(0.2) { -1.0 } else { PGen::of(rng, &g.vertices) };
+                let ob = if rng.chance(0.2) {
+                    -1.0
+                } else {
+                    PGen::of(rng, &g.vertices)
+                };
                 v.extend([idv(rng, g.n_vd), f64::from(1 + rng.below(2) as u32), ob]);
             }
             p::VD_SET_POS => {
@@ -4774,17 +5279,29 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                 }
                 v.extend([idv(rng, g.n_ed), d[0], d[1]]);
             }
-            p::ED_SET_SRC => v.extend([idv(rng, g.n_ed), f64::from(1 + rng.below(2) as u32), g.topo(rng)]),
+            p::ED_SET_SRC => v.extend([
+                idv(rng, g.n_ed),
+                f64::from(1 + rng.below(2) as u32),
+                g.topo(rng),
+            ]),
             p::ED_SET_FINAL => {
-                let ob = if rng.chance(0.3) { -1.0 } else { PGen::of(rng, &g.edges) };
+                let ob = if rng.chance(0.3) {
+                    -1.0
+                } else {
+                    PGen::of(rng, &g.edges)
+                };
                 v.extend([idv(rng, g.n_ed), f64::from(1 + rng.below(2) as u32), ob]);
             }
             p::MGR_REMOVE_VD => v.extend([idv(rng, g.n_vd), b(rng.chance(0.5))]),
             p::MGR_SET_TOL => v.push(gen_tol(rng, scale)),
             p::MGR_SET_CAPTURE => v.push(rng.uniform(0.0, 1.0) * scale),
             p::PV_COMBINE => v.extend([idv(rng, g.n_pv), idv(rng, g.n_pv)]),
-            p::ED_DESTRUCT | p::DELETE_ED | p::ED_REVERSE | p::ED_START_END_PV => v.push(idv(rng, g.n_ed)),
-            p::DELETE_VD | p::VD_RESOLVE | p::VD_SET_POINT_PARAMS | p::VD_NUM_PES => v.push(idv(rng, g.n_vd)),
+            p::ED_DESTRUCT | p::DELETE_ED | p::ED_REVERSE | p::ED_START_END_PV => {
+                v.push(idv(rng, g.n_ed));
+            }
+            p::DELETE_VD | p::VD_RESOLVE | p::VD_SET_POINT_PARAMS | p::VD_NUM_PES => {
+                v.push(idv(rng, g.n_vd));
+            }
             p::ED_EVAL => {
                 let c = g.curve(rng);
                 v.extend([idv(rng, g.n_ed), g.param(rng, c), rng.below(4) as f64]);
@@ -4794,11 +5311,19 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             p::ED_END_POS_PV => v.extend([idv(rng, g.n_ed), idv(rng, g.n_pv)]),
             p::ED_REPARAM => {
                 let a = rng.uniform(-3.0, 3.0);
-                let len = if rng.chance(0.03) { 0.0 } else { rng.uniform(0.1, 10.0) };
+                let len = if rng.chance(0.03) {
+                    0.0
+                } else {
+                    rng.uniform(0.1, 10.0)
+                };
                 v.extend([idv(rng, g.n_ed), a, a + len, b(rng.chance(0.3))]);
             }
             p::ED_IS_SAME | p::PE_IS_SAME => {
-                v.push(if code == p::ED_IS_SAME { idv(rng, g.n_ed) } else { idv(rng, g.n_pe) });
+                v.push(if code == p::ED_IS_SAME {
+                    idv(rng, g.n_ed)
+                } else {
+                    idv(rng, g.n_pe)
+                });
                 v.extend([idv(rng, g.n_pv), idv(rng, g.n_pv)]);
                 v.extend(g.pc(rng, true));
                 v.extend(g.pc(rng, true));
@@ -4820,8 +5345,16 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             p::PE_EVAL_MID => v.extend([idv(rng, g.n_pe), rng.below(4) as f64]),
             p::PV_FIND_MATCH => {
                 let n = objects.len() as u64;
-                let o1 = if rng.chance(0.2) { -1.0 } else { rng.below(n) as f64 };
-                let o2 = if rng.chance(0.2) { -1.0 } else { rng.below(n) as f64 };
+                let o1 = if rng.chance(0.2) {
+                    -1.0
+                } else {
+                    rng.below(n) as f64
+                };
+                let o2 = if rng.chance(0.2) {
+                    -1.0
+                } else {
+                    rng.below(n) as f64
+                };
                 v.extend([idv(rng, g.n_pv), o1, o2]);
             }
             p::PV_CLOSEST => {
@@ -4836,7 +5369,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             ]),
             p::MGR_FIND_PV => v.extend(g.point(rng)),
             p::MGR_FIND_ED_FROM_EDGE => {
-                let e = if rng.chance(0.2) { -1.0 } else { PGen::of(rng, &g.edges) };
+                let e = if rng.chance(0.2) {
+                    -1.0
+                } else {
+                    PGen::of(rng, &g.edges)
+                };
                 v.extend([e, f64::from(1 + rng.below(2) as u32)]);
             }
             p::MGR_CHECK_OVERLAP | p::ARE_OVERLAPPING => {
@@ -4862,7 +5399,11 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             p::MGR_CAN_COMBINE => v.extend([idv(rng, g.n_ed), idv(rng, g.n_ed)]),
             p::WHICH_PV => {
                 let c = g.curve(rng);
-                let sv = if rng.chance(0.7) { idv(rng, g.n_pv) } else { -1.0 };
+                let sv = if rng.chance(0.7) {
+                    idv(rng, g.n_pv)
+                } else {
+                    -1.0
+                };
                 v.extend([idv(rng, g.n_pe), g.param(rng, c), sv]);
             }
             p::FIND_POS | p::FOC_PV => {
@@ -4873,8 +5414,20 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
                 let c1 = g.curve(rng);
                 let c2 = if rng.chance(0.3) { c1 } else { g.curve(rng) };
                 let d1 = g.sub_domain(rng, c1);
-                let d2 = if rng.chance(0.5) { d1 } else { g.sub_domain(rng, c2) };
-                v.extend([c1, d1[0], d1[1], c2, d2[0], d2[1], rng.uniform(1e-6, 1.0) * scale]);
+                let d2 = if rng.chance(0.5) {
+                    d1
+                } else {
+                    g.sub_domain(rng, c2)
+                };
+                v.extend([
+                    c1,
+                    d1[0],
+                    d1[1],
+                    c2,
+                    d2[0],
+                    d2[1],
+                    rng.uniform(1e-6, 1.0) * scale,
+                ]);
             }
             p::IS_INTERIOR => {
                 let c = g.curve(rng);
@@ -4907,7 +5460,12 @@ fn gen_proto(rng: &mut Rng, p3: bool) -> Script {
             }
             p::ED_SPLIT => {
                 let c = g.curve(rng);
-                v.extend([idv(rng, g.n_ed), g.param(rng, c), idv(rng, g.n_pv), idv(rng, g.n_pe)]);
+                v.extend([
+                    idv(rng, g.n_ed),
+                    g.param(rng, c),
+                    idv(rng, g.n_pv),
+                    idv(rng, g.n_pe),
+                ]);
             }
             _ => continue,
         }
@@ -4975,11 +5533,19 @@ fn gen_transform(rng: &mut Rng) -> Script {
                 let s = rng.uniform(0.2, 5.0);
                 [s, s, s]
             }
-            1 => [rng.uniform(-3.0, 3.0), rng.uniform(-3.0, 3.0), rng.uniform(-3.0, 3.0)],
+            1 => [
+                rng.uniform(-3.0, 3.0),
+                rng.uniform(-3.0, 3.0),
+                rng.uniform(-3.0, 3.0),
+            ],
             2 => [1e-12, 1.0, 1.0],
             3 => [2.0, 2.0, 2.0 * (1.0 + 1e-13)],
             4 => [-1.0, -1.0, -1.0],
-            _ => [rng.uniform(0.1, 4.0), rng.uniform(0.1, 4.0), rng.uniform(0.1, 4.0)],
+            _ => [
+                rng.uniform(0.1, 4.0),
+                rng.uniform(0.1, 4.0),
+                rng.uniform(0.1, 4.0),
+            ],
         }
     };
     let op = match rng.below(5) {
@@ -5002,7 +5568,11 @@ fn gen_transform(rng: &mut Rng) -> Script {
         },
         _ => TOpIn::Rotate {
             r: rp(rng, 5.0 * scale),
-            a: if rng.chance(0.05) { [0.0; 3] } else { rp(rng, 2.0) },
+            a: if rng.chance(0.05) {
+                [0.0; 3]
+            } else {
+                rp(rng, 2.0)
+            },
             deg: rng.uniform(-720.0, 720.0),
         },
     };
@@ -5038,7 +5608,16 @@ pub(super) fn line(p0: [f64; 3], v: [f64; 3], d: [f64; 2]) -> CurveIn {
     })
 }
 
-pub(super) fn pcv(class: f64, ob: f64, tol: f64, flags: f64, t: f64, u: f64, v: f64, gap: f64) -> Vec<f64> {
+pub(super) fn pcv(
+    class: f64,
+    ob: f64,
+    tol: f64,
+    flags: f64,
+    t: f64,
+    u: f64,
+    v: f64,
+    gap: f64,
+) -> Vec<f64> {
     vec![class, ob, tol, flags, t, u, v, gap]
 }
 
@@ -5161,11 +5740,17 @@ fn edge_cases() -> Vec<(String, Value)> {
             opv(p::MGR_TYPE, &[]),
             opv(p::PV_NEW, &[0.0, 0.0, 0.0, t]),
             opv(p::PV_NEW, &[s, 0.0, 0.0, 2.0 * t]),
-            opv(p::PV_NEW_PCS, &cat(&[&pc_c0, &pc_s, &[0.25 * s, 0.0, 0.0, t]])),
+            opv(
+                p::PV_NEW_PCS,
+                &cat(&[&pc_c0, &pc_s, &[0.25 * s, 0.0, 0.0, t]]),
+            ),
             opv(p::MGR_ADD_PV, &[0.0]),
             opv(p::MGR_ADD_PV, &[1.0]),
             opv(p::MGR_ADD_PV, &[2.0]),
-            opv(p::VD_NEW, &cat(&[&pc_c2, &pc_s, &[0.0, s, 0.0, t, 0.0, 2.0]])),
+            opv(
+                p::VD_NEW,
+                &cat(&[&pc_c2, &pc_s, &[0.0, s, 0.0, t, 0.0, 2.0]]),
+            ),
             opv(p::PV_ADD_VD, &[2.0, 1.0]),
             opv(p::VD_RESOLVE, &[0.0]),
             opv(p::VD_RESOLVE, &[1.0]),
@@ -5201,12 +5786,24 @@ fn edge_cases() -> Vec<(String, Value)> {
             opv(p::IS_INTERIOR, &[2.0, 0.0, 90.0, 0.0, t]),
             opv(p::IS_INTERIOR, &[2.0, 0.0, 90.0, 120.0, t]),
             opv(p::MGR_SET_CAPTURE, &[1e-3 * s]),
-            opv(p::ED_IS_SAME, &cat(&[&[0.0, 0.0, 1.0], &pc_u, &pc_u, &[1.0, 0.0, 1.0]])),
-            opv(p::PE_IS_SAME, &cat(&[&[0.0, 1.0, 0.0], &pc_u, &pc_u, &[0.0, 0.0, 1.0]])),
+            opv(
+                p::ED_IS_SAME,
+                &cat(&[&[0.0, 0.0, 1.0], &pc_u, &pc_u, &[1.0, 0.0, 1.0]]),
+            ),
+            opv(
+                p::PE_IS_SAME,
+                &cat(&[&[0.0, 1.0, 0.0], &pc_u, &pc_u, &[0.0, 0.0, 1.0]]),
+            ),
             opv(p::MGR_CAN_COMBINE, &[0.0, 1.0]),
             opv(p::MGR_CAN_COMBINE, &[0.0, 0.0]),
-            opv(p::ARE_OVERLAPPING, &cat(&[&[1.0, t, 0.25, 0.75], &pc_e, &[0.0]])),
-            opv(p::MGR_CHECK_OVERLAP, &cat(&[&[1.0, t, 0.25, 0.75], &pc_e, &pc_u])),
+            opv(
+                p::ARE_OVERLAPPING,
+                &cat(&[&[1.0, t, 0.25, 0.75], &pc_e, &[0.0]]),
+            ),
+            opv(
+                p::MGR_CHECK_OVERLAP,
+                &cat(&[&[1.0, t, 0.25, 0.75], &pc_e, &pc_u]),
+            ),
             opv(p::FIND_POS, &cat(&[&pc_c0, &pc_s])),
             opv(p::FIND_POS, &cat(&[&pc_c0, &pc_c2])),
             opv(p::FIND_POS, &cat(&[&pc_u, &pc_u])),
@@ -5290,6 +5887,36 @@ fn edge_cases() -> Vec<(String, Value)> {
             ops
         }),
     ));
+    // an approximation tolerance below `SM_EFF_ZERO` (zero, negative, tiny) falls back
+    // to the two empty B-reps' tolerances and edge sizes; `SM_EFF_ZERO` itself does not
+    for (name, approx_tol) in [
+        ("zero", 0.0),
+        ("negative", -1e-3),
+        ("minus_one", -1.0),
+        ("tiny", 1e-13),
+        ("eff_zero", 1e-12),
+    ] {
+        let objects = vec![ObjIn::Curve(line(
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0],
+        ))];
+        let ops = vec![
+            opv(p::PV_NEW, &[0.0, 0.0, 0.0, 1e-5]),
+            opv(p::MGR_ADD_PV, &[0.0]),
+            opv(p::MGR_FIND_PV, &[3e-4, 0.0, 0.0]),
+        ];
+        out.push((
+            format!("edge_proto_fallback_tol_{name}"),
+            json!(Script::Proto {
+                objects,
+                approx_tol,
+                capture: 1e-3,
+                override_tol: 0.5,
+                ops
+            }),
+        ));
+    }
     // transforms: every API call on a line, a B-spline, a circle and a plane
     let bs = CurveIn::Bspline(BSplineIn {
         dim: 3,
@@ -5324,7 +5951,12 @@ fn edge_cases() -> Vec<(String, Value)> {
         ("scale_uniform", TOpIn::Scale { s: [2.0, 2.0, 2.0] }),
         ("scale_nonuniform", TOpIn::Scale { s: [2.0, 3.0, 0.5] }),
         ("scale_zero", TOpIn::Scale { s: [0.0, 1.0, 1.0] }),
-        ("scale_negative", TOpIn::Scale { s: [-1.0, -1.0, -1.0] }),
+        (
+            "scale_negative",
+            TOpIn::Scale {
+                s: [-1.0, -1.0, -1.0],
+            },
+        ),
         (
             "scale_by_pt",
             TOpIn::ScaleByPt {
@@ -5332,7 +5964,12 @@ fn edge_cases() -> Vec<(String, Value)> {
                 s: [3.0, 3.0, 3.0],
             },
         ),
-        ("translate", TOpIn::Translate { v: [1e6, -1e-6, 0.0] }),
+        (
+            "translate",
+            TOpIn::Translate {
+                v: [1e6, -1e-6, 0.0],
+            },
+        ),
         (
             "rotate",
             TOpIn::Rotate {
@@ -5351,11 +5988,42 @@ fn edge_cases() -> Vec<(String, Value)> {
         ),
     ];
     for (oname, obj) in [
-        ("line", TObjIn::Curve { owned: false, c: line([1.0, 1.0, 1.0], [1.0, 2.0, 3.0], [0.0, 2.0]) }),
-        ("bspline", TObjIn::Curve { owned: false, c: bs }),
-        ("circle", TObjIn::Curve { owned: false, c: circle }),
-        ("owned_line", TObjIn::Curve { owned: true, c: line([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0]) }),
-        ("plane", TObjIn::Plane { owned: false, o: [1.0, 2.0, 3.0], n: [0.0, 0.0, 1.0] }),
+        (
+            "line",
+            TObjIn::Curve {
+                owned: false,
+                c: line([1.0, 1.0, 1.0], [1.0, 2.0, 3.0], [0.0, 2.0]),
+            },
+        ),
+        (
+            "bspline",
+            TObjIn::Curve {
+                owned: false,
+                c: bs,
+            },
+        ),
+        (
+            "circle",
+            TObjIn::Curve {
+                owned: false,
+                c: circle,
+            },
+        ),
+        (
+            "owned_line",
+            TObjIn::Curve {
+                owned: true,
+                c: line([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0]),
+            },
+        ),
+        (
+            "plane",
+            TObjIn::Plane {
+                owned: false,
+                o: [1.0, 2.0, 3.0],
+                n: [0.0, 0.0, 1.0],
+            },
+        ),
         ("other", TObjIn::Other),
         ("null", TObjIn::Null),
         ("poly_empty", TObjIn::Poly),
@@ -5487,8 +6155,30 @@ pub fn edge_cases_p3() -> Vec<(String, Value)> {
             opv(p::SPLIT_INT, &[0.0, 2.0]),
             opv(p::SPLIT_INT, &[0.0, 3.0]),
             opv(p::ED_SPLIT, &[0.0, 7.0, 0.0, 1.0]),
-            opv(p::FOC_PE, &cat(&[&[0.0, t, 0.0, 1.0], &pc_u, &pc_u, &pc_u, &pc_u, &pc_u, &pc_u])),
-            opv(p::FOC_PE, &cat(&[&[0.0, t, 0.0, 1.0], &pc_s, &pc_u, &pc_u, &pc_u, &pc_u, &pc_u])),
+            opv(
+                p::FOC_PE,
+                &cat(&[
+                    &[0.0, t, 0.0, 1.0],
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                ]),
+            ),
+            opv(
+                p::FOC_PE,
+                &cat(&[
+                    &[0.0, t, 0.0, 1.0],
+                    &pc_s,
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                    &pc_u,
+                ]),
+            ),
             opv(p::GLUE, &[]),
             opv(p::RESOLVE, &[]),
             // a group of two proto edges without definitions is removed
@@ -5531,9 +6221,21 @@ pub fn edge_cases_p3() -> Vec<(String, Value)> {
         // `RemoveProtoEdge` removes the first copy only, UB-132)
         for (name, overlaps, dup) in [
             ("one_way_overlap", vec![(0.0, 1.0)], None),
-            ("repeated_overlap", vec![(0.0, 1.0), (0.0, 1.0), (1.0, 0.0)], None),
-            ("duplicate_manager_entry_0", vec![(0.0, 1.0), (1.0, 0.0)], Some(0.0)),
-            ("duplicate_manager_entry_1", vec![(0.0, 1.0), (1.0, 0.0)], Some(1.0)),
+            (
+                "repeated_overlap",
+                vec![(0.0, 1.0), (0.0, 1.0), (1.0, 0.0)],
+                None,
+            ),
+            (
+                "duplicate_manager_entry_0",
+                vec![(0.0, 1.0), (1.0, 0.0)],
+                Some(0.0),
+            ),
+            (
+                "duplicate_manager_entry_1",
+                vec![(0.0, 1.0), (1.0, 0.0)],
+                Some(1.0),
+            ),
         ] {
             let mut ops = vec![
                 opv(p::PV_NEW, &[0.0, 0.0, 0.0, t]),
@@ -5613,8 +6315,14 @@ pub fn edge_cases_p3() -> Vec<(String, Value)> {
         let mut ops = vec![
             opv(p::PV_NEW, &[0.0, 0.0, 0.0, t]),
             opv(p::MGR_ADD_PV, &[0.0]),
-            opv(p::VD_NEW, &cat(&[&pc_u, &pc_u, &[0.0, 0.0, 0.0, t, 0.0, 0.0]])),
-            opv(p::VD_NEW, &cat(&[&pc_u, &pc_u, &[0.0, 0.0, 0.0, t, 0.0, 0.0]])),
+            opv(
+                p::VD_NEW,
+                &cat(&[&pc_u, &pc_u, &[0.0, 0.0, 0.0, t, 0.0, 0.0]]),
+            ),
+            opv(
+                p::VD_NEW,
+                &cat(&[&pc_u, &pc_u, &[0.0, 0.0, 0.0, t, 0.0, 0.0]]),
+            ),
             opv(p::PV_ADD_VD, &[0.0, 0.0]),
             opv(p::PV_ADD_VD, &[0.0, 1.0]),
             opv(p::VD_SET_FINAL, &[0.0, 1.0, finals[0]]),
@@ -5821,8 +6529,12 @@ mod dump {
         for i in 0..MIN_GENERATED {
             let mut rng = Rng::new(CaseContext::seed_for("topology.proto_topology_p1", i));
             let s: Script = serde_json::from_value(Runner.generate(&mut rng).unwrap()).unwrap();
-            let Script::Proto { ops, .. } = &s else { continue };
-            let Ok(out) = ffi::run(&cpp_input(&s)) else { continue };
+            let Script::Proto { ops, .. } = &s else {
+                continue;
+            };
+            let Ok(out) = ffi::run(&cpp_input(&s)) else {
+                continue;
+            };
             if matches!(rust_run(&s), Err(Fail::Deferred(_))) {
                 deferred += 1;
             }

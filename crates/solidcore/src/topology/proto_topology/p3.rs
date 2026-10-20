@@ -25,8 +25,10 @@
 //!   sum of the two.
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`: `SmBrep::Point3DClassify` (`query.brep`),
-//!   `SmBrep::GlueVertices` /
-//!   `SqueezeEdge` / `DeleteEdge` (`topology.brep_p2` via part 5 / `_p3` / `_p4`).
+//!   `SqueezeEdge` / `DeleteEdge` (`topology.brep_p3` / `_p4`). `SmBrep::GlueVertices`
+//!   goes through [`BrepGlue`], which the B-reps' owner implements with
+//!   `topology::brep::p5` (so [`ProtoTopologyManager::glue_coincident_brep_vertices`]
+//!   takes the kernel and the B-reps mutably).
 //!   The intersector's `GetOtherMate` /
 //!   `RemoveRelationship` are reached through [`Mates`] (ported in
 //!   `boolean.topology_intersector_p1` / `_p2`; [`NoMates`] for no intersector maps). The
@@ -179,9 +181,26 @@ fn new_curve_classification<O: ClassObject>(
     )
 }
 
-/// `SmBrep::GlueVertices` of B-rep `which`.
-fn brep_glue_vertices<O: Copy + PartialEq>(_which: i32, v1: O, v2: O) -> Result<()> {
-    crate::topology::brep::p5::opaque_glue_preflight(v1 == v2)
+/// The B-rep edit [`ProtoTopologyManager::glue_coincident_brep_vertices`] (and the
+/// topology intersector) make on the B-reps behind the handles, implemented by their
+/// owner with the mutable arenas (`topology::brep::p5`).
+pub trait BrepGlue<O> {
+    /// `SmBrep::GlueVertices(pV1, pV2, pOptWireEdgesInBrep)` of `brep`;
+    /// `opt_wire_edges_in_brep` is `pOptWireEdgesInBrep` (`NULL` by default: every
+    /// shell edge is checked).
+    ///
+    /// # Errors
+    ///
+    /// Those of `topology::brep::p5::glue_vertices`; [`SolidError::InvalidInput`] for
+    /// handles that name no vertex (or edge) of `brep`.
+    fn glue_vertices(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        v1: O,
+        v2: O,
+        opt_wire_edges_in_brep: Option<&[O]>,
+    ) -> Result<()>;
 }
 
 /// `SmBrep::SqueezeEdge` of B-rep `which`.
@@ -941,8 +960,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// in the module header.
     pub fn glue_coincident_brep_vertices(
         &mut self,
-        k: &Kernel,
-        brep: &impl ProtoBrep<O>,
+        k: &mut Kernel,
+        brep: &mut (impl ProtoBrep<O> + BrepGlue<O>),
         mates: &mut dyn Mates<O>,
     ) -> Result<Vec<O>> {
         let mut deleted_curves: Vec<O> = Vec::new();
@@ -1078,7 +1097,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     if dist > xs {
                     } else if edges.is_empty() {
                         if v1 != v2 {
-                            ignore_soft(brep_glue_vertices(which, v1, v2))?;
+                            ignore_soft(brep.glue_vertices(
+                                k,
+                                self.which_brep(which),
+                                v1,
+                                v2,
+                                None,
+                            ))?;
                             set_slot(deleted_v, jj, v2);
                             self.vertex_def_mut(vd2)
                                 .ok_or(dangling("vertex definition is deleted"))?
@@ -1158,7 +1183,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                             } else {
                                 // coincident Vertices connected by a long Edge: Glue.
                                 if v1 != v2 {
-                                    ignore_soft(brep_glue_vertices(which, v1, v2))?;
+                                    ignore_soft(brep.glue_vertices(
+                                        k,
+                                        self.which_brep(which),
+                                        v1,
+                                        v2,
+                                        None,
+                                    ))?;
                                     set_slot(deleted_v, jj, v2);
                                     self.vertex_def_mut(vd2)
                                         .ok_or(dangling("vertex definition is deleted"))?

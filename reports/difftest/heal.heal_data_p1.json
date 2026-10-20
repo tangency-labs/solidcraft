@@ -1187,8 +1187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "api_heal_box_10",
@@ -2123,8 +2123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "gen0026",
@@ -3231,8 +3231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -3659,8 +3659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "gen0194",
@@ -3799,8 +3799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "gen0209",
@@ -4159,8 +4159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "gen0247",
@@ -4659,8 +4659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::SetTolerance",
-        "unit": "topology.brep_p2"
+        "symbol": "SmApiCreateBox",
+        "unit": "primitive.api_primitives"
       },
       "max_rel_err": 0.0,
       "name": "gen0301",
@@ -4840,9 +4840,9 @@
   "cases_passed": 271,
   "cases_total": 493,
   "deferred_by_unit": {
-    "intersect.curve_class_p4": 15,
-    "topology.brep_p2": 7,
-    "topology.face_p2": 133,
+    "primitive.api_primitives": 7,
+    "query.face_p4": 64,
+    "topology.face_p2": 84,
     "topology.face_p4": 67
   },
   "max_rel_err": 0.0,

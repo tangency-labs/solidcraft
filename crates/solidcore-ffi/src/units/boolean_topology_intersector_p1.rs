@@ -64,7 +64,7 @@
 //! | 30 | `ImprintIntersections`     |                          | `status n_pv n_pe` |
 //! | 31 | `sm_IntersectShellVertices` | `first swap`            | `status n_pv n_pe` |
 //! | 32 | `sm_IntersectWireLaminaEdges` | `first lamina swap`   | `status n_pv n_pe` |
-//! | 33 | new `SmProtoTopologyManager` | `capture override`     | `status` |
+//! | 33 | new `SmProtoTopologyManager` | `capture override`     | `status tol` (`GetTolerance`) |
 //!
 //! Ops 21, 23 to 28 emit their outputs only on a success status (the port cannot
 //! report the partly filled outputs of a failed call).

@@ -26,7 +26,13 @@
 //! releases the native context mark. Separate curve/surface slots are distinct
 //! owned values; native shared geometry across different owners is not represented
 //! and remains uncertified. Equal owner metadata is never used to invent aliasing.
-//! Notification environments borrow caller records and keys.
+//! Notification environments borrow caller records and keys; a plain entry point (no
+//! environment) notifies through a `topology.brep_p2` arena state (every object's
+//! default `SmTopology` record, an empty attribute store, arena identities) and the
+//! kernel's context, except `Transform`'s `ReplaceSurface` (`replace_surface`), which
+//! holds the kernel shared and so passes no context: an arena-only `Transform`'s face
+//! notifications reach no context callback. Curves have no identity in the port: `SetCurve`'s new/old curve
+//! data are null and a curve's own `SM_NO_CHANGE_OWNER` is not delivered.
 //! `SmBrep::Notify` is owned by `topology.brep_p2`, not this unit. Owning-list
 //! traversal and editing state belong to `topology.brep_p1`: arena allocation order
 //! is not substituted for list order. Callers supply the actual editing flag where
@@ -58,6 +64,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::topology::brep::p2 as brep_p2;
 use crate::topology::VertexuseId;
 use crate::topology::{vertex, Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
 
@@ -107,6 +114,30 @@ const OP: &str = "topology::brep::p5";
 
 fn missing<T>(symbol: &'static str, unit: &'static str) -> Result<T> {
     Err(SolidError::unported(symbol, unit))
+}
+
+/// Runs `f` with the caller's notification environment, or, for a plain entry point
+/// (`notifications` is `None`: the caller keeps no notification state of its own),
+/// with an [`brep_p2::ArenaNotifyState`] of `b` notifying through `context`. `f`'s last
+/// argument is the context the caller's own environment falls back to (`context`
+/// then; `None` for the arena state, which already holds it).
+fn with_notifications<R>(
+    b: &mut Brep,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
+    context: Option<&mut crate::geom::context::Context>,
+    f: impl FnOnce(
+        &mut Brep,
+        &mut EditNotifyEnv<'_>,
+        Option<&mut crate::geom::context::Context>,
+    ) -> Result<R>,
+) -> Result<R> {
+    if let Some(env) = notifications {
+        f(b, env, context)
+    } else {
+        let mut state = brep_p2::ArenaNotifyState::new(b);
+        let mut env = state.env(context);
+        f(b, &mut env, None)
+    }
 }
 
 fn require_editing(enabled: bool) -> Result<()> {
@@ -359,15 +390,27 @@ pub fn combine_with_notifications(
     update_vertex_edge_intervals(b, survivor)
 }
 
+/// `Notify(SM_NO_MERGE_IN_BREP, pSurvivingVertex, pVertexToDelete, this)`
+/// ([`brep_p2::notify`], no B-rep cache held by the caller).
 fn notify_merge(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _survivor: VertexId,
-    _deleted: VertexId,
-    _notifications: Option<&mut EditNotifyEnv<'_>>,
+    k: &mut Kernel,
+    b: &mut Brep,
+    survivor: VertexId,
+    deleted: VertexId,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    missing("SmBrep::Notify", "topology.brep_p2")
+    let data = [
+        Some(brep_p2::NotifyArg::Entity(crate::error::EntityRef::Vertex(
+            survivor,
+        ))),
+        Some(brep_p2::NotifyArg::Entity(crate::error::EntityRef::Vertex(
+            deleted,
+        ))),
+        Some(brep_p2::NotifyArg::Object(brep_p2::brep_ref(b))),
+    ];
+    with_notifications(b, notifications, Some(&mut k.context), |b, env, _| {
+        brep_p2::notify(b, env, None, NotifyOperation::MergeInBrep, data)
+    })
 }
 
 fn delete_vertex(_b: &mut Brep, _vertex: VertexId) -> Result<()> {
@@ -412,21 +455,24 @@ fn set_vertex_point(
     point: Point3,
     notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    let Some(env) = notifications else {
-        // UNPORTED(topology.brep_p2): SmBrep::Notify (arena-only notification environment)
-        return missing("SmBrep::Notify", "topology.brep_p2");
-    };
-    // `SmVertex::SetPoint` returns void: its notification statuses are dropped.
-    crate::error::ignore_status(vertex::set_point(
+    with_notifications(
         b,
-        vertex,
-        point,
-        env.records,
-        env.attributes,
-        env.context.as_deref_mut().or(Some(&mut k.context)),
-        (env.key_of)(crate::error::EntityRef::Vertex(vertex)),
-        &|vu| (env.key_of)(crate::error::EntityRef::Vertexuse(vu)),
-    ))
+        notifications,
+        Some(&mut k.context),
+        |b, env, fallback| {
+            // `SmVertex::SetPoint` returns void: its notification statuses are dropped.
+            crate::error::ignore_status(vertex::set_point(
+                b,
+                vertex,
+                point,
+                env.records,
+                env.attributes,
+                env.context.as_deref_mut().or(fallback),
+                (env.key_of)(crate::error::EntityRef::Vertex(vertex)),
+                &|vu| (env.key_of)(crate::error::EntityRef::Vertexuse(vu)),
+            ))
+        },
+    )
 }
 
 fn update_vertex_edge_intervals(_b: &mut Brep, _vertex: VertexId) -> Result<()> {
@@ -655,7 +701,7 @@ pub fn delete_topological_vertex_with_notifications(
             notifications.as_deref_mut(),
         )?;
         b.edge_mut(survivor)?.interval = interval;
-        set_edge_curve_owner(k, b, survivor, notifications.as_deref_mut())?;
+        set_edge_curve_owner(b, survivor, notifications.as_deref_mut())?;
     }
     for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
         let eu = b.edgeuse_mut(eu)?;
@@ -741,67 +787,89 @@ fn bspline_curve_base_mut(curve: &mut Curve) -> Result<&mut BSplineCurve> {
         _ => Err(SolidError::null_pointer(OP)),
     }
 }
+/// `pSurvivingEdge->SetCurve(pCurve, TRUE)` (status ignored upstream): notified, the
+/// old curve deleted with `delete_old`. Curves carry no identity in the port (the
+/// module's Deviations), so the notification's new/old curve data are null.
 fn set_joined_edge_curve(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _edge: EdgeId,
-    _curve: Option<Curve>,
-    _delete_old: bool,
-    _notifications: Option<&mut EditNotifyEnv<'_>>,
-) -> Result<()> {
-    // Edge::set_curve is ported, but needs actual new/old geometry object keys,
-    // in addition to the topology keys in NotifyEnv. That owning notification
-    // integration is missing; substituting null refs would discard callback data.
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    missing("SmBrep::Notify", "topology.brep_p2")
-}
-fn set_edge_curve_owner(
     k: &mut Kernel,
     b: &mut Brep,
     edge: EdgeId,
-    mut notifications: Option<&mut EditNotifyEnv<'_>>,
+    curve: Option<Curve>,
+    delete_old: bool,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    let env = notifications.as_deref_mut().ok_or_else(|| {
-        // UNPORTED(topology.brep_p2): SmBrep::Notify (geometry identity routing)
-        SolidError::unported("SmBrep::Notify", "topology.brep_p2")
-    })?;
-    let owner = (env.key_of)(crate::error::EntityRef::Edge(edge));
+    with_notifications(
+        b,
+        notifications,
+        Some(&mut k.context),
+        |b, env, fallback| {
+            let mut forwarded = crate::topology::edge::NotifyEnv {
+                records: env.records,
+                attributes: env.attributes,
+                context: env.context.as_deref_mut().or(fallback),
+                key_of: env.key_of,
+            };
+            let options = crate::topology::edge::SetCurveOptions {
+                delete_old_curve: delete_old,
+                ..crate::topology::edge::SetCurveOptions::default()
+            };
+            crate::error::ignore_status(crate::topology::edge::set_curve(
+                b,
+                edge,
+                curve,
+                options,
+                &mut forwarded,
+                [None, None],
+            ))
+        },
+    )
+}
+/// `pCurveSurviveCopy->SetOwner(pSurvivingEdge)`: the owner is the edge's identity in
+/// the notification environment. The curve's own `SM_NO_CHANGE_OWNER` notification
+/// (`SmObject::Notify` on the curve) is not delivered: the curve has no identity to
+/// notify under (the module's Deviations; as `topology.brep_p2`'s `SetCurve` helpers).
+fn set_edge_curve_owner(
+    b: &mut Brep,
+    edge: EdgeId,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
+) -> Result<()> {
     let brep = ObjectRef {
         type_code: crate::geom::a_object::BREP_TYPE,
         key: b.key(),
     };
-    let curve = b
-        .edge_mut(edge)?
-        .curve
-        .as_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let (_, change) = curve.set_owner(Some(owner), Some(brep));
-    if let Some(change) = change {
-        notify_curve_owner_change(k, b, edge, change, notifications)?;
-    }
-    Ok(())
-}
-fn notify_curve_owner_change(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _edge: EdgeId,
-    _change: crate::curve::curve::OwnerChange,
-    _notifications: Option<&mut EditNotifyEnv<'_>>,
-) -> Result<()> {
-    // The new curve's actual identity is needed as the callback caller.
-    // UNPORTED(topology.brep_p2): SmBrep::Notify (geometry identity routing)
-    missing("SmBrep::Notify", "topology.brep_p2")
+    with_notifications(b, notifications, None, |b, env, _| {
+        let owner = (env.key_of)(crate::error::EntityRef::Edge(edge));
+        let curve = b
+            .edge_mut(edge)?
+            .curve
+            .as_mut()
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let _ = curve.set_owner(Some(owner), Some(brep));
+        Ok(())
+    })
 }
 
+/// `Notify(SM_NO_MERGE_IN_BREP, pSurvivingEdge, pEdgeToDelete, this)`
+/// ([`brep_p2::notify`], no B-rep cache held by the caller).
 fn notify_edge_merge(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _survivor: EdgeId,
-    _deleted: EdgeId,
-    _notifications: Option<&mut EditNotifyEnv<'_>>,
+    k: &mut Kernel,
+    b: &mut Brep,
+    survivor: EdgeId,
+    deleted: EdgeId,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    missing("SmBrep::Notify", "topology.brep_p2")
+    let data = [
+        Some(brep_p2::NotifyArg::Entity(crate::error::EntityRef::Edge(
+            survivor,
+        ))),
+        Some(brep_p2::NotifyArg::Entity(crate::error::EntityRef::Edge(
+            deleted,
+        ))),
+        Some(brep_p2::NotifyArg::Object(brep_p2::brep_ref(b))),
+    ];
+    with_notifications(b, notifications, Some(&mut k.context), |b, env, _| {
+        brep_p2::notify(b, env, None, NotifyOperation::MergeInBrep, data)
+    })
 }
 /// `SER(pEU->GetOrCreateUVTrimCurve(pNewCurve))` with the declaration's defaults:
 /// no distance or deviation outputs, `bOKToMakeUVTrimCurve = TRUE`.
@@ -979,13 +1047,21 @@ pub fn glue_with_notifications(
     Ok(())
 }
 
+/// `Notify(SM_NO_PRE_EDIT, this, NULL, NULL)` ([`brep_p2::notify`], no B-rep cache
+/// held by the caller).
 fn notify_pre_edit(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _notifications: Option<&mut EditNotifyEnv<'_>>,
+    k: &mut Kernel,
+    b: &mut Brep,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    missing("SmBrep::Notify", "topology.brep_p2")
+    let data = [
+        Some(brep_p2::NotifyArg::Object(brep_p2::brep_ref(b))),
+        None,
+        None,
+    ];
+    with_notifications(b, notifications, Some(&mut k.context), |b, env, _| {
+        brep_p2::notify(b, env, None, NotifyOperation::PreEdit, data)
+    })
 }
 fn notify_vertex_pre_edit(
     k: &mut Kernel,
@@ -993,35 +1069,61 @@ fn notify_vertex_pre_edit(
     vertex: VertexId,
     notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    let Some(env) = notifications else {
-        // UNPORTED(topology.brep_p2): SmBrep::Notify (arena-only notification environment)
-        return missing("SmBrep::Notify", "topology.brep_p2");
-    };
-    let this = (env.key_of)(crate::error::EntityRef::Vertex(vertex));
     let brep = ObjectRef {
         type_code: crate::geom::a_object::BREP_TYPE,
         key: b.key(),
     };
-    vertex::notify(
+    with_notifications(
         b,
-        vertex,
-        env.records,
-        env.attributes,
-        env.context.as_deref_mut().or(Some(&mut k.context)),
-        NotifyOperation::PreEdit,
-        this,
-        [Some(this), Some(brep), None],
-        &|vu| (env.key_of)(crate::error::EntityRef::Vertexuse(vu)),
+        notifications,
+        Some(&mut k.context),
+        |b, env, fallback| {
+            let this = (env.key_of)(crate::error::EntityRef::Vertex(vertex));
+            vertex::notify(
+                b,
+                vertex,
+                env.records,
+                env.attributes,
+                env.context.as_deref_mut().or(fallback),
+                NotifyOperation::PreEdit,
+                this,
+                [Some(this), Some(brep), None],
+                &|vu| (env.key_of)(crate::error::EntityRef::Vertexuse(vu)),
+            )
+        },
     )
 }
+/// `pFace->Notify(SM_NO_PRE_EDIT, pFace, this, NULL)` ([`crate::topology::face::p3::notify`]);
+/// no caller holds the surface's trimmed surface cache.
 fn notify_face_pre_edit(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _face: FaceId,
-    _notifications: Option<&mut EditNotifyEnv<'_>>,
+    k: &mut Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::Notify
-    missing("SmFace::Notify", "topology.face_p3")
+    let brep = brep_p2::brep_ref(b);
+    with_notifications(
+        b,
+        notifications,
+        Some(&mut k.context),
+        |b, env, fallback| {
+            let this = (env.key_of)(crate::error::EntityRef::Face(face));
+            let mut forwarded = crate::topology::edge::NotifyEnv {
+                records: env.records,
+                attributes: env.attributes,
+                context: env.context.as_deref_mut().or(fallback),
+                key_of: env.key_of,
+            };
+            crate::topology::face::p3::notify(
+                b,
+                face,
+                &mut forwarded,
+                None,
+                NotifyOperation::PreEdit,
+                [Some(this), Some(brep), None],
+            )
+        },
+    )
 }
 fn shell_vertexuse(b: &Brep, shell: ShellId) -> Result<Option<VertexuseId>> {
     let shell = b.shell(shell)?;
@@ -1068,22 +1170,6 @@ fn transfer_shell_children(
 fn remove_owned_vertex(_b: &mut Brep, _vertex: VertexId) -> Result<()> {
     // UNPORTED(topology.brep_p1): SmBrep::m_pVertexListHead
     missing("SmBrep::m_pVertexListHead", "topology.brep_p1")
-}
-
-/// Handle-only identity preflight. Nonaliases need the mutable owning arena,
-/// kernel and notification routing, which these adapters cannot yet supply.
-/// When part 2 supplies them, call [`glue_vertices`] with the original vertices;
-/// replacing this barrier with Notify alone is not an implementation of glue.
-/// The complete owned continuation is in [`glue_with_notifications`].
-pub(crate) fn opaque_glue_preflight(aliases: bool) -> Result<()> {
-    if aliases {
-        return Ok(());
-    }
-    // UNPORTED(topology.brep_p2): SmBrep::Notify, reached through glue_vertices.
-    // NOT a plain Notify stub: wiring part 2 here means giving the intersector and
-    // proto-topology handle adapters a mutable owning arena, kernel and notification
-    // routing, then calling glue_vertices. Replacing this line with Notify is wrong.
-    missing("SmBrep::Notify", "topology.brep_p2")
 }
 
 /// Outputs of `MakeEdgeInFace`, initialized to null after its editing and face checks.
@@ -1994,12 +2080,14 @@ pub fn transform_with_notifications(
             let base =
                 transformed_surface_base(k, surface)?.ok_or_else(|| SolidError::sm_err(OP))?;
             replace_surface(
+                k,
                 b,
                 face,
                 crate::surface::surface::Surface::from(base),
                 false,
                 None,
                 true,
+                notifications.as_deref_mut(),
             )?;
         }
     }
@@ -2051,27 +2139,30 @@ fn notify_edge_pre_edit(
     edge: EdgeId,
     notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    let Some(env) = notifications else {
-        // UNPORTED(topology.brep_p2): SmBrep::Notify (arena-only notification environment)
-        return missing("SmBrep::Notify", "topology.brep_p2");
-    };
-    let this = (env.key_of)(crate::error::EntityRef::Edge(edge));
     let brep = ObjectRef {
         type_code: crate::geom::a_object::BREP_TYPE,
         key: b.key(),
     };
-    let mut forwarded = crate::topology::edge::NotifyEnv {
-        records: env.records,
-        attributes: env.attributes,
-        context: env.context.as_deref_mut().or(Some(&mut k.context)),
-        key_of: env.key_of,
-    };
-    crate::topology::edge::notify(
+    with_notifications(
         b,
-        edge,
-        &mut forwarded,
-        NotifyOperation::PreEdit,
-        [Some(this), Some(brep), None],
+        notifications,
+        Some(&mut k.context),
+        |b, env, fallback| {
+            let this = (env.key_of)(crate::error::EntityRef::Edge(edge));
+            let mut forwarded = crate::topology::edge::NotifyEnv {
+                records: env.records,
+                attributes: env.attributes,
+                context: env.context.as_deref_mut().or(fallback),
+                key_of: env.key_of,
+            };
+            crate::topology::edge::notify(
+                b,
+                edge,
+                &mut forwarded,
+                NotifyOperation::PreEdit,
+                [Some(this), Some(brep), None],
+            )
+        },
     )
 }
 fn transformed_surface_base(
@@ -2099,16 +2190,39 @@ fn transformed_surface_base(
         | SurfaceKind::SrfInVolume(_) => None,
     })
 }
+/// `SER(ReplaceSurface(pFace, pNewSurf, bAddToDeletedList, pOptFacesModified,
+/// bCreateUVTrimCurves))` ([`brep_p2::replace_surface`]); the face is notified under
+/// the caller's identity for it.
+#[allow(clippy::too_many_arguments)] // one upstream call
 fn replace_surface(
-    _b: &mut Brep,
-    _face: FaceId,
-    _surface: crate::surface::surface::Surface,
-    _add_to_deleted: bool,
-    _modified: Option<&mut Vec<FaceId>>,
-    _create_uv_trims: bool,
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    surface: crate::surface::surface::Surface,
+    add_to_deleted: bool,
+    mut modified: Option<&mut Vec<FaceId>>,
+    create_uv_trims: bool,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::ReplaceSurface
-    missing("SmBrep::ReplaceSurface", "topology.brep_p2")
+    // init output
+    if let Some(modified) = modified.as_deref_mut() {
+        modified.clear();
+    }
+    let old = if add_to_deleted {
+        brep_p2::OldSurface::AddToDeletedList
+    } else {
+        brep_p2::OldSurface::Delete
+    };
+    // The kernel is held immutably here (`SmSurface` evaluation), so an arena-only
+    // caller's notifications reach no context callbacks.
+    let (_, faces) = with_notifications(b, notifications, None, |b, env, _| {
+        let face_ref = (env.key_of)(crate::error::EntityRef::Face(face));
+        brep_p2::replace_surface(k, b, env, face, surface, face_ref, old, create_uv_trims)
+    })?;
+    if let Some(modified) = modified {
+        modified.extend(faces);
+    }
+    Ok(())
 }
 fn reverse_reflection_edgeuses(_b: &mut Brep, _edge: EdgeId) -> Result<()> {
     // UNPORTED(topology.brep_p1): sm_ReverseReflectionEdgeuses

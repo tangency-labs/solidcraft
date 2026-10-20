@@ -734,28 +734,20 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeShellVertexTopology",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "copy_vertex_1_0_0_null_region",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/helpers.json#89 (upstream source/SMLib/src/SmMerge.cpp)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeShellVertexTopology",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "copy_vertex_1_0_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/helpers.json#90 (upstream source/SMLib/src/SmMerge.cpp)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -1326,16 +1318,12 @@
       "values_compared": 241
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeShellVertexTopology",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314509",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -2167,15 +2155,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 45,
+  "cases_deferred": 42,
   "cases_failed": 0,
-  "cases_passed": 203,
+  "cases_passed": 206,
   "cases_total": 248,
   "deferred_by_unit": {
     "boolean.topology_intersector_p3": 4,
     "intersect.surface_drop_lib_p3": 18,
     "query.brep": 14,
-    "topology.brep_p2": 3,
     "topology.face_p2": 6
   },
   "max_rel_err": 0.0,

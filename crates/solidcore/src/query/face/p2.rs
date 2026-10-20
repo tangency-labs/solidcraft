@@ -1156,9 +1156,11 @@ mod tests {
 
     #[test]
     fn proto_vertex_containment_uses_the_larger_tolerance() {
+        let e = Brep::new();
         let mut mgr: ProtoTopologyManager<EntityRef> = ProtoTopologyManager::new(
-            EntityRef::Face(FaceId::from_index(0)),
-            EntityRef::Face(FaceId::from_index(1)),
+            &Kernel::default(),
+            (EntityRef::Face(FaceId::from_index(0)), &e),
+            (EntityRef::Face(FaceId::from_index(1)), &e),
             EntityRef::Face(FaceId::from_index(2)),
             1e-3,
             0.5,

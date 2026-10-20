@@ -31,12 +31,15 @@
 // Rust runner seeds the ported executive's cache the same way (`insert_extended_surface`).
 #include "sc_topology_fixture.h"
 
+#include <SmDatabaseIO.h>
 #include <SmOffsetExecutive.h>
 #include <SmOffsetGeometryCreation.h>
 #include <SmRelation.h>
 #include <SmSSIData.h>
+#include <SmSurfOfRevolution.h>
 
 #include <cstdlib>
+#include <sstream>
 #include <string>
 #include <array>
 
@@ -151,10 +154,13 @@ struct Two
 };
 
 const double ST_OK = 0.0;
+// The database version of the exported SmSurfOfRevolution records (OG_EXPORT).
+const ULONG REVOLUTION_DB_VERSION = 33;
 // The op the Rust side defers at without running anything comparable, so the script
 // stops here (the runner mirrors each predicate): a non-local FaceuseOffset of a face
-// whose surface the export brings in as its B-spline part (an SmSurfOfRevolution's
-// offset self-intersection takes 20 s to minutes, HANG-26), and an EdgeuseOffset with
+// whose surface is an SmBSplineSurface subclass other than SmPlane (an
+// SmSurfOfRevolution's offset self-intersection takes 20 s to minutes, HANG-26), and an
+// EdgeuseOffset with
 // |offset distance| above MAX_EDGEUSE_OFFSET_DISTANCE (HANG-27).
 const double ST_NOT_RUN = -6.0;
 // HANG-27: SmCrvOnSurf::ApproximateCurve of an EdgeuseOffset rail grows with the
@@ -932,6 +938,38 @@ void run_og(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             export_graph(t.brep[b], t.g[b], ex);
             o.push_back((double)ex.size());
             o.insert(o.end(), ex.begin(), ex.end());
+        }
+        // per B-rep, per face (export order): the binary WriteToDB record of a surface
+        // that is exactly an SmSurfOfRevolution (the export's surface block carries only
+        // its B-spline part), so the Rust side can read the real surface back
+        for (int b = 0; b < 2; b++)
+        {
+            if (t.brep[b] == nullptr)
+            {
+                o.push_back(0.0);
+                continue;
+            }
+            o.push_back((double)t.g[b].faces.size());
+            for (SmFace* f : t.g[b].faces)
+            {
+                SmSurface* s = f->GetSurface();
+                if (s == nullptr || s->GetType() != SmSurfOfRevolution_TYPE)
+                {
+                    o.push_back(-1.0);
+                    continue;
+                }
+                std::ostringstream oss;
+                SmDatabaseIOStream db(SM_BINARY, &oss);
+                if (s->WriteToDB(db, REVOLUTION_DB_VERSION) != SM_SUCCESS)
+                {
+                    o.push_back(-1.0);
+                    continue;
+                }
+                std::string bytes = oss.str();
+                o.push_back((double)bytes.size());
+                for (char ch : bytes)
+                    o.push_back((double)(unsigned char)ch);
+            }
         }
         return;
     }

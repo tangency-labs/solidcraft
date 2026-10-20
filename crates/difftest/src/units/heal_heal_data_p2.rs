@@ -1501,10 +1501,14 @@ fn rust_heal(
             Step::FixBadSheets => {
                 let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)
                     .map_err(|e| harness(format!("mark lock: {e}")))?;
+                // harness env: the runner holds no attribute state (default region
+                // records, empty store; see RegionNotifyState)
+                let mut state = solidcore::topology::brep::p2::RegionNotifyState::new(&b);
                 let r = h.fix_bad_sheets(
                     &mut k,
                     &mut b,
                     &mut marks,
+                    &mut state.env(),
                     &lock,
                     HealerOpType::FixBadsheets,
                 );

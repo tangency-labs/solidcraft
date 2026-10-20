@@ -1,0 +1,12759 @@
+{
+ "cases": [
+  {
+   "name": "merge_plane10_line",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1664",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "merge",
+    "editing": 1,
+    "face": 0,
+    "tol": 1e-05,
+    "curves": [
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        5.5,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        5.5,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "merge_plane10_line_noedit",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1664",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "merge",
+    "editing": 0,
+    "face": 0,
+    "tol": 1e-05,
+    "curves": [
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        5.5,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        5.5,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "merge_plane10_short",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1664",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "merge",
+    "editing": 1,
+    "face": 0,
+    "tol": 0.001,
+    "curves": [
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1.0001,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "merge_plane10_none",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1664",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "merge",
+    "editing": 1,
+    "face": 0,
+    "tol": 1e-05,
+    "curves": []
+   }
+  },
+  {
+   "name": "mate_plane10_e0_noedit",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e0_noedit_z1e300",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:22166 (editing check returns before the HANG-9 extension)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       1e+300
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e0_noedit_zm1e300",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:22166 (editing check returns before the HANG-9 extension)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       -1e+300
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e0_noedit_z1e160",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:22166 (editing check returns before the HANG-9 extension)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       1e+160
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e1_noedit",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e2_noedit",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e3_noedit",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane10_e3",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_plane10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_Mouse_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Mouse_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_Mouse",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_Endcap_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_Endcap_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_Endcap",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_box_with_large_fillet_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_box_with_large_fillet",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_cone_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_cone_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_cone",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_disk_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_disk_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_disk",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_ellips_ts2_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_ellips_ts2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_plane_circ_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_circ_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_plane_circ",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_plane_square_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_plane_square_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_plane_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_sphere_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_sphere_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_sphere",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_extrude_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_surf_extrude",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_surf_rev_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_rev_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_surf_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_surf_sphere150_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_surf_sphere150",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_torus_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_torus_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_torus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_toruswvy_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_toruswvy_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_toruswvy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "mate_vase_rev_e0_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e1_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 1,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e2_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 2,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e3_noedit",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 0,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "mate_vase_rev_e3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "mate",
+    "editing": 1,
+    "edge": 3,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0.5
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "ext": 1.5,
+    "uv_ext": 10.0
+   }
+  },
+  {
+   "name": "replace_vase_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "replace",
+    "face": 0,
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "keep": 0,
+    "create": true
+   }
+  },
+  {
+   "name": "notify_net_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_6",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_11",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_15",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_16",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_net_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_net_lim",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_wire_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_6",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_11",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_15",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_16",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_wire_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_wire",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_wire_lim",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_plane10_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_6",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_11",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_15",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_16",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane10_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_plane10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_plane10_lim",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_Mouse_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Mouse_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_Mouse",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_Mouse_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_Endcap_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_Endcap_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_Endcap",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_Endcap_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_box_with_large_fillet_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_box_with_large_fillet",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_box_with_large_fillet_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_cone_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_cone_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_cone",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_cone_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_disk_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_disk_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_disk",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_disk_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_ellips_ts2_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_ellips_ts2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_ellips_ts2_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_plane_circ_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_circ_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_plane_circ",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_plane_circ_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_plane_square_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_plane_square_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_plane_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_plane_square_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_sphere_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_sphere_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_sphere",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_sphere_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_surf_extrude_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_extrude_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_surf_extrude",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_surf_extrude_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_surf_rev_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_rev_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_surf_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_surf_rev_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_surf_sphere150_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_surf_sphere150",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_surf_sphere150_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_torus_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_torus_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_torus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_torus_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_toruswvy_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_toruswvy_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_toruswvy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_toruswvy_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_vase_rev_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_6",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_11",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_15",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_16",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_vase_rev_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16016,
+      0
+     ],
+     [
+      16016,
+      1
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rayfire_vase_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     0.1,
+     0.2,
+     -50.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-05,
+    "limit": null
+   }
+  },
+  {
+   "name": "rayfire_vase_rev_lim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "ray_fire",
+    "p": [
+     3.0,
+     4.0,
+     5.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "limit": 0.5
+   }
+  },
+  {
+   "name": "notify_all_net_op0_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op0_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op1_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op1_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op2_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op2_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op3_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 3,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op3_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 3,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op4_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 4,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op4_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 4,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op5_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op5_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op6_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op6_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op7_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 7,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op7_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 7,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op8_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 8,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op8_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 8,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op9_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 9,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op9_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 9,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op10_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op10_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op11_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op11_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op12_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 12,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op12_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 12,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op13_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 13,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op13_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 13,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op14_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 14,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op14_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 14,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op15_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op15_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op16_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_net_op16_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op0_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op0_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 0,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op1_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op1_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 1,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op2_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op2_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 2,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op3_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 3,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op3_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 3,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op4_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 4,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op4_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 4,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op5_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op5_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 5,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op6_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op6_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 6,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op7_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 7,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op7_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 7,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op8_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 8,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op8_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 8,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op9_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 9,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op9_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 9,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op10_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op10_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 10,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op11_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op11_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 11,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op12_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 12,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op12_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 12,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op13_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 13,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op13_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 13,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op14_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 14,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op14_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 14,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op15_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op15_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 15,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op16_brep2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16012,
+      0
+     ],
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_all_plane_op16_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Notify: every SmNotifyOperation with the B-rep as a data object (review of 87c57c02)",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "notify",
+    "operation": 16,
+    "data": [
+     [
+      16011,
+      0
+     ],
+     [
+      16016,
+      0
+     ],
+     [
+      16021,
+      0
+     ]
+    ]
+   }
+  }
+ ]
+}

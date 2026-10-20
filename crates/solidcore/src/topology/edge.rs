@@ -67,7 +67,10 @@
 //! - **Notification.** [`notify`] runs the edge's part, the edge uses' and vertex uses'
 //!   `Notify` and `SmTopology::Notify` with a [`NotifyEnv`] (the caller's topology
 //!   records, attribute store, context and the identity of each entity).
-//!   `SmBrep::Notify` (unit `topology.brep_p2`) returns [`SolidError::Unported`].
+//!   `SmBrep::Notify` is [`crate::topology::brep::p2::notify`] without B-rep
+//!   cache (the caller-held `SM_OC_BREP` cache is not threaded through
+//!   [`NotifyEnv`]; no Rust caller can build one yet); in `Notify(SM_NO_CHANGE_GEOMETRY)` the B-rep's
+//!   `data3` (`this->GetCurve()`) is the old curve's identity, as in `SetCurve`.
 //!   The constructor's and destructor's notifications and the destructor's context
 //!   `DoingBoolean` toggling are not modelled; the record owns its curve, which is
 //!   dropped with it.
@@ -94,7 +97,7 @@
 //!   port returns the error. [`SolidError::Unported`] always propagates.
 //! - **Recursion.** `sm_CoverOtherCoincidentFace` recurses once (its second call has
 //!   `bRefineDomains` set); no other recursion.
-//! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::Notify` (`topology.brep_p2`), `SmBrep::GetInfiniteRegion`
+//! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
 //!   (`topology.brep_p1`) and `SmFace::CalculateUVDomainFromUVTrimCurves`
 //!   (`topology.face_p1`). `SmSurface::CoverOtherCoincidentSurface` is wired to
 //!   `surface.surface_p5` (and its `CoverCoincidentSurface` to `surface.surface_p3`); the
@@ -122,6 +125,7 @@ use crate::nurbs::knots::Side;
 use crate::query::edge::{radial_sector_of_curve_classify, CurveSectorClass, RadialSectorClass};
 use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
+use crate::topology::brep::p2::{self as brep_p2, NotifyArg as BrepNotifyArg};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2 as eu2;
 use crate::topology::edgeuse::p3 as eu3;
@@ -201,11 +205,24 @@ fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Resul
     eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true).map(|_| ())
 }
 
-/// `SmBrep::Notify` (unit `topology.brep_p2`).
-fn brep_notify(operation: NotifyOperation) -> Result<()> {
-    let _ = operation;
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"))
+/// `pBrep->Notify(operation, data1, pBrep, data3)` (unit `topology.brep_p2`).
+fn brep_notify(
+    b: &Brep,
+    env: &mut NotifyEnv<'_>,
+    operation: NotifyOperation,
+    data1: Option<BrepNotifyArg>,
+    data3: Option<ObjectRef>,
+) -> Result<()> {
+    let brep = BrepNotifyArg::Object(brep_p2::brep_ref(b));
+    // the caller-held SM_OC_BREP cache is not threaded through `NotifyEnv` (no Rust
+    // caller can build one yet: `make_brep_cache` needs `query.brep`)
+    brep_p2::notify(
+        b,
+        env,
+        None,
+        operation,
+        [data1, Some(brep), data3.map(BrepNotifyArg::Object)],
+    )
 }
 
 /// `SmBrep::GetInfiniteRegion` (unit `topology.brep_p1`).
@@ -2176,7 +2193,7 @@ impl core::fmt::Debug for NotifyEnv<'_> {
 ///
 /// [`SolidError::InvalidInput`] where upstream dereferences null (a missing vertex use
 /// or mate, and those of the edge use notification); [`SolidError::Unported`] from
-/// `SmBrep::Notify`; those of the notification handlers.
+/// `SmBrep::Notify`'s unported callees; those of the notification handlers.
 pub fn notify(
     b: &mut Brep,
     e: EdgeId,
@@ -2192,8 +2209,10 @@ pub fn notify(
             None => brep(b, e)?.is_some(),
         };
         if has_brep {
-            brep_notify(N::RmFromBrep)?;
-            brep_notify(N::AddToBrep)?;
+            // this->GetCurve() is still the old geometry (data3)
+            let obj = |d: Option<ObjectRef>| d.map(BrepNotifyArg::Object);
+            brep_notify(b, env, N::RmFromBrep, obj(d3), d3)?;
+            brep_notify(b, env, N::AddToBrep, obj(d1), d3)?;
         }
     }
     if matches!(
@@ -2277,7 +2296,7 @@ impl Default for SetCurveOptions {
 ///
 /// # Errors
 ///
-/// Those of [`notify`]; [`SolidError::Unported`] from `SmBrep::Notify`.
+/// Those of [`notify`] and of `SmBrep::Notify` ([`crate::topology::brep::p2::notify`]).
 pub fn set_curve(
     b: &mut Brep,
     e: EdgeId,
@@ -2304,7 +2323,8 @@ pub fn set_curve(
         )?;
         if has_brep {
             // side effect: remove from spatial cache.
-            brep_notify(NotifyOperation::RmFromBrep)?;
+            let this = Some(BrepNotifyArg::Entity(EntityRef::Edge(e)));
+            brep_notify(b, env, NotifyOperation::RmFromBrep, this, old_ref)?;
         }
     }
 
@@ -2338,7 +2358,8 @@ pub fn set_curve(
 
     // side effect: Add to spatial cache.
     if options.call_notify && has_brep {
-        brep_notify(NotifyOperation::AddToBrep)?;
+        let this = Some(BrepNotifyArg::Entity(EntityRef::Edge(e)));
+        brep_notify(b, env, NotifyOperation::AddToBrep, this, new_ref)?;
     }
     Ok(returned)
 }

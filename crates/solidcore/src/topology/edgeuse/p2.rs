@@ -10,6 +10,7 @@
 //! | [`crate::topology::Edgeuse`] (`Default`, `Drop`) | `SmEdgeuse::SmEdgeuse`, `SmEdgeuse::~SmEdgeuse` |
 //! | [`is_tangent_sector`]                  | `SmEdgeuse::IsTangentSector`                     |
 //! | [`evaluate_binormal_step_off`], [`StepOffOptions`], [`BinormalEval`] | `SmEdgeuse::EvaluateBinormalStepOff` |
+//! | [`evaluate_binormal_step_off_into`]   | `SmEdgeuse::EvaluateBinormalStepOff` (out-params in place) |
 //! | [`is_convex_radial_sector`]            | `SmEdgeuse::IsConvexRadialSector`                |
 //! | [`rebuild_uv_trim_curve`]              | `SmEdgeuse::RebuildUVTrimCurve`                  |
 //! | [`check_and_set_uv_trim_curve`], [`CheckAndSetUvTrimCurve`] | `SmEdgeuse::CheckAndSetUVTrimCurve` |
@@ -26,6 +27,8 @@
 //!   [`SolidError::InvalidInput`]; `NER` is [`SolidError::null_pointer`].
 //! - **Out-params.** `EvaluateBinormalStepOff` returns all its outputs in a
 //!   [`BinormalEval`]; its optional inputs are a [`StepOffOptions`].
+//!   [`evaluate_binormal_step_off_into`] writes them in place for callers that read
+//!   them after a failed call, as upstream's out-params.
 //!   `CheckAndSetUVTrimCurve` takes the curve by value (upstream deletes it on every
 //!   path except an error return before the restore: either it stays attached, or the
 //!   restoring `SetUVTrimCurve(old, 0.0, TRUE)` deletes it, although the header says

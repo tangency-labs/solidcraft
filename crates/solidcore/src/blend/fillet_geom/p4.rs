@@ -2142,7 +2142,7 @@ impl FilletBrep {
                 false,
             )?;
             let crv_ivl = lifted.curve.natural_interval();
-            set_edge_curve(self.brep_mut(), rail, Some(Curve::from(lifted.curve)))?;
+            set_edge_curve(self.brep_mut(), rail, Some(lifted.curve))?;
             edge::set_interval(self.brep_mut(), rail, &crv_ivl)?;
             self.set_edgeuse_uv_curve(mate, Some(Curve::from(new_uv_curve)), true, true)?;
         }

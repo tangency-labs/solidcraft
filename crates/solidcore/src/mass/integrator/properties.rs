@@ -371,12 +371,8 @@ fn vertices(b: &Brep) -> Result<Vec<VertexId>> {
 fn region_void(b: &Brep, r: RegionId) -> Result<bool> {
     Ok(b.region(r)?.is_void() != 0)
 }
-fn manifold_solid(_b: &Brep) -> Result<bool> {
-    // UNPORTED(topology.brep_p2): SmBrep::IsManifoldSolid
-    Err(SolidError::unported(
-        "SmBrep::IsManifoldSolid",
-        "topology.brep_p2",
-    ))
+fn manifold_solid(b: &Brep) -> Result<bool> {
+    crate::topology::brep::p2::is_manifold_solid(b)
 }
 fn add(total: &mut PreciseProperties, delta: &PreciseProperties, density: f64) {
     total.area += delta.area;

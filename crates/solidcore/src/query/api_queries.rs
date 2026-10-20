@@ -573,13 +573,9 @@ pub fn find_faces(
     tools::find_face(k, brep, id, point, keys, owners)?.ok_or(SolidError::sm_err(OP))
 }
 
-/// Manifold solid predicate (`SmApiBrepIsManifoldSolid`); waits for B-rep traversal.
-pub fn brep_is_manifold_solid(_brep: &Brep) -> Result<bool> {
-    // UNPORTED(topology.brep_p2): SmBrep::IsManifoldSolid
-    Err(SolidError::unported(
-        "SmBrep::IsManifoldSolid",
-        "topology.brep_p2",
-    ))
+/// Manifold solid predicate (`SmApiBrepIsManifoldSolid`: `SmBrep::IsManifoldSolid`).
+pub fn brep_is_manifold_solid(brep: &Brep) -> Result<bool> {
+    crate::topology::brep::p2::is_manifold_solid(brep)
 }
 
 /// Loose or tight B-rep box (`SmApiBrepBoundingBox`); missing queries are `Unported`.

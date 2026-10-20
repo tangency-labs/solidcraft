@@ -833,8 +833,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .other
             .ok_or(invalid(OP_INSERT_RELATE, "no other B-rep"))?;
         self.proto_topo_mgr = Some(ProtoTopologyManager::new(
-            this,
-            other,
+            k,
+            (this, brep.brep_arena(this)?),
+            (other, brep.brep_arena(other)?),
             ti,
             self.this_approx_tol_3d,
             capture_distance,

@@ -1133,7 +1133,7 @@ mod tests {
     }
 
     #[test]
-    fn transform_delegates_identity_and_reports_the_actual_notify_boundary() {
+    fn transform_delegates_identity_and_reports_the_actual_boundary() {
         let mut adapter = KernelManifoldIntersector::new(5).unwrap();
         let mut k = Kernel::default();
         let mut b = Brep::default();
@@ -1155,24 +1155,27 @@ mod tests {
             .unwrap();
         let mut placement = Axis2Placement::default();
         placement.translate(Vec3::X);
-        let err = adapter
-            .transform_brep(
-                &mut kernels,
-                &mut b,
-                false,
-                &mut attrs,
-                &placement,
-                None,
-                true,
-            )
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            SolidError::Unported {
-                unit: "topology.brep_p2",
-                upstream: "SmBrep::Notify"
-            }
-        ));
+        // SmBrep::Notify is topology.brep_p2's (#149) and now runs through the adapter's
+        // environment; the transform then stops at its vertex walk
+        let r = adapter.transform_brep(
+            &mut kernels,
+            &mut b,
+            false,
+            &mut attrs,
+            &placement,
+            None,
+            true,
+        );
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::Unported {
+                    unit: "topology.brep_p1",
+                    upstream: "SmBrep::GetVertices"
+                })
+            ),
+            "transform: {r:?}"
+        );
         let id = 17;
         let entities = [
             EntityRef::Region(RegionId::from_index(id)),

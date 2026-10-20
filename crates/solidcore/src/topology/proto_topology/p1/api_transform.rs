@@ -110,8 +110,7 @@ fn is_uniform_positive_scale(scale: Vec3) -> bool {
 /// curve in a volume, on a surface, projected or composite, a surface in a volume,
 /// a scale a specialised kind does not take, or any other object; those of
 /// [`Curve::transform`], [`Surface::transform`] and [`PolyBrep::transform`];
-/// [`SolidError::Unported`] for B-reps (`SmBrep::Transform`, unit
-/// `topology.brep_p2` through part 5).
+/// those of `SmBrep::Transform` (`topology::brep::p5::transform`) for B-reps.
 pub fn transform_independent_object(
     k: &mut Kernel,
     obj: Option<TransformObject<'_>>,

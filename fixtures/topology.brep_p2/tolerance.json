@@ -1,0 +1,3813 @@
+{
+ "cases": [
+  {
+   "name": "settol_net_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_net_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_net_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_net_big",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_net_zero",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_net_neg",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_net_255_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_net_255_255",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_net_181_103",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_net_74_255",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_wire_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_wire_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_wire_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_wire_big",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_wire_zero",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_wire_neg",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_wire",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_wire",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_wire_255_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_wire_255_255",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_wire_181_103",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_wire_74_255",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_wire",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_plane10_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane10_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane10_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane10_big",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane10_zero",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane10_neg",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_plane10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_plane10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_plane10_255_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_plane10_255_255",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_plane10_181_103",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_plane10_74_255",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_plane10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_Mouse_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Mouse_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Mouse_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Mouse_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Mouse_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Mouse_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_Mouse",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_Mouse",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_Mouse_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_Mouse_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_Mouse_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_Mouse_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_Mouse",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_Endcap_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Endcap_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Endcap_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Endcap_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Endcap_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_Endcap_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_Endcap",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_Endcap",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_Endcap_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_Endcap_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_Endcap_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_Endcap_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_Endcap",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_box_with_large_fillet_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_box_with_large_fillet_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_box_with_large_fillet_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_box_with_large_fillet_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_box_with_large_fillet_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_box_with_large_fillet_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_box_with_large_fillet",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_box_with_large_fillet",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_box_with_large_fillet_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_box_with_large_fillet_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_box_with_large_fillet_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_box_with_large_fillet_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_box_with_large_fillet",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_cone_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_cone_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_cone_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_cone_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_cone_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_cone_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_cone",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_cone",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_cone_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_cone_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_cone_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_cone_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_cone",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_disk_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_disk_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_disk_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_disk_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_disk_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_disk_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_disk",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_disk",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_disk_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_disk_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_disk_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_disk_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_disk",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_ellips_ts2_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_ellips_ts2_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_ellips_ts2_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_ellips_ts2_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_ellips_ts2_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_ellips_ts2_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_ellips_ts2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_ellips_ts2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_ellips_ts2_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_ellips_ts2_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_ellips_ts2_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_ellips_ts2_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_ellips_ts2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_plane_circ_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_circ_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_circ_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_circ_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_circ_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_circ_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_plane_circ",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_plane_circ",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_plane_circ_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_plane_circ_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_plane_circ_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_plane_circ_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_plane_circ",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_plane_square_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_square_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_square_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_square_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_square_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_plane_square_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_plane_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_plane_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_plane_square_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_plane_square_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_plane_square_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_plane_square_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_plane_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_sphere_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_sphere_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_sphere_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_sphere_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_sphere_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_sphere_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_sphere",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_sphere",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_sphere_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_sphere_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_sphere_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_sphere_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_sphere",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_surf_extrude_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_extrude_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_extrude_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_extrude_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_extrude_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_extrude_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_surf_extrude",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_surf_extrude",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_surf_extrude_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_surf_extrude_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_surf_extrude_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_surf_extrude_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_surf_extrude",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_surf_rev_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_rev_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_rev_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_rev_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_rev_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_rev_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_surf_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_surf_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_surf_rev_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_surf_rev_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_surf_rev_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_surf_rev_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_surf_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_surf_sphere150_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_sphere150_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_sphere150_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_sphere150_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_sphere150_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_surf_sphere150_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_surf_sphere150",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_surf_sphere150",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_surf_sphere150_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_surf_sphere150_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_surf_sphere150_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_surf_sphere150_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_surf_sphere150",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_torus_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_torus_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_torus_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_torus_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_torus_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_torus_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_torus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_torus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_torus_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_torus_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_torus_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_torus_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_torus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_toruswvy_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_toruswvy_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_toruswvy_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_toruswvy_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_toruswvy_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_toruswvy_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_toruswvy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_toruswvy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_toruswvy_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_toruswvy_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_toruswvy_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_toruswvy_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_toruswvy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "settol_vase_rev_1e7_shrink",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:337",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_vase_rev_1e4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:696",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0001,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_vase_rev_zone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:1728",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 1e-05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_vase_rev_big",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.05,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_vase_rev_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": 0.0,
+    "only_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "settol_vase_rev_neg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "set_tol",
+    "tol": -0.002,
+    "only_larger": false,
+    "cascade": true
+   }
+  },
+  {
+   "name": "rebuild_vase_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "stale_vase_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "stale"
+   }
+  },
+  {
+   "name": "stale_vase_rev_255_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 0
+   }
+  },
+  {
+   "name": "stale_vase_rev_255_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "stale",
+    "create": 255,
+    "modified": 255
+   }
+  },
+  {
+   "name": "stale_vase_rev_181_103",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "stale",
+    "create": 181,
+    "modified": 103
+   }
+  },
+  {
+   "name": "stale_vase_rev_74_255",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "stale",
+    "create": 74,
+    "modified": 255
+   }
+  },
+  {
+   "name": "swap_vase_rev",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "swap"
+   }
+  }
+ ]
+}

@@ -1143,17 +1143,17 @@ fn find_and_set_infinite(
     crate::topology::brep::p5::find_and_set_infinite_region(primary, shell, code, bounding_box)
 }
 
-fn is_sheet(_primary: &Brep) -> Result<bool> {
-    // UNPORTED(topology.brep_p2): SmBrep::IsSheet
-    Err(SolidError::unported("SmBrep::IsSheet", "topology.brep_p2"))
+/// `m_pOther->IsSheet()` (`topology.brep_p2`), in the other B-rep's context as
+/// [`orient_sheet_surfaces`].
+fn is_sheet(kernels: &mut BooleanKernels<'_>, other: &Brep) -> Result<bool> {
+    let k = kernels.other.as_deref_mut().unwrap_or(kernels.primary);
+    crate::topology::brep::p2::is_sheet(k, other)
 }
 
-fn is_oriented_sheet(_primary: &Brep) -> Result<bool> {
-    // UNPORTED(topology.brep_p2): SmBrep::IsOrientedSheet
-    Err(SolidError::unported(
-        "SmBrep::IsOrientedSheet",
-        "topology.brep_p2",
-    ))
+/// `m_pOther->IsOrientedSheet()` (`topology.brep_p2`), in the other B-rep's context.
+fn is_oriented_sheet(kernels: &mut BooleanKernels<'_>, other: &Brep) -> Result<bool> {
+    let k = kernels.other.as_deref_mut().unwrap_or(kernels.primary);
+    crate::topology::brep::p2::is_oriented_sheet(k, other)
 }
 
 fn orient_sheet_surfaces(
@@ -1176,12 +1176,14 @@ fn new_component_brep(
     Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
-fn delete_stale_caches(_primary: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::DeleteStaleCaches
-    Err(SolidError::unported(
-        "SmBrep::DeleteStaleCaches",
-        "topology.brep_p2",
-    ))
+/// `m_vTI.m_pBrep->DeleteStaleCaches()` (`topology.brep_p2`): the faces' trimmed-surface
+/// caches are held by their Rust callers, not by the B-rep, and the merge holds none, so
+/// none is stale.
+fn delete_stale_caches(primary: &mut Brep) -> Result<()> {
+    crate::topology::brep::p2::delete_stale_caches::<()>(
+        primary,
+        &mut std::collections::BTreeMap::new(),
+    )
 }
 
 // true means imprint-only or imprint/classify: preserve normal topology and exit.
@@ -1429,10 +1431,10 @@ fn manifold_boolean_translated(
     let a = required(primary.as_mut())?;
     let b = required(other.as_mut())?;
     if operation == BooleanOperation::Slice {
-        if !is_sheet(b)? {
+        if !is_sheet(kernels, b)? {
             return Err(SolidError::sm_err(OP));
         }
-        if !is_oriented_sheet(b)? {
+        if !is_oriented_sheet(kernels, b)? {
             let first = required(bp::faces(b, None)?.first().copied())?;
             ignored(orient_sheet_surfaces(kernels, b, first, true))?;
         }

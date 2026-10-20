@@ -11,8 +11,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::IsManifoldSolid",
-        "unit": "topology.brep_p2"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_p3_defined_null_leaf_result",
@@ -2849,7 +2849,7 @@
   "cases_total": 287,
   "deferred_by_unit": {
     "boolean.merge_p2": 114,
-    "topology.brep_p2": 1,
+    "primitive.primitive_creation_p1": 1,
     "topology.brep_p3": 21
   },
   "max_rel_err": 0.0,

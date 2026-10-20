@@ -3,7 +3,7 @@
 //! Initial graphs are exported before either operation. Split refusals compare
 //! their retained endpoint as well as the complete semantic topology/geometry
 //! snapshot. Successful native mutations on deferred paths are not parity passes.
-use super::boolean_merge_p1::graph;
+use super::boolean_merge_p1::{graph, Canon};
 use super::topology_edgeuse_p1::{self as spec, BrepIn};
 use super::topology_vertexuse::import;
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
@@ -18,7 +18,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::topology::brep::p9 as port;
-use solidcore::topology::{ArenaId, EdgeId, FaceId, RegionId, VertexuseId};
+use solidcore::topology::{ArenaId, Brep, EdgeId, FaceId, RegionId, VertexuseId};
 use solidcore::SolidError;
 use solidcore_ffi::units::topology_brep_p9 as ffi;
 
@@ -405,6 +405,7 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
     match result {
         Ok(code) => {
             record.insert(0, f64::from(code));
+            canon_record(&b, i.op, &mut record);
             Ok(graph(&b, record))
         }
         Err(SolidError::Upstream { code, .. }) if i.op <= 4 => {
@@ -419,6 +420,7 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
             };
             record.resize(slots, -1.0);
             record.insert(0, f64::from(code));
+            canon_record(&b, i.op, &mut record);
             Ok(graph(&b, record))
         }
         Err(e) => status(&e),
@@ -439,6 +441,35 @@ impl solidcore::intersect::point_class::ClassObject for Handle {
         }
     }
 }
+/// Puts the B-rep ids of `record` (status first) in [`Canon`] numbering, the shim's
+/// `fresh.find` of a walk after the op.
+fn canon_record(b: &Brep, op: u8, record: &mut [f64]) {
+    let c = Canon::of(b);
+    let mut map = |at: usize, f: &dyn Fn(f64) -> f64| {
+        if let Some(x) = record.get_mut(at) {
+            *x = f(*x);
+        }
+    };
+    match op {
+        0 => map(1, &|x| c.regions.of_slot(x)),
+        2 => {
+            map(1, &|x| c.shells.of_slot(x));
+            map(2, &|x| c.vertices.of_slot(x));
+        }
+        3 => {
+            map(1, &|x| c.loops.of_slot(x));
+            map(2, &|x| c.vertices.of_slot(x));
+        }
+        4 => {
+            map(1, &|x| c.edges.of_slot(x));
+            map(2, &|x| c.edges.of_slot(x));
+            map(3, &|x| c.vertices.of_slot(x));
+        }
+        6 | 7 => map(2, &|x| c.vertices.of_slot(x)),
+        _ => {}
+    }
+}
+
 fn object_ref(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
     super::boolean_topology_intersector_p1::p9_entity_ref(e)
 }
@@ -469,6 +500,7 @@ impl UnitDiff for Runner {
             raw.get(2 + n..)
                 .ok_or_else(|| error("short native graph"))?,
         )?;
+        canon_record(&b, i.op, &mut record);
         Ok(graph(&b, record))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {

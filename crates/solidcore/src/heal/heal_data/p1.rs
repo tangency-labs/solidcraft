@@ -61,6 +61,7 @@ use crate::heal::face_props::{
 };
 use crate::kernel::Kernel;
 use crate::math::BIG_DOUBLE;
+use crate::topology::edge::NotifyEnv;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::face::p3 as face_p3;
@@ -421,19 +422,21 @@ impl<O: LoopObject> HealData<O> {
     /// same closed shell without sharing a face use, splits the region on either side
     /// (`SmBrep::TestClosureSplitRegion`), records the new shells and regions and
     /// marks the face's sheet property okay or fixed. `mark_lock` is the caller's
-    /// claimed mark (`rMarkLock`), `marks` the B-rep's topology marks.
+    /// claimed mark (`rMarkLock`), `marks` the B-rep's topology marks, `env` the
+    /// notification state the region split notifies through (`SmBrep::Notify`).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] where upstream dereferences null (a listed props
     /// without a face, a face without face uses); those of the closure traversals and
     /// the mark lock; [`SolidError::Unported`] from the region-splitting dependencies
-    /// (`topology.brep_p2`).
+    /// (`query.brep`).
     pub fn fix_bad_sheets(
         &mut self,
         k: &mut Kernel,
         b: &mut Brep,
         marks: &mut Marks,
+        env: &mut NotifyEnv<'_>,
         mark_lock: &MarkLock,
         _this_healer_op: HealerOpType,
     ) -> Result<()> {
@@ -442,7 +445,7 @@ impl<O: LoopObject> HealData<O> {
         if !self.face_props_sheets.base.is_empty() {
             // locals
             let mut sheet_lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
-            let r = self.fix_bad_sheets_with(k, b, marks, mark_lock, &sheet_lock);
+            let r = self.fix_bad_sheets_with(k, b, marks, env, mark_lock, &sheet_lock);
             sheet_lock.release(std::slice::from_mut(&mut k.context))?;
             r?;
         }
@@ -458,6 +461,7 @@ impl<O: LoopObject> HealData<O> {
         k: &mut Kernel,
         b: &mut Brep,
         marks: &mut Marks,
+        env: &mut NotifyEnv<'_>,
         mark_lock: &MarkLock,
         sheet_lock: &MarkLock,
     ) -> Result<()> {
@@ -521,7 +525,7 @@ impl<O: LoopObject> HealData<O> {
                 // fix - Split the Region on either side of the BadSheet into two
                 // different regions - increments mark again
                 let split = crate::topology::brep::p6::test_closure_split_region_attempt(
-                    k, b, marks, true, up_faceuse,
+                    k, b, marks, env, true, up_faceuse,
                 )?;
                 // Bare call in SmHealData.cpp:4832: ignore the native SmStatus
                 // and retain its partial outputs. The outer Result still
@@ -829,7 +833,7 @@ fn no_face() -> SolidError {
 mod tests {
     use super::*;
     use crate::intersect::point_class::{ClassObject, ClassObjectKind};
-    use crate::topology::LoopId;
+    use crate::topology::{Face, LoopId, ShellId};
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct H;
@@ -968,16 +972,20 @@ mod tests {
             api_heal_brep(&mut k, None),
             Err(SolidError::InvalidInput { .. })
         ));
-        // on a B-rep the whole-B-rep target lists are gathered (empty here) and the
-        // heal sequence of heal_data_p3 runs up to Fix_TolSizes, whose
-        // SmBrep::SetTolerance is unit topology.brep_p2 (SmBrep::HealBrep passes
-        // Unported through, ignoring every other status)
+        // on a B-rep the whole-B-rep target lists are gathered (its one face) and the
+        // heal sequence of heal_data_p3 runs past Fix_TolSizes (SmBrep::SetTolerance
+        // raises the face's tolerance through SmFace::SetTolerance) up to
+        // Cache_DegenFaces' SmFace::GetEdges (unit topology.face_p4; SmBrep::HealBrep
+        // passes Unported through, ignoring every other status)
         let mut b = Brep::default();
+        let face = b
+            .add_face_record(Face::new(ShellId::from_index(0)))
+            .unwrap();
         assert!(matches!(
             api_heal_brep(&mut k, Some(&mut b)),
             Err(SolidError::Unported {
-                upstream: "SmBrep::SetTolerance",
-                unit: "topology.brep_p2",
+                upstream: "SmFace::GetEdges",
+                unit: "topology.face_p4",
                 ..
             })
         ));
@@ -991,12 +999,13 @@ mod tests {
         assert!(matches!(
             r,
             Err(SolidError::Unported {
-                upstream: "SmBrep::SetTolerance",
-                unit: "topology.brep_p2",
+                upstream: "SmFace::GetEdges",
+                unit: "topology.face_p4",
                 ..
             })
         ));
-        assert!(h.tgt_faces.is_empty());
+        assert_eq!(b.face(face).unwrap().tolerance, 1e-5);
+        assert_eq!(h.tgt_faces, vec![face]);
         let (v, e, f) = ids();
         let t = HealBrepTargets {
             vertices: Some(&v),
@@ -1019,10 +1028,12 @@ mod tests {
         let mut h: HealData<H> = HealData::new();
         let mut marks = Marks::default();
         let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS).unwrap();
+        let mut state = crate::topology::brep::p2::RegionNotifyState::new(&b);
         h.fix_bad_sheets(
             &mut k,
             &mut b,
             &mut marks,
+            &mut state.env(),
             &lock,
             HealerOpType::FixBadsheets,
         )

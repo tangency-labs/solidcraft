@@ -11,27 +11,38 @@
 //!
 //! Deviations: pointers become arena ids; optional outputs become return values.
 //! Edits preserve the upstream mutations preceding an error. Missing callees stop
-//! at their first call: copying stops at the copy `Notify` (`brep_p2`) after part 5's
-//! `CreateWireEdgeFromCurve`, face
-//! construction at `SetTolerance` (`face_p3`), and a closed-shell split at `Notify`
-//! (`brep_p2`). The dependent remainder of each algorithm is deferred, rather than
+//! at their first call: face construction at `SetTolerance` (`face_p3`), and a closed-shell split at
+//! `CalculateBoundingBox` (`query.brep`) after its two `SmBrep::Notify` calls
+//! ([`crate::topology::brep::p2::notify`] with the caller's [`NotifyEnv`], statuses
+//! ignored; the new region gets its default `SmTopology` record when it is made, as
+//! `new SmRegion`). The dependent remainder of each algorithm is deferred, rather than
 //! approximating construction, attributes, radial sectors, trims or ray casting.
 //! The shell implementation comes from PR #154. Surface owner identities are
 //! supplied by the caller, independently of arena indices. A null trimmed copy
 //! returns a null-pointer error instead of the upstream dereference. There is no recursion;
 //! the traverser uses its bounded, iterative implementation.
+//! The copy notifications (`SM_NO_COPY` on each source edge and its vertices) run on a
+//! `topology.brep_p2` arena state seeded from both B-reps: the callers keep no attribute
+//! state, and both B-reps' objects are named by their arena identities, which overlap
+//! across the two B-reps (an overlapping pair propagates nothing, as for an object
+//! notified about itself). `SmEdge::Notify` and `SmVertex::Notify` pass `SM_NO_COPY`
+//! straight to `SmTopology::Notify`, which is called directly (the source B-rep is only
+//! read). They notify through the destination kernel's context, the only one given.
 //! An attempt exposes native status separately for callers that ignore it;
 //! missing dependencies and Rust representation failures remain outer errors.
 
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
-use crate::geom::object::ObjectRef;
+use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::Surface;
+use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
+use crate::topology::edge::NotifyEnv;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell::{self, ShellType};
+use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{self as tr, Marks};
 use crate::topology::{
     Brep, EdgeId, EdgeuseId, Face, FaceId, Faceuse, FaceuseId, Region, RegionId, Shell, ShellId,
@@ -50,35 +61,79 @@ fn split_link<T>(value: Option<T>) -> Result<T> {
     value.ok_or_else(|| SolidError::invalid_input(OP, "unlinked topology in region split"))
 }
 
-/// Copy edges to independent wires in `destination`, in input order.
-/// An empty list succeeds without inspecting the destination. Each edge's trimmed
-/// NURBS copy is made into a wire edge by part 5's `CreateWireEdgeFromCurve` over the
-/// copy's natural interval; the copy notifications that follow need the caller's
-/// notification routing and defer at `SmBrep::Notify` (`brep_p2`).
+/// Copy edges to independent wires in `destination`, in input order, returning the new
+/// edges (`pNewEdges`). An empty list succeeds without inspecting the destination. Each
+/// edge's trimmed NURBS copy is made into a wire edge by part 5's
+/// `CreateWireEdgeFromCurve` over the copy's natural interval; then the source edge and
+/// its start vertex (and its end vertex, when both edges have two) report the copy
+/// (`Notify(SM_NO_COPY, pNew, pDestinationBrep, this)`, statuses ignored; see the
+/// module's Deviations).
+///
+/// # Errors
+///
+/// Those of `CreateTrimmedNURBSCurve` and `CreateWireEdgeFromCurve` (`SER`); a
+/// null-pointer error for a null curve copy or a missing vertex, which upstream
+/// dereferences.
 pub fn copy_edges(
     destination_kernel: &mut Kernel,
     source: &Brep,
     edges: &[EdgeId],
     destination: &mut Brep,
 ) -> Result<Vec<EdgeId>> {
-    let result = Vec::new();
-    if let Some(&edge) = edges.first() {
+    let mut result = Vec::new();
+    for &edge in edges {
         let curve = required(crate::topology::edge::create_trimmed_nurbs_curve(
             destination_kernel,
             source,
             edge,
         )?)?;
         let interval = curve.natural_interval();
-        let _new_edge = crate::topology::brep::p5::create_wire_edge_from_curve(
+        let new_edge = crate::topology::brep::p5::create_wire_edge_from_curve(
             destination_kernel,
             destination,
             curve,
             interval,
         )?;
-        // Notify(SM_NO_COPY) on the edge and its vertices propagates attributes
-        // between the two B-reps' records.
-        // UNPORTED(topology.brep_p2): SmBrep::Notify
-        return Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"));
+
+        // Notify Copy Edge - propogates attributes and reports copy
+        let mut state = brep_p2::ArenaNotifyState::new(source);
+        state.seed(destination);
+        let data = [brep_p2::brep_ref(destination), brep_p2::brep_ref(source)];
+        let mut notify_copy = |old: EntityRef, new: EntityRef| {
+            use crate::topology::loopuse::notify_ref;
+            crate::error::ignore_status(crate::topology::topology::notify(
+                &mut state.records,
+                &mut state.attributes,
+                Some(&mut destination_kernel.context),
+                NotifyOperation::Copy,
+                notify_ref(old),
+                Some(notify_ref(new)),
+                Some(data[0]),
+                Some(data[1]),
+            ))
+        };
+        notify_copy(EntityRef::Edge(edge), EntityRef::Edge(new_edge))?;
+
+        // Notify Copy Vertices - propogates attributes and reports copy
+        let new_start = required(crate::topology::edge::start_vertex(destination, new_edge)?)?;
+        let new_end = required(crate::topology::edge::other_vertex(
+            destination,
+            new_edge,
+            Some(new_start),
+        )?)?;
+        let old_start = required(crate::topology::edge::start_vertex(source, edge)?)?;
+        let old_end = required(crate::topology::edge::other_vertex(
+            source,
+            edge,
+            Some(old_start),
+        )?)?;
+        notify_copy(EntityRef::Vertex(old_start), EntityRef::Vertex(new_start))?;
+        if old_start != old_end && new_start != new_end {
+            notify_copy(EntityRef::Vertex(old_end), EntityRef::Vertex(new_end))?;
+        }
+
+        // set optional output
+        result.push(new_edge);
     }
     Ok(result)
 }
@@ -202,18 +257,20 @@ pub fn make_face_topology(
 /// Split a region when the seed face use bounds a closed set of neighbors.
 /// Returns `(new_shell, new_region)`. Already separated mates, lamina faces and
 /// non-closed traversals succeed without creating either object. Closed sets move
-/// to a new solid region/shell before the first notification defers on `brep_p2`.
+/// to a new solid region/shell, both notified through `env`, before the B-rep box
+/// defers on `query.brep`.
 /// The caller's marks and kernel context persist across calls. Every acquired
 /// mark lock is released on success and on error.
 pub fn test_closure_split_region(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
     do_infinite_region_testing: bool,
     start: FaceuseId,
 ) -> Result<(Option<ShellId>, Option<RegionId>)> {
     let attempt =
-        test_closure_split_region_attempt(k, brep, marks, do_infinite_region_testing, start)?;
+        test_closure_split_region_attempt(k, brep, marks, env, do_infinite_region_testing, start)?;
     attempt.status?;
     Ok((attempt.shell, attempt.region))
 }
@@ -255,6 +312,7 @@ pub fn test_closure_split_region_attempt(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
     _do_infinite_region_testing: bool,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
@@ -263,7 +321,7 @@ pub fn test_closure_split_region_attempt(
         shell: None,
         region: None,
     };
-    let status = split_region_into(k, brep, marks, start, &mut attempt);
+    let status = split_region_into(k, brep, marks, env, start, &mut attempt);
     finish_split_attempt(attempt, status)
 }
 
@@ -271,6 +329,7 @@ fn split_region_into(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
     start: FaceuseId,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
@@ -284,7 +343,7 @@ fn split_region_into(
         return Ok(());
     }
     let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
-    let result = split_closed(k, brep, marks, start, &lock, attempt);
+    let result = split_closed(k, brep, marks, env, start, &lock, attempt);
     lock.release(std::slice::from_mut(&mut k.context))?;
     result
 }
@@ -293,6 +352,7 @@ fn split_closed(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
     start: FaceuseId,
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
@@ -310,6 +370,9 @@ fn split_closed(
         is_void: 0,
     })?;
     brep.shell_mut(new_shell)?.region = Some(new_region);
+    // the new region's SmTopology members (default-constructed)
+    let region_key = (env.key_of)(EntityRef::Region(new_region)).key;
+    env.records.insert(region_key, Topology::default());
 
     let old_shell = split_link(brep.faceuse(start)?.shell)?;
     let old_region = split_link(brep.shell(old_shell)?.region)?;
@@ -333,11 +396,45 @@ fn split_closed(
     // available to unchecked callers when a later native operation fails.
     attempt.shell = Some(new_shell);
     attempt.region = Some(new_region);
-    // Notify(PRE_EDIT) and Notify(SPLIT_IN_BREP) precede CalculateBoundingBox,
-    // infinite-region testing, classification of residual faces/wires/shells,
-    // and empty-shell/region cleanup. None of those may run before this call.
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"))
+    // notify this Brep and the OldRegion for attribute propagation (SmBrep.cpp:27954-5;
+    // both statuses ignored)
+    let this = Some(NotifyArg::Object(brep_p2::brep_ref(brep)));
+    ignore_status(brep_p2::notify(
+        brep,
+        env,
+        None,
+        NotifyOperation::PreEdit,
+        [this, None, None],
+    ))?;
+    let region = |r| Some(NotifyArg::Entity(EntityRef::Region(r)));
+    ignore_status(brep_p2::notify(
+        brep,
+        env,
+        None,
+        NotifyOperation::SplitInBrep,
+        [region(old_region), region(old_region), region(new_region)],
+    ))?;
+    // CalculateBoundingBox, infinite-region testing, classification of residual
+    // faces/wires/shells and empty-shell/region cleanup follow.
+    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
+    Err(SolidError::unported(
+        "SmBrep::CalculateBoundingBox",
+        "query.brep",
+    ))
+}
+
+/// A status upstream ignores: only [`SolidError::Unported`] and the port's
+/// representation failures ([`SolidError::InvalidInput`], [`SolidError::NotFound`])
+/// propagate.
+fn ignore_status(r: Result<()>) -> Result<()> {
+    match r {
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::NotFound { .. }),
+        ) => Err(e),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -392,15 +489,24 @@ mod tests {
             MarkType::Mark.code(),
         )
         .unwrap();
-        let result =
-            test_closure_split_region_attempt(&mut k, &mut b, &mut Marks::default(), true, first);
+        let mut state = crate::topology::brep::p2::RegionNotifyState::new(&b);
+        let result = test_closure_split_region_attempt(
+            &mut k,
+            &mut b,
+            &mut Marks::default(),
+            &mut state.env(),
+            true,
+            first,
+        );
         assert!(matches!(
             result,
             Err(SolidError::Unported {
-                unit: "topology.brep_p2",
-                ..
+                upstream: "SmBrep::CalculateBoundingBox",
+                unit: "query.brep",
             })
         ));
+        // the new region got its (default) SmTopology record
+        assert_eq!(state.records.len(), 2);
         assert!(k.context.is_mark_locked(MarkType::Mark));
         assert!(!k.context.is_mark_locked(MarkType::Mark2));
         assert_eq!(b.regions().len(), 2);
@@ -428,7 +534,7 @@ mod tests {
         assert_eq!(attempt.region, Some(RegionId::from_index(11)));
         for error in [
             SolidError::invalid_input(OP, "typed resolver required"),
-            SolidError::unported("SmBrep::Notify", "topology.brep_p2"),
+            SolidError::unported("SmBrep::CalculateBoundingBox", "query.brep"),
         ] {
             assert_eq!(
                 finish_split_attempt(partial(), Err(error.clone())).unwrap_err(),
@@ -441,10 +547,12 @@ mod tests {
     fn missing_split_links_are_outer_errors_even_for_unchecked_callers() {
         let mut b = Brep::new();
         let seed = b.add_faceuse_record(Faceuse::default()).unwrap();
+        let mut state = crate::topology::brep::p2::RegionNotifyState::default();
         let result = test_closure_split_region_attempt(
             &mut Kernel::default(),
             &mut b,
             &mut Marks::default(),
+            &mut state.env(),
             true,
             seed,
         );

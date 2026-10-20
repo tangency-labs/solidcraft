@@ -595,18 +595,26 @@ fn empty_brep(
     Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
+/// `pNewBrep->SetTolerance(tol, bUpdateOnlyIfLarger, bCascadeToBndries)`
+/// (`topology::brep::p2::set_tolerance`); the status is ignored (`SmMerge.cpp:466`), so
+/// only [`SolidError::Unported`] propagates.
 fn set_tolerance(
-    _k: &mut Kernel,
-    _brep: &mut Brep,
-    _tolerance: f64,
-    _topology: bool,
-    _check: bool,
+    k: &mut Kernel,
+    brep: &mut Brep,
+    tolerance: f64,
+    update_only_if_larger: bool,
+    cascade_to_boundaries: bool,
 ) -> solidcore::Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::SetTolerance
-    Err(SolidError::unported(
-        "SmBrep::SetTolerance",
-        "topology.brep_p2",
-    ))
+    match solidcore::topology::brep::p2::set_tolerance(
+        k,
+        brep,
+        tolerance,
+        update_only_if_larger,
+        cascade_to_boundaries,
+    ) {
+        Err(e) if e.is_unported() => Err(e),
+        _ => Ok(()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // all five native SSI arrays remain explicit
@@ -627,16 +635,31 @@ fn register_ssi(
     ))
 }
 
+/// `SmBrep::Notify(op, caller, data1, data2)` (`topology::brep::p2::notify`). The fixture
+/// pool carries no attribute records, so the notification runs on an empty store over
+/// the B-rep's regions, as `heal.stitch_p1`'s `PRE_EDIT`; no Rust caller holds the
+/// B-rep's `SM_OC_BREP` cache.
 fn notify(
     _k: &mut Kernel,
-    _brep: &mut Brep,
-    _operation: solidcore::geom::object::NotifyOperation,
-    _caller: solidcore::geom::object::ObjectRef,
-    _data1: Option<solidcore::geom::object::ObjectRef>,
-    _data2: Option<solidcore::geom::object::ObjectRef>,
+    brep: &mut Brep,
+    operation: solidcore::geom::object::NotifyOperation,
+    caller: solidcore::geom::object::ObjectRef,
+    data1: Option<solidcore::geom::object::ObjectRef>,
+    data2: Option<solidcore::geom::object::ObjectRef>,
 ) -> solidcore::Result<()> {
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"))
+    use solidcore::topology::brep::p2;
+    let mut state = p2::RegionNotifyState::new(brep);
+    p2::notify(
+        brep,
+        &mut state.env(),
+        None,
+        operation,
+        [
+            Some(p2::NotifyArg::Object(caller)),
+            data1.map(p2::NotifyArg::Object),
+            data2.map(p2::NotifyArg::Object),
+        ],
+    )
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
@@ -985,13 +1008,9 @@ mod tests {
                 ..
             })
         ));
-        assert!(matches!(
-            pool.notify_pre_edit(&mut k, 0),
-            Err(SolidError::Unported {
-                unit: "topology.brep_p2",
-                ..
-            })
-        ));
+        // SmBrep::Notify is topology.brep_p2's (#149): PRE_EDIT of the fixture B-rep runs
+        let r = pool.notify_pre_edit(&mut k, 0);
+        assert!(r.is_ok(), "notify_pre_edit: {r:?}");
         assert!(matches!(
             pool.register_empty_ssi((0, 0), (0, 1)),
             Err(SolidError::Unported {

@@ -13,7 +13,7 @@
 //!
 //! | [`Op`]   | after the blocks | outputs |
 //! |----------|------------------|---------|
-//! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it |
+//! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it; then per B-rep `n_faces` (`0` for an absent one) and per face (export order) `-1`, or `n byte*n`: the binary `WriteToDB` record (version 33) of a surface that is exactly an `SmSurfOfRevolution` |
 //! | `Run`    | `dist approx make_analytics n_local (face surface)* inset extend n_shell face* n_pairs (eu eu)* n_ops ops*` | per op its code, a status and its outputs (below): an op's out-parameters follow a success status only, the states of existing topology (edge states, a face's domain and surface) follow every status |
 //!
 //! The run header makes `SmOffsetGeometryCreation(dist, approx)` (with
@@ -494,6 +494,44 @@ pub fn split_exports(out: &[f64]) -> Option<(Vec<f64>, Option<Vec<f64>>)> {
     let a = blocks.first().cloned().flatten()?;
     let b = blocks.get(1).cloned().flatten();
     Some((a, b))
+}
+
+/// The per-face `SmSurfOfRevolution` records after an `Export` output's two blocks:
+/// per B-rep, per face in export order, the binary `WriteToDB` bytes of a surface that
+/// is exactly an `SmSurfOfRevolution` (`None` for other faces; an empty list for an
+/// absent B-rep). `None` when the output is a build failure or malformed.
+#[must_use]
+pub fn split_revolutions(out: &[f64]) -> Option<[Vec<Option<Vec<u8>>>; 2]> {
+    if out.first() != Some(&0.0) {
+        return None;
+    }
+    let mut at = 1usize;
+    for _ in 0..2 {
+        let len = *out.get(at)? as usize;
+        at = at.checked_add(1 + len)?;
+    }
+    let mut breps: [Vec<Option<Vec<u8>>>; 2] = [Vec::new(), Vec::new()];
+    for faces in &mut breps {
+        let n = *out.get(at)? as usize;
+        at += 1;
+        for _ in 0..n {
+            let len = *out.get(at)?;
+            at += 1;
+            if len < 0.0 {
+                faces.push(None);
+                continue;
+            }
+            let len = len as usize;
+            let bytes = out
+                .get(at..at.checked_add(len)?)?
+                .iter()
+                .map(|&b| u8::try_from(b as i64).ok())
+                .collect::<Option<Vec<u8>>>()?;
+            at += len;
+            faces.push(Some(bytes));
+        }
+    }
+    Some(breps)
 }
 
 /// Per B-rep: `[vertices, edges, faces, edgeuses, faceuses]`.

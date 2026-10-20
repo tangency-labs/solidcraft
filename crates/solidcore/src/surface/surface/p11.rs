@@ -82,7 +82,6 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
-use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
@@ -1758,7 +1757,7 @@ fn extract_iso_curve(
     uv_curve: &Curve,
     interval: &Extent1d,
     approx_tol_3d: f64,
-) -> Result<Option<(BSplineCurve, f64)>> {
+) -> Result<Option<(Curve, f64)>> {
     // `sm_ExtractIsoCurve` takes an `SmBSplineCurve`: every `Curve` kind derived from it
     // has one as base. Other kinds cannot reach upstream's signature, so they are not
     // iso curves here.
@@ -1776,23 +1775,24 @@ fn extract_iso_curve(
     else {
         return Ok(None);
     };
-    // rp3dCurve is an SmBSplineCurve
-    let bspline = match iso.into_kind() {
-        CurveKind::BSpline(b) => b,
-        CurveKind::Line(l) => l.base().clone(),
-        CurveKind::Ellipse(e) => e.base().clone(),
-        CurveKind::Hyperbola(h) => h.base().clone(),
-        CurveKind::Parabola(p) => p.base().clone(),
-        _ => return Err(SolidError::sm_err(OP_LIFT)),
-    };
-    Ok(Some((bspline, 0.0)))
+    // rp3dCurve is an SmBSplineCurve: the iso curve keeps its own kind (an SmLine or
+    // conic is one; the caller's virtual calls dispatch on it)
+    match iso.kind() {
+        CurveKind::BSpline(_)
+        | CurveKind::Line(_)
+        | CurveKind::Ellipse(_)
+        | CurveKind::Hyperbola(_)
+        | CurveKind::Parabola(_) => Ok(Some((iso, 0.0))),
+        _ => Err(SolidError::sm_err(OP_LIFT)),
+    }
 }
 
 /// The lifted curve of [`Surface::lift_curve`].
 #[derive(Debug, Clone)]
 pub struct LiftedCurve {
-    /// `rp3dCurve`: the 3D curve `surface(uv_curve(interval))`.
-    pub curve: BSplineCurve,
+    /// `rp3dCurve`: the 3D curve `surface(uv_curve(interval))`, an `SmBSplineCurve`:
+    /// a B-spline, or the analytic iso curve (line or conic) `sm_ExtractIsoCurve` made.
+    pub curve: Curve,
     /// `rdMaxApproxDev`: the largest distance from the curve to the surface.
     pub max_approx_dev: f64,
 }
@@ -2020,7 +2020,7 @@ impl Surface {
         };
 
         Ok(LiftedCurve {
-            curve,
+            curve: Curve::from(curve),
             max_approx_dev,
         })
     }

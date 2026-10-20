@@ -1859,8 +1859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "api_translate_box_brep",
@@ -3247,8 +3247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0166",
@@ -4471,8 +4471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0313",
@@ -4507,8 +4507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0317",
@@ -4827,8 +4827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0355",
@@ -6779,8 +6779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0594",
@@ -7399,8 +7399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0670",
@@ -9063,8 +9063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0872",
@@ -12379,8 +12379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1275",
@@ -12775,8 +12775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetVertices",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1322",
@@ -14291,6 +14291,46 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "edge_proto_fallback_tol_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edge_proto_fallback_tol_negative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edge_proto_fallback_tol_minus_one",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edge_proto_fallback_tol_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edge_proto_fallback_tol_eff_zero",
+      "outcome": "pass",
+      "pass": true,
+      "source": "inline",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "edge_transform_line_transform",
       "outcome": "pass",
       "pass": true,
@@ -15229,10 +15269,11 @@
   "cases_both_errored": 0,
   "cases_deferred": 92,
   "cases_failed": 0,
-  "cases_passed": 1765,
-  "cases_total": 1857,
+  "cases_passed": 1770,
+  "cases_total": 1862,
   "deferred_by_unit": {
-    "topology.brep_p2": 10,
+    "topology.brep_p1": 8,
+    "topology.brep_p3": 2,
     "topology.edge": 28,
     "topology.face_p2": 29,
     "topology.vertex": 25
