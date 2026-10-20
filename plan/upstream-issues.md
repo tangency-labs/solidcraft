@@ -144,6 +144,16 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes. Single-byte overwrites (digits, `-`, `.`) accepted by `SmBrepData::ReadFromFile`, run one per process: 11 of 600 crashed with SIGSEGV (rc=139; 100 streams each of `Endcap`, `Mouse`, `box_with_large_fillet`, `cone`, `disk`, `ellips_ts2`: 2, 1, 2, 4, 1, 1). A batch of 100 such streams per file crashed in 13 of the 15 `pt_TestFiles` (all but `torus`, `vase_rev`).
 - **Severity:** crash/UB (out-of-bounds read, wild pointer dereference).
 - **Rust port:** `MakeTopologyFromData` belongs to `topology.brep_p10` (unported; `p7::read_from_file` defers there). Its port must range-check every cross-reference index and return `InvalidInput`. The `topology.brep_p7` difftest keeps such streams away from the C++ side (`cpp-guard:unvalidated-topology`).
+- **Fuzz sweep trigger (2026-10-20):** healing (`bAlwaysHeal` or an old healer version) after a `Set` patch that leaves malformed cross-reference indices walks them (`topology.brep_p10` runner `heal_guard`, `crates/difftest/src/units/topology_brep_p10.rs:182`). Confirmed: no (the guard covers the whole `Set` arm, broader than any observed crash).
+
+#### UB-223. `SmIsoCurve` / `SmProjectedCurve` / `SmBSplineSurface` readers cast unchecked file values to enums [PSIRT]
+- **Location:** `source/SMLib/src/SmIsoCurve.cpp:421` (`(SmSurfParamType) lSurfParam`, `SmIsoCurve::ReadFromDB`, def. `:369`); `SmProjectedCurve.cpp:785` (`(SmProjectionType) lProjType`, `SmProjectedCurve::ReadFromDB`, def. `:690`); `SmBSplineSurface.cpp:6515` (`(SmBSplineSurfaceForm) lBSplineSurfaceForm`, reached from the iso curve's nested surface).
+- **What happens:** A `ULONG` read from the file is cast to an enum without a range check. Values outside the enum's range of values (`SmSurfParamType`, `SmBSplineSurfaceForm`: 0..=15; `SmProjectionType`: 0..=3) are undefined behaviour; in the reference build the raw value is stored and later read back (`m_eProjType` comes back as `-2147483648` for `2147483648`). In the ASCII branches an extraction from an already-failed stream leaves `lSurfParam`, `bFromLeft` (`SmIsoCurve.cpp:398`, `:400`) and `lProjType` (`SmProjectedCurve.cpp:729`, `:754`) uninitialised before the same cast.
+- **Trigger:** `curve.iso_curve` fuzz `fuzz00479` (`/db/sp = 2147483648`), `fuzz01374` (`/db/form = 9223372036854775807`); `curve.projected_curve` fuzz `fuzz00412` (`/ptype = 2147483648`), `fuzz00488` (`/ptype = 4`).
+- **How found:** generated difftest case (fuzz sweep, `--fuzz 2000`).
+- **Confirmed:** no (no crash; the C++ run kept and returned the out-of-range value).
+- **Severity:** crash/UB.
+- **Rust port:** Maps unknown values to `SM_SP_UNKNOWN` / `SM_PT_UNKNOWN`; the difftest runners keep out-of-range values away from the C++ side (`curve_iso_curve.rs`, `curve_projected_curve.rs`).
 
 ### NLib: knots and basis functions
 
@@ -293,6 +303,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Reports `SM_ERR`.
+- **Fuzz sweep trigger (2026-10-20):** `smgu_BestFitPlaneToPoints` (`SmGeomUtility.cpp:4478`, call at `:4555`) on a point set with coordinates near `±1e300`. The scatter matrix overflows to `inf`, `inf - inf` is NaN, `IsSymmetric` (`SmMatrix.cpp:222`) fails, `EigenSystemJacobiSolver` returns `SM_ERR` before writing `sV`, and `Compute3x3EigenVectors` returns `SM_SUCCESS` with the uninitialised small-matrix storage as eigenvectors. Cases: `geom.point_set` `fuzz00533` (`/pts/9/2 = 1e+300`, `/pts/0/1 = 1e+300`) and `fuzz01968` (`fuzz-out/verify2000/geom.point_set/`), 12 more in `fuzz-out/geom/geom.point_set/`. The C++ reports success while Rust returns `SM_ERR` (1001), so the ignored status is confirmed in a C++ run. The uninitialised values were not observed directly.
 
 #### UB-22. `SmMatrix::LUDecompose` uses a fixed stack buffer it does not check
 - **Location:** `SmMatrix.cpp:662`, `SmMatrix::LUDecompose`.
@@ -371,6 +382,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** `ul`/`ur` can be in range and the call still writes out of bounds. For `U = [0,0,0,0,1e-300,6,9,9,9,9]` (cubic, 6 control points), `N_CrvExtractCrvSeg(0, 1e-300)`: `N_BasisFindSpan` skips the too-short span, `ul = 0` lands in span 4, `spr - mlr < spl`, and upstream writes one knot past the `m + 1` it allocated for `UQ`. Found in the `nlib.srf_adv_p6` sweep. Its group may already list it, in which case keep one bullet. The Rust port returns `InvalidInput` (`crv_tool/p1.rs`, test `extract_seg_over_skipped_tiny_span_is_invalid_input`). Not confirmed.
 
 #### UB-30. Reparametrisation writes at negative indices
 - **Location:** `NL_CrvBasic.cpp:5005` `N_CrvReparamToInterval`; `NL_SrfBasic.cpp:5095` `N_SrfReparamToInterval`.
@@ -407,6 +419,8 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput` or the angle error.
+- **Fuzz sweep trigger (2026-10-20):** a curve control point coordinate or weight of `1e300` / `1e-300`, or a start derivative `-1e300` (`nlib.srf_adv_p4` `fuzz00511`, `fuzz00921`, `fuzz01441`, `fuzz01762`): C++ returned a curve, Rust the angle error. Also an end angle exactly equal to `eps` or NaN leaves the knot uninitialised. The `nlib.srf_adv_p4` FFI now replays `N_VectorsAngle` in upstream's operation order and rejects the first-pass inputs that hit either case (`approx_angles_ok`). Confirmed: no (no crash).
+- **Fuzz sweep trigger (2026-10-20):** a surface weight of `0.0` or `-0.0` (`nlib.srf_adv_p2` `fuzz01654`, `fuzz00394`): a zero weight makes Euclidean points infinite, the reflection plane cannot be normalised and C++ reads past its scratch rows and returns a surface; Rust errors. The `nlib.srf_adv_p1`/`p2`/`p3` FFIs require surface weights all `NOW` or all positive (`p4`: curve weights). Confirmed: no (no crash).
 
 #### UB-33. `sm_CrvDerivs` / `sm_CrvRationalBasisDerivs` overrun fixed derivative arrays
 - **Location:** `SmNurbsCrv.cpp:1281`-`1288` (`sm_CrvDerivs`: `BD_STACK[GW_MAX_DERIV]`, but the guard is `der > GW_MAX_DERIV`); `SmNurbsCrv.cpp:1182` `sm_CrvRationalBasisDerivs`, reached from `SmOffsetCurve::Evaluate` (`SmOffsetCurve.cpp:141`).
@@ -434,6 +448,33 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes. In a fresh process the call returns `SM_ERR` every time; after a few other extensions in the same process the same call returns `SM_SUCCESS`. The separate, non-in-place `N_SrfExtendByDist` calls of that sequence (`nlib.srf_adv_p1` shim, error state cleared) agree with the Rust port at every step.
 - **Severity:** crash/UB (uninitialised read).
 - **Rust port:** `N_SrfExtendByDist` returns a new surface, so a failed attempt leaves the surface unchanged and the retry extends the original (the documented in-place deviation of `nurbs::srf_adv::p3`). The `surface.surface_p2` generator leaves out extension cases whose first attempt at some side fails (see `plan/findings.md`).
+
+#### UB-225. `N_ApproxNurbsWithNonRatCrv` overflows its `NL_INDEX` sample count and writes past its parameter array
+- **Location:** `source/SMLib/src/NL_CrvApprox.cpp:2698` `N_ApproxNurbsWithNonRatCrv`: `nu[i] = (NL_INDEX)ceil(f1 * gro)` at `:2778`-`2779` (`f1 = (1/tol)^exp`, `gro = max(deg, sqrt(max|C''| / 8))`), `mu += nu[i]` at `:2780`, `N_AllocReal1dArray(mu)` at `:2785`. Reached from `SmBSplineCurveNLib.cpp:524` `SmBSplineCurve::ApproximateRationalCurve` (def. `:497`) and so from `sm_CreateNonRationalCurve` (`SmBSplineSurfaceNLib.cpp:2906`) / `SmBSplineSurface::CreateCornerBlend`.
+- **What happens:** For a tiny tolerance or a huge second derivative, `del` is beyond `2^63` (or infinite), so the cast is undefined and `mu` wraps. The parameter array is allocated from the wrapped sum and the sampling loop writes past it. The heap is corrupted; the process dies at once or several calls later.
+- **Trigger:** `sm_CreateNonRationalCurve` (approximation of a rational curve) on `TestFiles/pt_TestFiles/curve0.smc` with `tol = 1e-300` (segfault); a rational cubic with one control point coordinate `1e300` (glibc `realloc(): invalid next size` in the same process); `double free or corruption (out)` 50 cases later in the same process.
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `nurbs.b_spline_surface_n_lib_p1` `fuzz00080`, `fuzz00651`, `fuzz00902`; files under `n2000/nurbs.b_spline_surface_n_lib_p1/`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB (heap buffer overflow).
+- **Rust port:** `nurbs::crv_approx` bounds the sample count. The `nurbs.b_spline_surface_n_lib_p1` FFI applies the `nlib.crv_approx` `NonRat` bounds to a rational curve (`APPROX_MIN_TOL = 1e-7 <= tol <= 1`, homogeneous data within `MAX_COORD = 1e6`); the `nlib.crv_approx` FFI already had them.
+
+#### UB-234. `N_CrvOffsetPtSampling` casts an unchecked sample count to `NL_INDEX`
+- **Location:** `source/SMLib/src/NL_CrvOffset.cpp:1380` `nu[i] = (NL_INDEX)del;` and `:1381` `mu += nu[i];` in `N_CrvOffsetPtSampling` (def. `:1217`), then `:1386` `N_AllocReal1dArray( mu, &SL )`. The same pattern is at `:297`/`:298` (`N_CrvOffsetFuncVariableDir`) and `:674`/`:675` (`N_CrvOffsetFuncConstantDir`).
+- **What happens:** `del = ceil(f1 * gro)` comes from `N_CrvOffsetGetMax2ndDeriv` per Bezier segment. A NaN or infinite `Muu`, or a `del` above `LONG_MAX`, makes the double-to-integer conversion undefined. The per-segment counts are summed without an overflow check and the sum sizes the parameter and point arrays.
+- **Trigger:** A rational curve with a non-positive weight (a pole: `Muu` non-finite or huge), or a tolerance near `0`. Fuzz cases `nlib.crv_offset` fuzz00366 / fuzz01037 / fuzz01299 (`/crv/cpts/k/3 = -1.0`) and fuzz00468 (`/tol = 1e+300`, `/deg = 4294967296`, control points at `+-1.8e308`).
+- **How found:** read during porting (the `nlib.crv_offset` shim recomputes the count before the call); fuzz sweep (`difftest --fuzz 2000`) inputs reach it.
+- **Confirmed:** no. The shim returns `SC_ERR_ARG` for a non-finite count or a total above `MAX_SAMPLES` (4000), and the FFI rejects non-positive weights.
+- **Severity:** crash/UB.
+- **Rust port:** Sums with `checked_add` and returns `InvalidInput` for an unrepresentable count or more than `MAX_OFFSET_SAMPLES` (16 384) samples.
+
+#### UB-235. NLib fitting and approximation overflow `NL_INDEX` on huge caller counts
+- **Location:** `NL_CrvApprox.cpp:2274` `N_ApproxCircArcWithCrvData` (`nc + p + 1` knots, `np = 4 * nc` at `:2444`, `:2526`); `NL_CrvFit.cpp:2000` `N_FitCrvCalcKnotVector`, `:2458` `N_FitCalcKnotVectorEndDerivs`, `:2562` `N_FitCalcKnotVectorDeriv`, `:4023` `N_FitCalcKnotVectorCrvApprox` (`n + p + 1`), `:2273` `N_FitCrvInterpGivenParams` (`n + p + 1` compared with the knot count), `:13320` `N_FitCrvWeightedLstSqKnots` (`mc + n`), `:14621` `N_FitCrvApproxClosedConditions` (`p + 1`, `k` derivatives allocated).
+- **What happens:** Index sums and products on caller counts are signed `long` arithmetic with no overflow check. Near `LONG_MAX` they overflow (undefined behaviour), and a wrapped sum then sizes `N_Malloc` or indexes the knot array.
+- **Trigger:** `N_ApproxCircArcWithCrvData(..., deg = 4, nc = 9223372036854775807, ...)` (fuzz `nlib.crv_approx` fuzz00475). `N_FitCrvInterp` with `p = 9223372036854775807` (`nlib.crv_fit_p1` fuzz00023). The bad argument has to come from the calling code. No file input reaches these calls.
+- **How found:** fuzz sweep (Rust overflow panics at the mirrored lines).
+- **Confirmed:** no. The FFI caps `nc` (`MAX_NC` = 400), counts and degrees.
+- **Severity:** crash/UB.
+- **Rust port:** `fit_arrays::add` / `mul` return `InvalidInput` on overflow. Where the sum is only compared with the knot count, an overflowing sum counts as a mismatch (`NL_INP_ERR`). `alloc` reserves fallibly and returns `NL_MEM_ERR`, as a failed `N_Malloc` does.
 
 ### Spatial structures and small geometry
 
@@ -559,6 +600,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the difftest guard keeps a ray vector shorter than `1e-6` from `MayContainAnswer`; zero and tiny option vectors elsewhere are defined upstream and are difftested by `fixtures/intersect.topology_solver_p1/zero_vectors.json`).
 - **Severity:** crash/UB (uninitialised read).
 - **Rust port:** Returns `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** a ray-fire topology solve with ray radius `1e300` (`topology.shell` `fuzz-out/n2000/topology.shell/fuzz00814.json`, `/ray/radius = 1e+300`): the C++ returned normally, the Rust port refuses (`may_contain_answer`: ray/box intersection failed). Confirmed: no.
 
 #### UB-86. Topology edge solvers dereference a curve's missing edge
 - **Location:** `SmTopologySolver.cpp:557`/`:582` `SmTLSPointEdge::SolveIt`, `:1079`/`:1101` `SmTLSCurveEdge::SolveIt`, `:1359`/`:1380` `SmTLSEdgeEdge::SolveIt`.
@@ -568,6 +610,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the difftest guard passes only curves that own an edge).
 - **Severity:** crash/UB (bad argument from calling code).
 - **Rust port:** Returns `InvalidInput`.
+
+#### UB-221. `SmTreeNode` neighbour and side searches trust the node links
+- **Location:** `source/SMLib/src/SmTree.cpp:3027`-`3236` `SmTreeNode::GetLeftNeighbors` / `GetRightNeighbors` / `GetBotNeighbors` / `GetTopNeighbors` (recurse up through `m_pParent` and into `m_pParent->m_pChild1/2`), `:3244`-`3510` `GetRightSide` and the other `Get*Side` searches (recurse into `m_pChild1` and `m_pChild2`), `:2749` `PropagateToParents` (reads the sibling `m_pParent->m_pChild1/2` and its `m_pData`).
+- **What happens:** No null, consistency or cycle checks. A node with one child, a parent that does not list the node, a child whose parent pointer names another node, or cyclic parent links give a NULL dereference (SIGSEGV) or unbounded recursion (stack overflow).
+- **Trigger:** A subdivision tree whose node links disagree, e.g. the `geom.tree` subdivision program with one node duplicated (`/nodes element 5 duplicated`, n2000 `fuzz00296`) or a child link cleared on one side only (`/nodes/28/c1 = -1`, `fuzz01815`). Trees built by upstream's own subdivision always have two distinct children and matching parent links.
+- **How found:** crash in the C++ reference run (`difftest --unit geom.tree --fuzz 2000`: 14 cases, 11 SIGSEGV, 3 stack overflows; `fuzz-out/n2000/geom.tree/`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB. Not file-reachable (needs hand-built or corrupted `SmTreeNode` links).
+- **Rust port:** Arena ids; a missing node is `InvalidInput`. The `geom.tree` FFI (`well_formed`, `crates/solidcore-ffi/src/units/geom_tree.rs:152`) now rejects such link tables before calling C++.
+
+#### UB-222. Size constructors and setters write through a failed `smos_Calloc`
+- **Location:** `source/SMLib/src/SmMatrix.cpp:20` `SmMatrix(ULONG, ULONG)` and `:143` `SmMatrix::SetSize` (`smos_Calloc(1, sizeof(double)*rows*cols)` unchecked, product can wrap, then the row-pointer loop writes `m_ppdM[ii]`); `SmSolutionArray.cpp:1076` `SmSolutionArray::SetSize` (calloc result unchecked, then `smos_MemCpy`/writes; the `nNewMaxSize *= 2` loop never ends for a size above `2^63`, and `nNewMaxSize * sizeof(SmSolution)` can wrap) and `:1448` `InsertAt` (`nIndex + nCount` unchecked, then `smos_MemMove` and slot writes); `source/SMLib/inc/SmLocalSolve1d.h:159` `SmIterQueue1d(ULONG)` (`SetSize` refuses or fails softly, `Add` then writes `m_vArray[0]` of an empty array).
+- **What happens:** For a caller-chosen size that cannot be allocated the object keeps a NULL buffer (or a too-small one after a wrapped product) and the next statement writes through it.
+- **Trigger:** `SmMatrix(2^31, 5)`, `SmSolutionArray::SetSize(2^31)`, `InsertAt(2^32, s, 2^32)`, `SmIterQueue1d(2^31)` then `Add`. Upstream's own callers use small sizes (`SmIterQueue1d(8)`, matrix sizes from curve/surface degrees).
+- **How found:** generated difftest case (fuzz sweep: the Rust ports aborted on these sizes in `geom.matrix`, `geom.solution_array`, `geom.local_solve1d`, `blend.fillet_custom_solver`; upstream source then read).
+- **Confirmed:** no. The existing FFI limits (`geom.matrix` `MAX_DIM` 64, `geom.solution_array` `MAX_SIZE` 4096, `geom.local_solve1d` queue size 1..=1024) kept these sizes from the C++ side.
+- **Severity:** crash/UB (NULL write, size wrap) and hang (`SetSize` above `2^63`). Not file-reachable.
+- **Rust port:** `Matrix::try_new` / `Matrix::set_size`, `SolutionArray::try_set_size` / `try_insert_at` / `try_with_capacity`, `IterQueue1d::try_new` return `InvalidInput` with the object unchanged.
 
 ### Curves
 
@@ -581,6 +641,8 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no. The shim refuses these inputs.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `SM_ERR`.
+- **Fuzz sweep trigger (2026-10-20):** `SmParabola` with a non-finite-after-unitize frame (`/a/y/2 = 1e+300`, `curve.parabola` fuzz `fuzz01135`, op `gps_step`): `MakeNurb` fails, `GlobalPointSolveSTEP` -> `AdjustSTEPInterval` keeps the domain, then `SmCurve::GlobalPointSolve` builds the length cache through `SmBSplineCurve::EvaluatePoint`, which dereferences `GetOrCreateGwNurbPointer()` (`SmBSplineCurve.cpp:3300`). SIGSEGV in the C++ reference run. Change **Confirmed:** to yes (crash in the C++ reference run, fuzz sweep); the shim's earlier refusal did not cover this input, the FFI now replays `Adjust`/`MakeNurb` first (`crates/solidcore-ffi/src/units/curve_parabola.rs:131`).
+- **Fuzz sweep trigger (2026-10-20):** an `SmCircle` / conic whose axis' squared length overflows (`1e300` in one component) builds no NURB; `SmBSplineCurve::EvaluatePoint` (`SmBSplineCurve.cpp:3300`) then dereferences it from `SmBrepConstructor::EndLoop` (`query.loop` `fuzz-out/n2000/query.loop/fuzz01585.json`, `/edges/0/curve/y/1 = 1e+300`) and from `SmEdgeDefinition::GetEndPosition` / `SmVertexDefinition::Resolve` (`topology.proto_topology_p1` `fuzz-out/n2000/topology.proto_topology_p1/fuzz00350.json`, `/objects/1/curve/conic/x/1 = -1e+300`). Both SIGSEGV in the C++ run, so Confirmed becomes yes for this trigger. Guards: `crates/solidcore-ffi/src/units/query_loop.rs:389`, `crates/solidcore-ffi/src/units/topology_proto_topology_p1.rs:557`.
 
 #### UB-47. `SmBSplineCurve` helpers write or read past their arrays
 - **Location:**
@@ -696,6 +758,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** `SmPolarConversion::ReadFromDB` (`SmEllipse.cpp:1488`) accepts an exactness table shorter than `angles - 1` (here empty, `curve.ellipse_p1` fuzz `fuzz00284`: `/build/read_db/record/exact emptied`); `ConvertToNURBSParameter` then reads `m_vExactConversion[ii-1]` past the array (`SmEllipse.cpp:555`). SIGSEGV in the C++ reference run: change **Confirmed:** to yes and add **[PSIRT]** to the title (reachable from a crafted file). Also refine the `ConvertTo2D` bullet: the quadratic is at `SmEllipse.cpp:1732`; with one root only `dThetaYRad` (`:1735`) reads the uninitialised `adSols[1]`, and it is unused; only a zero-root solve makes the used `adSols[0]` uninitialised (fuzz `fuzz01889`, `/build/read_db/record/head/11 = -1e-300`, degenerate radius).
 
 #### UB-58. `SmCompositeCurve::GetKnots` reads past its array, and loops forever with an interval
 - **Location:** `SmCompositeCurve.cpp:524` (`lLastIndex = rKnots.GetSize()`), `:569` (`for(ii=rKnots.GetSize()-1; ii>=0; ii--)` on an unsigned `ULONG`), `SmCompositeCurve::GetKnots` (def. `:505`).
@@ -714,6 +777,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns the join error / `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** the `AssertValid` dereference is at `SmCompositeCurve.cpp:676` (`:595` is the def.). `CreateByJoining` also fails, leaving `rpNewBSplineCurve` NULL, for connected segments when a segment's knot span vanishes in the shift `u + (lastJoinedKnot - firstSegmentKnot)` (knot `1e-300` after a joined end at `~4.24`, `curve.composite_curve_p1` fuzz `fuzz00767`: `/comp/curves/1/bspline/oob = true`, `/comp/curves/2/bspline/u/4 = 1e-300`, op `approx`, `tol = 0.01`): `CreateCanonical` rejects the repeated knot. SIGSEGV in the C++ reference run: change **Confirmed:** to yes. FFI guard: `check_approx`, `crates/solidcore-ffi/src/units/curve_composite_curve_p1.rs:338`.
 
 #### UB-60. `sm_CreateCorner` reads `sSolutions[0]` of an empty array
 - **Location:** `SmCompositeCurve.cpp:2178`, `sm_CreateCorner` (def. `:1785`). Reached from `CreateOffsetsOfManyCurves` and `CreateTrimmedOffsets` with `SM_OC_LINEAR_CHAMFER`.
@@ -741,6 +805,33 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput`.
+
+#### UB-224. `SmCompositeCurve(dim, curves, closed, senses, gaps)` indexes senses and gaps by the curve count
+- **Location:** `source/SMLib/src/SmCompositeCurve.cpp:1073` (`(*cpSenses)[i]`), `:1090` (`(*cpGaps)[m_lNumSegments-1]`), `:1097` (`(*cpGaps)[i]`); constructor def. `:1050`.
+- **What happens:** The optional sense and gap arrays are read once per curve with unchecked `operator[]` (the size check is an `SM_ASSERT_BREAK_MSG`, compiled out). A shorter array is read past its end; a closed composite with no curves and a gap array reads `cpGaps[ULONG_MAX]`.
+- **Trigger:** Two curves with a one-entry `cpSenses` or `cpGaps`; `bIsClosed = TRUE`, no curves, `cpGaps` non-NULL.
+- **How found:** generated difftest case (fuzz sweep: mutated sense/gap arrays of a different length than the curve list; the runners now pass exactly one entry per curve).
+- **Confirmed:** no. The harness keeps these inputs away from the C++ side.
+- **Severity:** crash/UB.
+- **Rust port:** `CompositeCurve::new` returns `InvalidInput` for fewer senses or gaps than curves and for gaps of a closed composite without curves.
+
+#### UB-233. `SmBSplineCurve::CreateByJoining` reads `cpOptSenses` past a shorter array
+- **Location:** `source/SMLib/src/SmBSplineCurve.cpp:1188` `SmBSplineCurve::CreateByJoining`: the size match is only `SM_ASSERT`ed (`:1199`); `(*cpOptSenses)[ii]` is read for every segment at `:1271`.
+- **What happens:** With fewer senses than segments, `SmTArray::operator[]` reads outside the array. The release build returned a joined curve.
+- **Trigger:** `CreateByJoining` with two segments and an empty senses array.
+- **How found:** generated difftest case (`difftest --fuzz 2000`, `nurbs.b_spline_curve_p2` `fuzz00360`, `fuzz01002`: C++ returned a curve, Rust an error).
+- **Confirmed:** no (no crash; the out-of-range read is from source inspection).
+- **Severity:** crash/UB (out-of-bounds read).
+- **Rust port:** Returns `InvalidInput`. The `nurbs.b_spline_curve_p2` runner keeps fewer senses than segments from the C++ side.
+
+#### UB-236. `sm_CreateBezSegments` copies control points past the polygon of a curve whose end knots are not clamped
+- **Location:** `source/SMLib/src/SmNurbsCrv.cpp:478` `sm_CreateBezSegments` (end-of-span loop `while( ie LT m AND UP[ie] EQ UP[ie+1] ) ie++` at `:551`, copy `InitCP(Pw[ie-p+i],&NQw[i])` at `:596`). Reached from `SmCurveCache.cpp:1291` (the curve cache `DropPoint` builds) during `SmBrepConstructor::EndLoop`.
+- **What happens:** The span walk assumes `p + 1` equal end knots. With an unclamped end, `ie` stops short of the clamp and the next-segment copy reads `Pw[ie - p + i]` past the last control point.
+- **Trigger:** An edge curve of a loop being built whose last `p + 1` knots are not all equal (`query.loop` fuzz: one tail knot of a 3D edge B-spline set to `0.0`, `1.0` or `-0.0`).
+- **How found:** crash in the C++ reference run (`difftest --unit query.loop --fuzz 2000`: `fuzz-out/n2000/query.loop/fuzz00183.json`, `fuzz00293.json`, `fuzz00592.json`).
+- **Confirmed:** yes (SIGSEGV, 3 cases).
+- **Severity:** crash/UB (out-of-bounds read).
+- **Rust port:** not reached; the `query.loop` FFI wrapper rejects an edge curve whose last `p + 1` knots differ (`crates/solidcore-ffi/src/units/query_loop.rs:400`).
 
 ### Surfaces and volumes
 
@@ -802,6 +893,8 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput` / `SM_ERR`.
+- **Fuzz sweep trigger (2026-10-20):** two more NULL-NURB paths. `SmBSplineSurface::Transform` (`SmBSplineSurface.cpp:5299`, `N_SrfTransform(GetOrCreateGwNurbPointer(), ..)`) on a bounded plane with an inverted domain (`u0 = 2147483648 > u1 = 5`; `v1 = -0.0 < v0 = 4`), and `SmPlane::IntersectWithPlane` (`SmPlane.cpp:2191`-`2192`, `:2274`, `:2284`) of non-parallel planes, which boxes a bounded plane with an empty or inverted domain through `SmBSplineSurface::CalculateBoundingBox` (`SmBSplineSurface.cpp:489`-`490` reads `->net`). `surface.plane_p2` `fuzz00149`, `fuzz00896`, `fuzz01393`, `fuzz01926`. Confirmed: yes (segfault). The `surface.plane_p2` FFI rejects both (`nurb_less`, `bounded_nurb_less`).
+- **Fuzz sweep trigger (2026-10-20):** the surface cache of a plane with an inverted domain passes the NULL `m_pNurb` to `sm_CreateBezierPatchBlock` (`SmSurfaceCache.cpp:5042`, dereferenced at `:4795`) (`intersect.surface_intersector_p5` `fuzz-out/n2000/intersect.surface_intersector_p5/fuzz00950.json`, `/a/domain/2 = -1.0`; SIGSEGV, confirmed yes). Guards: `crates/solidcore-ffi/src/units/intersect_surface_intersector_p5.rs:238`, `crates/solidcore-ffi/src/units/intersect_surface_drop_lib_p2.rs:387`.
 
 #### UB-69. `SmSurfOfRevolution` constructor reads an uninitialised `bOnPlane`
 - **Location:** `SmSurfOfRevolution.cpp:147`-`149` (constructor, def. `:94`); `SmBSplineCurve.cpp:5433` `SmBSplineCurve::IsOnPlane`; `SmGeomUtility.cpp:3829` `smgu_PlanePointDistance`.
@@ -1053,6 +1146,60 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB.
 - **Rust port:** Missing polar state returns an error. The differential adapter rejects only an attempted STEP-to-NURBS conversion with a null polar curve; self-intersection and disjoint early returns stay callable.
 
+#### UB-226. `SmBSplineSurface::CreateCornerBlend` segfaults on a boundary curve with a `1e300` control point
+- **Location:** `source/SMLib/src/SmBSplineSurfaceNLib.cpp:3008` `SmBSplineSurface::CreateCornerBlend`. The failing dereference was not located.
+- **What happens:** Segfault. The curves are non-rational, so the `sm_CreateNonRationalCurve` approximation (UB-225) is not involved.
+- **Trigger:** four non-rational cubic boundary curves (bilinear blend, `tol = 1e-3`, angle `0.05`) with one control point x coordinate set to `1e300`.
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `nurbs.b_spline_surface_n_lib_p2` `fuzz01761`; the C++ ran in process, so the harness reported a Rust-side signal 11).
+- **Confirmed:** yes.
+- **Severity:** crash/UB.
+- **Rust port:** Returns an error. The `nurbs.b_spline_surface_n_lib_p2` FFI rejects Euclidean control point coordinates above `MAX_COORD = 1e6`.
+
+#### UB-227. Surface-of-revolution and extrusion constructors evaluate a generator that has no NURB
+- **Location:** `source/SMLib/src/SmSurfOfRevolution.cpp:134` (constructor, def. `:94`) and `source/SMLib/src/SmSurfOfExtrusion.cpp:70` / `:170` (constructors, def. `:37`, `:138`) call `pGenCurve->EvaluatePoint` with the status only `SE`d; `source/SMLib/src/SmBSplineCurve.cpp:3299`-`3300` `SmBSplineCurve::EvaluatePoint` dereferences `GetOrCreateGwNurbPointer()->knt` without a NULL check.
+- **What happens:** When the generator's `MakeNurb` fails, the constructor dereferences its NULL NURB. Seen for: a circle or ellipse whose axis has an overflowing squared length (`Unitize` makes it a zero vector, WR-159, so the circle gets no NURB); a hyperbola or parabola whose centre or size is near `1e300` (`MakeNurb`'s tangent intersection `smgu_LineLineClosestPoint` fails). Spheres and tori go through the revolution constructor. UB-82 lists the unchecked statuses of the extrusion constructor; this is the crash they lead to.
+- **Trigger:** a sphere or torus whose generator circle has an axis component `-1e300` (`surface.sphere` `fuzz00721`, `surface.torus` `fuzz00120`, `fuzz01665`, `fuzz01864`); a surface of revolution or extrusion with a circle axis component `±1e300` (`surface.surf_of_revolution_p1` `fuzz00820`, `surface.surf_of_extrusion_p1` `fuzz01152`); an extrusion of a hyperbola with centre x `-1e300` or semi axis `1e300`, or of a parabola with focal distance `1e300` (`surface.surf_of_extrusion_p1` `fuzz00827`, `fuzz01228`, `fuzz00834`).
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`; 37 segfaults across `surface.sphere`, `surface.torus`, `surface.surf_of_revolution_p1`/`p2` and `surface.surf_of_extrusion_p1`/`p2`, files under `n2000/<unit>/`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB (null dereference).
+- **Rust port:** Returns the generator's error. The FFIs of `surface.sphere`, `surface.torus`, `surface.surf_of_revolution_p1` and `surface.surf_of_extrusion_p1` reject axes whose length is not finite; the extrusion FFI also bounds a hyperbola's or parabola's centre and sizes by `MAX_CONIC = 1e12` (a heuristic; the exact failure threshold was not derived).
+
+#### UB-228. `SmSurfOfExtrusion::IntersectWithPlane` dereferences a failed plane projection of the generator
+- **Location:** `source/SMLib/src/SmSurfOfExtrusion.cpp:2245` (`m_pGenCurve->CreatePlaneProjection(..., m_vExtrusionVec, pProjCurve)`, status ignored) and `:2276` (`pProjCurve->CalculateBoundingBox`) in `SmSurfOfExtrusion::IntersectWithPlane` (def. `:1870`).
+- **What happens:** `N_CrvProjectOntoPlane` fails for an extrusion vector whose squared length overflows, `pProjCurve` stays NULL and is dereferenced.
+- **Trigger:** a canonical extrusion of a B-spline with vector `(1e300, 0, 0)`, or of a parabola with vector `(1e-9, 0, 1e300)`, intersected with a non-parallel plane (`IntersectWithPlane` directly, or through the global surface intersection).
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `surface.surf_of_extrusion_p2` `fuzz00363`, `fuzz01373`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB (null dereference).
+- **Rust port:** Returns the projection error. The `surface.surf_of_extrusion_p2` FFI rejects plane intersections (`Plane`, `Global` with a plane) of a surface whose extrusion vector length is not finite.
+
+#### UB-229. `SmSurfOfRevolution::CreateOffsetSurface` dereferences a failed axis segment
+- **Location:** `source/SMLib/src/SmSurfOfRevolution.cpp:1413` (`SmLine::CreateLineSegment(..., origin, origin + dHeight * zAxis, pAxisLine)`, status ignored) and `:1417` (`*pAxisLine` passed to `GlobalCurveIntersect`) in `SmSurfOfRevolution::CreateOffsetSurface` (def. `:1244`).
+- **What happens:** `dHeight` is 1.5 times the offset generator's box size. With an axis point near `2^63`, `origin + dHeight * zAxis == origin`, the segment is degenerate, `CreateLineSegment` fails and the NULL line is dereferenced.
+- **Trigger:** `CreateOffsetSurface` of a revolution whose axis point has a coordinate `9223372036854775807` or `-9223372036854775808` (generator of unit size).
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `surface.surf_of_revolution_p2` `fuzz01805`, `fuzz01926`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB (null dereference).
+- **Rust port:** Returns the segment error. The `surface.surf_of_revolution_p2` FFI rejects `Offset` with an axis point coordinate above `MAX_AXIS_POINT = 1e12` (a heuristic bound; the exact threshold depends on the generator size).
+
+#### UB-230. An unbounded `SmCone` whose apex height overflows recurses without bound while making its NURB
+- **Location:** `source/SMLib/src/SmCone.cpp:499` `SmCone::GetApex` (apex at height `-bot / tan(semi)`); `SmSurfOfRevolution.cpp:957` `SmSurfOfRevolution::MakeNurbWithSweepParams`; `SmLine.cpp:1679` (`SmLine::MakeNurb` asks the owner's `GetGenDirParamExtent`); `SmSurfOfRevolution.cpp:799` `GetGenDirParamExtent`.
+- **What happens:** The apex parameter is NaN when the height overflows, so the generator's STEP interval is NaN. `MakeNurbWithSweepParams` re-adjusts the generator line (`AdjustSTEPInterval` never sees two equal NaN intervals), the line's `MakeNurb` asks the cone's `GetGenDirParamExtent`, which makes the cone's NURB again. The stack overflows. Related to UB-70 (same owner detour).
+- **Trigger:** `SmCone::CreateCanonical` (semi-angle overload, no height) with `bot = 1e300`, semi `6e-11` deg (build, `fuzz01891`) or `1e-9` deg (iso circle, `fuzz00916`), or `bot = -1e300` with semi `5.7e-11` / `6e-11` deg (iso circle `fuzz00168`, inversion `fuzz00494`), all `surface.cone_p1`. The guard also covers the bot/top/height overload with `h <= 0` (the top radius is then the semi-angle of an unbounded cone); that path did not crash in the run.
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `surface.cone_p1`: `fatal runtime error: stack overflow`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB (stack overflow).
+- **Rust port:** No recursion. The `surface.cone_p1` FFI rejects unbounded cones whose `bot / tan(semi)` is not finite, except a zero semi-angle (`|semi| <= SM_EFF_ZERO`, a cylinder, which `GetApex` treats as having no apex).
+
+#### UB-231. `SmSurface::CreateNaturalUVTrimCurves` segfaults on a domain `1e-300` wide
+- **Location:** `source/SMLib/src/SmSurface.cpp:9048` `SmSurface::CreateNaturalUVTrimCurves` (iso curves from `CreateIsoParametricCurve`, degenerate sides replaced by `SmLine::CreateLineSegment`). The failing dereference was not located.
+- **What happens:** Segfault.
+- **Trigger:** a plane `(o = 0, n = (0,0,1))` with domain `[0, 0] x [1e-300, 1e-9]`, side `0`, remove degenerate curves `TRUE`; `TestFiles/pt_TestFiles/offset_nurb.sms` with domain `[-1e-300, 0] x [0, 10]`, side `0`.
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `surface.surface_p6` `fuzz01069`, `fuzz01289`; still crashing in `verify3/surface.surface_p6/`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB.
+- **Rust port:** Not guarded yet: the `surface.surface_p6` FFI still passes these inputs (open).
+
 ### Intersection
 
 #### UB-89. `SmVolume::ReadFromDB` fills NULL volumes and uses unread map types [PSIRT]
@@ -1291,6 +1438,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes.
 - **Severity:** crash.
 - **Rust port:** The wrappers are stubs until `primitive.primitive_creation_p2` lands. The FFI rejects draft / taper profiles with a curve extent below `2e-5`; the generator keeps those profiles at scale `>= 1e-3`.
+- **Fuzz sweep trigger (2026-10-20):** an open four-line square profile with one line endpoint z at `9223372036854775807` / `-9223372036854775808` (`SmApiCreateTaperExtrude`, angle 5, caps -5 or 3; `SmApiCreateDraftSweep`, angle 90, caps 3), and a profile of two identical `SmCircle`s (centre `(2.10, 1.35, 0.65)`, radius `6.89`; taper angle `-2.85`, height `30.2`, caps 1, fillet). `sweep.api_brep` `fuzz00538`, `fuzz01054`, `fuzz01493`, `fuzz01538`. Confirmed: yes (segfault). Not guarded yet.
 
 #### UB-113. `SmPrimitiveCreation::CreateSweepAlongPlanarPath` crashes on a curve that is not an `SmBSplineCurve`
 - **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp:5698` `SmPrimitiveCreation::CreateSweepAlongPlanarPath` (static `PositionProfileCurves` uses the result of `rProfileCurves[ii]->Copy(..)` without checking its status; the path curves are C-cast to `SmBSplineCurve*`); reached from `SmApiCreateSweepAlongPlanarPath` (`source/SM_API/src/SmApiBrep.cpp:1420`), which only checks the list sizes and the cap selector.
@@ -1325,6 +1473,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the difftest shim rejects these scripts).
 - **Severity:** crash/UB.
 - **Rust port:** `SolidError::InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** `SmCurveClassification::IntersectVertices` -> `InsertPointClass` -> `FindInterval` with an empty classification and a vertex (`intersect.curve_class_p5` op 6, `n == 0`, `flag1` set; `fuzz-out/n2000/intersect.curve_class_p5/fuzz00653.json`, `fuzz01268.json`, `/bounds truncated to 1`). SIGSEGV in the C++ run: Confirmed becomes yes. Guard: `crates/solidcore-ffi/src/units/intersect_curve_class_p5.rs:90`.
 
 #### UB-110. `SmCurveClassification::IsCoincident` walks past the intervals when its end index wraps or a search failed
 - **Location:** `source/SMLib/src/SmCurveClass.cpp:7016` (`lIndex2--` of an unsigned `ULONG`) and `:7020`-`7022` (`m_pData[ii]` for `ii <= lIndex2`).
@@ -1589,6 +1738,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash (out-of-bounds read and write through a stale pointer).
 - **Rust port:** `nurbs::nurbs_srf::decompose_srf` bounds the patch index and returns an error. The `blend.fillet_geom_p1` shim reads back the knot vector the real constructor left and refuses (`SC_ERR_ARG`), for the six ops that build a surface cache, a surface whose constructed v vector has start multiplicity above `degree + 1`; that is the crash precondition, so it also refuses some runs that would complete because their path returns before building the cache (28 of 169 such programs in the round-5 review: `TwoPnts` 1001 and Fb-op exits before the cache fetch). It does not re-implement the fixup (a replica in the Rust wrapper missed the end-snap route). The u over-multiplicity, non-monotone constructed vectors, curves and the other ops are compared. Comparing the non-monotone vectors exposed three port bugs on the cache path, fixed in PR #147: the Rust caches held a `Clone` of their surface (the copy constructor, which runs the fixup a second time) where upstream holds a pointer, `compute_net_constants` returned the error of a failed `N_SrfEvalPt` that upstream ignores, and `subdivide_node` returned the error of a failed patch split that upstream's `GW_ERR` only logs (the children stay zero-filled).
 
+#### UB-232. `SmApiCreatePipeSweep` raises `SIGFPE` for a path with a `1e300` control point
+- **Location:** `source/SM_API/src/SmApiBrep.cpp:1376` `SmApiCreatePipeSweep` -> `SmPrimitiveCreation::CreatePipeSweep`. The faulting instruction was not located (an integer division or `INT_MIN / -1`).
+- **What happens:** The process is killed by signal 8.
+- **Trigger:** `SmApiCreatePipeSweep(radius 0.7176, path = SmApiCreateCurve((0,0,0), (3.078,0,6.097), (3.326,0,12.19), (0.516,1e300,18.29)), cap TRUE)`.
+- **How found:** crash in the C++ reference run (`difftest --fuzz 2000`, `sweep.api_brep` `fuzz01378`; still crashing in `verify2000/sweep.api_brep/`).
+- **Confirmed:** yes.
+- **Severity:** crash/UB.
+- **Rust port:** The sweep wrappers are stubs until `primitive.primitive_creation_p2` lands; not guarded yet (open).
+
+#### UB-237. Healing a face use built without a shell crashes in `SmBrep::TestClosureSplitRegion` [PSIRT]
+- **Location:** `source/SMLib/src/SmBrep.cpp:27907` (`pFUStart->GetShell()->GetRegion()`), `SmBrep::TestClosureSplitRegion` (def. `:27845`), called from `SmHealData::Fix_BadSheets` (`SmHealData.cpp:4832`, def. `:4732`), reached from `SmBrep::MakeTopologyFromData` when the healer runs (`bHealerIsEnabled` and `bAlwaysHeal` or a file healer version below the current one).
+- **What happens:** `MakeTopologyFromData` builds a face use whose record lies in no face-use shell without a shell. `Fix_BadSheets` hands it to `TestClosureSplitRegion`, which dereferences the null shell.
+- **Trigger:** `.smb` data whose shells leave a face use record uncovered (the `topology.brep_p10` "spine" fixtures with the IGES patch: region 1 without shells), read with the healer enabled.
+- **How found:** crash in the C++ reference run (`difftest --unit topology.brep_p10 --fuzz 2000`: `fuzz-out/n2000/topology.brep_p10/fuzz00353.json`, `fuzz00790.json`, `fuzz01898.json`, `fuzz01957.json`; mutations `/options/5 = true`, i.e. healer enabled).
+- **Confirmed:** yes (SIGSEGV, 4 cases).
+- **Severity:** crash/UB (null dereference). A crafted file with an old healer version reaches it through `ReadFromFile`.
+- **Rust port:** not reached; the `topology.brep_p10` runner rejects healing requests on such data (`crates/difftest/src/units/topology_brep_p10.rs:182` `heal_guard`).
+
 ### Healer target management
 
 #### HANG-32. `SmBrep::CreateParallelProjectionCurves` spins on a subnormal approximation tolerance
@@ -1694,6 +1861,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** hang.
 - **Rust port:** Returns `InvalidInput` for non-finite angles and after 2^20 turns.
+- **Fuzz sweep trigger (2026-10-20):** `N_CreateEllipticalArcAngTypeTol` with a conic domain end of `-1e300` (`topology.proto_topology_p1` `fuzz-out/n2000/topology.proto_topology_p1/fuzz00000.json`; C++ timed out, Confirmed becomes yes). Guard: domain ends within `MAX_CONIC_ANGLE = 1e6` (`crates/solidcore-ffi/src/units/topology_proto_topology_p1.rs:539`).
 
 #### HANG-5. `N_ApproxCrvWithPolyline` subdivides forever below floating-point resolution
 - **Location:** `NL_CrvGeom.cpp:1531`, `N_ApproxCrvWithPolyline`.
@@ -1703,6 +1871,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** hang.
 - **Rust port:** Stops after `POLYLINE_MAX_SPLITS` with `NotConverged`.
+- **Fuzz sweep trigger (2026-10-20):** `N_CreateSweepScale` (`NL_SrfAdv.cpp:15353`, polyline at `:15516` within `E / 2`) with a sweeping tolerance below floating-point resolution of the trajectory: `E = 1e-300`, or a trajectory control point at `±1e300` / `-2^63` (`nlib.srf_adv_p6` `fuzz00381`, `fuzz00486`, `fuzz01019`, `fuzz01105`, `fuzz01236`, `fuzz01549`, `fuzz01582`, `fuzz01615`, `fuzz01772`); `SmBSplineSurface::CreateSweepSurface` with `tol = 1e-300` (`nurbs.b_spline_surface_n_lib_p1` `fuzz00530`); `SmApiCreateSweep` (fixed `dTol = 1e-5`, `SmApiSurfaces.cpp:328`) with a path control point at `±1e300` (`sweep.api_surfaces` `fuzz00106`, `fuzz00357`, `fuzz00476`, `fuzz00668`, `fuzz00746`, `fuzz00805`, `fuzz01000`, `fuzz01115`, `fuzz01151`, `fuzz01999`). Change "Confirmed" to yes (C++ timeouts). The `nlib.srf_adv_p6` and `nurbs.b_spline_surface_n_lib_p1` FFIs require a non-translational sweep tolerance of at least `MIN_SWEEP_TOL_FRACTION = 1e-6` times the trajectory's control polygon length; `sweep.api_surfaces` is not guarded yet (open).
 
 #### HANG-6. Zero-distance G2 curve and surface extensions
 - **Location:** `NL_CrvAdv.cpp:640` `ST_curxcdr` (`NL_G2` parameter search); `NL_SrfAdv.cpp:661` `N_SrfExtendByDist` / `:696` `ST_surxsdr` (G1/G2 extend the iso-curves with `ST_curxcdr` `NL_G2`).
@@ -1716,6 +1885,8 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
   `CreateExtendedSurface` step (in the FFI, and again in the shim), since a stalled or
   crawling search (e.g. `1e-20` on a unit surface, where each step moves) cannot be
   stopped from outside NLib.
+- **Fuzz sweep trigger (2026-10-20):** `N_SrfExtendByDist` with `dist` `0.0`, `-0.0`, `±1e-300` and `cont` `NL_G1`/`NL_G2` (`nlib.srf_adv_p1` `fuzz00349`, `fuzz01120`, `fuzz01972`, `fuzz01998`; `nlib.srf_adv_p2` 14 cases, e.g. `fuzz00123`, `fuzz00438`), or a net coordinate of `±1e300` / `2^63` (iso-curve length overflows; `nlib.srf_adv_p1` `fuzz01548`, `nlib.srf_adv_p2` `fuzz00006`, `fuzz00184`, `fuzz00236` and 8 more); `SmBSplineSurface::CreateExtendedSurface` on a surface with a `1e300` control point (`nurbs.b_spline_surface_n_lib_p1` `fuzz01411`, `fuzz01639`). Confirmed: yes (C++ timeouts). The `nlib.srf_adv_p1`/`p2` FFIs require a non-zero distance whose estimated step `range * dist / iso-polygon bound` is at least `MIN_G2_STEP_EPS = 1024` ulps of the largest knot (`g2_extension_ok`); the `nurbs.b_spline_surface_n_lib_p1`/`p2` FFIs bound coordinates by `MAX_COORD = 1e6`.
+- **Fuzz sweep trigger (2026-10-20):** a vanishing but non-zero `NL_G2` distance also hangs `ST_curxcdr` (`NL_CrvAdv.cpp:640`). Each step does change the parameter, but the search takes about `arc length / extension` steps. Fuzz `nlib.crv_adv_p1` fuzz00548 (`closedCurve.smc`, `N_CrvExtendByDist`, `NL_RELATIVE`, `dist = 1e-300`, start, `NL_G2`) and fuzz01037 (`crvTrim1.smc`, same). Rust timed out before the bound. The FFI already rejects G2 extensions below `MIN_G2_FRACTION` (1e-3), so these are not confirmed. The Rust port now also stops after `MAX_G2_STEPS` = 100 000 steps with `NotConverged` (`crv_adv/p1.rs:92`, checks `:700`, `:758`).
 
 #### HANG-7. Periodic shifts in unbounded evaluation
 - **Location:** `NL_CrvAdv.cpp:4257` `N_CrvEvalUnboundedPtsAndDerivs`; `NL_SrfAdv.cpp:5446` `N_SrfEvalPtDerivsUnbounded`.
@@ -1780,6 +1951,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes (gdb backtrace 25 frames deep in `GlobalCoincidenceChecker`; never returned; timings measured in the reference build).
 - **Severity:** hang (above `1e154`); seconds to about a minute per call from `1e15`.
 - **Rust port:** The FFI wrapper rejects, for the ops that reach `sm_ClassifyFacePoint` (`ClassifyFacePoint`, `FbSplitFace`), any value and any Euclidean control point (`Pw / w`) above `MAX_MAGNITUDE = 1e150`, the overflow regime (see `crates/solidcore-ffi/src/units/blend_fillet_geom_p1.rs`); slow inputs under it are valid upstream inputs and are accepted (the guard fuzz allows those two ops 180 s per call). The other ops take any finite value. The Rust `classify_face_point` still defers on `topology.face_p1`.
+- **Fuzz sweep trigger (2026-10-20):** B-rep blocks with one surface control point coordinate at `+-1e300` time out in the C++ while the B-rep is built (call not isolated; consistent with HANG-29's `CreateUVTrimCurve` path) in `topology.edgeuse_p2` (6), `topology.edgeuse_p3` (8), `topology.face_p2` (3), `topology.face_p3` (3), `topology.loopuse` (1), `heal.heal_data_p1` (4) and `offset.offset_executive_p1` (2) (case files under `fuzz-out/n2000/<unit>/`, see the findings). Confirmed: yes for the hang (20 s plus retry); the location is not confirmed for these paths.
 
 #### HANG-20. The global solvers never finish when a surface coordinate's own box arithmetic overflows
 - **Location:** `SmGlobalSolver::SolveBranch` with each of its local solvers: `SmCSIGlobalSolver::LocalSolve` -> `SmCurve::SimpleCoincidenceChecker` -> `SmCurve::LocalPointSolve` -> `SmLocalSolve1d::SolveIt` (gdb after 25 s on the cliff program: eleven `SolveBranch` frames, the time in `LocalSolve`), reached from `SmSurface::GlobalCurveIntersect` (`SmFilletVertex::CalcCliffRailIntEdge`), from `SmSurface::GlobalPointSolve` (`sm_SurfaceDropPoint`) and from `SmSurface::PointBasedSurfaceIntersect` (`sm_TwoPntsIntersection`), all in `SmFilletGeom.cpp`.
@@ -1899,6 +2071,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes. Unmodified C++ times out; debugger captured `d1`, `du`, and search parameters as NaN.
 - **Severity:** hang.
 - **Harness:** `surface.offset_surface` refuses every `CreateExtendedSurface` step in process (see HANG-6), so this input stops at its extension step; an FFI test replays the exact input and checks the refusal. These are unsafe-reference exclusions, not passing difftest cases.
+- **Fuzz sweep trigger (2026-10-20):** the NaN arc-length search is also reached directly through `N_CrvExtendByDist`, with no surface retry: fuzz `nlib.crv_adv_p1` fuzz01836, a rational quadratic with 5 control points and weights `[0, 2, 1, 0.5, 1]` (`/crv/cpts/0/3 = 0`), relative `dist = 3.0`, end, `NL_G2`. Rust timed out. The FFI rejects non-positive weights, so this is not confirmed. Rust stops at `MAX_G2_STEPS`.
 
 #### HANG-34. `SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves` loops forever when a knot insertion adds no knot
 - **Location:** `source/SMLib/src/SmFilletStandardSolver.cpp:4090` (`while (sKnots.GetSize() < 4)`: the mid-span knot is inserted into both rails and the knots are re-read). `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` has the same loop with a bail-out (`:3336`).
@@ -1926,6 +2099,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** hang.
 - **Rust port:** Returns `NotConverged` after `curve::ellipse::p2::MAX_PERIOD_SHIFTS` (2^20) shifts or when a shift no longer changes the midpoint; the callers ignore that status as upstream ignores the set-up's, leaving the converter impossible.
 - **Harness:** the `surface.cone_p3` FFI accepts cone angles only within upstream's documented `[-360, 360]` (`SmCone.h:205-206`). A first guard at about `3.8e8` degrees (the Rust bound) still let fuzzed intersections run past 20 s natively: every surface evaluation of such a cone goes through `SmEllipse::STEPInversion` and `SmExtent1d::PeriodicWrap`, one turn per iteration (HANG-1), confirmed with gdb backtraces.
+- **Fuzz sweep trigger (2026-10-20):** `SmSurfOfExtrusion::AdjustSTEPUVDomain` of an ellipse extrusion to a domain whose u end is `9223372036854775807` degrees (`surface.surf_of_extrusion_p1` `fuzz00222`, `fuzz01418`); a revolution (sphere part / torus generator circle) whose v domain bound is `±2^63` or `-1e300` degrees, through `DropPoint` / `ConvertUVFromSTEPToNURBS` (`surface.surf_of_revolution_p3` `fuzz00476`, `fuzz01129`, `fuzz01853`). Confirmed: yes (C++ timeouts; the loop was not traced, so HANG-1 `PeriodicWrap` may be the one spinning). Not guarded yet (open).
 
 #### HANG-33. `SmStitch::StitchIntoShell` never returns when `dMaxStitchTol3d / 100` underflows
 - **Location:** `source/SMLib/src/SmStitch.cpp:2756`-`2791` (`StitchIntoShell`).
@@ -1944,6 +2118,61 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (source inspection; the shim refuses a tolerance `<= 0` below the diagonal test, `-3`). The difftest block cannot set the B-rep tolerance, so no fixture reaches the guard.
 - **Severity:** hang.
 - **Rust port:** Stops after `MAX_TOL_DOUBLINGS` (2200) doublings with `SolidError::InvalidInput`.
+
+#### HANG-40. `SmGrid::Step3DDDA` steps along an axis the ray does not move on when every next-plane parameter reaches `SM_BIG_DOUBLE`
+- **Location:** `source/SMLib/src/SmGrid.cpp:881` `SmGrid::Step3DDDA` (axis choice at `:997`-`:1042`); `Setup3DDDA` (`:686`-`:745`) sets `m_lStep*` / `m_lOut*` only for axes with `|ray| >= SM_EFF_ZERO`.
+- **What happens:** An axis the ray does not move along gets `m_dNextT = SM_BIG_DOUBLE` (`1e20`). When the moving axis's next plane is also at or past `1e20` (huge voxels or a tiny direction component), neither `<` test succeeds and the loop steps in Z (or Y) using an `m_lStep*` that was never set for this ray: uninitialised, or left over from an earlier ray. If it is 0, the address never changes and the `for(;;)` loop never ends. If it is ±1, the walk leaves the grid on the wrong axis and misses elements.
+- **Trigger:** A grid over `[-1e-4, 1e300] x [-1e-4, 1.0001]^2` with 10x10x10 voxels, ray from `(1.000003, 0.5, 0.5)` along `(1, 0, 0)`, `Step3DDDA(1e20)` (`geom.grid` `fuzz09254`, `/grid/bbox/3 = 1e+300`; also `fuzz08036`, `fuzz-out/geom/geom.grid/`).
+- **How found:** generated difftest case (10000-case fuzz; the Rust port, which zeroes the step, timed out).
+- **Confirmed:** no. The existing `geom.grid` FFI coordinate bound (`MAX_COORD` 1e12) kept the box away from the C++ side.
+- **Severity:** hang (with an uninitialised read). Not file-reachable.
+- **Rust port:** `Grid::step_3ddda` returns `InvalidInput` after `1 + nx + ny + nz` steps in one call (`crates/solidcore/src/geom/grid.rs:872`). A walk that advances leaves the grid sooner than that.
+- **Fuzz sweep trigger (2026-10-20):** `SmHCR::IsPointVisible` -> `SmRayTracer::FireRay` -> `SmGrid::Step3DDDA` in `blend.hcr` scenes with a curve or surface coordinate of `+-1e300` (`fuzz-out/n2000/blend.hcr/fuzz00041.json`, `fuzz00401.json`, `fuzz00490.json`, `fuzz00648.json`, `fuzz00901.json`, `fuzz01293.json`, `fuzz01948.json`; the sweep worker measured a scene of size `2e4` returning with one coordinate at `1e18` and not at `1e20`). The C++ timed out (20 s plus retry), so Confirmed becomes yes. The faithful Rust walk also timed out on `fuzz00700.json` and `fuzz01870.json` before the `grid.rs:872` step bound. Guard: the `blend.hcr` FFI rejects scene and op-7 point values above `MAX_SCENE_MAGNITUDE = 1e15` (`crates/solidcore-ffi/src/units/blend_hcr.rs:262`, `:178`), broader than the measured onset (follow-up).
+
+#### HANG-41. `SmLine::Tessellate` runs `lMinimumNumberOfSegments` iterations and ignores failed `Add`s
+- **Location:** `source/SMLib/src/SmLine.cpp:1955` `SmLine::Tessellate` (loops at `:1973`, `:2001`, `:2038`); `SmTArray<TYPE>::Add` (`source/SMLib/inc/SmTArray.h:1049`).
+- **What happens:** Each requested output array gets `lMinimumNumberOfSegments + 1` entries through `Add` with no up-front size check. For a huge count the arrays grow until `SetAtGrow` fails; `Add` then returns `SM_BIG_ULONG`, which is ignored, and the loop runs on for the remaining count (up to ~1.8e19 iterations), finally returning `SM_SUCCESS` with short arrays.
+- **Trigger:** `Tessellate` on a bounded line with `lMinimumNumberOfSegments = 2^63 - 1` and parameters or points requested (`curve.curve_p1` fuzz `fuzz01447`: `/minseg = 9223372036854775807`).
+- **How found:** generated difftest case (fuzz sweep; the Rust port aborted on the allocation).
+- **Confirmed:** no. The FFI caps the count (`MAX_SEGMENTS = 64`, `crates/solidcore-ffi/src/units/curve_curve_p1.rs`).
+- **Severity:** hang (also memory exhaustion and a short result reported as success).
+- **Rust port:** `Line::tessellate` reserves the `min_segments + 1` entries per requested array first and returns `InvalidInput` when that fails.
+
+#### HANG-42. `N_SrfRemoveAllKnots` / `N_SrfRemoveKnotsConstraints` loop forever once a removal error bound is NaN
+- **Location:** `source/SMLib/src/NL_SrfTool.cpp:3114` `N_SrfRemoveAllKnots` and `:11424` `N_SrfRemoveKnotsConstraints` (`dir = NL_UVDIR` direction choice).
+- **What happens:** With a control point near `1e300` the u error bounds are NaN, so `bu < bv` is false and every `NL_UVDIR` step goes to v. Once v has nothing removable, each step removes nothing and leaves the selection state unchanged, and the loop never ends.
+- **Trigger:** `N_SrfRemoveAllKnots(sur, tol = 0, NL_UVDIR)` on a generated surface with one net coordinate `1e300` (`nlib.srf_tool_p3` `fuzz00246`, `fuzz00619`, `fuzz00633`, `fuzz01530`, `fuzz01724`); `N_SrfRemoveKnotsConstraints(.., tol = 1, NL_UVDIR)` with a net coordinate `-1e300` (`nlib.srf_tool_p4` `fuzz00396`, `fuzz00456`, `fuzz01087`, `fuzz01339`, `fuzz01923`).
+- **How found:** generated difftest case (`difftest --fuzz 2000`: C++ gave no result within 20 s).
+- **Confirmed:** yes (timeout, 10 cases).
+- **Severity:** hang.
+- **Rust port:** `nurbs::srf_tool::p3::remove_all_knots` detects a step that changes nothing and returns `NotConverged`. The `nlib.srf_tool_p3`/`p4` FFIs only remove knots of nets with homogeneous coordinates within `MAX_REMOVAL_COORD = 1e60` and weights within `[1e-30, 1e30]` (conservative, not an exact test).
+
+#### HANG-43. `SmApiCreateCurveSweepFromFaces` does not return for a path with a `1e300` control point
+- **Location:** `source/SM_API/src/SmApiBrep.cpp:1530` `SmApiCreateCurveSweepFromFaces` -> `SmPrimitiveCreation::CreateCurveSweep`. The spinning loop was not located; the sweep-surface polyline approximation of HANG-5 is a candidate.
+- **What happens:** No result within 20 s.
+- **Trigger:** a circular face (radius `29.2` or `21.4`) swept along `SmApiCreateCurve` through four points, one with x `1e300` (options `[F,F,T,F,T]` without scale curve; `[T,F,T,T,F]` with a line scale curve).
+- **How found:** generated difftest case (`difftest --fuzz 2000`, `sweep.api_brep` `fuzz01218`, `fuzz01458`; still timing out in `verify2000/sweep.api_brep/`).
+- **Confirmed:** yes (timeout).
+- **Severity:** hang.
+- **Rust port:** `create_curve_sweep` is a stub until `primitive.primitive_creation_p3` lands; not guarded yet (open).
+
+#### HANG-44. `N_CrvOffsetPtSampling` time grows quadratically with an unbounded sample count
+- **Location:** `source/SMLib/src/NL_CrvOffset.cpp:1380`-`1381` (sample count per segment, no upper bound), `:1525` `N_CrvRemoveKnotsDerivConstraints( curQ, tol, NL_BOTH, der, curQ, SG )` on the interpolant through all `mu` samples.
+- **What happens:** The count is `ceil((1/tol)^0.34 * max(2 deg, sqrt(Muu / 8)))` per segment, with no cap. The interpolant has `mu` control points, and the knot removal that follows takes time quadratic in `mu`. The Rust port, which runs the same algorithm, needs about 5 s for 23 000 samples. A pole makes `Muu` huge (727 541 samples for the case below), and that run did not finish.
+- **Trigger:** `nlib.crv_offset` fuzz00366: a cubic, 8 control points, weight of control point 5 set to `-1.0` (`/crv/cpts/5/3 = -1.0`), `B = (0,0,1)`, `d = 0`, `deg = 3`, `NL_INHERITED`, `tol = 0.11799393559359235` (Rust: no result after 20 s). The same happens for valid positive-weight curves with a tiny `tol`.
+- **How found:** fuzz sweep (Rust timeout on the faithful port).
+- **Confirmed:** no. The shim refuses more than `MAX_SAMPLES` (4000) samples and the FFI refuses non-positive weights, so the C++ never ran this input.
+- **Severity:** hang.
+- **Rust port:** `InvalidInput` ("too many sample points") above `MAX_OFFSET_SAMPLES` = 16 384 (`crates/solidcore/src/nurbs/crv_offset.rs:52`, check at `:214`), a documented deviation. The bound needs a maintainer decision.
+
+#### HANG-45. `SmBrep::CreateFaceFromSurface` of a rational B-spline sphere of radius about `1e-5` does not return
+- **Location:** `SmBrep::CreateFaceFromSurface` -> `SmSurface::LocalCurveIntersect` -> `SmLocalSolveNd::SolveIt` inside `SmGlobalSolver::SolveBranch` (location as recorded by the sweep worker in the FFI guard comment; not re-checked with gdb).
+- **What happens:** Building the face of a full rational biquadratic sphere (4 x 8 spans, weights `sqrt(0.5)`) of radius `1e-5` (and in the `1e-5`..`1e-4` range) never returns; `1e-6` and `1e-3` return. Shape-dependent, like UB-201 (small-radius `SmApiCreateSphereNoPole` hangs); may share its cause.
+- **Trigger:** `query.api_queries` shim kind 9, radius `1e-5`, domain `[0,1]^2`, any B-rep op (fuzz mutated `op 3 -> 0`).
+- **How found:** generated difftest case (`difftest --unit query.api_queries --fuzz 2000`: `fuzz-out/n2000/query.api_queries/fuzz00500.json`, base `rational_kind9_1e-05_north`, mutation `/op = 0`).
+- **Confirmed:** yes (no result after 20 s and the retry).
+- **Severity:** hang.
+- **Rust port:** not reached; the FFI wrapper requires radius `>= 1e-3` for kind-9 B-rep ops (`crates/solidcore-ffi/src/units/query_api_queries.rs:83`).
 
 ## Nondeterminism
 
