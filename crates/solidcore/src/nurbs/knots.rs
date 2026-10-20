@@ -18,6 +18,7 @@
 //! | [`KnotVector::find_span_and_mult`]     | `N_BasisFindSpanAndMult`          |
 //! | [`KnotVector::span_count`]             | `N_BasisGetSpanCount`             |
 //! | [`KnotVector::basis_eval`]             | `N_BasisEval`                     |
+//! | [`KnotVector::basis_eval_into`]        | `N_BasisEval` (caller's `N` array) |
 //! | [`KnotVector::basis_i_eval`]           | `N_BasisIEval`                    |
 //! | [`KnotVector::basis_i_derivs`]         | `N_BasisIDerivs`                  |
 //! | [`Side`]                               | `NL_LEFT` / `NL_RIGHT` flags      |
@@ -109,6 +110,14 @@ fn out_of_range(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
         operation,
         reason: "index out of range (knot vector too short for the degree?)",
+    }
+}
+
+/// `p > NL_MAXDEG + 1`: upstream's `N_BasisEval` scratch arrays would overflow.
+fn degree_too_high(operation: &'static str) -> SolidError {
+    SolidError::InvalidInput {
+        operation,
+        reason: "degree above NL_MAXDEG + 1 (upstream scratch array size)",
     }
 }
 
@@ -419,6 +428,20 @@ impl<'a> KnotVector<'a> {
     /// of bounds (fewer than `2p + 2` knots, `p > MAX_DEGREE + 1`).
     pub fn basis_eval(&self, p: usize, u: f64, side: Side) -> Result<Basis> {
         const OP: &str = OP_BASIS_EVAL;
+        if p > MAX_DEGREE + 1 {
+            return Err(degree_too_high(OP));
+        }
+        let mut n = zeros(Some(p + 1), OP)?;
+        let span = self.basis_eval_into(p, u, side, &mut n)?;
+        Ok(Basis { span, values: n })
+    }
+
+    /// [`KnotVector::basis_eval`] into a caller buffer: zeroes `n[0..=p]`, writes the
+    /// values there and returns the span (same values and errors; `InvalidInput` when
+    /// `n` has fewer than `p + 1` entries). Lets hot evaluators keep `N` on the stack
+    /// (`[f64; MAX_DEGREE + 2]` fits every valid degree), as upstream does.
+    pub fn basis_eval_into(&self, p: usize, u: f64, side: Side, n: &mut [f64]) -> Result<usize> {
+        const OP: &str = OP_BASIS_EVAL;
         // Divide by zero? The denominator is the sum of the two values multiplied
         // by it, so the quotients never exceed 1; only an exactly-zero delta (more
         // than degree+1 equal knots) is a problem. Guard with something tiny.
@@ -426,25 +449,19 @@ impl<'a> KnotVector<'a> {
         let uk = self.knots;
         let m = self.last_index();
         if p > MAX_DEGREE + 1 {
-            return Err(SolidError::InvalidInput {
-                operation: OP,
-                reason: "degree above NL_MAXDEG + 1 (upstream scratch array size)",
-            });
+            return Err(degree_too_high(OP));
         }
-        let mut n = zeros(Some(p + 1), OP)?;
+        n.get_mut(..=p).ok_or_else(|| out_of_range(OP))?.fill(0.0);
 
         // Special cases for end values.
         if u == rd(uk, p, OP)? {
-            wr(&mut n, 0, 1.0, OP)?;
-            return Ok(Basis { span: p, values: n });
+            wr(n, 0, 1.0, OP)?;
+            return Ok(p);
         }
         let end = sub(m, p, OP)?;
         if u == rd(uk, end, OP)? {
-            wr(&mut n, p, 1.0, OP)?;
-            return Ok(Basis {
-                span: sub(end, 1, OP)?,
-                values: n,
-            });
+            wr(n, p, 1.0, OP)?;
+            return sub(end, 1, OP);
         }
 
         // Find the knot span u is in.
@@ -453,7 +470,7 @@ impl<'a> KnotVector<'a> {
         // Compute the non-vanishing B-splines.
         let mut left = [0.0_f64; MAX_DEGREE + 2];
         let mut right = [0.0_f64; MAX_DEGREE + 2];
-        wr(&mut n, 0, 1.0, OP)?;
+        wr(n, 0, 1.0, OP)?;
         for k in 1..=p {
             wr(&mut left, k, u - rd(uk, sub(i + 1, k, OP)?, OP)?, OP)?;
             wr(&mut right, k, rd(uk, i + k, OP)? - u, OP)?;
@@ -468,15 +485,15 @@ impl<'a> KnotVector<'a> {
                         code: NlibCode::Numerical,
                     });
                 }
-                let temp = rd(&n, l, OP)?;
+                let temp = rd(n, l, OP)?;
                 // Keep the divisions inside the parentheses: dividing N[l] by the
                 // knot difference can be huge.
-                wr(&mut n, l, saved + temp * (r / delta), OP)?;
+                wr(n, l, saved + temp * (r / delta), OP)?;
                 saved = temp * (lf / delta);
             }
-            wr(&mut n, k, saved, OP)?;
+            wr(n, k, saved, OP)?;
         }
-        Ok(Basis { span: i, values: n })
+        Ok(i)
     }
 
     /// The single basis function `N[i, p](u)` (upstream `N_BasisIEval`).
@@ -840,6 +857,38 @@ mod tests {
         let start = kv(&EX23).basis_eval(2, 0.0, Side::Right).unwrap();
         assert_eq!(start.span, 2);
         assert_eq!(start.values, vec![1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn basis_eval_into_matches_basis_eval_bitwise() {
+        let k = kv(&EX23);
+        for s in -5..=55 {
+            let u = f64::from(s) * 0.1;
+            for side in [Side::Left, Side::Right] {
+                for p in 0..=2 {
+                    // a dirty buffer: every used entry must be overwritten
+                    let mut n = [7.0_f64; MAX_DEGREE + 2];
+                    let r = k.basis_eval_into(p, u, side, &mut n);
+                    match k.basis_eval(p, u, side) {
+                        Ok(b) => {
+                            assert_eq!(r.unwrap(), b.span);
+                            let bits: Vec<u64> = b.values.iter().map(|x| x.to_bits()).collect();
+                            let got: Vec<u64> = n[..=p].iter().map(|x| x.to_bits()).collect();
+                            assert_eq!(got, bits, "u={u} p={p}");
+                        }
+                        Err(e) => assert_eq!(r.unwrap_err(), e),
+                    }
+                }
+            }
+        }
+        let mut short = [0.0; 2];
+        assert!(k.basis_eval_into(2, 0.5, Side::Left, &mut short).is_err());
+        let mut n = [0.0; MAX_DEGREE + 3];
+        assert_eq!(
+            k.basis_eval_into(MAX_DEGREE + 2, 0.5, Side::Left, &mut n)
+                .unwrap_err(),
+            k.basis_eval(MAX_DEGREE + 2, 0.5, Side::Left).unwrap_err()
+        );
     }
 
     #[test]

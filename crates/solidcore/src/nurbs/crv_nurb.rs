@@ -286,15 +286,15 @@ impl Curve {
             return Err(SolidError::nlib(OP, NlibCode::Parameter));
         }
 
-        // Compute non-vanishing B-splines.
-        let basis = knt.basis_eval(self.degree(), u, side)?;
-        let spn = sx(basis.span, OP)?;
+        // Compute non-vanishing B-splines (on the stack, as upstream's `N`).
+        let mut n = [0.0_f64; MAX_DEGREE + 2];
+        let spn = sx(knt.basis_eval_into(self.degree(), u, side, &mut n)?, OP)?;
 
         // Compute the point on the curve.
         let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
         let j = spn - p;
         for i in j..=spn {
-            let alpha = get(&basis.values, i - j, OP)?;
+            let alpha = get(&n, i - j, OP)?;
             let q = get(pw, i, OP)?;
             cw.x += alpha * q.x;
             cw.y += alpha * q.y;

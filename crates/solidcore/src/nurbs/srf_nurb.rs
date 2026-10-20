@@ -727,15 +727,17 @@ impl Surface {
         let (pu, qu) = self.degrees();
         let (knu, knv) = self.knot_vectors()?;
 
-        // Compute non-vanishing B-splines.
-        let bu = knu.basis_eval(pu, u, ufl)?;
-        let bv = knv.basis_eval(qu, v, vfl)?;
+        // Compute non-vanishing B-splines (on the stack, as upstream's `Nu`/`Nv`).
+        let mut nu = [0.0_f64; MAX_DEGREE + 2];
+        let mut nv = [0.0_f64; MAX_DEGREE + 2];
+        let u_span = knu.basis_eval_into(pu, u, ufl, &mut nu)?;
+        let v_span = knv.basis_eval_into(qu, v, vfl, &mut nv)?;
 
         // Compute the point on the surface.
         let (p, q) = (sx(pu, OP)?, sx(qu, OP)?);
         let mut sw = CPoint::ZERO;
-        let tmp1 = sx(bu.span, OP)? - p;
-        let tmp2 = sx(bv.span, OP)? - q;
+        let tmp1 = sx(u_span, OP)? - p;
+        let tmp2 = sx(v_span, OP)? - q;
         for i in 0..=p {
             let mut tw = CPoint::ZERO;
             let row = self.row(ux(tmp1 + i, OP)?)?;
@@ -743,12 +745,12 @@ impl Surface {
                 blend_spec(
                     pnoz,
                     pnow,
-                    get(&bv.values, j, OP)?,
+                    get(&nv, j, OP)?,
                     get(row, tmp2 + j, OP)?,
                     &mut tw,
                 );
             }
-            blend_spec(pnoz, pnow, get(&bu.values, i, OP)?, tw, &mut sw);
+            blend_spec(pnoz, pnow, get(&nu, i, OP)?, tw, &mut sw);
         }
         Ok(to_euclid_spec(pnoz, pnow, sw))
     }
