@@ -60,11 +60,11 @@ fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
     let resolve = buffer(wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC);
     let read = buffer(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ);
     let software = info.device_type == wgpu::DeviceType::Cpu;
-    let samples = if software { if ground > 0 { 5 } else { 12 } } else { 30 };
-    let warm = if software && ground > 0 { 2 } else { 5 };
+    let samples = if software { 12 } else { 30 };
+    let warm = 5;
     let mut rows = Vec::new();
     for (width, height) in [(1670u32, 838u32), (3340, 1676)] {
-        if software && ground > 0 && width > 1670 {
+        if software && width > 1670 {
             continue;
         }
         let mut scene = GpuScene::default();
@@ -123,12 +123,12 @@ fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
                                 view: &color,
                                 depth_slice: None,
                                 resolve_target: None,
-                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Discard },
+                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store },
                             })],
                             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                                 view: &depth,
-                                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
-                                stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
+                                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                                stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
                             }),
                             ..Default::default()
                         })
@@ -164,7 +164,7 @@ fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
     }
     let result = json!({"adapter":info.name,"backend":format!("{:?}",info.backend),"radius":radius,"ground":ground,
         "triangles":meshes.iter().map(|m|m.triangles.len()).sum::<usize>(),"rows":rows,
-        "notes":"Actual Renderer, same cached opaque model, MSAA4, two off/on pairs after warm-up. ground=0: surface AO; 1: virtual floor; Floor composites require AO on. Projection is not part of this measurement. 3340x1676 is SSAA2 work resolution without final downsample. GPU total includes prepare plus model/clear, not the application frame."});
+        "notes":"Actual Renderer, same cached opaque model, MSAA4, two off/on pairs after warm-up. ground=0: surface AO; 1: virtual floor; Floor composites require AO on. Projection is not part of this measurement. Stored MSAA4 attachments prevent unused-output elimination; presentation, MSAA resolve and final downsample are excluded. 3340x1676 is SSAA2 working resolution. GPU total includes prepare plus model/clear, not the application frame."});
     let label = match ground {
         1 => "ao-ground",
         2 => "ao-ground-projection",
