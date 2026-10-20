@@ -465,6 +465,11 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
         pick(&mut h, [-22.5, 10.0], false);
         step(&mut h, json!({"key":"Tab"}));
         assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{command}");
+        if command == "sketch.pattern.rectangular" {
+            step(&mut h, json!({"key":"Tab"}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"key":"Tab"})); // First direction section header.
+        }
         step(&mut h, json!({"key":"Tab"}));
         step(&mut h, json!({"key":"A", "cmd":true}));
         step(&mut h, json!({"text":"4"}));
@@ -473,13 +478,18 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
             crate::dialogs::Kind::SketchModify(Mod::PatternRect { count, .. } | Mod::PatternCirc { count, .. }) => assert_eq!(count, "4"),
             _ => panic!("pattern dialog"),
         }
+        if command == "sketch.pattern.rectangular" {
+            step(&mut h, json!({"key":"Tab", "shift":true})); // First direction section header.
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+        }
         step(&mut h, json!({"key":"Tab", "shift":true}));
         assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
         step(&mut h, json!({"key":"Tab", "shift":true}));
         assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
         if command == "sketch.pattern.rectangular" {
-            // Entities, Direction, Quantity, Spacing, Direction 2, Quantity 2, Spacing 2.
-            for _ in 0..4 {
+            // Entities, both directions, then each section header and its values.
+            for _ in 0..6 {
                 step(&mut h, json!({"key":"Tab"}));
             }
             assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
