@@ -27,6 +27,7 @@
 //! | [`SsiData`]                                                 | `SmSSIData` (`SmSSIData.h`, CO-PORTED: no unit owns it) |
 //! | [`OffsetExecutive`]                                         | what this unit uses of `SmOffsetExecutive` (ported in `offset.offset_executive_p1`), over handles |
 //! | [`OffsetBrep`]                                              | what the unit reads from and writes to the two B-reps |
+//! | `VertexOffsetBrep` (private)                                | the vertex creator's topology/owned-geometry subset |
 //!
 //! Deviations:
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
@@ -39,7 +40,9 @@
 //!   returns owned pointers. The offset executive is reached through
 //!   [`OffsetExecutive`] (its stored flags, shell faces, edge-use map and
 //!   extended-surface cache), which its owner implements over the ported
-//!   [`crate::offset::offset_executive::p1::OffsetExecutive`].
+//!   [`crate::offset::offset_executive::p1::OffsetExecutive`]. The executive's vertex
+//!   adapter uses a narrow internal backend; the public full-backend `vertex_offset`
+//!   delegates to the same algorithm, preserving lookup/storage error translation.
 //! - **Context.** `crContext` is the [`Kernel`] passed to each method.
 //! - **Out-params** become return values ([`VertexOffsetGeometry`], [`EdgeuseOffset`],
 //!   [`ReplaceEdgeCurves`], the trim interval of `TrimExtendedEdge` as an `Option`,
@@ -500,6 +503,77 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     ) -> Result<(f64, Curve)>;
 }
 
+/// The topology and owned-geometry subset used by `VertexOffset`. Keeping this
+/// interface separate lets the executive borrow the real source and result arenas
+/// without implementing unrelated SSI, classification or editing operations.
+pub(crate) trait VertexOffsetBrep<O> {
+    /// The source vertex's B-rep tolerance, not the result B-rep's tolerance.
+    fn brep_tolerance(&self, vertex: O) -> Result<f64>;
+    /// `SmVertex::GetPoint` in the source arena.
+    fn vertex_point(&self, vertex: O) -> Result<Point3>;
+    /// `SmVertex::IsLaminaVertex` in the source arena.
+    fn vertex_is_lamina(&self, vertex: O) -> Result<bool>;
+    /// The result edge's incident faces in native traversal order.
+    fn edge_faces(&self, edge: O) -> Result<Vec<O>>;
+    /// `SmEdge::IsSeam(*face->GetSurface())` in the result arena.
+    fn edge_is_seam_of_face_surface(&mut self, k: &Kernel, edge: O, face: O) -> Result<bool>;
+    /// The result edge's curve handle.
+    fn edge_curve(&self, edge: O) -> Result<Option<O>>;
+    /// The result edge's parameter interval.
+    fn edge_interval(&self, edge: O) -> Result<Extent1d>;
+    /// Resolves a curve without replacing its concrete kind by its B-spline part.
+    fn curve(&self, curve: O) -> Result<&Curve>;
+    /// Stores an owned trimming curve.
+    fn insert_curve(&mut self, curve: Curve) -> Result<O>;
+    /// Stores the owned cap surface.
+    fn insert_surface(&mut self, surface: Surface) -> Result<O>;
+}
+
+/// Adapts the existing full backend so public callers keep using the same path.
+struct OffsetVertexBrep<'a, B>(&'a mut B);
+
+impl<O: ClassObject, B: OffsetBrep<O>> VertexOffsetBrep<O> for OffsetVertexBrep<'_, B> {
+    fn brep_tolerance(&self, vertex: O) -> Result<f64> {
+        self.0.brep_tolerance(vertex)
+    }
+
+    fn vertex_point(&self, vertex: O) -> Result<Point3> {
+        self.0.vertex_point(vertex)
+    }
+
+    fn vertex_is_lamina(&self, vertex: O) -> Result<bool> {
+        self.0.vertex_is_lamina(vertex)
+    }
+
+    fn edge_faces(&self, edge: O) -> Result<Vec<O>> {
+        self.0.edge_faces(edge)
+    }
+
+    fn edge_is_seam_of_face_surface(&mut self, k: &Kernel, edge: O, face: O) -> Result<bool> {
+        self.0.edge_is_seam_of_face_surface(k, edge, face)
+    }
+
+    fn edge_curve(&self, edge: O) -> Result<Option<O>> {
+        self.0.edge_curve(edge)
+    }
+
+    fn edge_interval(&self, edge: O) -> Result<Extent1d> {
+        self.0.edge_interval(edge)
+    }
+
+    fn curve(&self, curve: O) -> Result<&Curve> {
+        curve_of(self.0, curve)
+    }
+
+    fn insert_curve(&mut self, curve: Curve) -> Result<O> {
+        store_curve(self.0, curve)
+    }
+
+    fn insert_surface(&mut self, surface: Surface) -> Result<O> {
+        store_surface(self.0, surface)
+    }
+}
+
 // ---- callees through the B-rep, and unported callees ----------------------------------------
 //
 // Each helper carries every argument of the upstream call (literals and header defaults
@@ -700,6 +774,12 @@ fn b_spline_kind_of<O: ClassObject>(
     h: O,
 ) -> Result<Option<&Curve>> {
     let c = curve_of(geometry, h)?;
+    Ok(is_b_spline_kind(c).then_some(c))
+}
+
+/// The same cast through the vertex-only backend; concrete curve kinds stay intact.
+fn vertex_b_spline_kind_of<O>(geometry: &impl VertexOffsetBrep<O>, h: O) -> Result<Option<&Curve>> {
+    let c = geometry.curve(h)?;
     Ok(is_b_spline_kind(c).then_some(c))
 }
 
@@ -1012,6 +1092,23 @@ impl OffsetGeometryCreation {
         original_vertex: Option<O>,
         bounding_edges: &[O],
     ) -> Result<VertexOffsetGeometry<O>> {
+        self.vertex_offset_with_backend(
+            k,
+            &mut OffsetVertexBrep(brep),
+            original_vertex,
+            bounding_edges,
+        )
+    }
+
+    /// The shared vertex algorithm, also used by the executive's cross-arena adapter.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn vertex_offset_with_backend<O: Copy>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl VertexOffsetBrep<O>,
+        original_vertex: Option<O>,
+        bounding_edges: &[O],
+    ) -> Result<VertexOffsetGeometry<O>> {
         // init output
         let original_vertex = original_vertex.ok_or(SolidError::null_pointer(OP_VERTEX))?;
         let mut out = VertexOffsetGeometry {
@@ -1060,11 +1157,12 @@ impl OffsetGeometryCreation {
             let ivl1 = brep.edge_interval(e1)?;
             let param2_start = ivl1.min();
             let param2_end = ivl1.max();
-            let max_dist = curve_of(brep, c1)?
+            let max_dist = brep
+                .curve(c1)?
                 .curve_max_distance_between(
                     k,
                     &ivl0,
-                    curve_of(brep, c2)?,
+                    brep.curve(c2)?,
                     param2_start,
                     param2_end,
                     10,
@@ -1077,11 +1175,12 @@ impl OffsetGeometryCreation {
             }
 
             // check to see if the curves have opposite parameterization
-            let max_dist = curve_of(brep, c1)?
+            let max_dist = brep
+                .curve(c1)?
                 .curve_max_distance_between(
                     k,
                     &ivl0,
-                    curve_of(brep, c2)?,
+                    brep.curve(c2)?,
                     param2_end,
                     param2_start,
                     10,
@@ -1109,7 +1208,7 @@ impl OffsetGeometryCreation {
                     .ok_or(dangling("edge list"))?;
                 let c = brep.edge_curve(e)?.ok_or(dangling("edge without curve"))?;
                 // SM_CAST_PTR(SmBSplineCurve, curve): the failed cast is dereferenced
-                let blend = b_spline_kind_of(brep, c)?
+                let blend = vertex_b_spline_kind_of(brep, c)?
                     .ok_or(dangling("bounding curve is not a B-spline curve"))?;
                 let ivl = brep.edge_interval(e)?;
                 if blend.is_closed(k, &ivl, 0.0)? {
@@ -1173,7 +1272,7 @@ impl OffsetGeometryCreation {
                     None,
                 )?,
             };
-            out.surface = Some(store_surface(brep, Surface::from(sphere))?);
+            out.surface = Some(brep.insert_surface(Surface::from(sphere))?);
         } else {
             // 3 boundary curves none of which are lamina
             // In this simple case we will assume that we are doing a constant radius
@@ -1185,7 +1284,8 @@ impl OffsetGeometryCreation {
                 let c = brep
                     .edge_curve(e)?
                     .ok_or(SolidError::null_pointer(OP_VERTEX))?;
-                let bsc = b_spline_kind_of(brep, c)?.ok_or(SolidError::null_pointer(OP_VERTEX))?;
+                let bsc =
+                    vertex_b_spline_kind_of(brep, c)?.ok_or(SolidError::null_pointer(OP_VERTEX))?;
                 curves.push(bsc.clone());
             }
 
@@ -1219,10 +1319,10 @@ impl OffsetGeometryCreation {
                             &point_curve,
                         )?;
                         for c in trimmed.trimming_curves {
-                            out.trimming_curves.push(store_curve(brep, c)?);
+                            out.trimming_curves.push(brep.insert_curve(c)?);
                         }
                         out.orients = trimmed.trim_orientations;
-                        out.surface = Some(store_surface(brep, Surface::from(trimmed.plane))?);
+                        out.surface = Some(brep.insert_surface(Surface::from(trimmed.plane))?);
                         return Ok(out);
                     }
                 }
@@ -1329,13 +1429,13 @@ impl OffsetGeometryCreation {
                 .filter_map(|&i| curves.get(i).cloned())
                 .collect();
             out.orients = sphere.orients;
-            out.surface = Some(store_surface(brep, Surface::from(sphere.sphere))?);
+            out.surface = Some(brep.insert_surface(Surface::from(sphere.sphere))?);
             for orig in trim_curves {
                 // SM_CAST_PTR(SmBSplineCurve, curve), new SmBSplineCurve(*pOrig): a plain
                 // B-spline copy of the curve's NURB part
                 let copy = b_spline_part(&orig)?.ok_or(dangling("trim curve kind"))?;
                 out.trimming_curves
-                    .push(store_curve(brep, Curve::from(copy))?);
+                    .push(brep.insert_curve(Curve::from(copy))?);
             }
         } // end given 3 boundary curves branch
 

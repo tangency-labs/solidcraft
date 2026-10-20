@@ -4370,14 +4370,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmOffsetGeometryCreation::VertexOffset",
-        "unit": "offset.offset_geometry_creation"
-      },
       "max_rel_err": 0.0,
       "name": "probe_vertex_isolated",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#7",
       "values_compared": 0
     },
@@ -4742,6 +4738,134 @@
       "pass": true,
       "source": "fixture:fixtures/offset.offset_executive_p1/tangency.json#7",
       "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_origin_semicircle_180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#0 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:394-409)",
+      "values_compared": 212
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_translated_distinct_tolerances",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#1 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:288,365,397-400)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_negative_translation",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#2 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:365,397-400)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_small_scale",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#3 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:397-400)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_large_translation",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#4 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:365,397-400)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_large_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#5 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:397-400)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_tiny_translation_and_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#6 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:365,397-400)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_isolated_translated_tolerances_swapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#7 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3258,3443; source/SMLib/src/SmOffsetGeometryCreation.cpp:288)",
+      "values_compared": 194
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_closed_circle_360",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#8 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3277-3355; source/SMLib/src/SmOffsetGeometryCreation.cpp:310-321,367-407)",
+      "values_compared": 204
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_negative_height_axis_flip",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#9 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:377-382,405-407)",
+      "values_compared": 204
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_mate_faceuse_fallback",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#10 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3284-3288,3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:367-407)",
+      "values_compared": 204
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_translated_scaled_circle",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#11 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3323-3349; source/SMLib/src/SmOffsetGeometryCreation.cpp:367-407)",
+      "values_compared": 204
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_small_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#12 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:367-407)",
+      "values_compared": 204
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_radius_filter_no_cap",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#13 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3329-3355)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_center_filter_no_cap",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#14 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3329-3355)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_strut_translated_negative_height_mate",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/vertex.json#15 (upstream source/SMLib/src/SmOffsetExecutive.cpp:3284-3288,3344; source/SMLib/src/SmOffsetGeometryCreation.cpp:377-382,405-407)",
+      "values_compared": 204
     },
     {
       "max_rel_err": 0.0,
@@ -9545,14 +9669,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 317,
+  "cases_deferred": 316,
   "cases_failed": 0,
-  "cases_passed": 714,
+  "cases_passed": 731,
   "cases_rejected": 1,
-  "cases_total": 1032,
+  "cases_total": 1048,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 1,
-    "offset.offset_geometry_creation": 1,
     "query.brep": 1,
     "topology.brep_p1": 1,
     "topology.brep_p3": 312,

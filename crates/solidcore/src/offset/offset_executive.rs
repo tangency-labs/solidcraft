@@ -10,3 +10,4 @@
 //! Deviations: typed arena ids replace pointers; each part documents its dependency boundaries.
 
 pub mod p1;
+mod vertex;
