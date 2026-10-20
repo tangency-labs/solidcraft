@@ -63,12 +63,16 @@
 //! - `SM_CAST_PTR(SmOffsetSurface, ..)` on an analytic copy: an offset surface gets
 //!   `SetAllowExtension(FALSE)`, as upstream.
 //! - **Undefined behaviour upstream** (null objects dereferenced, a curve that is
-//!   not an `SmBSplineCurve` cast as one and used, a null curve extension used, the
-//!   stale `sSolutions2[0]` of `TrimExtendedEdge` read when the second drop finds
-//!   nothing) is [`SolidError::InvalidInput`] with [`UNDEFINED_UPSTREAM`] as
-//!   operation, which tells it apart from a callee's real `SM_ERR_INVALID_INPUT`; the
-//!   statuses upstream ignores are ignored whatever they are, except these and
-//!   [`SolidError::Unported`].
+//!   not an `SmBSplineCurve` cast as one and used, a null curve extension used) is
+//!   [`SolidError::InvalidInput`] with [`UNDEFINED_UPSTREAM`] as operation, which tells
+//!   it apart from a callee's real `SM_ERR_INVALID_INPUT`; the statuses upstream
+//!   ignores are ignored whatever they are, except these and [`SolidError::Unported`].
+//! - **`ExtendTrimEdges`' empty seam drop.** When a candidate's `GlobalPointSolve`
+//!   (`SM_SR_SINGLE`, minimize) finds no solution, upstream reads `sSolutions2[0]`
+//!   anyway (cpp:1610): defined behaviour, the array's backing `sData2[0]` (a default
+//!   `SmSolution`, value `0.0`, or an earlier candidate's result). A single minimizing
+//!   solve always has a solution, so this is unreachable; the port refuses it with the
+//!   same [`UNDEFINED_UPSTREAM`] error instead of reproducing the stale value.
 //! - **Virtual calls.** `pSur->CreateOffsetSurface` dispatches on the surface kind
 //!   (the plane, surface-of-revolution and B-spline overrides, else the base); the
 //!   curves cast `SM_CAST_PTR(SmBSplineCurve, ..)` keep their kind (a line or a circle
@@ -267,6 +271,17 @@ pub struct ReplaceEdgeCurves {
 /// implements it on top of the ported struct, mapping handles to its typed ids. The
 /// tangency tolerance is not here: upstream's executive calls back into the geometry
 /// creation (`m_rGeometryCreation.GetTangencyTolDegrees()`), so this module reads its own.
+///
+/// # Implementing this trait
+///
+/// As for [`OffsetBrep`], the only implementation today is the difftest runner's (`Exec`,
+/// wrapping the ported struct). An adapter keeps upstream's identities: the extension
+/// cache is keyed by the base surface's identity (upstream's pointer; one key per
+/// surface object, never per copy), a lookup that hits returns the cached surface's
+/// handle (the runner seeds the cache with each surface mapped to itself, as the C++
+/// shim seeds `m_vSurfExtSurf`, so a hit returns the base handle), and an extension made
+/// on a miss is stored once and its handle returned again on later hits.
+/// [`OffsetExecutive::offset_edgeuse`] follows `GetOffsetEdgeuse`'s exactly-one rule.
 pub trait OffsetExecutive<O> {
     /// `GetInset`.
     fn inset(&self) -> bool;
@@ -301,6 +316,31 @@ pub trait OffsetExecutive<O> {
 /// implemented by their owner on top of [`ClassGeometry`] / [`ProtoGeometry`] with
 /// the ported topology functions each method names. A method returns `Ok(None)` or
 /// [`SolidError::InvalidInput`] where upstream would dereference null.
+///
+/// # Implementing this trait
+///
+/// The only implementation today is the `offset.offset_geometry_creation` difftest
+/// runner's (`Two` in `crates/difftest/src/units/offset_offset_geometry_creation.rs`),
+/// which is compared against upstream; a library-side adapter (for
+/// [`crate::offset::offset_executive::p1::OffsetExecutive`]'s `EdgeuseOffset` /
+/// `VertexOffset` calls) must make the same choices where a method's upstream call has
+/// side effects:
+/// - For [`OffsetBrep::edge_set_curve`], a copy of the curve through
+///   `topology::edge::set_curve` with `SetCurveOptions { delete_old_curve: true,
+///   dbg_warn_leaks: true, call_notify: true }` and the B-rep's notification environment
+///   (`topology::edge::NotifyEnv`: its topology records, attribute store and object
+///   keys), then `Curve::set_owner` on the edge's new curve with the edge's key.
+/// - For [`OffsetBrep::set_edge_tolerance`], `topology::edge::set_tolerance(.., true, true)`
+///   (`bUpdateOnlyIfLarger`, `bCascadeToBndries`: upstream's defaults).
+/// - For [`OffsetBrep::edgeuse_set_uv_trim_curve`], `topology::edgeuse::p1::set_uv_trim_curve`
+///   with a new curve (or null), the given distance and `true` (delete the existing UV
+///   trim curve), no drop-curve record.
+/// - For [`OffsetBrep::set_vertex_point`], `topology::vertex::set_point` with the same
+///   notification environment (vertex uses keyed as the B-rep's topology records).
+/// - For [`OffsetBrep::insert_curve`] / [`OffsetBrep::insert_surface`], new objects get
+///   handles of their own; they are never attached to topology by the store.
+/// - The surfaces of faces keep their face as owner (`Surface::set_owner`), so that a
+///   trimmed surface cache built on them reaches the face as upstream's does.
 #[allow(clippy::too_many_arguments)]
 pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// Stores a new curve and returns its handle; `None` when the store is full.

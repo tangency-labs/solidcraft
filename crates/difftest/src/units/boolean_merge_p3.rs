@@ -4,12 +4,17 @@
 //! read from the actual Rust B-rep. Native result graphs are freshly imported and
 //! projected to the same digest. Curve/surface values and adjacency are not compared.
 //! Geometric merges remain deferred at the exact missing dependency call.
+//! Family 6 runs `NonManifoldBoolean` through `DependencyMerge::with_engine` against a
+//! context-only native `SmMerge` with the same explicit members and at most one
+//! operand: it compares the NER status, the restored manifold flag, the lamina mode
+//! the engine's intersector received and the null result (error-path coverage only).
 use std::collections::BTreeSet;
 
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use port::{BooleanDriver, PiecewiseAccess};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use solidcore::boolean::merge::p4::{KernelManifoldIntersector, ManifoldState};
 use solidcore::boolean::merge::{p1::MergeOptions, p3 as port};
 use solidcore::boolean::topology_intersector::p1::TopologyIntersector;
 use solidcore::geom::a_object::BooleanOperation;
@@ -80,6 +85,102 @@ fn encode(i: &Inputs) -> Vec<f64> {
     data.extend(i.tree.iter().map(|&v| v as f64));
     data
 }
+/// Family 6: `NonManifoldBoolean` on an adopted engine (see the module docs).
+const ENGINE_PROBE: u8 = 6;
+
+fn boolean_operation(code: i32) -> Result<BooleanOperation, HarnessError> {
+    Ok(match code {
+        0 => BooleanOperation::Unknown,
+        1 => BooleanOperation::Union,
+        2 => BooleanOperation::Intersection,
+        3 => BooleanOperation::Difference,
+        4 => BooleanOperation::ExclusiveOr,
+        5 => BooleanOperation::Merge,
+        6 => BooleanOperation::PartialMerge,
+        7 => BooleanOperation::Imprint,
+        8 => BooleanOperation::ImprintClassify,
+        9 => BooleanOperation::ExtractSeparate,
+        10 => BooleanOperation::Slice,
+        _ => return Err(harness("invalid operation")),
+    })
+}
+
+fn engine_output(status: i64, manifold: bool, lamina: u64, result: bool) -> Output {
+    Output::new()
+        .int("status", status)
+        .int("manifold", i64::from(manifold))
+        .int("lamina", lamina as i64)
+        .int("result", i64::from(result))
+}
+
+/// The engine mirrors the native `EngineAccess`: the context-only constructor's
+/// members (`KernelManifoldIntersector::new`), the same explicit tolerances and
+/// `SetMergeOptions`, manifold flag true and lamina mode 0 before the call.
+fn engine_probe(i: &Inputs, pool: &mut Pool) -> Result<Output, HarnessError> {
+    let mut breps = std::mem::take(&mut pool.breps).into_iter();
+    let mut primary = if i.a.is_empty() { None } else { breps.next() };
+    let mut other = if i.b.is_empty() { None } else { breps.next() };
+    let mut intersector = KernelManifoldIntersector::new(0).map_err(|error| harness(&error))?;
+    intersector.set_intersection_tolerances(1e-9, 0.3);
+    intersector
+        .merge
+        .set_merge_options(i.options.map(options).as_ref());
+    let mut driver = port::DependencyMerge::with_engine(port::MergeEngine {
+        intersector,
+        state: ManifoldState::default(),
+        attributes: AttributeStore::default(),
+    });
+    let mut k = Kernel::default();
+    let mut manifold = true;
+    let mut lamina = 0;
+    let result = port::non_manifold_boolean(
+        &mut k,
+        &mut driver,
+        &mut primary,
+        &mut other,
+        &mut manifold,
+        &mut lamina,
+        boolean_operation(i.operation)?,
+    );
+    let engine = driver
+        .into_engine()
+        .ok_or_else(|| harness("adopted engine was not returned"))?;
+    let code = match &result {
+        Ok(_) => 0,
+        Err(error) => match Output::unported(error) {
+            Some(deferred) => return Ok(deferred),
+            None => status(error),
+        },
+    };
+    Ok(engine_output(
+        code,
+        manifold,
+        engine.intersector.intersect_lamina_edges(),
+        matches!(result, Ok(Some(_))),
+    ))
+}
+
+fn native_engine_output(raw: &[f64]) -> Result<Output, HarnessError> {
+    let [status, manifold, lamina, result] = raw else {
+        return Err(harness("invalid engine probe output"));
+    };
+    let flag = |value: f64| {
+        if value == 0.0 || value == 1.0 {
+            Ok(value == 1.0)
+        } else {
+            Err(harness("invalid engine probe flag"))
+        }
+    };
+    let mut input: &[f64] = std::slice::from_ref(lamina);
+    let lamina = take_count(&mut input)? as u64;
+    Ok(engine_output(
+        *status as i64,
+        flag(*manifold)?,
+        lamina,
+        flag(*result)?,
+    ))
+}
+
 fn options(mask: u8) -> MergeOptions {
     MergeOptions::new(
         mask & 1 != 0,
@@ -405,11 +506,10 @@ impl BooleanDriver for Pool {
         _operation: BooleanOperation,
         _lock: Option<&mut MarkLock>,
     ) -> solidcore::Result<Option<usize>> {
-        // UNPORTED(boolean.merge_p4): SmMerge::ManifoldBoolean
-        Err(SolidError::unported(
-            "SmMerge::ManifoldBoolean",
-            "boolean.merge_p4",
-        ))
+        // ManifoldBoolean (boolean.merge_p4) runs on the engine the merge
+        // constructor builds, as port::DependencyMerge does; the pool has none.
+        // UNPORTED(boolean.merge_p2): SmMerge::SmMerge
+        Err(SolidError::unported("SmMerge::SmMerge", "boolean.merge_p2"))
     }
 }
 impl PiecewiseAccess for Pool {
@@ -663,11 +763,14 @@ fn notify(
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    if i.family > 4 {
+    if i.family > 4 && i.family != ENGINE_PROBE {
         return Err(harness("fixture-only family is not a unit operation"));
     }
     ffi::validate(&encode(i)).map_err(|error| harness(&error))?;
     let mut pool = Pool::load(i)?;
+    if i.family == ENGINE_PROBE {
+        return engine_probe(i, &mut pool);
+    }
     let mut k = Kernel::default();
     let opts = i.options.map(options);
     let mut values = vec![0.0];
@@ -715,20 +818,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut other = Some(1);
             let mut manifold = true;
             let mut lamina = 0;
-            let operation = match i.operation {
-                0 => BooleanOperation::Unknown,
-                1 => BooleanOperation::Union,
-                2 => BooleanOperation::Intersection,
-                3 => BooleanOperation::Difference,
-                4 => BooleanOperation::ExclusiveOr,
-                5 => BooleanOperation::Merge,
-                6 => BooleanOperation::PartialMerge,
-                7 => BooleanOperation::Imprint,
-                8 => BooleanOperation::ImprintClassify,
-                9 => BooleanOperation::ExtractSeparate,
-                10 => BooleanOperation::Slice,
-                _ => return Err(harness("invalid operation")),
-            };
+            let operation = boolean_operation(i.operation)?;
             port::non_manifold_boolean(
                 &mut k,
                 &mut pool,
@@ -788,11 +878,14 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs =
             serde_json::from_value(case.inputs.clone()).map_err(|error| harness(&error))?;
-        if i.family > 4 {
+        if i.family > 4 && i.family != ENGINE_PROBE {
             return Err(harness("fixture-only family is not a unit operation"));
         }
         if let Some(expected) = &i.expected_refusal {
             return refusal(&i, expected);
+        }
+        if i.family == ENGINE_PROBE {
+            return native_engine_output(&ffi::eval(&encode(&i)).map_err(|error| harness(&error))?);
         }
         native_output(
             &ffi::eval(&encode(&i)).map_err(|error| harness(&error))?,

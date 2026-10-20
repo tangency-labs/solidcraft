@@ -215,7 +215,7 @@ pub fn merge_breps(
         breps,
         kernel_operation,
         None,
-        &mut crate::boolean::merge::p3::DependencyMerge,
+        &mut crate::boolean::merge::p3::DependencyMerge::default(),
     )
 }
 
@@ -277,7 +277,7 @@ pub fn boolean_trees(
         breps,
         post_fix_trees,
         None,
-        &mut crate::boolean::merge::p3::DependencyMerge,
+        &mut crate::boolean::merge::p3::DependencyMerge::default(),
     )
 }
 

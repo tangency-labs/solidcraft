@@ -641,7 +641,9 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
                     !edges[0]->GetCurve()->IsKindOf(SmBSplineCurve_TYPE))
                     bad = true;
             }
-            if (bad || !all_ok)
+            // no all_ok: VertexOffset walks no loops (IsLaminaVertex is GetEdges + IsLamina),
+            // so wire and other non-loop B-reps are compared; the per-edge checks stay
+            if (bad)
             {
                 o.push_back(ST_NULL_DEREF);
                 break;

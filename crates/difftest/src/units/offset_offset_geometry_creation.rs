@@ -33,9 +33,16 @@
 //! **Guards.** The shim refuses (`-2`) what upstream dereferences without checking;
 //! the topology-walking functions need every edge use of both B-reps to be a loop edge
 //! use with edge, curve, vertex, mate, neighbours and a face with surface (so wire,
-//! single-face and network B-reps only exercise the refusal). `ReplaceEdgeCurves` with
+//! single-face and network B-reps only exercise the refusal), except `VertexOffset`,
+//! which walks no loops and keeps only its per-edge checks (a curve on each edge; for a
+//! single edge, a face with surface and a B-spline curve). `ReplaceEdgeCurves` with
 //! a 3D curve and no UV curve is refused only when the curves run opposite (the shape
-//! test is replicated). The runner mirrors every guard on the imported B-reps.
+//! test is replicated). The runner mirrors every guard on the imported B-reps. The run
+//! header takes any finite offset distance (zero included) and any finite tolerance that
+//! is not negative: upstream neither crashes nor hangs at zero (every generated script
+//! ran at each zero; the `*_zero_distance` and `*_zero_approx` cases keep the bases whose
+//! compared output changes at zero), so only a negative tolerance is refused, and the
+//! runner mirrors that refusal (`approx_negative`) as it does the B-rep guards.
 //!
 //! **Hang guards (`-6`, the script stops; the case defers).** The shim does not run two
 //! ops the Rust side defers at anyway, as they can take minutes or not return (the
@@ -1764,8 +1771,14 @@ fn resolve(i: &Inputs, c: &mut Counts, two: &Two) -> Result<(RHeader, Vec<ROp>),
             Some(_) => Err(format!("unresolvable_{what}_kind")),
         }
     };
-    // header (the local pairs come last: their store surfaces are named against the
-    // store the ops fill, and resolved again at each local op)
+    // header: the FFI refuses a negative tolerance (no upstream caller passes one); the
+    // refusal is mirrored here, as the B-rep guards are, so that neither side runs the
+    // script
+    if i.approx < 0.0 {
+        return Err("approx_negative".into());
+    }
+    // (the local pairs come last: their store surfaces are named against the store the
+    // ops fill, and resolved again at each local op)
     let mut shell = Vec::new();
     for (j, f) in i.shell.iter().enumerate() {
         shell.push(hk(c, *f, &[K_FACE], true, 3, &format!("shell{j}"))?);
@@ -1915,7 +1928,7 @@ fn resolve(i: &Inputs, c: &mut Counts, two: &Two) -> Result<(RHeader, Vec<ROp>),
                 other_off: eu(c, *other_off, true)?,
             },
             OpIn::HaveTangentGaps { n, off, other_off } => OpIn::HaveTangentGaps {
-                n: (*n).clamp(1, ffi::MAX_SAMPLES as u64),
+                n: (*n).min(ffi::MAX_SAMPLES as u64),
                 off: eu(c, *off, true)?,
                 other_off: eu(c, *other_off, true)?,
             },
@@ -2598,7 +2611,8 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                         _ => bad = true,
                     }
                 }
-                if bad || !all_ok {
+                // (no `all_ok`: VertexOffset walks no loops, as the shim)
+                if bad {
                     o.push(NULL_DEREF);
                     continue;
                 }
@@ -3373,6 +3387,8 @@ impl UnitDiff for Runner {
                 inputs,
             });
         }
+        let zero = zero_header_cases(self.id(), &cases)?;
+        cases.extend(zero);
         Ok(cases)
     }
 
@@ -3405,7 +3421,8 @@ const fn h(b: i64, kind: u8, i: i64) -> Hin {
 const NULL_H: Hin = [-1, K_NULL, -1];
 
 /// Cases built in code: each op on real solid B-reps with explicit geometry, at unit,
-/// tiny and huge scale, plus the guard refusals on the wire network.
+/// tiny and huge scale, plus the guard refusals on the wire network (the run header at
+/// zero is [`zero_header_cases`]).
 #[allow(clippy::too_many_lines)]
 fn edge_cases() -> Vec<(String, Value)> {
     let mut out = Vec::new();
@@ -4096,5 +4113,115 @@ fn edge_cases() -> Vec<(String, Value)> {
         add(&format!("vase_{name}_scale"), i);
     }
 
+    // VertexOffset on topology without loops (it walks none, so the shim no longer
+    // refuses it there): the wire network's vertices with two and three of their edges,
+    // and with no edges; a single wire's end vertex with its own edge (refused: the
+    // one-edge branch needs a face)
+    for (name, v, edges) in [
+        ("network_vertex_two_edges", 0, vec![0, 1]),
+        ("network_vertex_three_edges", 1, vec![1, 2, 3]),
+        ("network_vertex_no_edges", 2, Vec::new()),
+    ] {
+        let mut i = base("cone.smb", None, 0.5);
+        i.brep_a = BrepIn::Network;
+        i.ops = vec![OpIn::VertexOffset {
+            v: h(0, K_VERTEX, v),
+            edges: edges.into_iter().map(|e| h(0, K_EDGE, e)).collect(),
+        }];
+        add(name, i);
+    }
+    {
+        let mut i = base("cone.smb", None, 0.5);
+        i.brep_a = BrepIn::Wire {
+            curve: CrvIn {
+                dim: 3,
+                cpts: vec![
+                    [0.0, 0.0, 0.0, 1.0],
+                    [1.0, 2.0, 0.0, 1.0],
+                    [3.0, 1.0, 1.0, 1.0],
+                ],
+                p: 2,
+                u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            },
+            t0: 0.0,
+            t1: 1.0,
+        };
+        i.ops = vec![
+            OpIn::VertexOffset {
+                v: h(0, K_VERTEX, 0),
+                edges: vec![h(0, K_EDGE, 0)],
+            },
+            OpIn::VertexOffset {
+                v: h(0, K_VERTEX, 1),
+                edges: Vec::new(),
+            },
+        ];
+        add("wire_vertex_offset", i);
+    }
+
+    // HaveTangentGaps with no samples: upstream evaluates once at 0 / 0
+    let mut i = base("cone.smb", Some("cone.smb"), 0.5);
+    i.pairs = pairs(4, 1);
+    i.ops = vec![OpIn::HaveTangentGaps {
+        n: 0,
+        off: h(1, K_EDGEUSE, 0),
+        other_off: h(1, K_EDGEUSE, 1),
+    }];
+    add("cone_have_tangent_gaps_no_samples", i);
+
     out
+}
+
+/// Bases of the `*_zero_distance` cases: their compared output changes at `dist = 0`.
+///
+/// A sweep of the 800 generated scripts at `dist = 0` (the `Getters` echo of the header
+/// left out) changes 67 compared results, every one a script with a `FaceuseOffset` (the
+/// offset surface at distance 0) or a `VertexOffset` (the radius-0 arc, status 1007);
+/// `EdgeuseOffset` reads the distance on its rail path only, which defers. The built-in
+/// `cone_vertex_offset` is the only built-in whose compared output changes. `gen0638`
+/// offsets a B-spline face (`ellips_ts2.smb`); `gen0700` and `gen0012` offset planes.
+const ZERO_DISTANCE_BASES: &[&str] = &[
+    "cone_vertex_offset",
+    "gen0700",
+    "gen0107",
+    "gen0012",
+    "gen0638",
+];
+
+/// Bases of the `*_zero_approx` cases: their compared output changes at `approx = 0`.
+///
+/// The same sweep at `approx = 0` changes 2 compared results, both through
+/// `VertexOffset`; the built-in `cone_trim_extended_edge` is the only built-in whose
+/// compared output changes (`TrimExtendedEdge`'s `d3DTol`, ten times the tolerance).
+const ZERO_APPROX_BASES: &[&str] = &["cone_trim_extended_edge", "gen0775", "gen0651"];
+
+/// The run header at zero (maintainer review of #156, second round): the bases above with
+/// `dist = 0` or `approx = 0`, named by exact case name (a generated base is taken from
+/// the case list, so `MIN_GENERATED` keeps it present); a base that is missing is an error.
+fn zero_header_cases(unit: &str, cases: &[Case]) -> Result<Vec<Case>, HarnessError> {
+    let mut out = Vec::new();
+    for (suffix, bases, zero_dist) in [
+        ("zero_distance", ZERO_DISTANCE_BASES, true),
+        ("zero_approx", ZERO_APPROX_BASES, false),
+    ] {
+        for base in bases {
+            let Some(c) = cases.iter().find(|c| c.name == *base) else {
+                return Err(harness(format!("zero-header base {base} is not a case")));
+            };
+            let mut i: Inputs = c.parse()?;
+            if zero_dist {
+                i.dist = 0.0;
+            } else {
+                i.approx = 0.0;
+            }
+            let inputs = serde_json::to_value(i).map_err(|e| harness(e.to_string()))?;
+            out.push(Case {
+                unit: unit.to_string(),
+                name: format!("{base}_{suffix}"),
+                source: CaseSource::Inline,
+                inputs,
+            });
+        }
+    }
+    Ok(out)
 }

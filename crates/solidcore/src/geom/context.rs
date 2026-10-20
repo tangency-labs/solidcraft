@@ -205,6 +205,8 @@ impl Context {
     /// the kernel's traversal marks or tolerances. Notification APIs use mutable
     /// Context while geometry APIs borrow Kernel; both refer to one upstream
     /// context. Callback ownership is restored on every returned error as well.
+    /// The snapshot `Context` is read-only apart from its callbacks: mark, mark-lock
+    /// and doing-Boolean changes the action makes to it are dropped on return.
     pub(crate) fn with_notification_context<T>(
         k: &mut Kernel,
         action: impl FnOnce(&mut Kernel, &mut Context) -> T,

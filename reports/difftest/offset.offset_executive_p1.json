@@ -347,6 +347,3966 @@
     },
     {
       "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#0",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#1",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#2",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#3",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#4",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#5",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#6",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#7",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#8",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#9",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#10",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#11",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#12",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#13",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#14",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#15",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#16",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#17",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#18",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#19",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#20",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#21",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#22",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_solid_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#23",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#24",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#25",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#26",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#27",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#28",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#29",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#30",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#31",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#32",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#33",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#34",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#35",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#36",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#37",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#38",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#39",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#40",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#41",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#42",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#43",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#44",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#45",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#46",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_equal_local_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#47",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#48",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#49",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#50",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#51",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#52",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#53",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#54",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#55",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#56",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#57",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#58",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#59",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#60",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#61",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#62",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#63",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#64",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#65",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#66",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#67",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#68",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#69",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#70",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_solid_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#71",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#72",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#73",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#74",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#75",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#76",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#77",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#78",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#79",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#80",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#81",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#82",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#83",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#84",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#85",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#86",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#87",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#88",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#89",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#90",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#91",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#92",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#93",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#94",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_larger_local_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#95",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#96",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#97",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#98",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#99",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#100",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#101",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#102",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#103",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#104",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#105",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#106",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#107",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#108",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#109",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#110",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#111",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#112",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#113",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#114",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#115",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#116",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#117",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#118",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#119",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#120",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#121",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#122",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#123",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#124",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#125",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#126",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#127",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#128",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#129",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#130",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#131",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#132",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#133",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#134",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#135",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#136",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#137",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#138",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#139",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#140",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#141",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#142",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d0.25_smaller_local_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#143",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#144",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#145",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#146",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#147",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#148",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#149",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#150",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#151",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#152",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#153",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#154",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#155",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#156",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#157",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#158",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#159",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#160",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#161",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#162",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#163",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#164",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#165",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#166",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_solid_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#167",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#168",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#169",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#170",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#171",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#172",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#173",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#174",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#175",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#176",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#177",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#178",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#179",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#180",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#181",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#182",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#183",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#184",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#185",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#186",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#187",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#188",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#189",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#190",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_equal_local_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#191",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#192",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#193",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#194",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#195",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#196",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#197",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#198",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#199",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#200",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#201",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#202",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#203",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#204",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#205",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#206",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#207",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#208",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#209",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#210",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#211",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#212",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#213",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#214",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_solid_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#215",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#216",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#217",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#218",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#219",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#220",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#221",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#222",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#223",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#224",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#225",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#226",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#227",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#228",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#229",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#230",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#231",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#232",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#233",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#234",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#235",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#236",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#237",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#238",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_larger_local_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#239",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#240",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#241",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#242",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#243",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#244",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#245",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#246",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#247",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#248",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#249",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#250",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#251",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#252",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#253",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#254",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#255",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#256",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#257",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#258",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#259",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#260",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#261",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#262",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#263",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#264",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#265",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#266",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#267",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#268",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#269",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#270",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#271",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#272",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#273",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#274",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_noext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#275",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#276",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#277",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#278",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#279",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#280",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#281",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_merge_up_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#282",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_merge_up_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#283",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_merge_up_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#284",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_merge_down_none",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#285",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_merge_down_inner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#286",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_d3.0_smaller_local_ext_merge_down_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#287",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_tiny_noext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#288",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_tiny_ext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#289",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_huge_noext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#290",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_huge_ext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#291",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_zero_noext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#292",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_zero_ext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#293",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_tol_exceeds_half_noext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#294",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_tol_exceeds_half_ext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#295",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_zero_tol_noext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#296",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "face_tail_zero_tol_ext",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#297",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_inner_parallel_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#298",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_crossing_parallel_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#299",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_crossing_perpendicular_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#300",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_inner_perpendicular_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#301",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_crossing_subsegment_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#302",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_crossing_reversed_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#303",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_crossing_near_identical_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#304",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_inner_near_identical_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#305",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_inner_touching_ends_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#306",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge2_crossing_diagonal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#307",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "negative_tol_lamina_delete_solid_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#308",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "negative_tol_lamina_delete_solid_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#309",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "negative_tol_lamina_delete_local_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#310",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertexTopology",
+        "unit": "topology.brep_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "negative_tol_lamina_delete_local_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/offset.offset_executive_p1/face_tail.json#311",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_up_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#0",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_up_down",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#1",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_flip_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#2",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_flip_down",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#3",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_d3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#4",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_negative_distance",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#5",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "equal_zero_distance",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#6",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "smaller_offset",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#7",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "smaller_offset_flip_down",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#8",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "truncated_offset",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#9",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "truncated_offset_down",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#10",
+      "values_compared": 30
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "larger_original",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#11",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "larger_original_flip",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#12",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "disjoint",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#13",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "small_rectangles",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#14",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "huge_rectangles",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#15",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "shifted_2e-23",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#16",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "shifted_2e-18",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#17",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "shifted_2e-15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#18",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "shifted_2e-12",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#19",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "shifted_2e-8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#20",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "shifted_2e-5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#21",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "split_bottom_half",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#22",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "split_bottom_offcenter_down",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#23",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "split_bottom_shifted_flip",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#24",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 1.850371707708594e-16,
+      "name": "overhanging_offset",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#25",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 1.850371707708594e-16,
+      "name": "overhanging_offset_flip_down",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/offset.offset_executive_p1/map_twin.json#26",
+      "values_compared": 24
+    },
+    {
+      "deferred": {
         "symbol": "SmBrep::ShrinkGeometry",
         "unit": "topology.brep_p4"
       },
@@ -451,8 +4411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdgeuse::NormalizedEvaluate",
-        "unit": "topology.edgeuse_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "probe_map_plane",
@@ -5585,17 +9545,18 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 5,
+  "cases_deferred": 317,
   "cases_failed": 0,
-  "cases_passed": 687,
+  "cases_passed": 714,
   "cases_rejected": 1,
-  "cases_total": 693,
+  "cases_total": 1032,
   "deferred_by_unit": {
+    "intersect.surface_drop_lib_p3": 1,
     "offset.offset_geometry_creation": 1,
     "query.brep": 1,
     "topology.brep_p1": 1,
-    "topology.brep_p4": 1,
-    "topology.edgeuse_p3": 1
+    "topology.brep_p2": 312,
+    "topology.brep_p4": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

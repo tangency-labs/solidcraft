@@ -28,6 +28,20 @@ struct MergeAccess : SmMerge {
     bool manifold() const { return m_bManifoldBoolean!=FALSE; }
     ULONG lamina() { return m_vTI.m_lIntersectLaminaEdges; }
 };
+// Family 6: the context-only SmMerge with explicitly set members, as the
+// boolean_merge_p4 shim's Access, for the Rust adapter's adopted-engine path.
+// It holds at most one operand, so ManifoldBoolean returns at its NER checks.
+struct EngineAccess : SmMerge {
+    EngineAccess(const SmContext& c, SmBrep* a, SmBrep* b, SmMergeOptions* options) : SmMerge(c) {
+        m_vTI.SetPrimaryBrep(a); m_vTI.SetOtherBrep(b);
+        m_vTI.SetThisApproxTol3d(1e-9); m_vTI.SetThisAngTolRad(0.3);
+        m_bManifoldBoolean = TRUE;
+        SetMergeOptions(options);
+    }
+    ~EngineAccess() { m_vTI.SetPrimaryBrep(nullptr); m_vTI.SetOtherBrep(nullptr); }
+    bool manifold() const { return m_bManifoldBoolean!=FALSE; }
+    ULONG lamina() { return m_vTI.m_lIntersectLaminaEdges; }
+};
 void put(SmBrep* b, const std::vector<SmBrep*>& originals, std::vector<double>& out) {
     auto it=std::find(originals.begin(),originals.end(),b);
     out.push_back(it==originals.end() ? -1.0 : static_cast<double>(it-originals.begin()));
@@ -41,7 +55,7 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
     if(!input || n<0 || !out || !len || cap<0) return SC_ERR_ARG;
     try {
         Reader rd{input,n};
-        int family=rd.integer(0,5); int operation=rd.integer(-64,64);
+        int family=rd.integer(0,6); int operation=rd.integer(-64,64);
         int mask=rd.integer(0,31); bool have_options=rd.integer(0,1)!=0;
         int na=rd.integer(0,16), nb=rd.integer(0,16);
         if(na+nb>16 || ((family==3 || family==4) && (na!=1 || nb!=1))) throw Bad();
@@ -80,7 +94,8 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
         }
         if(rd.at!=rd.n || (family==0 && nb!=0) || (family!=0 && nt!=0)
             || ((family==3 || family==4) && (operation<0 || operation>10))
-            || (family==5 && (na!=1 || nb!=0))) throw Bad();
+            || (family==5 && (na!=1 || nb!=0))
+            || (family==6 && (na>1 || nb>1 || na+nb>1 || operation<0 || operation>10))) throw Bad();
         // Failed consuming calls can leave live objects whose ownership is not
         // observable. Their context must outlive the call, like the API fixture
         // context used by SmApiCreateBox; a stack context leaves dangling caches.
@@ -114,6 +129,17 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
         if(family==5) { Graph graph; walk(originals[0],graph,true); export_graph(originals[0],graph,values);
             delete originals[0]; *len=values.size(); if(*len>cap) return SC_ERR_BUFFER;
             std::copy(values.begin(),values.end(),out); return SC_OK; }
+        if(family==6) {
+            {
+                EngineAccess merge(context,na ? originals[0] : nullptr,nb ? originals[0] : nullptr,opt);
+                status=merge.NonManifoldBoolean(static_cast<SmBooleanOperationType>(operation),single);
+                values.insert(values.end(),{static_cast<double>(sc::st(status)),
+                    static_cast<double>(merge.manifold()),static_cast<double>(merge.lamina()),single ? 1.0 : 0.0});
+            }
+            for(auto* original:originals) delete original;
+            *len=static_cast<int64_t>(values.size()); if(*len>cap) return SC_ERR_BUFFER;
+            std::copy(values.begin(),values.end(),out); return SC_OK;
+        }
         if(family==0) status=SmMerge::BooleanTrees(a,tree,opt);
         else if(family==1) status=SmMerge::merge_breps(a,static_cast<ULONG>(operation),single,opt);
         else if(family==2) status=SmMerge::BooleanLists(&context,a,empty_surfaces,b,empty_surfaces,

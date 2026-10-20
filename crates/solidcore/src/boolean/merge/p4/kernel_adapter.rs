@@ -5,6 +5,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`KernelManifoldIntersector`] | `SmMerge::m_vTI` and shared merge-stage access |
+//! | [`KernelManifoldIntersector::delete_faces_in`] | `SmTopologyIntersector(ctx, brep, brep, ..).DeleteFaces` over one B-rep |
 //!
 //! Deviations: the existing typed `Relations` is the sole mate store. Object
 //! keys encode a caller-reserved 27-bit namespace, operand, class and arena id;
@@ -145,12 +146,77 @@ impl KernelManifoldIntersector {
         })
     }
 
+    /// `SmTopologyIntersector(ctx, pBrep, pBrep, SM_EFF_ZERO, SM_EFF_ZERO).DeleteFaces(faces)`
+    /// over one kernel B-rep, as the offset executive's lamina clean-up uses it
+    /// (`SmOffsetExecutive.cpp:3749-3752`): a fresh intersector whose two operands
+    /// are the same B-rep deletes `faces` through this crate's arena access.
+    /// Notifications of the deleted topology go to `records` and `attributes` under
+    /// `namespace` (27 bits, distinct from any other pair sharing the store).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TopologyIntersector::delete_faces`] and an over-wide namespace.
+    pub fn delete_faces_in(
+        kernel: &mut Kernel,
+        brep: &mut Brep,
+        faces: &[FaceId],
+        records: &mut BTreeMap<ObjectKey, Topology>,
+        attributes: &mut AttributeStore,
+        namespace: u32,
+    ) -> Result<()> {
+        if namespace > 0x07ff_ffff {
+            return Err(SolidError::invalid_input(
+                OP,
+                "object namespace exceeds 27 bits",
+            ));
+        }
+        let mut intersector: TopologyIntersector<H> = TopologyIntersector::new(
+            Some(arena_pair::brep_h(0)),
+            Some(arena_pair::brep_h(0)),
+            crate::math::EFF_ZERO,
+            crate::math::EFF_ZERO,
+        );
+        let handles: Vec<H> = faces
+            .iter()
+            .map(|&face| arena_pair::encode(EntityRef::Face(face), false))
+            .collect();
+        let mut curves = Vec::new();
+        let mut extra_curves = Vec::new();
+        Context::with_notification_context(kernel, |k, context| {
+            let mut pair = ArenaPair::new(
+                brep,
+                None,
+                &mut curves,
+                &mut extra_curves,
+                records,
+                attributes,
+                cache_kernels(k, None, context),
+                context,
+                None,
+                namespace,
+            );
+            intersector.delete_faces(&mut pair, &handles, None)
+        })
+    }
+
     /// Set the same explicit intersection tolerances supplied to `SmMerge`.
     /// Leaving them at zero retains the context-only intersector defaults;
     /// automatic tolerance selection belongs to the merge constructor's owner.
     pub fn set_intersection_tolerances(&mut self, distance: f64, angle_radians: f64) {
         self.intersector.set_this_approx_tol_3d(distance);
         self.intersector.set_this_ang_tol_rad(angle_radians);
+    }
+
+    /// Set `m_vTI.m_lIntersectLaminaEdges` (0 none, 1 both, 2 only the B-rep's,
+    /// 3 only the other's), as `NonManifoldBoolean` and `PiecewiseMerge` do.
+    pub fn set_intersect_lamina_edges(&mut self, mode: u64) {
+        self.intersector.intersect_lamina_edges = mode;
+    }
+
+    /// `m_vTI.m_lIntersectLaminaEdges`.
+    #[must_use]
+    pub fn intersect_lamina_edges(&self) -> u64 {
+        self.intersector.intersect_lamina_edges
     }
 
     /// Run the orchestration with the options held in the canonical `MergeState`.

@@ -1,7 +1,9 @@
 //! Guarded calls to the five `SmMerge` entry points of `boolean.merge_p3`.
 //! The flat program is family, operation, option-mask, has-options, list lengths,
 //! shell-vertex points or box origins/dimensions, tree length, tree nodes. Family 0 evaluates
-//! trees, 1 folds a list, 2 combines lists, 3 nonmanifold Boolean, 4 piecewise.
+//! trees, 1 folds a list, 2 combines lists, 3 nonmanifold Boolean, 4 piecewise,
+//! 5 exports one fixture operand, and 6 runs a nonmanifold Boolean on a context-only
+//! `SmMerge` with explicit members and at most one operand (status and controls).
 //! Results begin with the native status; successful B-reps include stable input
 //! identity and the complete `sc_topology_fixture` graph export.
 use crate::{call_with_buffer, reader::Cursor, FfiError};
@@ -25,7 +27,7 @@ fn bad(message: &str) -> FfiError {
 /// are safe native error paths and remain covered.
 pub fn validate(input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Cursor::new(input);
-    let family = rd.index(5)?;
+    let family = rd.index(6)?;
     let operation = rd.num()?;
     if !operation.is_finite() || operation.fract() != 0.0 || !(-64.0..=64.0).contains(&operation) {
         return Err(bad("operation outside harness integer range"));
@@ -39,6 +41,8 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
         || (family == 0 && nb != 0)
         || ((family == 3 || family == 4) && !(0.0..=10.0).contains(&operation))
         || (family == 5 && (na != 1 || nb != 0))
+        || (family == 6 && (na > 1 || nb > 1 || na + nb > 1))
+        || (family == 6 && !(0.0..=10.0).contains(&operation))
     {
         return Err(bad("operand list shape or enum"));
     }

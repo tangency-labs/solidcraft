@@ -28,10 +28,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
-use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm, KnotType};
 use solidcore::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, ControlPointBlock,

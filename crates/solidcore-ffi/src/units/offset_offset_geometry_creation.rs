@@ -16,8 +16,10 @@
 //! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it; then per B-rep `n_faces` (`0` for an absent one) and per face (export order) `-1`, or `n byte*n`: the binary `WriteToDB` record (version 33) of a surface that is exactly an `SmSurfOfRevolution` |
 //! | `Run`    | `dist approx make_analytics n_local (face surface)* inset extend n_shell face* n_pairs (eu eu)* n_ops ops*` | per op its code, a status and its outputs (below): an op's out-parameters follow a success status only, the states of existing topology (edge states, a face's domain and surface) follow every status |
 //!
-//! The run header makes `SmOffsetGeometryCreation(dist, approx)` (with
-//! `SetMakeAnalytics`), `SmLocalOperationGeometryCreation(dist, approx, faces,
+//! The run header takes any finite `dist` (zero included) and any finite `approx` that
+//! is not negative (upstream neither crashes nor hangs at zero; a negative tolerance is
+//! refused, no upstream caller passes one). It makes `SmOffsetGeometryCreation(dist,
+//! approx)` (with `SetMakeAnalytics`), `SmLocalOperationGeometryCreation(dist, approx, faces,
 //! surfaces)` from the `n_local` pairs, and an `SmOffsetExecutive` over the first
 //! B-rep with `SetInset`, `SetExtendConvexEdges`, `SetShellFaces` (when `n_shell > 0`)
 //! and its original-to-offset edge-use relation filled with the `n_pairs` pairs (a
@@ -36,7 +38,9 @@
 //! 6 a B-rep (`index` 0 or 1), 8 null. A status is `0` (success), the upstream `SmStatus`
 //! code, or `-2` when the shim refused the op because upstream would dereference null
 //! (an op that walks the topology needs every edge use of both B-reps to be a loop edge
-//! use with edge, curve, vertex, mate, neighbours and a face with surface). `-6` ends
+//! use with edge, curve, vertex, mate, neighbours and a face with surface; `VertexOffset`
+//! walks no loops and needs only a curve on each edge and, for a single edge, a face
+//! with surface and a B-spline curve). `-6` ends
 //! the script at an op the Rust side defers at without comparing anything: a non-local
 //! `FaceuseOffset` of a face whose surface is neither an `SmPlane` nor a plain
 //! `SmBSplineSurface` (HANG-26: an `SmSurfOfRevolution`'s offset self-intersection takes
@@ -669,13 +673,10 @@ const EU: HandleKind = HandleKind::Edgeuse;
 /// The run header and script.
 #[allow(clippy::too_many_lines)]
 fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
-    let dist = rd.finite()?;
-    if dist == 0.0 {
-        return Err(bad("zero offset distance"));
-    }
+    rd.finite()?; // the offset distance: any finite value, zero included
     let approx = rd.finite()?;
-    if approx <= 0.0 {
-        return Err(bad("approximation tolerance must be positive"));
+    if approx < 0.0 {
+        return Err(bad("approximation tolerance must not be negative"));
     }
     rd.flag()?; // make_analytics
     let n_local = rd.index(MAX_LIST)?;
@@ -768,7 +769,7 @@ fn script(rd: &mut Reader<'_>, mut c: Counts) -> Result<(), FfiError> {
                 }
             }
             ScriptOp::HaveTangentGaps => {
-                rd.int(1, MAX_SAMPLES)?;
+                rd.int(0, MAX_SAMPLES)?;
                 c.edgeuse(rd, true)?;
                 c.edgeuse(rd, true)?;
             }

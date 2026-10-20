@@ -617,6 +617,15 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             .map(|v| hd(brep.b, K_VERTEX, v.index()))
             .collect())
     }
+    fn face_calculate_bounding_box(
+        &self,
+        k: &Kernel,
+        face: H,
+        tight: bool,
+    ) -> crate::Result<Extent3d> {
+        let b = self.brep_r(face)?;
+        crate::query::face::p1::calculate_bounding_box(k, b, fid(face), tight)
+    }
     fn vertex_brep(&self, vertex: H) -> crate::Result<Option<H>> {
         let b = self.brep_r(vertex)?;
         Ok(vx::brep(b, vid(vertex))?.map(|_| brep_h(vertex.b)))
