@@ -302,9 +302,28 @@ void p7_copy(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
     p7_put_counts(o, dest.brep);
 }
 
-// `face tol`, B-rep block: no self-intersection curves on the face's surface. Output
-// `status nedges` (`-2` for a face without surface).
-void p7_merge_self(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
+// The self-intersection curves of a merge: 3D curve and the UV curves on both sheets.
+// Upstream does not own them (both classifications are built with bIsCurveOwned FALSE,
+// SetCurve defaults to FALSE): freed after the B-rep, which is declared after them.
+struct SelfCurves
+{
+    SmTArray<SmCurve*> c3;
+    SmTArray<SmBSplineCurve*> u1, u2;
+    ~SelfCurves()
+    {
+        for (ULONG i = 0; i < c3.GetSize(); i++)
+            delete c3[i];
+        for (ULONG i = 0; i < u1.GetSize(); i++)
+            delete u1[i];
+        for (ULONG i = 0; i < u2.GetSize(); i++)
+            delete u2[i];
+    }
+};
+
+// `face tol`, then (read before the B-rep block) `ncurves (curve3d curveuv1 curveuv2)*`:
+// MergeSelfIntersectionCurves on the face's surface. Output `status nedges counts` (`-2`
+// for a face without surface).
+void p7_merge_self(SmBrep* b, Graph& g, Rd& rd, const SelfCurves& cs, std::vector<double>& o)
 {
     int64_t fi = rd.idx();
     double tol = rd.num();
@@ -315,11 +334,10 @@ void p7_merge_self(SmBrep* b, Graph& g, Rd& rd, std::vector<double>& o)
         o.push_back(P7_NULL_DEREF);
         return;
     }
-    SmTArray<SmCurve*> c3;
-    SmTArray<SmBSplineCurve*> u1, u2;
     SmTArray<SmEdge*> es;
-    o.push_back(st(b->MergeSelfIntersectionCurves(*s, tol, c3, u1, u2, es)));
+    o.push_back(st(b->MergeSelfIntersectionCurves(*s, tol, cs.c3, cs.u1, cs.u2, es)));
     o.push_back((double)es.GetSize());
+    p7_put_counts(o, b);
 }
 
 void p7_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
@@ -330,6 +348,18 @@ void p7_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     for (int64_t i = 0; i < n_args; i++)
         args.push_back(rd.num());
     Rd ad{args.data(), 0};
+    SelfCurves cs;
+    if (op == OP_MERGE_SELF)
+    {
+        const SmContext& ctx = the_context();
+        int64_t nc = rd.idx();
+        for (int64_t i = 0; i < nc; i++)
+        {
+            cs.c3.Add(read_curve(rd, ctx));
+            cs.u1.Add(read_curve(rd, ctx));
+            cs.u2.Add(read_curve(rd, ctx));
+        }
+    }
     SmStatus status = SM_SUCCESS;
     Built built;
     built.brep = build(rd, path, status);
@@ -346,7 +376,7 @@ void p7_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     {
     case OP_GLUE: p7_glue(built.brep, g, ad, o); break;
     case OP_COPY: p7_copy(built.brep, g, ad, o); break;
-    case OP_MERGE_SELF: p7_merge_self(built.brep, g, ad, o); break;
+    case OP_MERGE_SELF: p7_merge_self(built.brep, g, ad, cs, o); break;
     default: o.push_back((double)SC_ERR_ARG); break;
     }
 }

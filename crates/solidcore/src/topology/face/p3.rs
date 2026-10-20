@@ -1375,12 +1375,17 @@ pub struct FaceIntersection {
     pub cc_other_uv_curves: Option<Vec<Option<Curve>>>,
 }
 
-/// The classification objects of [`face_intersect`].
-struct IntersectObjects<'a> {
-    b: &'a Brep,
-    curves_3d: &'a [Curve],
-    uv1: &'a [Option<Curve>],
-    uv2: &'a [Option<Curve>],
+/// The classification objects of [`face_intersect`] (also used by
+/// `topology::brep::p7`'s `MergeSelfIntersectionCurves`).
+pub(crate) struct IntersectObjects<'a> {
+    /// The B-rep of the faces.
+    pub(crate) b: &'a Brep,
+    /// The curves behind [`IntersectObject::Curve`].
+    pub(crate) curves_3d: &'a [Curve],
+    /// The curves behind [`IntersectObject::UvCurve`] `(i, false)`.
+    pub(crate) uv1: &'a [Option<Curve>],
+    /// The curves behind [`IntersectObject::UvCurve`] `(i, true)`.
+    pub(crate) uv2: &'a [Option<Curve>],
 }
 
 impl qf2::CurveOnClassifyObjects<IntersectObject> for IntersectObjects<'_> {

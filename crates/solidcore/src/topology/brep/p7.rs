@@ -64,15 +64,17 @@
 //!   by its PR #204) notify through the caller's notification environment, as the
 //!   other edits here do.
 //! - **Unported callees** return [`SolidError::Unported`]: `DeleteEdge`
-//!   (`topology.brep_p4`); the curve constructor of
-//!   `SmCurveClassification` (`intersect.curve_class_p4`), which
-//!   `MergeSelfIntersectionCurves` reaches first. `GlueVertices` calls
-//!   `topology.brep_p5` with the caller's notification environment. `CopyFaces` with the
-//!   merge builds `boolean.merge_p2`'s merge and calls its `MakeFaceuse` (so it takes the
-//!   kernel mutably, for the context's `DoingBoolean`); its copies are notified in `env`'s
-//!   one identity space. Its classification of a UV curve
-//!   against the faces and the `SetCurve` + `MergeIntervals` that follows are two stubs
-//!   (`classify_on_faces`, `set_curve_and_merge`) over a stand-in interval type; the
+//!   (`topology.brep_p4`). `GlueVertices` calls `topology.brep_p5` with the caller's
+//!   notification environment. `CopyFaces` with the merge builds `boolean.merge_p2`'s
+//!   merge and calls its `MakeFaceuse` (so it takes the kernel mutably, for the
+//!   context's `DoingBoolean`); its copies are notified in `env`'s one identity space.
+//!   `MergeSelfIntersectionCurves` classifies each UV curve with
+//!   `intersect.curve_class_p4`'s constructor and `query.face_p2`'s `CurveOnClassify`,
+//!   then `intersect.curve_class_p1`'s `SetCurve` and `intersect.curve_class_p5`'s
+//!   `MergeIntervals`, over `topology.face_p3`'s [`IntersectObject`] handles (the merge's
+//!   curve `i` is `Curve(i)`, its UV curves `UvCurve(i, false / true)`, the surface
+//!   `Surface(face)`); their unported callees defer the call. The classification's
+//!   borrowed interval array is not modelled (`lOptDataSize = 16` is passed through). The
 //!   upstream interval loop around them is ported (`GetSize() != 1` skips before the
 //!   second merge, `SM_ERR` after it, `SE(SM_ERR)` for a middle not on an edge).
 //!   `SmShell::IsInnerShell` (merged shells) calls `topology.shell`'s port;
@@ -109,14 +111,19 @@ use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
+use crate::geom::tol::zone_tol3d;
 use crate::geom::tools::{
     find_coincident_edge, find_first_vertex_within_tol_to_pnt, CoincidentEdgeQuery,
 };
+use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
+use crate::intersect::curve_class::p4::ClassificationInit;
+use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO, EFF_ZERO_DEG, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::InValueType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::face::p2 as qf2;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
 use crate::topology::brep::p10::{self, MakeTopologyOptions, TopologyEnv};
@@ -128,6 +135,7 @@ use crate::topology::database_io::FileType;
 use crate::topology::edge as ed;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as fp2;
+use crate::topology::face::p3::{IntersectObject, IntersectObjects};
 use crate::topology::topology_traverser::{self as tt, Marks};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, ShellId, VertexId};
 
@@ -417,47 +425,72 @@ fn merge_copy_faces(
     Ok(new_faces)
 }
 
-/// One interval of a self-intersection curve's classification: its parameter interval
-/// and the edge its middle is classified to (`None`: the middle is not on an edge). A
-/// stand-in for `SmCurveClassification` (it drops the end point classes `MergeIntervals`
-/// reads): wiring replaces it with `intersect.curve_class_p4`'s classification.
-type ClassifiedInterval = (Extent1d, Option<EdgeId>);
+/// The classification of a self-intersection curve (`SmCurveClassification`), over
+/// [`IntersectObject`] handles: the curve at index `i` of the merge's curves is
+/// [`IntersectObject::Curve`] `(i)`, its UV curves [`IntersectObject::UvCurve`].
+type SelfClassification = CurveClassification<IntersectObject>;
 
 /// `SmCurveClassification sCC(uvCurve, ivl, uvCurve, tol, 16, data, FALSE, TRUE,
 /// &surface)` with `surface` the surface of `face`, then `CurveOnClassify(TRUE, sCC)` on
-/// each of `faces`: the classification's intervals.
+/// each of `faces` (the remaining arguments default).
 fn classify_on_faces(
-    _b: &Brep,
-    _faces: &[FaceId],
-    _face: FaceId,
-    _uv_curve: &Curve,
-    _ivl: Extent1d,
-    _tol: f64,
-) -> Result<Vec<ClassifiedInterval>> {
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
-    // (then SmFace::CurveOnClassify, unit query.face_p2)
-    Err(SolidError::unported(
-        "SmCurveClassification::SmCurveClassification",
-        "intersect.curve_class_p4",
-    ))
+    k: &Kernel,
+    objects: &IntersectObjects<'_>,
+    faces: &[FaceId],
+    face: FaceId,
+    uv_curve: IntersectObject,
+    ivl: Extent1d,
+    tol: f64,
+) -> Result<SelfClassification> {
+    let mut cc = CurveClassification::with_curve(
+        k,
+        &ClassificationInit {
+            curve: Some(uv_curve),
+            interval: ivl,
+            uv_curve: Some(uv_curve),
+            src_zone_tol_3d: zone_tol3d(k, tol),
+            opt_data_size: 16,
+            is_curve_owned: false,
+            is_curve_current: true,
+            surface1: Some(IntersectObject::Surface(face)),
+            surface2: None,
+            uv_curve2: None,
+            ti: None,
+        },
+    )?;
+    for &f in faces {
+        qf2::curve_on_classify(k, objects.b, f, objects, true, &mut cc, false, false, true)?;
+    }
+    Ok(cc)
 }
 
-/// `sCC.SetCurve(curve_3d)` and `sCC.MergeIntervals(&newFaces, NULL, NULL, face)` on a
-/// classification of [`classify_on_faces`]: the faces the merge made; `intervals` become
-/// the merged classification's.
+/// `sCC.SetCurve(curve_3d)` and `sCC.MergeIntervals(&newFaces, NULL, NULL, face)`: the
+/// faces the merge made.
 fn set_curve_and_merge(
-    _b: &mut Brep,
-    _intervals: &mut Vec<ClassifiedInterval>,
-    _curve_3d: &Curve,
-    _face: FaceId,
+    k: &Kernel,
+    objects: &IntersectObjects<'_>,
+    cc: &mut SelfClassification,
+    curve_3d: IntersectObject,
 ) -> Result<Vec<FaceId>> {
-    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::MergeIntervals over a
-    // classification of B-rep faces (the ported MergeIntervals needs the classification
-    // the unported constructor makes)
-    Err(SolidError::unported(
-        "SmCurveClassification::MergeIntervals (B-rep classification)",
-        "intersect.curve_class_p4",
-    ))
+    cc.set_curve(Some(curve_3d), false);
+    let merged = cc.merge_intervals(k, objects, false)?;
+    merged
+        .faces
+        .into_iter()
+        .map(|o| match o {
+            IntersectObject::Topology(EntityRef::Face(f)) => Ok(f),
+            _ => Err(null("merged face is not a face")),
+        })
+        .collect()
+}
+
+/// `SM_CAST_PTR(SmEdge, rCIvl.m_vMid.GetObject())` of an interval whose middle is on an
+/// edge (upstream dereferences the result).
+fn mid_edge(ivl: &CurveInterval<IntersectObject>) -> Result<EdgeId> {
+    match ivl.mid.object() {
+        Some(IntersectObject::Topology(EntityRef::Edge(e))) => Ok(e),
+        _ => Err(null("interval middle on an edge without edge")),
+    }
 }
 
 // ---- owning-list edits ----------------------------------------------------------------------
@@ -505,6 +538,8 @@ fn merge_shells(k: &mut Kernel, b: &mut Brep, mut del: ShellId, mut keep: ShellI
 /// The tail of the shell merge once `reg` lost its last shell: `this->Remove(pReg)`
 /// (status ignored), then `m_pInfiniteRegion = m_pList`.
 fn remove_emptied_region(b: &mut Brep, reg: RegionId) -> Result<()> {
+    // Upstream deletes pReg even when Remove fails; a failed removal here leaves the
+    // region (and its in_brep) as it was. Unreachable: a merged shell's region is listed.
     ignore_status(brep_remove_region(b, reg))?;
     // make sure infinite region points where it should: the first region of the list
     // (a stored head of None starts at the first region on the list; it is not an
@@ -1796,8 +1831,8 @@ pub struct SelfIntersectionCurve {
 /// # Errors
 ///
 /// `SM_ERR` when the second classification does not give one interval; those of the
-/// classifications, vertex and edge gluing; [`SolidError::Unported`] (the curve
-/// classification, `GlueVertices`, `GlueEdgesGeneral`'s callees).
+/// classifications, vertex and edge gluing; [`SolidError::Unported`] (the
+/// classifications' callees, `GlueVertices`, `GlueEdgesGeneral`'s callees).
 pub fn merge_self_intersection_curves(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1813,35 +1848,67 @@ pub fn merge_self_intersection_curves(
         None if curves.is_empty() => return Ok(new_edges),
         None => return Err(null("surface owner is not a face")),
     };
-    for c in curves {
+    // the classifications' curves: curve i is IntersectObject::Curve(i), its UV curves
+    // IntersectObject::UvCurve(i, false / true)
+    let curves_3d: Vec<Curve> = curves.iter().map(|c| c.curve_3d.clone()).collect();
+    let uv1: Vec<Option<Curve>> = curves.iter().map(|c| Some(c.uv_curve_1.clone())).collect();
+    let uv2: Vec<Option<Curve>> = curves.iter().map(|c| Some(c.uv_curve_2.clone())).collect();
+    for (i, c) in curves.iter().enumerate() {
         let tol = tol_3d;
+        let curve_3d = IntersectObject::Curve(i);
+        let objects = IntersectObjects {
+            b: &*b,
+            curves_3d: &curves_3d,
+            uv1: &uv1,
+            uv2: &uv2,
+        };
         let mut cc1 = classify_on_faces(
-            b,
+            k,
+            &objects,
             &all_faces,
             face,
-            &c.uv_curve_1,
+            IntersectObject::UvCurve(i, false),
             c.uv_curve_1.natural_interval(),
             tol,
         )?;
-        let new_faces = set_curve_and_merge(b, &mut cc1, &c.curve_3d, face)?;
+        let new_faces = set_curve_and_merge(k, &objects, &mut cc1, curve_3d)?;
         all_faces.extend(new_faces);
-        for &(ivl, mid_edge) in &cc1 {
-            let Some(e1) = mid_edge else {
-                continue;
-            };
-            let mut cc2 = classify_on_faces(b, &all_faces, face, &c.uv_curve_2, ivl, tol)?;
-            if cc2.len() != 1 {
+        // (the intervals are copied: the gluing below edits the B-rep the
+        // classification's objects borrow)
+        let intervals = cc1.intervals().to_vec();
+        for ivl in &intervals {
+            if ivl.mid.point_class() != PointClassType::Edge {
                 continue;
             }
-            let new_faces = set_curve_and_merge(b, &mut cc2, &c.curve_3d, face)?;
+            let e1 = mid_edge(ivl)?;
+            let objects = IntersectObjects {
+                b: &*b,
+                curves_3d: &curves_3d,
+                uv1: &uv1,
+                uv2: &uv2,
+            };
+            let mut cc2 = classify_on_faces(
+                k,
+                &objects,
+                &all_faces,
+                face,
+                IntersectObject::UvCurve(i, true),
+                ivl.interval,
+                tol,
+            )?;
+            if cc2.size() != 1 {
+                continue;
+            }
+            let new_faces = set_curve_and_merge(k, &objects, &mut cc2, curve_3d)?;
             all_faces.extend(new_faces);
-            let [(_, mid2)] = cc2.as_slice() else {
+            let [ivl2] = cc2.intervals() else {
                 return Err(SolidError::sm_err(OP));
             };
-            // (SE(SM_ERR): the error is signalled, not returned)
-            let Some(e2) = *mid2 else {
+            if ivl2.mid.point_class() != PointClassType::Edge {
+                // (SE(SM_ERR): the error is signalled, not returned)
                 continue;
-            };
+            }
+            let e2 = mid_edge(ivl2)?;
             let st1 = ed::start_vertex(b, e1)?;
             let end1 = ed::other_vertex(b, e1, st1)?;
             let st2 = ed::start_vertex(b, e2)?;
