@@ -30,11 +30,6 @@ impl TabThrough {
         });
     }
 
-    /// Selection chips use Enter to apply their dialog, rather than only activating the chip.
-    pub(crate) fn enter_pressed(&self, ctx: &egui::Context) -> bool {
-        ctx.input(|input| input.key_pressed(egui::Key::Enter)) && ctx.memory(|memory| self.selections.iter().any(|(_, id)| memory.has_focus(*id)))
-    }
-
     /// Keyboard focus and pointer activation must select the same canvas input.
     pub(crate) fn selection(&mut self, index: usize, response: &egui::Response) -> bool {
         if let Some((_, id)) = self.selections.iter_mut().find(|(slot, _)| *slot == index) {
@@ -44,6 +39,11 @@ impl TabThrough {
         }
         if response.gained_focus() {
             response.scroll_to_me(None);
+        }
+        // Let the dialog's existing Enter-to-OK handler run instead of activating the chip.
+        if response.has_focus() && response.ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+            response.surrender_focus();
+            return false;
         }
         response.has_focus() || response.clicked()
     }
