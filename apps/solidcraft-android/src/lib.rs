@@ -1,24 +1,33 @@
 //! SolidCraft for Android: a thin eframe shell over the shared UI, entered directly from
-//! Android's `NativeActivity` (the APK holds this cdylib and no Java or Kotlin).
+//! Android's `NativeActivity`. The APK holds this cdylib plus a small Java shim (`java/`,
+//! about the Activity that catches the document pickers' answers — see [`saf`]).
 //!
 //! `cargo xtask android` checks it and its whole dependency graph for `aarch64-linux-android`
-//! (arm64-v8a); cargo-apk reads `[package.metadata.android]` in Cargo.toml to package the APK.
+//! (arm64-v8a); cargo-apk2 reads `[package.metadata.android]` in Cargo.toml to package the APK.
 //!
 //! The shell runs the full [`solidcraft_ui_egui::SolveApp`] — start page, sketches, features,
 //! timeline — with the desktop's settings, autosave and recovery folders, all under the app's
 //! private storage (`android_main` points `HOME` and the XDG folders there), wgpu
 //! over Vulkan, egui-winit's touch and pinch input, and the system Back button as Escape.
-//! Save As writes a new file into the app's designs folder (there is no system file picker in
-//! this shell yet: Storage Access Framework wiring, bundled CJK fallback fonts and on-device
-//! screenshots are follow-ups); Open cancels until that picker lands.
+//! Files meet the system through [`saf`]: Open and Save As launch the Android document
+//! pickers, exports go through them too, and the shell copies the engine's bytes to the
+//! picked `content://` documents (bundled CJK fallback fonts and on-device screenshots are
+//! still follow-ups).
 //!
-//! The crate denies `unsafe` (the workspace forbids it) so that `android::android_main` alone
-//! can allow it: the Activity's glue loads the exported symbol, which has no safe API.
+//! The crate denies `unsafe` (the workspace forbids it) so that the few entry points that
+//! must reach Java — `android::android_main` (loaded by name) and the SAF JNI calls in
+//! [`saf`] — allow it individually, each with its safety argument.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+/// The system file pickers and the copy-back of picked documents (`#[cfg(test)]` keeps the
+/// pure part testable on the host; the JNI half compiles only on the device).
+#[cfg(any(test, target_os = "android"))]
+mod saf;
+
 #[cfg(target_os = "android")]
 mod android {
+    use crate::saf;
     use solidcraft_engine::Session;
     use solidcraft_ui_egui::{Services, SolveApp};
     use winit::platform::android::activity::AndroidApp;
@@ -30,10 +39,6 @@ mod android {
     /// The settings are checked this often (seconds) and written when they changed; also on
     /// exit. `eframe` never calls `App::save` here — it has no `Storage` on Android.
     const PREFS_INTERVAL_SECS: f64 = 5.0;
-    /// A file name from the dialog field stays this short (the field is user input).
-    const MAX_NAME: usize = 180;
-    /// Save As looks for a free name up to this many times before it gives up (cancel).
-    const NAME_TRIES: usize = 100;
 
     /// What `android-activity` (through winit) calls on the Activity's main-loop thread. The
     /// NativeActivity glue looks this symbol up in the cdylib the Activity loads, so it must be
@@ -64,17 +69,26 @@ mod android {
         // viewport pipelines are built for exactly this format: with the 0/0 defaults wgpu rejects
         // every draw ("renderpass uses a texture with format None but the pipeline with 'sc_overlay'
         // uses ... Depth24PlusStencil8").
+        // `setup` runs later on the render thread but the picker services need the Activity
+        // (to launch SAF screens on the Java main thread) and the URI targets.
+        let shell_app = app.clone();
+        let targets = std::rc::Rc::new(saf::Targets::default());
+        let shell_targets = targets.clone();
         let options = eframe::NativeOptions { depth_buffer: DEPTH_BITS, stencil_buffer: STENCIL_BITS, android_app: Some(app), ..Default::default() };
-        let result = eframe::run_native("SolidCraft", options, Box::new(setup));
+        let result = eframe::run_native("SolidCraft", options, Box::new(move |cc| setup(cc, shell_app, shell_targets)));
         if let Err(e) = result {
             log::error!("SolidCraft failed to start: {e}");
         }
     }
 
-    fn setup(cc: &eframe::CreationContext<'_>) -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
+    fn setup(
+        cc: &eframe::CreationContext<'_>,
+        app: AndroidApp,
+        targets: std::rc::Rc<saf::Targets>,
+    ) -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
         solidcraft_engine::crash::phase("app setup");
         solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
-        let mut solve = SolveApp::new(Session::default(), services());
+        let mut solve = SolveApp::new(Session::default(), services(app.clone(), targets.clone()));
         // Heavy features compute off the window thread after 150 ms (the desktop's choice).
         solve.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
         let prefs_path = solidcraft_engine::recovery::data_dir().map(|dir| dir.join("prefs.json"));
@@ -116,61 +130,37 @@ mod android {
             solidcraft_ui_egui::recovery_ui::start(&mut solve, &dir, std::time::Duration::from_secs_f64(every.min(1e9)));
         }
         solidcraft_engine::crash::phase("first frame");
-        Ok(Box::new(Shell { solve, prefs_path, saved_prefs: loaded, prefs_at: 0.0 }))
+        Ok(Box::new(Shell { solve, app, targets, prefs_path, saved_prefs: loaded, prefs_at: 0.0 }))
     }
 
-    /// The host services. This shell has no system file picker: Save As writes a *new* file
-    /// into the app's designs folder (a name that is taken gets a numbered one, so nothing is
-    /// ever overwritten by this path) and Open is a plain cancel — `file_picker` treats a
-    /// missing service as one — until Storage Access Framework wiring lands.
-    fn services() -> Services {
+    /// The host services: the system document pickers of [`saf`]. `pick_save` branches on the
+    /// extensions the command offers — a design save gets the mirror-capable picker, every
+    /// other export the one-shot picker; both answer with a future the shell completes once
+    /// the system reports back.
+    fn services(app: AndroidApp, targets: std::rc::Rc<saf::Targets>) -> Services {
         Services {
-            pick_save: Some(Box::new(|name: &str, _exts: &[&str]| {
-                let path = solidcraft_engine::recovery::data_dir().and_then(|dir| free_path(&dir.join("designs"), name));
-                Box::pin(std::future::ready(path.map(|p| p.to_string_lossy().into_owned())))
+            pick_open: Some(Box::new({
+                let (app, targets) = (app.clone(), targets.clone());
+                move |_exts: &[&str]| Box::pin(saf::Picker::open(app.clone(), targets.clone()))
+            })),
+            pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
+                if exts.contains(&solidcraft_engine::io::DESIGN_EXT) {
+                    Box::pin(saf::Picker::design(app.clone(), targets.clone(), name))
+                } else {
+                    Box::pin(saf::Picker::export(app.clone(), targets.clone(), name))
+                }
             })),
             ..Default::default()
         }
     }
 
-    /// The dialog's `name`, kept to one file name of a sane length (the field is user input:
-    /// no directories, no `..`, no endless names).
-    fn safe_name(name: &str) -> String {
-        let base = std::path::Path::new(name.trim()).file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if base.is_empty() {
-            return "design.solidcraft".into();
-        }
-        base.chars().take(MAX_NAME).collect()
-    }
-
-    /// A free path for Save As: `designs/<name>`, else `designs/<stem> (2)<ext>` and so on.
-    /// Existing files are never replaced from here — the picker has no confirm dialog.
-    fn free_path(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-        let _ = std::fs::create_dir_all(dir);
-        let base = safe_name(name);
-        let (stem, ext) = match base.rsplit_once('.') {
-            Some((s, e)) if !s.is_empty() && !e.is_empty() => (s.to_string(), Some(e.to_string())),
-            _ => (base.clone(), None),
-        };
-        for n in 1..=NAME_TRIES {
-            let file = if n == 1 {
-                dir.join(&base)
-            } else {
-                match &ext {
-                    Some(e) => dir.join(format!("{stem} ({n}).{e}")),
-                    None => dir.join(format!("{stem} ({n})")),
-                }
-            };
-            // An unreadable entry counts as taken: never replace what cannot be listed.
-            if matches!(std::fs::exists(&file), Ok(false)) {
-                return Some(file);
-            }
-        }
-        None
-    }
-
     struct Shell {
         solve: SolveApp,
+        /// The Activity handle the [`saf`] pickers launch their screens through (posted to
+        /// the Java main thread — the render thread itself must not call into Java UI).
+        app: AndroidApp,
+        /// The picked documents this process still writes bytes to; `saf::deliver` syncs it.
+        targets: std::rc::Rc<saf::Targets>,
         /// Where the settings live: `eframe` has no `Storage` on Android (`file_storage`
         /// returns `None` there), so the host keeps them in this file itself.
         prefs_path: Option<std::path::PathBuf>,
@@ -209,6 +199,9 @@ mod android {
             // The design on screen is the one whose commands a crash report replays.
             self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
             self.solve.logic(ctx);
+            // Export temporaries and linked mirrors reach their picked `content://` documents
+            // here (the engine writes plain paths only); quiet unless a copy fails.
+            saf::deliver(&self.app, &self.targets, &mut self.solve);
             if self.solve.quit_requested {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }

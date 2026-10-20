@@ -396,7 +396,8 @@ fn wasm_check() -> Result<(Command, usize), String> {
 /// Never break the Android build: `solidcraft-android` and its whole dependency graph (geom
 /// through ui-egui, including the C build scripts such as zstd through crates/io) must build for
 /// `aarch64-linux-android` (arm64-v8a). Like `wasm`, a cross-target compile check — the APK
-/// itself is cargo-apk's, in packaging/android/package.sh for a release.
+/// itself is cargo-apk2's, built with `cargo apk2 build --target aarch64-linux-android` in
+/// apps/solidcraft-android.
 fn cmd_android() -> Result<(), String> {
     let ndk = find_android_ndk()?;
     let bin = ndk.join("toolchains/llvm/prebuilt").join(ndk_host()).join("bin");

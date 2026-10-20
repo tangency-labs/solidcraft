@@ -19,8 +19,9 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 neg_cmp_op_on_partial_ord = "allow"
 
-# The Activity loads this cdylib (`android.app.lib_name`); the package holds no Java or Kotlin:
-# Android's NativeActivity enters it at `android_main` in src/lib.rs.
+# The Activity loads this cdylib (`android.app.lib_name`); the package's only Java is the
+# Activity shim in java/ (compiled by cargo-apk2, see java_sources below): NativeActivity
+# enters the cdylib at `android_main` in src/lib.rs.
 [lib]
 name = "solidcraft_android"
 crate-type = ["cdylib"]
@@ -35,18 +36,25 @@ solidcraft-ui-egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "android-native-activity"] }
 egui = { workspace = true }
 log = { workspace = true }
+# The Storage Access Framework pickers (src/saf.rs): JNI calls to the system's document
+# screens, and the native method SolidcraftActivity's onActivityResult answers through.
+jni = "0.22"
 # The `AndroidApp` handle for `eframe::NativeOptions::android_app`: winit's re-export of
 # android-activity, so the glue version is the one winit itself uses.
 winit = { version = "0.30", default-features = false }
 
-# cargo-apk reads this into the AndroidManifest and packages the cdylib into the APK.
+# cargo-apk2 reads this into the AndroidManifest and packages the cdylib into the APK.
 [package.metadata.android]
 package = "io.solidcraft"
 build_targets = ["aarch64-linux-android"]
 apk_name = "solidcraft"
 strip = "default"
+# The Activity shim (java/), compiled with the JDK's javac and dexed into the package — the
+# build must run from this directory so the relative path resolves (it does: cargo apk2
+# build lives here; JAVA_HOME must point at a JDK).
+java_sources = "java"
 # Launcher icons: `cargo xtask app-icons` draws the canonical mipmaps this path holds,
-# and cargo-apk packages them with the SDK's aapt (`aapt package -S`).
+# and cargo-apk2 compiles them with the SDK's aapt2 (`aapt2 link`).
 resources = "../../assets/icons/app/android/exports/res"
 
 [package.metadata.android.sdk]
@@ -57,8 +65,26 @@ target_sdk_version = 34
 label = "SolidCraft"
 icon = "@mipmap/ic_launcher"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+# The package carries code: the Activity shim's dex (java/, see java_sources) is what
+# catches the file pickers' answers. cargo-apk2's default activity name is empty.
+has_code = true
 
-[package.metadata.android.application.activity]
+# cargo-apk2 takes activities as a list (an array of tables). Our own NativeActivity
+# subclass: it overrides onActivityResult for the Storage Access Framework pickers, and the
+# NativeActivity glue still enters the cdylib at android_main.
+[[package.metadata.android.application.activity]]
+name = "io.solidcraft.SolidcraftActivity"
 orientation = "landscape"
 launch_mode = "singleTop"
 exported = true
+
+# The Activity finds this cdylib at start-up; cargo-apk2 fills the value from [lib] when the
+# value is left out (it does not add the entry itself).
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+
+# Home-screen launcher entry: cargo-apk2 writes only what is here, and it adds no intent filter
+# of its own (cargo-apk used to).
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
