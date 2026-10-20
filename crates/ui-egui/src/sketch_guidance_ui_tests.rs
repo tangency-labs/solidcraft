@@ -504,6 +504,8 @@ fn dialog_tab_enter_on_mirror_selection_applies_the_dialog() {
     step(&mut h, json!({"key":"Tab", "shift":true}));
     step(&mut h, json!({"key":"Tab"}));
     assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+    step(&mut h, json!({"key":"Space"}));
+    assert!(h.app.dialog.is_some(), "Space activates the selection without applying the dialog");
     step(&mut h, json!({"key":"Enter"}));
     assert!(h.app.dialog.is_none(), "Enter on the Mirror line selection must apply the dialog");
     assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), 5);
