@@ -83,7 +83,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.topology_intersector_p2/upstream.json#8 (upstream tests/prog_test/src/smTopoTest.cpp:my_test_analytic_tsurf_creation (one-face B-reps intersected); RegisterExistingSSI marking the pair as not intersecting, then IntersectTopology)",
-      "values_compared": 14
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -3057,8 +3057,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0336",
@@ -3573,8 +3573,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0394",
@@ -6933,8 +6933,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0775",
@@ -7205,8 +7205,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "squeeze_conflict_closer",
@@ -7309,8 +7309,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetFaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "iir_negative_tol",
@@ -7321,8 +7321,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::GetFaces",
-        "unit": "topology.brep_p1"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "iir_tiny_tol",
@@ -7434,8 +7434,11 @@
   "cases_passed": 667,
   "cases_total": 841,
   "deferred_by_unit": {
-    "topology.brep_p1": 126,
-    "topology.brep_p5": 15,
+    "query.brep": 41,
+    "topology.brep_p1": 7,
+    "topology.brep_p3": 8,
+    "topology.face_p2": 72,
+    "topology.face_p3": 12,
     "topology.face_p4": 34
   },
   "max_rel_err": 0.0,

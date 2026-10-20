@@ -15,7 +15,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.topology_intersector_p1/fuzz_regressions.json#1 (upstream SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01531, gave 103 vs C++ 104))",
-      "values_compared": 34
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -7116,8 +7116,8 @@
   "cases_both_errored": 3,
   "cases_deferred": 117,
   "cases_failed": 0,
-  "cases_passed": 710,
-  "cases_total": 827,
+  "cases_passed": 713,
+  "cases_total": 830,
   "deferred_by_unit": {
     "query.brep": 17,
     "query.face_p1": 7,

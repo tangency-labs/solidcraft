@@ -11279,16 +11279,16 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 418,
+  "cases_deferred": 413,
   "cases_failed": 0,
-  "cases_passed": 785,
+  "cases_passed": 790,
   "cases_total": 1203,
   "deferred_by_unit": {
     "curve.crv_on_surf": 10,
     "curve.curve_p6": 31,
     "intersect.surface_drop_lib_p3": 28,
     "query.brep": 335,
-    "query.face_p3": 45
+    "topology.face_p2": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

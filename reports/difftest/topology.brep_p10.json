@@ -13452,6 +13452,7 @@
   "cases_passed": 851,
   "cases_total": 1404,
   "deferred_by_unit": {
+    "geom.tol": 5,
     "query.brep": 5,
     "surface.cone_p1": 41,
     "surface.sphere": 328,

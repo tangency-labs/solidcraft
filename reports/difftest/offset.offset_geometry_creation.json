@@ -1316,7 +1316,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0130",
@@ -2996,7 +2996,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0311",
@@ -4412,7 +4412,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0462",
@@ -5184,7 +5184,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0545",
@@ -5320,7 +5320,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0560",
@@ -5960,7 +5960,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0628",
@@ -7224,7 +7224,7 @@
     {
       "deferred": {
         "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "surface.surface_cache_p2"
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0760",
@@ -8134,11 +8134,11 @@
   "deferred_by_unit": {
     "blend.fillet_standard_solver_p1": 11,
     "curve.crv_on_surf": 27,
+    "geom.tol": 82,
     "harness:analytic-geometry-export": 107,
     "intersect.surface_drop_curve": 17,
     "intersect.surface_drop_lib_p3": 7,
     "surface.sphere": 2,
-    "surface.surface_cache_p2": 82,
     "topology.face_p2": 13,
     "topology.face_p4": 43
   },
