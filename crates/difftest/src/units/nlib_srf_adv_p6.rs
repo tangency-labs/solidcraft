@@ -6,8 +6,10 @@
 //!
 //! A case is `{"op": "sweep", ...}` or `{"op": "fill", ...}`. Both sides produce the
 //! same flat record of doubles, split into keys by [`to_output`]: `status` (`0` ok,
-//! else the `NL_*_ERR` number; `-1` on the Rust side for a non-NLib error, which never
-//! matches), then on success:
+//! else the `NL_*_ERR` number; `1000` for upstream's bare error flag, which the Rust
+//! side reports for `ST_BezCalcArcLength`'s recursion limit (`NotConverged` of
+//! `nurbs::bezier::calc_arc_length`); `-1` on the Rust side for any other non-NLib
+//! error, which never matches), then on success:
 //!
 //! - sweep: the surface (`dims = [n, m, p, q, r, s]`, `net` x y z w row-major, `u`,
 //!   `v`);
@@ -328,11 +330,18 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-/// `0` for `Ok`, the `NL_*_ERR` number for an NLib error, `-1` otherwise.
+/// `0` for `Ok`, the `NL_*_ERR` number for an NLib error, `1000` for the arc-length
+/// recursion limit (upstream's bare flag), `-1` otherwise.
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        // `ST_BezCalcArcLength` past its recursion limit: upstream's bare error flag.
+        Err(SolidError::NotConverged { operation, .. })
+            if *operation == "nurbs::bezier::calc_arc_length" =>
+        {
+            1000.0
+        }
         Err(_) => -1.0,
     }
 }

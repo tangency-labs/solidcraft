@@ -37,7 +37,8 @@
 //! values (any placement, radii, angles, heights: upstream returns statuses or
 //! degenerate surfaces for those), derivative orders up to [`MAX_ORDER`], an
 //! `AdjustSTEPUVDomain` sweep interval that is not reversed (upstream loops forever on
-//! one), independent axes for `Transform` (whose upstream body is unported, so it is
+//! one), unbounded cones whose apex height `-bot / tan(semi)` does not overflow
+//! (upstream recurses without bound on one), independent axes for `Transform` (whose upstream body is unported, so it is
 //! never compared), lines of two distinct points, circles and ellipses with
 //! independent axes, positive radii and an angular domain inside `[-360, 360]` at most
 //! 360 long.
@@ -384,6 +385,23 @@ fn angular(d0: f64, d1: f64, what: &str) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// Upstream `SM_EFF_ZERO`.
+const SM_EFF_ZERO: f64 = 1.0e-12;
+
+/// The unbounded cone constructor (`SmCone(O, X, Y, bot, semi, ..)`) places the apex
+/// at height `-bot / tan(semi)` (`SmCone::GetApex`). When that overflows, the apex
+/// parameter is NaN and the generator's STEP interval with it: `MakeNurbWithSweepParams`
+/// then re-adjusts the generator line (`AdjustSTEPInterval` never sees equal NaN
+/// intervals), whose `MakeNurb` asks the cone's `GetGenDirParamExtent`, which makes the
+/// cone's NURB again: unbounded recursion (stack overflow). A zero semi-angle is a
+/// cylinder (no apex): `GetApex` tests `SM_IS_ZERO(semi)`, i.e. `|semi| <= SM_EFF_ZERO`.
+fn apex_overflows(bot: f64, semi: f64) -> Result<(), FfiError> {
+    if semi.abs() > SM_EFF_ZERO && !(bot / (semi * std::f64::consts::PI / 180.0).tan()).is_finite() {
+        return Err(bad("cone: apex height overflows"));
+    }
+    Ok(())
+}
+
 fn b(v: bool) -> f64 {
     f64::from(u8::from(v))
 }
@@ -401,6 +419,9 @@ fn push_build(o: &mut Vec<f64>, s: &Build) -> Result<(), FfiError> {
             inside,
         } => {
             finite(&[bot, semi, h.unwrap_or(0.0)], "canonical")?;
+            if h.is_none() {
+                apex_overflows(bot, semi)?;
+            }
             (
                 0.0,
                 [bot, semi, b(h.is_some()), h.unwrap_or(0.0), b(swap), b(inside), 0.0, 0.0],
@@ -414,6 +435,10 @@ fn push_build(o: &mut Vec<f64>, s: &Build) -> Result<(), FfiError> {
             inside,
         } => {
             finite(&[bot, top, h], "canonical")?;
+            if h <= 0.0 {
+                // the top radius is the semi-angle of an unbounded cone
+                apex_overflows(bot, top)?;
+            }
             (1.0, [bot, top, h, b(swap), b(inside), 0.0, 0.0, 0.0])
         }
         Mode::CylCanonical { radius } => {
@@ -427,6 +452,7 @@ fn push_build(o: &mut Vec<f64>, s: &Build) -> Result<(), FfiError> {
             inside,
         } => {
             finite(&[base, semi], "cone")?;
+            apex_overflows(base, semi)?;
             (3.0, [base, semi, b(swap), b(inside), 0.0, 0.0, 0.0, 0.0])
         }
         Mode::ConeBounded {

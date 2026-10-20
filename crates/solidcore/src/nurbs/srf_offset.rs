@@ -66,9 +66,12 @@ const fn invalid(reason: &'static str) -> SolidError {
     }
 }
 
-/// `(NL_INDEX)del` of a sample count: errors where upstream's cast is undefined.
+/// `(NL_INDEX)del` of a sample count (`del >= 0`, already rounded up): errors where
+/// upstream's cast to the 64-bit `NL_INDEX` is undefined (not finite, negative or
+/// `>= 2^63`). A count above `isize::MAX` (32-bit targets) saturates; every caller
+/// only compares such a count with [`SLM`].
 fn count(del: f64) -> Result<isize> {
-    if !(0.0..1.0e15).contains(&del) {
+    if !(0.0..9.223_372_036_854_775_808e18).contains(&del) {
         return Err(invalid("sample count not representable"));
     }
     Ok(del as isize)
@@ -743,5 +746,16 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn sample_counts_follow_the_nl_index_cast() {
+        assert_eq!(count(3.0).unwrap(), 3);
+        // Finite counts beyond 1e15 cast fine upstream (and lose to `slm`).
+        assert!(count(1.0e16).unwrap() >= 1000);
+        assert!(count(f64::INFINITY).is_err());
+        assert!(count(f64::NAN).is_err());
+        assert!(count(9.3e18).is_err());
+        assert!(count(-1.0).is_err());
     }
 }

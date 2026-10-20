@@ -63,7 +63,8 @@
 //!   by the bytes left (see `plan/findings.md`, "Header-declared sizes").
 //! - **`GetControlPointsExpert`** writes into the caller's array and leaves the slots it
 //!   does not write alone; the port returns a vector of `stride * count` values whose
-//!   unwritten slots are `0`.
+//!   unwritten slots are `0`; that vector is allocated fallibly (`InvalidInput`
+//!   "output too large" for a stride or count whose output does not fit in memory).
 //! - **`ReadFromDB`** always builds a new curve (the "fill this empty object" input of
 //!   `rpNewCurve` is dropped, as is its unused type argument).
 //! - **`ReverseParameterization`** sets the new interval with `SetMinMax`, whose
@@ -1415,7 +1416,11 @@ impl BSplineCurve {
         let len = stride
             .checked_mul(count)
             .ok_or_else(|| invalid(OP_EXPERT, "output too large"))?;
-        let mut out = vec![0.0; len];
+        // the caller's output array upstream: allocated fallibly here
+        let mut out = Vec::new();
+        out.try_reserve_exact(len)
+            .map_err(|_| invalid(OP_EXPERT, "output too large"))?;
+        out.resize(len, 0.0);
         let mut address = 0usize;
         let three_d = dim > 2;
 
@@ -2080,5 +2085,23 @@ mod tests {
             panic!("expected a line");
         };
         assert_eq!(a.evaluate_point(1.0), Point3::new(2.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn control_points_expert_absurd_stride_is_an_error() {
+        // fuzz regression (nurbs.b_spline_curve_p2 fuzz00841): a 2^32 stride aborted
+        // the output allocation
+        let c = cubic();
+        let r = c.control_points_expert(ControlPointForm::NonRational, 0, 4, 1 << 62);
+        assert!(r.is_err());
+        assert!(c
+            .control_points_expert(ControlPointForm::NonRational, 0, 4, usize::MAX)
+            .is_err());
+        assert_eq!(
+            c.control_points_expert(ControlPointForm::NonRational, 0, 4, 3)
+                .unwrap()
+                .len(),
+            15
+        );
     }
 }

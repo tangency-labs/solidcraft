@@ -54,7 +54,9 @@
 //!   upstream allocates uninitialised (`malloc`) is zero-filled.
 //! - The `NL_STACKS` arguments have no counterpart and allocation cannot fail, so
 //!   [`Surface::compress`], [`Surface::swap_uv`] and [`Surface::average_len`] have no
-//!   memory error path.
+//!   memory error path. [`size_arrays`] sizes new storage from caller indices and so
+//!   reserves it fallibly: [`NlibCode::Memory`] (upstream `NL_MEM_ERR`) instead of an
+//!   allocation abort.
 //! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The routine-name argument (`rname`) is dropped.
@@ -521,7 +523,29 @@ impl Surface {
     /// allocated, an existing one is resized with [`size_arrays`] (keeping storage
     /// that is large enough), then the net and knots in use are copied.
     pub fn copy_into(&self, dst: &mut Option<Surface>) {
-        let sur = size_arrays(dst, self.indices());
+        // `size_arrays` with this surface's own (already allocated) sizes; new
+        // storage is allocated infallibly here, as for any copy.
+        let idx = self.indices();
+        let SurfaceIndices { n, m, p, q, r, s } = idx;
+        let reuse = match dst {
+            Some(sur) => sur.is_sized(n, m, r, s).is_ok() && sur.set_size_indices(idx).is_ok(),
+            None => false,
+        };
+        let sur = if let (true, Some(sur)) = (reuse, dst.as_mut()) {
+            sur
+        } else {
+            dst.insert(Surface {
+                net: zero_net(n, m),
+                n,
+                m,
+                p,
+                q,
+                u: vec![0.0; r.saturating_add(1)],
+                r,
+                v: vec![0.0; s.saturating_add(1)],
+                s,
+            })
+        };
         for (qrow, prow) in sur.net.iter_mut().zip(self.rows()) {
             for (q, p) in qrow.iter_mut().zip(prow) {
                 *q = *p;
@@ -954,6 +978,21 @@ pub fn make_rat_compatible(surfaces: &mut [Surface]) {
     }
 }
 
+/// `len_minus_1 + 1` copies of `v`, or [`NlibCode::Memory`] (upstream `NL_MEM_ERR`
+/// from a failed allocation) when the storage cannot be reserved or the length
+/// overflows.
+fn try_filled<T: Clone>(len_minus_1: usize, v: T) -> Result<Vec<T>> {
+    let mem = || SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory);
+    let len = len_minus_1.checked_add(1).ok_or_else(mem)?;
+    let mut a = Vec::new();
+    a.try_reserve_exact(len).map_err(|_| mem())?;
+    a.resize(len, v);
+    Ok(a)
+}
+
+/// Operation name of [`size_arrays`].
+const OP_SIZE_ARRAYS: &str = "nurbs::srf_basic::size_arrays";
+
 /// Makes `slot` able to hold a surface with indices `(n, m, r, s)` and degrees
 /// `(p, q)`, and sets them (`N_SrfSizeArrays`).
 ///
@@ -961,31 +1000,47 @@ pub fn make_rat_compatible(surfaces: &mut [Surface]) {
 /// indices in use are at least the requested ones ([`Surface::is_sized`]) keeps its
 /// storage; otherwise new zero-filled storage replaces it. In every case the indices
 /// and degrees are then set to the requested values. Returns the sized surface.
-pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> &mut Surface {
+///
+/// # Errors
+///
+/// [`NlibCode::Memory`] (upstream's failed `N_Malloc`, `NL_MEM_ERR`) when the new
+/// storage cannot be allocated; the slot is then unchanged.
+pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> Result<&mut Surface> {
     let SurfaceIndices { n, m, p, q, r, s } = idx;
-    let fresh = || Surface {
-        net: zero_net(n, m),
-        n,
-        m,
-        p,
-        q,
-        u: vec![0.0; r.saturating_add(1)],
-        r,
-        v: vec![0.0; s.saturating_add(1)],
-        s,
+    let fresh = || -> Result<Surface> {
+        let row = try_filled(m, CPoint::default())?;
+        let mut net = try_filled(n, Vec::new())?;
+        for r in &mut net {
+            let mut copy = Vec::new();
+            copy.try_reserve_exact(row.len())
+                .map_err(|_| SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory))?;
+            copy.extend_from_slice(&row);
+            *r = copy;
+        }
+        Ok(Surface {
+            net,
+            n,
+            m,
+            p,
+            q,
+            u: try_filled(r, 0.0)?,
+            r,
+            v: try_filled(s, 0.0)?,
+            s,
+        })
     };
     let sur = match slot {
         Some(sur) => {
             // The storage always holds the indices in use, so `set_size_indices`
             // cannot fail once `is_sized` passed.
             if sur.is_sized(n, m, r, s).is_err() || sur.set_size_indices(idx).is_err() {
-                *sur = fresh();
+                *sur = fresh()?;
             }
             sur
         }
-        None => slot.insert(fresh()),
+        None => slot.insert(fresh()?),
     };
-    sur
+    Ok(sur)
 }
 
 #[cfg(test)]
@@ -1104,6 +1159,25 @@ mod tests {
         let len = s.average_len();
         assert_eq!((len.area, len.lu, len.lv), (1.0, 1.0, 1.0));
         assert!(s.equals(&slot.unwrap(), 0.0, 0.0));
+    }
+
+    /// Fuzz regression (`nlib.srf_basic` fuzz00933, fuzz00159): indices sized from
+    /// `i64::MAX` / `2^32` are a memory error, not an allocation abort or panic.
+    #[test]
+    fn size_arrays_huge_is_a_memory_error() {
+        let idx = |n| SurfaceIndices {
+            n,
+            m: 1,
+            p: 1,
+            q: 1,
+            r: 3,
+            s: 3,
+        };
+        let mut slot = None;
+        assert!(size_arrays(&mut slot, idx(usize::MAX)).is_err());
+        assert!(slot.is_none());
+        let mut slot = Some(bilinear());
+        assert!(size_arrays(&mut slot, idx(1)).is_ok());
     }
 
     #[test]

@@ -272,7 +272,9 @@ fn push_srf(o: &mut Vec<f64>, b: &BssIn) -> Result<(), HarnessError> {
     let s = srf(&b.srf)?;
     let (n, m) = shape(&s)?;
     o.extend([n as f64, m as f64, s.p as f64, s.q as f64]);
-    o.extend([(s.u.len() - 1) as f64, (s.v.len() - 1) as f64]);
+    let ku = s.u.len().checked_sub(1).ok_or_else(|| harness("empty u knots"))?;
+    let kv = s.v.len().checked_sub(1).ok_or_else(|| harness("empty v knots"))?;
+    o.extend([ku as f64, kv as f64]);
     for row in &s.net {
         for p in row {
             o.extend(p);

@@ -474,7 +474,14 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
                 }
                 Kind::SizeArrays { idx } => {
                     let mut slot = Some(s);
-                    let sized = size_arrays(&mut slot, indices(idx));
+                    let sized = match size_arrays(&mut slot, indices(idx)) {
+                        Ok(sized) => sized,
+                        Err(e) => {
+                            // only an allocation failure (the FFI rejects such sizes)
+                            o.push(status(&Err::<(), _>(e)));
+                            return Ok(o);
+                        }
+                    };
                     let (n, m, r, ss) = sized.array_sizes();
                     let (p, q) = sized.degrees();
                     o.push(0.0);

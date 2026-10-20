@@ -744,6 +744,11 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             want2,
             want3,
         } => {
+            // the FFI rejects more than `ffi::MAX_SAMPLES` samples; a larger count only
+            // sizes the Rust side's sampling loop
+            if *n > ffi::MAX_SAMPLES as u64 {
+                return Err(HarnessError::new(format!("{n} samples")).into());
+            }
             let reference = match reference {
                 Some(r) => match curve_of(r)? {
                     Some(c) => Some(c),

@@ -524,7 +524,7 @@ pub fn create_coons_srf(
             r: 7,
             s,
         },
-    );
+    )?;
     let mut sur_v: Option<Surface> = None;
     size_arrays(
         &mut sur_v,
@@ -536,7 +536,7 @@ pub fn create_coons_srf(
             r,
             s: 7,
         },
-    );
+    )?;
     let mut sur_t: Option<Surface> = None;
     size_arrays(
         &mut sur_t,
@@ -548,7 +548,7 @@ pub fn create_coons_srf(
             r: 7,
             s: 7,
         },
-    );
+    )?;
     let (Some(mut sur_u), Some(mut sur_v), Some(mut sur_t)) = (sur_u, sur_v, sur_t) else {
         return Err(invalid(OP, "surface not sized"));
     };
@@ -673,7 +673,7 @@ pub fn create_coons_srf(
     // Compute output surface
     let idx = sur_u.indices();
     let mut out: Option<Surface> = None;
-    let sur = size_arrays(&mut out, idx);
+    let sur = size_arrays(&mut out, idx)?;
     for i in 0..=idx.n {
         for j in 0..=idx.m {
             let pw = CPoint::translate_sum2(
@@ -713,7 +713,11 @@ pub fn make_knots(u: &[f64], n: usize, p: usize, knots: &mut [f64]) -> Result<()
     if p == 0 {
         return Err(invalid(OP, "degree 0"));
     }
-    if u.len() <= n || knots.len() < n + p + 2 {
+    if u.len() <= n
+        || n.checked_add(p)
+            .and_then(|l| l.checked_add(2))
+            .is_none_or(|l| knots.len() < l)
+    {
         return Err(invalid(OP, "array too short"));
     }
     let oob = || invalid(OP, "index out of range");
@@ -1916,5 +1920,14 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn make_knots_absurd_sizes_are_errors() {
+        // fuzz regression: n + p + 2 overflowed
+        let u = [0.0, 0.5, 1.0];
+        let mut k = [0.0; 6];
+        assert!(make_knots(&u, 2, usize::MAX, &mut k).is_err());
+        assert!(make_knots(&u, 2, 1, &mut k).is_ok());
     }
 }

@@ -46,6 +46,9 @@
 //!   The fixed scratch arrays are `SMALL_NP` (8) wide when both degrees are below 8
 //!   and `NL_MAXDEG + 1` otherwise (every index used is at most the degree, so the
 //!   values and errors are the same; this only avoids zeroing large stack arrays).
+//! - `N_SrfIsClosedSmooth`: a degree whose span index `+ 1` overflows (near
+//!   `isize::MAX`, upstream's signed overflow) is `InvalidInput`, as an index
+//!   outside the knot array.
 //! - `N_SrfReverse` keeps both forms: [`Surface::reverse`] in place,
 //!   [`Surface::reversed`] into a new surface sized as upstream sizes a NULL output.
 //! - `N_SrfType` points its curve outputs at its scratch curves, so a curve output
@@ -1179,7 +1182,7 @@ impl Surface {
         if do_u {
             let mut ii = q; // check u-closure
             loop {
-                let dv = (get(vk, ii + 1, OP)? - get(vk, ii, OP)?) / q as f64;
+                let dv = (get(vk, succ(ii, OP)?, OP)? - get(vk, ii, OP)?) / q as f64;
                 let mut broke = false;
                 for jj in 0..=q {
                     let (d1, d2) = if jj == q {
@@ -1241,7 +1244,7 @@ impl Surface {
         if do_v {
             let mut ii = p; // check v-closure
             loop {
-                let du = (get(uk, ii + 1, OP)? - get(uk, ii, OP)?) / p as f64;
+                let du = (get(uk, succ(ii, OP)?, OP)? - get(uk, ii, OP)?) / p as f64;
                 let mut broke = false;
                 for jj in 0..=p {
                     let (d1, d2) = if jj == p {
@@ -1408,6 +1411,12 @@ impl Surface {
     pub fn surface_type(&self, tol: f64) -> Result<SurfaceType> {
         TypeFinder::new(self, tol)?.run()
     }
+}
+
+/// `i + 1` on a signed index; `InvalidInput` where it overflows (an index that far
+/// out is outside every array upstream would read).
+fn succ(i: isize, op: &'static str) -> Result<isize> {
+    i.checked_add(1).ok_or_else(|| oob(op))
 }
 
 /// `SD[k][l]`.
@@ -2153,5 +2162,20 @@ mod tests {
         assert_eq!(cone.degrees(), (1, 2));
         let closed = cone.is_closed_smooth(0, &[1e-9], Direction::V).unwrap();
         assert_eq!(closed, Some(Direction::V));
+    }
+
+    #[test]
+    fn closed_smooth_absurd_degree_is_an_error() {
+        // fuzz (nlib.srf_nurb fuzz01067): p = q = i64::MAX overflowed `ii + 1`.
+        let f = flat();
+        let s = Surface::new(
+            f.cpts(),
+            i64::MAX as usize,
+            i64::MAX as usize,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert!(s.is_closed_smooth(1, &[1e-6, 1.0], Direction::UV).is_err());
     }
 }

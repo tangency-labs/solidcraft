@@ -107,6 +107,10 @@
 //!   `m_pData`, index past an array (`GetPatchAt`, which would also grow the patch
 //!   list; a continuity array longer than the knot list) or dereference a null
 //!   subdivision surface, the port returns [`SolidError::InvalidInput`].
+//! - **Cyclic trees.** `FindUnmarkedLeafNode` walks child links: on a tree whose links
+//!   form a cycle it never ends (its stack grows without bound). The port stops after
+//!   more pops than an acyclic tree allows (the initial stack length plus one, times
+//!   the node count plus one) with [`SolidError::InvalidInput`].
 //! - **Not ported here.** `GetNthBoundingPlane`, `AddCurvesToCache`, the destructor
 //!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction
 //!   (`surface.surface_cache_p3`, [`crate::surface::surface_cache::p3`]),
@@ -2206,8 +2210,18 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         stack: &mut Vec<NodeId>,
     ) -> Result<Option<NodeId>> {
         let tree = self.tree_ref(OP_FIND)?;
+        // each entry of the stack expands to at most every node of an acyclic tree
+        let visit_limit = stack
+            .len()
+            .saturating_add(1)
+            .saturating_mul(tree.nodes().len().saturating_add(1));
+        let mut visits = 0usize;
         // while nodes are to be processed
         while let Some(id) = stack.pop() {
+            visits += 1;
+            if visits > visit_limit {
+                return Err(invalid(OP_FIND, "tree node links are cyclic"));
+            }
             let node = tree.node(id)?;
             let aux = match node.data {
                 NodeData::Surface(a) => a,

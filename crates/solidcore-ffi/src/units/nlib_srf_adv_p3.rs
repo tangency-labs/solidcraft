@@ -15,7 +15,8 @@
 //! `n+p+2` u knots, `m+q+2` v knots; a curve `n p`, `n+1` control points, `n+p+2`
 //! knots. [`eval`] accepts only well-formed clamped surfaces and curves (degrees
 //! `1..=NL_MAXDEG`, at least degree + 1 control points, finite data, non-decreasing
-//! knots with end multiplicity exactly `p+1` and interior multiplicity at most `p`)
+//! knots with end multiplicity exactly `p+1` and interior multiplicity at most `p`;
+//! surface weights all `NOW` or all positive)
 //! and rejects every argument that would make upstream index outside its arrays:
 //!
 //! - `Grid`: at least one parameter in each direction; flags `1..=2`; inner
@@ -29,7 +30,7 @@
 //!   `knotTol >= 0`; without `cmp` the curves must already share degree, control point
 //!   count and knots (upstream copies `cur[0]`'s count from every curve).
 
-use crate::validate::bad;
+use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest net index (`n`, `m`) of a surface accepted by [`eval`].
@@ -146,7 +147,14 @@ fn surface<'a>(rd: &mut Reader<'a>) -> Result<SrfShape<'a>, FfiError> {
     if p > n || q > m {
         return Err(bad("degree above the highest net index"));
     }
-    rd.slice(4 * (n + 1) * (m + 1))?;
+    let net = rd.slice(4 * (n + 1) * (m + 1))?;
+    // Weights: all NOW (non-rational) or all positive. Anything else is no valid
+    // surface; a zero weight makes Euclidean points infinite, and the extension then
+    // reads past its scratch rows when a reflection plane cannot be normalised.
+    let ws: Vec<f64> = net.chunks(4).filter_map(|c| c.get(3).copied()).collect();
+    if !(ws.iter().all(|&w| w == NOW) || ws.iter().all(|&w| w > 0.0)) {
+        return Err(bad("mixed or non-positive weights"));
+    }
     let u = rd.slice(n + p + 2)?;
     let v = rd.slice(m + q + 2)?;
     if !valid_knots(u, p) || !valid_knots(v, q) {

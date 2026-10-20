@@ -43,7 +43,8 @@
 //!   `SM_ERR_NULL_POINTER` (`NER`).
 //! - **Array bounds.** `GetControlPointsExpert` checks indices also for a single
 //!   point (upstream reads outside the net there) and returns the output array
-//!   (sized to the last value written, unwritten slots `0`). `CreateSurfOfRevolution`
+//!   (sized to the last value written, unwritten slots `0`, allocated fallibly:
+//!   `InvalidInput` when strides make it too large for memory). `CreateSurfOfRevolution`
 //!   returns `InvalidInput` where upstream would index past the sweep circle's
 //!   weights or polygon.
 //! - **Ignored statuses** stay ignored: `CreateIsoParametricCurve`'s
@@ -1193,7 +1194,11 @@ impl BSplineSurface {
             .and_then(|a| v_stride.checked_mul(nv).and_then(|b| a.checked_add(b)))
             .and_then(|a| a.checked_add(pt_size))
             .ok_or_else(|| SolidError::invalid_input(OP_EXPERT, "output too large"))?;
-        let mut out = vec![0.0; len];
+        // the caller's output array upstream: allocated fallibly here
+        let mut out = Vec::new();
+        out.try_reserve_exact(len)
+            .map_err(|_| SolidError::invalid_input(OP_EXPERT, "output too large"))?;
+        out.resize(len, 0.0);
 
         // copy the requested array of control points into the requested output array
         for (u_cnt, i_u) in (start_u..=end_u).enumerate() {

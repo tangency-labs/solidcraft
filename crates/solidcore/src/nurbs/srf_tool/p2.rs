@@ -48,7 +48,8 @@ use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 
 use super::p1::{
-    at, at2, check_interior, ix, oob, put, put2, span_mult, surface, sx, zeros1, zeros2, Local, Net,
+    at, at2, check_interior, ix, oob, put, put2, span_mult, surface, sx, twice, zeros1, zeros2,
+    Local, Net,
 };
 
 /// Upstream `sto`: relative parameter tolerance of the basis maxima searched by
@@ -264,11 +265,11 @@ fn remove_conditional_rows(
     let degu = ix(deg, op)?;
     let rows = sx(lines.len(), op)? - 1;
 
-    let mut alf: Vec<f64> = zeros1(2 * a, op)?;
-    let mut oma: Vec<f64> = zeros1(2 * a, op)?;
-    let mut bet: Vec<f64> = zeros1(2 * a, op)?;
-    let mut omb: Vec<f64> = zeros1(2 * a, op)?;
-    let mut rw: Vec<CPoint> = zeros1(2 * a, op)?;
+    let mut alf: Vec<f64> = zeros1(twice(a, op)?, op)?;
+    let mut oma: Vec<f64> = zeros1(twice(a, op)?, op)?;
+    let mut bet: Vec<f64> = zeros1(twice(a, op)?, op)?;
+    let mut omb: Vec<f64> = zeros1(twice(a, op)?, op)?;
+    let mut rw: Vec<CPoint> = zeros1(twice(a, op)?, op)?;
 
     let fout = (2 * spn - mlt - deg) / 2;
     let mut rmf = true;
@@ -496,11 +497,11 @@ pub fn remove_one_knot(
     let (r, s, f, l) = (sx(r, OP)?, sx(s, OP)?, sx(f, OP)?, sx(l, OP)?);
 
     let a = p.max(q);
-    let mut alf: Vec<f64> = zeros1(2 * a, OP)?;
-    let mut oma: Vec<f64> = zeros1(2 * a, OP)?;
-    let mut bet: Vec<f64> = zeros1(2 * a, OP)?;
-    let mut omb: Vec<f64> = zeros1(2 * a, OP)?;
-    let mut rw: Vec<CPoint> = zeros1(2 * a, OP)?;
+    let mut alf: Vec<f64> = zeros1(twice(a, OP)?, OP)?;
+    let mut oma: Vec<f64> = zeros1(twice(a, OP)?, OP)?;
+    let mut bet: Vec<f64> = zeros1(twice(a, OP)?, OP)?;
+    let mut omb: Vec<f64> = zeros1(twice(a, OP)?, OP)?;
+    let mut rw: Vec<CPoint> = zeros1(twice(a, OP)?, OP)?;
 
     let mut mr = mr;
     if mr == f64::MAX {
@@ -714,10 +715,10 @@ fn elevate_rows(
     let mut bw: Net = zeros2(rows, pp, op)?;
     let mut nw: Net = zeros2(rows, pp, op)?;
     let mut dw: Net = zeros2(rows, pq, op)?;
-    let mut ralf: Vec<Vec<f64>> = zeros2(asz, 2 * asz, op)?;
-    let mut roma: Vec<Vec<f64>> = zeros2(asz, 2 * asz, op)?;
-    let mut rbet: Vec<Vec<f64>> = zeros2(asz, 2 * asz, op)?;
-    let mut romb: Vec<Vec<f64>> = zeros2(asz, 2 * asz, op)?;
+    let mut ralf: Vec<Vec<f64>> = zeros2(asz, twice(asz, op)?, op)?;
+    let mut roma: Vec<Vec<f64>> = zeros2(asz, twice(asz, op)?, op)?;
+    let mut rbet: Vec<Vec<f64>> = zeros2(asz, twice(asz, op)?, op)?;
+    let mut romb: Vec<Vec<f64>> = zeros2(asz, twice(asz, op)?, op)?;
     let mut alfs: Vec<f64> = zeros1(asz, op)?;
     let mut omas: Vec<f64> = zeros1(asz, op)?;
 
@@ -1032,5 +1033,15 @@ mod tests {
         let mr2 = remove_one_knot(&s, 4, 1, 0, 3, Direction::U, 1e9).unwrap();
         assert_eq!(mr2, 1e9);
         assert!(remove_one_knot(&s, 3, 1, 0, 9, Direction::V, -1.0).is_err());
+    }
+
+    #[test]
+    fn absurd_degree_is_an_error() {
+        // fuzz (nlib.srf_tool_p2 fuzz00301): `2 * max(p, q)` overflowed.
+        let s = sample();
+        let (u, v) = (s.u_knots().to_vec(), s.v_knots().to_vec());
+        let bad = Surface::new(s.cpts(), i64::MAX as usize, s.q(), u, v).unwrap();
+        assert!(remove_one_knot(&bad, 4, 1, 0, 1, Direction::U, f64::MAX).is_err());
+        assert!(elevate_degree(&bad, 1, Direction::V).is_err());
     }
 }

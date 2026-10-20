@@ -483,6 +483,10 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
         | OpIn::Reverse { a, b }
         | OpIn::Adjust { a, b } => o.extend([*a, *b]),
         OpIn::Join { segs, senses } => {
+            // upstream reads `(*cpOptSenses)[ii]` past a shorter array (UB)
+            if senses.as_ref().is_some_and(|v| v.len() < segs.len()) {
+                return Err(HarnessError::new("join: fewer senses than segments"));
+            }
             o.push(segs.len() as f64);
             for s in segs {
                 encode_this(s, &mut o)?;

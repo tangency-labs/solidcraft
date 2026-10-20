@@ -849,6 +849,11 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             n,
             needed,
         } => {
+            // the FFI rejects more than 32 samples; upstream (and the port) would loop
+            // that many times, so a larger count is not a case for Rust either
+            if *n > 32 {
+                return Err(HarnessError::new(format!("{n} samples")).into());
+            }
             let c = curve_of(curve)?;
             match st(c.surface_max_distance_between(
                 &k,

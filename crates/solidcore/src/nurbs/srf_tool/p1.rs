@@ -23,6 +23,11 @@
 //! - [`extract_patch`] takes the requested patch as a [`Rectangle`] instead of four
 //!   corner parameters.
 //! - `mt` of [`insert_knot`] is a `usize`, so upstream's `mt < 0` test cannot fail.
+//! - Degrees above `32767` (upstream's `NL_DEGREE` is a `short`, so they cannot be
+//!   expressed there) are `InvalidInput` in every `nurbs::srf_tool` routine; scratch
+//!   and output arrays that cannot be allocated are `NL_MEM_ERR` (upstream's failed
+//!   `N_Malloc`), and index arithmetic that would overflow (`2 * max(p, q)`) is
+//!   `InvalidInput`.
 //! - Every array access is bounds checked. Where upstream would index outside its
 //!   arrays (invalid knot vectors, degrees above `NL_MAXDEG` for the fixed-size scratch
 //!   arrays of `N_SrfSplit` / `N_SrfExtractIsoCrv`), the Rust functions return
@@ -93,7 +98,18 @@ pub(super) fn put2<T>(w: &mut [Vec<T>], i: isize, j: isize, x: T, op: &'static s
     put(row, j, x, op)
 }
 
+/// `len` copies of `x`, or `NL_MEM_ERR` where the storage cannot be allocated (as
+/// upstream's failed `N_Malloc`).
+fn filled<T: Clone>(len: usize, x: T, op: &'static str) -> Result<Vec<T>> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(len)
+        .map_err(|_| nlib(op, NlibCode::Memory))?;
+    v.resize(len, x);
+    Ok(v)
+}
+
 /// A zero-filled `(n+1) x (m+1)` array (upstream allocates uninitialised storage).
+/// `NL_MEM_ERR` where it cannot be allocated.
 pub(super) fn zeros2<T: Clone + Default>(
     n: isize,
     m: isize,
@@ -101,13 +117,46 @@ pub(super) fn zeros2<T: Clone + Default>(
 ) -> Result<Vec<Vec<T>>> {
     let rows = ix(n.checked_add(1).ok_or_else(|| oob(op))?, op)?;
     let cols = ix(m.checked_add(1).ok_or_else(|| oob(op))?, op)?;
-    Ok(vec![vec![T::default(); cols]; rows])
+    let mut w = Vec::new();
+    w.try_reserve_exact(rows)
+        .map_err(|_| nlib(op, NlibCode::Memory))?;
+    for _ in 0..rows {
+        w.push(filled(cols, T::default(), op)?);
+    }
+    Ok(w)
 }
 
-/// A zero-filled array of `k + 1` entries.
+/// A zero-filled array of `k + 1` entries; `NL_MEM_ERR` where it cannot be
+/// allocated.
 pub(super) fn zeros1<T: Clone + Default>(k: isize, op: &'static str) -> Result<Vec<T>> {
     let len = ix(k.checked_add(1).ok_or_else(|| oob(op))?, op)?;
-    Ok(vec![T::default(); len])
+    filled(len, T::default(), op)
+}
+
+/// `i + 1` on a signed index; `InvalidInput` where it overflows.
+pub(super) fn succ(i: isize, op: &'static str) -> Result<isize> {
+    i.checked_add(1).ok_or_else(|| oob(op))
+}
+
+/// `2 * a` on a signed index (scratch sizes `2 * max(p, q)`); `InvalidInput` where it
+/// overflows (upstream's signed overflow is undefined).
+pub(super) fn twice(a: isize, op: &'static str) -> Result<isize> {
+    a.checked_mul(2).ok_or_else(|| oob(op))
+}
+
+/// Largest degree upstream can express (`NL_DEGREE` is a `short`).
+pub(super) const DEGREE_RANGE_MAX: usize = 32767;
+
+/// A degree as upstream's signed index; `InvalidInput` above
+/// [`DEGREE_RANGE_MAX`] (not expressible upstream; bounds the index arithmetic).
+pub(super) fn degree(p: usize, op: &'static str) -> Result<isize> {
+    if p > DEGREE_RANGE_MAX {
+        return Err(SolidError::InvalidInput {
+            operation: op,
+            reason: "degree above upstream's NL_DEGREE (short) range",
+        });
+    }
+    sx(p, op)
 }
 
 /// Local notation of a surface (`N_SrfGetCPtsDegreesAndKnots`), indices signed.
@@ -129,8 +178,8 @@ impl<'a> Local<'a> {
         Ok(Self {
             n: sx(idx.n, op)?,
             m: sx(idx.m, op)?,
-            p: sx(idx.p, op)?,
-            q: sx(idx.q, op)?,
+            p: degree(idx.p, op)?,
+            q: degree(idx.q, op)?,
             r: sx(idx.r, op)?,
             s: sx(idx.s, op)?,
             pw: sur.cpts(),
@@ -206,7 +255,8 @@ pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<S
         Direction::U => {
             check_interior(up, t, OP)?;
             (spu, mlu) = span_mult(up, p, t, OP)?;
-            if mlu + mt > p {
+            // An overflowing sum exceeds the degree as well.
+            if mlu.checked_add(mt).is_none_or(|x| x > p) {
                 return Err(nlib(OP, NlibCode::Parameter));
             }
             (n + mt, m, r + mt, s)
@@ -214,7 +264,8 @@ pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<S
         Direction::V => {
             check_interior(vp, t, OP)?;
             (spv, mlv) = span_mult(vp, q, t, OP)?;
-            if mlv + mt > q {
+            // An overflowing sum exceeds the degree as well.
+            if mlv.checked_add(mt).is_none_or(|x| x > q) {
                 return Err(nlib(OP, NlibCode::Parameter));
             }
             (n, m + mt, r, s + mt)
@@ -665,8 +716,8 @@ pub fn decompose_to_bez(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
     }
     let blank = Patch {
         net: zeros2(p, q, OP)?,
-        u: zeros1(2 * p + 1, OP)?,
-        v: zeros1(2 * q + 1, OP)?,
+        u: zeros1(succ(twice(p, OP)?, OP)?, OP)?,
+        v: zeros1(succ(twice(q, OP)?, OP)?, OP)?,
     };
     let mut sur_a: Vec<Vec<Patch>> = vec![vec![blank; ix(nsv, OP)?]; ix(nsu, OP)?];
 
@@ -1555,5 +1606,22 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn absurd_degrees_and_sizes_are_errors() {
+        // fuzz (nlib.srf_tool_p1..p4): a degree of i64::MAX overflowed the index
+        // arithmetic, and scratch arrays sized from it aborted on allocation.
+        let s = sample();
+        let huge = i64::MAX as usize;
+        let (u, v) = (s.u_knots().to_vec(), s.v_knots().to_vec());
+        let bad = Surface::new(s.cpts(), huge, s.q(), u, v).unwrap();
+        assert!(insert_knot(&bad, 0.5, 1, Direction::U).is_err());
+        assert!(decompose_to_bez(&bad).is_err());
+        assert!(insert_knot(&s, 0.5, usize::MAX >> 1, Direction::U).is_err());
+        assert!(zeros1::<f64>(isize::MAX - 1, "t").is_err());
+        assert!(zeros2::<f64>(1 << 40, 1 << 40, "t").is_err());
+        assert!(twice(isize::MAX, "t").is_err());
+        assert!(degree(DEGREE_RANGE_MAX + 1, "t").is_err());
     }
 }

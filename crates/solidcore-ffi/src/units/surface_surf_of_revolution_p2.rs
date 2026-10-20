@@ -22,9 +22,10 @@
 //! extents for the NURB reparameterisations `Adjust` and `Trim` run: a zero-width one
 //! divides by zero in NLib; the STEP domain of `Adjust` must also have its sweep inside
 //! `[-360, 360]` and at most 360 long), non-negative tolerances, independent plane axes,
-//! and finite non-negative tolerance scales.
+//! finite non-negative tolerance scales, and for `Offset` an axis point inside
+//! `[-MAX_AXIS_POINT, MAX_AXIS_POINT]` (upstream dereferences a failed axis segment).
 
-use super::surface_surf_of_revolution_p1::{check_surface, push_surf, Surf, SurfaceData};
+use super::surface_surf_of_revolution_p1::{check_surface, push_surf, Build, Surf, SurfaceData};
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
@@ -276,10 +277,32 @@ fn call(op: i32, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
 /// for a shim failure.
 pub fn surface_op(s: &Surf, op: &Op) -> Result<Vec<f64>, FfiError> {
+    if matches!(op, Op::Offset { .. }) {
+        far_axis(s)?;
+    }
     let mut input = Vec::new();
     push_surf(&mut input, s)?;
     push_op(&mut input, op)?;
     call(op.code(), &input)
+}
+
+/// Largest axis point coordinate `CreateOffsetSurface` is given.
+pub const MAX_AXIS_POINT: f64 = 1e12;
+
+/// `CreateOffsetSurface` trims the offset generator with the axis segment from the
+/// axis point to `point + 1.5 * box size * Z` (`SmLine::CreateLineSegment`, status
+/// ignored) and dereferences it: an axis point far beyond the generator's size makes
+/// the segment degenerate and the line NULL. Bounds the axis point by
+/// [`MAX_AXIS_POINT`].
+fn far_axis(s: &Surf) -> Result<(), FfiError> {
+    let p = match &s.build {
+        Build::Canonical { point, .. } => point,
+        Build::Ctor { origin, .. } => origin,
+    };
+    if p.iter().any(|v| v.abs() > MAX_AXIS_POINT) {
+        return Err(bad("offset: axis point above MAX_AXIS_POINT"));
+    }
+    Ok(())
 }
 
 /// The test surface of [`is_nurb_surface_surf_of_revolution`].

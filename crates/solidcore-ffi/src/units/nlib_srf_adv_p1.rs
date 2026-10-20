@@ -15,11 +15,14 @@
 //! `n+p+2` u knots, `m+q+2` v knots; a curve `n p`, `n+1` control points, `n+p+2`
 //! knots. [`eval`] accepts only well-formed clamped surfaces and curves (degrees
 //! `1..=NL_MAXDEG`, at least degree + 1 control points, finite data, non-decreasing
-//! knots with end multiplicity exactly `p+1` and interior multiplicity at most `p`)
+//! knots with end multiplicity exactly `p+1` and interior multiplicity at most `p`;
+//! surface weights all `NOW` or all positive)
 //! and rejects every argument that would make upstream index outside its arrays or
 //! loop without end:
 //!
-//! - `ExtendByDist`: `dflg` `1..=2`, `end` `1..=2`, `cont` one of `2, 3, 4, 6`.
+//! - `ExtendByDist`: `dflg` `1..=2`, `end` `1..=2`, `cont` one of `2, 3, 4, 6`; with
+//!   `cont` `2` or `3` a distance of at least a parameter step that
+//!   is not lost to rounding (see `g2_extension_ok`).
 //! - `Unbounded`: `cflg` one of `2, 3, 4, 6`; `ndr` `0..=`[`MAX_NDR`]; `1..=`[`MAX_EVALS`]
 //!   evaluations; each parameter either within [`MAX_REACH`] domain lengths of the
 //!   domain (bounding the periodic wrap loops) or beyond `1e12` in magnitude
@@ -33,7 +36,7 @@
 //!   equal degrees and control point counts, so upstream never reads past the
 //!   vector field's control points.
 
-use crate::validate::bad;
+use crate::validate::{bad, euclid, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest highest net index (`n`, `m`) of a surface accepted by [`eval`].
@@ -154,7 +157,14 @@ fn surface<'a>(rd: &mut Reader<'a>) -> Result<SrfShape<'a>, FfiError> {
     if p > n || q > m {
         return Err(bad("degree above the highest net index"));
     }
-    rd.slice(4 * (n + 1) * (m + 1))?;
+    let net = rd.slice(4 * (n + 1) * (m + 1))?;
+    // Weights: all NOW (non-rational) or all positive. Anything else is no valid
+    // surface; a zero weight makes Euclidean points infinite, and the extension then
+    // reads past its scratch rows when a reflection plane cannot be normalised.
+    let ws: Vec<f64> = net.chunks(4).filter_map(|c| c.get(3).copied()).collect();
+    if !(ws.iter().all(|&w| w == NOW) || ws.iter().all(|&w| w > 0.0)) {
+        return Err(bad("mixed or non-positive weights"));
+    }
     let u = rd.slice(n + p + 2)?;
     let v = rd.slice(m + q + 2)?;
     if !valid_knots(u, p) || !valid_knots(v, q) {
@@ -176,6 +186,89 @@ fn curve<'a>(rd: &mut Reader<'a>) -> Result<(usize, usize, &'a [f64]), FfiError>
         return Err(bad("invalid knot vector"));
     }
     Ok((n, p, u))
+}
+
+/// Smallest parameter step of the `NL_G2` search, in units of `f64::EPSILON` times the
+/// largest knot magnitude (see `g2_extension_ok`).
+pub const MIN_G2_STEP_EPS: f64 = 1024.0;
+
+/// The validated surface at the start of `input` (`n m p q`, the net, the u and v
+/// knots): a bound on the control polygon length of every iso-curve running in u
+/// (`udir`) or v, and the knots of that direction. The bound is the sum, over
+/// consecutive net rows (columns), of the largest distance between corresponding
+/// Euclidean points; it is infinite when a distance is not finite.
+fn iso_polygon_bound(input: &[f64], udir: bool) -> Result<(f64, &[f64]), FfiError> {
+    let head = |k: usize| {
+        input
+            .get(k)
+            .map(|&x| x as usize)
+            .ok_or_else(|| bad("input too short"))
+    };
+    let (n, m, p, q) = (head(0)?, head(1)?, head(2)?, head(3)?);
+    let pt = |i: usize, j: usize| -> Result<[f64; 3], FfiError> {
+        let at = 4 + 4 * (i * (m + 1) + j);
+        match input.get(at..at + 4) {
+            Some(&[x, y, z, w]) => Ok(euclid([x, y, z, w])),
+            _ => Err(bad("input too short")),
+        }
+    };
+    let u0 = 4 + 4 * (n + 1) * (m + 1);
+    let v0 = u0 + n + p + 2;
+    let knots = if udir {
+        input.get(u0..v0)
+    } else {
+        input.get(v0..v0 + m + q + 2)
+    }
+    .ok_or_else(|| bad("input too short"))?;
+    let dist = |a: [f64; 3], b: [f64; 3]| {
+        let [dx, dy, dz] = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    };
+    let (rows, cols) = if udir { (n, m) } else { (m, n) };
+    let mut total = 0.0;
+    for a in 0..rows {
+        let mut longest: f64 = 0.0;
+        for b in 0..=cols {
+            let (p0, p1) = if udir {
+                (pt(a, b)?, pt(a + 1, b)?)
+            } else {
+                (pt(b, a)?, pt(b, a + 1)?)
+            };
+            let d = dist(p0, p1);
+            if !d.is_finite() {
+                return Ok((f64::INFINITY, knots));
+            }
+            longest = longest.max(d);
+        }
+        total += longest;
+    }
+    Ok((total, knots))
+}
+
+/// `ST_surxsdr` extends sampled iso-curves with `ST_curxcdr` `NL_G2` for `cont`
+/// `NL_G1` / `NL_G2`. Its parameter search steps by `du = range * dist / d1` (`d1` the
+/// iso-curve's arc length) and never ends when that step is lost to rounding (zero
+/// or tiny `dist`, a huge or overflowing iso-curve length; HANG-6). So `dist` must
+/// be non-zero and the step
+/// estimated with [`iso_polygon_bound`] in place of `d1` (a lower bound of `du` for
+/// non-rational surfaces) at least [`MIN_G2_STEP_EPS`] `f64::EPSILON`s of the largest
+/// knot magnitude.
+fn g2_extension_ok(input: &[f64], dist: f64, udir: bool, cont: usize) -> Result<(), FfiError> {
+    if cont != 2 && cont != 3 {
+        return Ok(());
+    }
+    let (bound, knots) = iso_polygon_bound(input, udir)?;
+    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
+        return Err(bad("empty knot vector"));
+    };
+    let step = (last - first) * (dist / bound);
+    let floor = MIN_G2_STEP_EPS * f64::EPSILON * first.abs().max(last.abs());
+    if !(step.abs() >= floor && dist != 0.0) {
+        return Err(bad(
+            "extend by distance: G1/G2 step lost to rounding (distance too short)",
+        ));
+    }
+    Ok(())
 }
 
 fn cont_flag(rd: &mut Reader<'_>) -> Result<usize, FfiError> {
@@ -210,11 +303,12 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     match op {
         Op::ExtendByDist => {
             surface(&mut rd)?;
-            rd.num()?;
+            let dist = rd.num()?;
+            let udir = rd.index(1, 2)? == 1;
             rd.index(1, 2)?;
-            rd.index(1, 2)?;
-            cont_flag(&mut rd)?;
+            let cont = cont_flag(&mut rd)?;
             rd.index(0, 1)?;
+            g2_extension_ok(input, dist, udir, cont)?;
         }
         Op::MaxDeriv => {
             surface(&mut rd)?;

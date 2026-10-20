@@ -50,6 +50,9 @@
 //!   derivatives, a vector field with fewer control points than the curve,
 //!   incompatible profiles without `make_compatible`) the functions return
 //!   [`SolidError::InvalidInput`].
+//! - `N_CreateSkinSpine`: a subdivision level whose frame count `k * (subdiv + 1)`
+//!   overflows is `InvalidInput`; alignment parameters that cannot be allocated are
+//!   `NL_MEM_ERR` (upstream's failed `N_AllocReal1dArray`).
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
@@ -545,12 +548,13 @@ pub fn create_skin_spine(
         let sub = al.subdiv.max(1);
 
         // Set up the alignment parameters: spine_params with `sub` interpolations.
-        let ll = k * (sub + 1);
-        let mut align_params = vec![0.0; ll + 1];
+        let sub1 = sub.checked_add(1).ok_or_else(|| oob(OP))?;
+        let ll = k.checked_mul(sub1).ok_or_else(|| oob(OP))?;
+        let mut align_params = super::filled(ll.checked_add(1).ok_or_else(|| oob(OP))?, 0.0, OP)?;
         for ii in 0..k {
             let (t0, t1) = (at(spine_params, ii, OP)?, at(spine_params, ii + 1, OP)?);
             let incr = (t1 - t0) / (sub as f64 + 1.0);
-            let base = ii * (sub + 1);
+            let base = ii * sub1;
 
             for jj in 0..=sub {
                 put(&mut align_params, base + jj, t0 + jj as f64 * incr, OP)?;
@@ -564,7 +568,7 @@ pub fn create_skin_spine(
         for ii in 0..=k {
             let (origin, x_axis) = spine.eval_tangent(at(spine_params, ii, OP)?, Side::Left)?;
 
-            let z_axis = at(&bvecs, ii * (sub + 1), OP)?;
+            let z_axis = at(&bvecs, ii * sub1, OP)?;
             let y_axis = z_axis.cross(x_axis);
 
             let mat =
@@ -1009,5 +1013,29 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn absurd_subdivision_is_an_error() {
+        // fuzz (nlib.srf_adv_p1 fuzz00596, fuzz01129): `k * (subdiv + 1)` overflowed
+        // and sized the alignment parameters.
+        let mut profiles = vec![
+            line_crv(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+            line_crv(Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 1.0)),
+        ];
+        let spine = line_crv(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        for subdiv in [usize::MAX, i64::MAX as usize] {
+            let opts = SkinSpineOptions {
+                make_compatible: false,
+                align: Some(SpineAlignment {
+                    z0: Vec3::new(1.0, 0.0, 0.0),
+                    subdiv,
+                }),
+                derivs: SkinDerivs::None,
+                degree: 1,
+                dir: Direction::V,
+            };
+            assert!(create_skin_spine(&mut profiles, &spine, &[0.0, 1.0], &opts).is_err());
+        }
     }
 }

@@ -38,6 +38,11 @@
 //!   minus one; an empty slice returns `InvalidInput`.
 //! - Every array access is bounds checked; where upstream would index outside its
 //!   arrays (invalid surfaces) the functions return [`SolidError::InvalidInput`].
+//! - `N_SrfRemoveAllKnots` loops forever when a removal step leaves its state
+//!   unchanged (the chosen knot was already unremovable and stays so; e.g. a NaN
+//!   error bound in u with no removable v knot sends every `NL_UVDIR` step to v);
+//!   [`remove_all_knots`] detects exactly that and returns
+//!   [`SolidError::NotConverged`].
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::max2;
@@ -47,7 +52,9 @@ use crate::nurbs::knots::KnotVector;
 use crate::nurbs::math::{CPoint, BIGD, NOW};
 use crate::nurbs::srf_basic::{make_rat_compatible, Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 
-use super::p1::{at, at2, insert_knots, ix, oob, put, put2, sx, zeros1, zeros2, Local};
+use super::p1::{
+    at, at2, degree, insert_knots, ix, oob, put, put2, sx, twice, zeros1, zeros2, Local,
+};
 use super::p2::{
     elevate_degree, remove_knot_conditional_with_status, remove_one_knot, REMOVAL_PARAM_TOL,
 };
@@ -82,9 +89,9 @@ fn uv(d: Direction, a: isize, b: isize) -> (isize, isize) {
 fn dims(sur: &Surface, d: Direction, op: &'static str) -> Result<(isize, isize, isize)> {
     let x = sur.indices();
     if d == Direction::U {
-        Ok((sx(x.p, op)?, sx(x.n, op)?, sx(x.r, op)?))
+        Ok((degree(x.p, op)?, sx(x.n, op)?, sx(x.r, op)?))
     } else {
-        Ok((sx(x.q, op)?, sx(x.m, op)?, sx(x.s, op)?))
+        Ok((degree(x.q, op)?, sx(x.m, op)?, sx(x.s, op)?))
     }
 }
 
@@ -269,12 +276,12 @@ pub(super) fn remove_knots_kept(
         brv: vec![BIGD; ix(s + 1, op)?],
         sru: vec![0; ix(r + 1, op)?],
         srv: vec![0; ix(s + 1, op)?],
-        alf: zeros1(2 * a, op)?,
-        oma: zeros1(2 * a, op)?,
-        bet: zeros1(2 * a, op)?,
-        omb: zeros1(2 * a, op)?,
+        alf: zeros1(twice(a, op)?, op)?,
+        oma: zeros1(twice(a, op)?, op)?,
+        bet: zeros1(twice(a, op)?, op)?,
+        omb: zeros1(twice(a, op)?, op)?,
         max: zeros1(a + 1, op)?,
-        rw: zeros2(b, 2 * a, op)?,
+        rw: zeros2(b, twice(a, op)?, op)?,
         lam: 0.0,
         oml: 0.0,
         error: None,
@@ -332,11 +339,12 @@ pub(super) fn remove_knots_kept(
     // Try to remove each knot.
     let (mut bu, mut su, mut ru) = (0.0, 0, 0);
     let (mut bv, mut sv, mut rv) = (0.0, 0, 0);
+    let mut steps: u32 = 0;
     loop {
         // Find knot with smallest error.
         let x = w.sq.indices();
         if do_u {
-            let (pp, rr) = (sx(x.p, op)?, sx(x.r, op)?);
+            let (pp, rr) = (degree(x.p, op)?, sx(x.r, op)?);
             bu = at(&w.bru, pp + 1, op)?;
             su = at(&w.sru, pp + 1, op)?;
             ru = pp + 1;
@@ -350,7 +358,7 @@ pub(super) fn remove_knots_kept(
             }
         }
         if do_v {
-            let (qq, ss) = (sx(x.q, op)?, sx(x.s, op)?);
+            let (qq, ss) = (degree(x.q, op)?, sx(x.s, op)?);
             bv = at(&w.brv, qq + 1, op)?;
             sv = at(&w.srv, qq + 1, op)?;
             rv = qq + 1;
@@ -386,10 +394,23 @@ pub(super) fn remove_knots_kept(
         };
 
         // Remove in the chosen direction.
-        if krm == Direction::U {
-            w.step(Direction::U, ru, su, bu, op)?;
+        let (rk, sk, bk) = if krm == Direction::U {
+            (ru, su, bu)
         } else {
-            w.step(Direction::V, rv, sv, bv, op)?;
+            (rv, sv, bv)
+        };
+        let was_kept = at(w.br(krm), rk, op)? == NO_REMOVAL;
+        w.step(krm, rk, sk, bk, op)?;
+        steps = steps.saturating_add(1);
+
+        // A step that removes nothing from a knot already marked unremovable leaves
+        // every input of the selection unchanged: upstream picks it again forever
+        // (e.g. a NaN error bound in u makes `bu < bv` false while v is done).
+        if was_kept && w.sq.indices() == x && at(w.br(krm), rk, op)? == NO_REMOVAL {
+            return Err(SolidError::NotConverged {
+                operation: op,
+                iterations: steps,
+            });
         }
     }
 
@@ -1125,5 +1146,201 @@ mod tests {
         assert_eq!(v[0].degrees(), v[1].degrees());
         assert!(max_dist(&s, &v[0]) < 1e-9);
         assert!(make_compatible(&mut [], Direction::U).is_err());
+    }
+
+    #[test]
+    fn absurd_degree_is_an_error() {
+        let s = sample();
+        let (u, v) = (s.u_knots().to_vec(), s.v_knots().to_vec());
+        let bad = Surface::new(s.cpts(), i64::MAX as usize, s.q(), u, v).unwrap();
+        assert!(remove_all_knots(&bad, 0.1, Direction::UV).is_err());
+    }
+
+    #[test]
+    fn stuck_removal_loop_is_not_converged() {
+        // fuzz (nlib.srf_tool_p3 fuzz00246): a control point at 1e300 makes the u
+        // error bounds NaN; with nothing removable in v every `NL_UVDIR` step goes to
+        // v and changes nothing, so upstream loops forever.
+        use crate::nurbs::math::CPoint;
+        let net = vec![
+            vec![
+                CPoint::new(
+                    1626.3087426842285,
+                    -9.743918576531186,
+                    5.643171203164258,
+                    1.0,
+                ),
+                CPoint::new(
+                    519.5078505845089,
+                    -2.9675111313088722,
+                    1.7078684560266675,
+                    0.36724555114660634,
+                ),
+                CPoint::new(
+                    0.16358720963267612,
+                    0.21218302875865636,
+                    -0.1386939392132162,
+                    0.07033813493236826,
+                ),
+                CPoint::new(
+                    -2.9596848534411486,
+                    6.906520213597406,
+                    3.9556725479410804,
+                    0.8874920132658637,
+                ),
+                CPoint::new(
+                    -6.458485261542945,
+                    5.280748590770612,
+                    0.1518901176891312,
+                    1.0,
+                ),
+            ],
+            vec![
+                CPoint::new(
+                    -1.5787813219128228,
+                    0.7418135932976195,
+                    -9.03132939503351,
+                    1.0,
+                ),
+                CPoint::new(
+                    -6.229192732531399,
+                    1016.7293044374496,
+                    -2.884348915780943,
+                    1.0,
+                ),
+                CPoint::new(
+                    -8.411305618125482,
+                    1493.461188913565,
+                    -8.168913180903867e-07,
+                    1.0,
+                ),
+                CPoint::new(
+                    -1.422549489599622e-06,
+                    -2.1715420326530586,
+                    -14.026370188646485,
+                    1.5699444326596041,
+                ),
+                CPoint::new(
+                    9.361202292046882e-07,
+                    9.882733024988777,
+                    -3.6075633563374776,
+                    1.0,
+                ),
+            ],
+            vec![
+                CPoint::new(
+                    2.9196125327924736,
+                    -4.289018443510048,
+                    8.210002077396046,
+                    0.9431015856528775,
+                ),
+                CPoint::new(
+                    -1.256655965527212,
+                    -4.6044238256936065,
+                    0.005063449909195938,
+                    0.9818282734558954,
+                ),
+                CPoint::new(
+                    -3.216286737780081,
+                    -4.752421516194052,
+                    -3.8449405010672955,
+                    1.0,
+                ),
+                CPoint::new(
+                    -1.4301272519182891e-06,
+                    11.539207454443742,
+                    -4.472860455363832,
+                    1.4889698651863237,
+                ),
+                CPoint::new(
+                    3.678236824741495,
+                    2.9872992417753297,
+                    5.681212789521694,
+                    0.7351019376987773,
+                ),
+            ],
+            vec![
+                CPoint::new(
+                    0.0,
+                    -5.47642869895013,
+                    -15.524988749452309,
+                    1.6831404287925364,
+                ),
+                CPoint::new(
+                    -1.9002930294812972,
+                    -1.7490147291009897,
+                    -4.958237472739259,
+                    1.632269172959596,
+                ),
+                CPoint::new(-2.791967666389214, 0.0, 0.0, 1.6083988498724937),
+                CPoint::new(-2.62985801022589, 2.306046547439225, 6.327673951208524, 1.0),
+                CPoint::new(
+                    5399.490649237752,
+                    4.311559664997214,
+                    2.3594855955162117,
+                    1.0,
+                ),
+            ],
+            vec![
+                CPoint::new(
+                    0.09516099892339171,
+                    0.0,
+                    -0.010259986886403916,
+                    0.01968707308526039,
+                ),
+                CPoint::new(
+                    0.030391701947088776,
+                    -3.188545969307479,
+                    -1293.9973169913883,
+                    0.44467229738037856,
+                ),
+                CPoint::new(
+                    0.0,
+                    -4.684707627187429,
+                    -1901.1749581854826,
+                    0.6440881451920273,
+                ),
+                CPoint::new(
+                    1e+300,
+                    1.921649850073933,
+                    -13.850288600357576,
+                    1.9056967771560864,
+                ),
+                CPoint::new(
+                    0.0,
+                    0.649768547588242,
+                    12.305716587561323,
+                    1.5177859821925366,
+                ),
+            ],
+        ];
+        let s = Surface::new(
+            net,
+            1,
+            1,
+            vec![
+                -0.42006782694164,
+                -0.42006782694164,
+                0.377647184343457,
+                1.175362195628554,
+                1.973077206913651,
+                2.770792218198748,
+                2.770792218198748,
+            ],
+            vec![
+                67.2383433427168,
+                67.2383433427168,
+                121.29078320883525,
+                146.65381351199017,
+                161.5377674219393,
+                172.7821035234011,
+                172.7821035234011,
+            ],
+        )
+        .unwrap();
+        assert!(matches!(
+            remove_all_knots(&s, 0.0, Direction::UV),
+            Err(SolidError::NotConverged { .. })
+        ));
     }
 }

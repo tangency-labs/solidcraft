@@ -48,6 +48,10 @@
 //!   arrays (invalid knot vectors, incompatible cross sections with `cmp == NL_NO`,
 //!   extension parameters on the wrong side of the domain, ...) the functions return
 //!   [`SolidError::InvalidInput`].
+//! - Scratch and output nets that cannot be allocated are `NL_MEM_ERR` (upstream's
+//!   failed `N_Alloc*`); index arithmetic on a degree that overflows (`p + 1`,
+//!   `ns + p + 1` for a degree near `isize::MAX`, where upstream's signed overflow is
+//!   undefined) is `InvalidInput`.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
@@ -99,10 +103,11 @@ fn s2<T>(w: &mut [Vec<T>], i: isize, j: isize, x: T, op: &'static str) -> Result
 }
 
 /// A zero-filled `(n+1) x (m+1)` array (upstream allocates uninitialised storage).
+/// `NL_MEM_ERR` where it cannot be allocated.
 fn net<T: Clone + Default>(n: isize, m: isize, op: &'static str) -> Result<Vec<Vec<T>>> {
-    let row: Vec<T> = storage(m, op)?;
+    let cols = ux(m, op)?.checked_add(1).ok_or_else(|| oob(op))?;
     let rows = ux(n, op)?.checked_add(1).ok_or_else(|| oob(op))?;
-    Ok(vec![row; rows])
+    super::grid(rows, cols, T::default(), op)
 }
 
 /// `v[i]` for a `usize` index.
@@ -399,7 +404,7 @@ fn extend_rec(
     };
     let mut d1 = f64::MAX;
     let mut jj: isize = 0;
-    for ii in (p + 1)..(r - p) {
+    for ii in p.checked_add(1).ok_or_else(|| oob(OP))?..(r - p) {
         let x = get(&up, ii, OP)?;
         if (uu - x).abs() < d1 {
             d1 = (uu - x).abs();
@@ -1242,7 +1247,10 @@ pub fn create_skin_srf(
     };
 
     // Compute surface control points (rows of the skinning direction).
-    let rs = ns + ps + 1;
+    let rs = ns
+        .checked_add(ps)
+        .and_then(|x| x.checked_add(1))
+        .ok_or_else(|| oob(OP))?;
     let kn_s: Vec<f64>;
     let knt: Option<Vec<f64>>;
     if let Some(uc) = &skc {
@@ -1252,7 +1260,7 @@ pub fn create_skin_srf(
         knt = None;
         kn_s = interp_knot_vector(&sk, deg)?;
     }
-    if sx(kn_s.len(), OP)? != rs + 1 {
+    if sx(kn_s.len(), OP)? - 1 != rs {
         return Err(oob(OP));
     }
     let kv_s = KnotVector::from_slice(&kn_s)?;
@@ -1439,5 +1447,32 @@ mod tests {
         assert!(create_skin_srf(&mut cs, false, false, 2, Direction::UV, 0.0).is_err());
         let mut one = vec![cs[0].clone()];
         assert!(create_skin_srf(&mut one, false, true, 2, Direction::U, 0.0).is_err());
+    }
+
+    #[test]
+    fn absurd_degrees_are_errors() {
+        // fuzz (nlib.srf_adv_p3 fuzz00356, fuzz00379): degrees of i64::MAX overflowed
+        // the extension's knot loop and the skin's knot count.
+        let s = plane_srf(false);
+        let (u, v) = (s.u_knots().to_vec(), s.v_knots().to_vec());
+        let bad = Surface::new(s.cpts(), s.p(), i64::MAX as usize, u, v).unwrap();
+        assert!(extend_by_param_dist(
+            &bad,
+            1.2,
+            Direction::V,
+            CurveEnd::End,
+            ExtendContinuity::Cmax
+        )
+        .is_err());
+        let mut cs: Vec<Curve> = (0..3)
+            .map(|i| {
+                let z = f64::from(i);
+                line([0.0, 0.0, z], [1.0, 0.0, z], NOW)
+            })
+            .collect();
+        assert!(
+            create_skin_srf(&mut cs, false, false, i64::MAX as usize, Direction::V, 0.0).is_err()
+        );
+        assert!(net::<f64>(1 << 40, 1 << 40, "t").is_err());
     }
 }

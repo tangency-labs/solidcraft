@@ -53,6 +53,9 @@
 //! - Every array access is bounds checked; where upstream would index outside its
 //!   arrays (curves with fewer control points than read, empty parameter lists) the
 //!   functions return [`SolidError::InvalidInput`].
+//! - `N_SweepCrossTangentCrv`: a cross section degree above `32767` (upstream's
+//!   `NL_DEGREE` is a `short`) is `InvalidInput`; sample arrays that cannot be
+//!   allocated are `NL_MEM_ERR`.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
@@ -555,7 +558,7 @@ pub fn sweep_cross_tangent_crv(
     cross_section: &Curve,
 ) -> Result<Curve> {
     const OP: &str = OP_SWEEP_CT;
-    let pc = cross_section.degree();
+    let pc = super::degree(cross_section.degree(), OP)?;
     let (nc, mc) = cross_section.array_sizes();
     let knt = cross_section.knot_vector()?;
     let uk = cross_section.knots();
@@ -579,9 +582,12 @@ pub fn sweep_cross_tangent_crv(
             reason: "cross section without a knot span",
         });
     }
-    let sample_count = pc * segment_count + 1;
-    let mut cross_tangents = vec![Vec3::ZERO; sample_count];
-    let mut params = vec![0.0; sample_count];
+    let sample_count = pc
+        .checked_mul(segment_count)
+        .and_then(|x| x.checked_add(1))
+        .ok_or_else(|| oob(OP))?;
+    let mut cross_tangents = super::filled(sample_count, Vec3::ZERO, OP)?;
+    let mut params = super::filled(sample_count, 0.0, OP)?;
 
     let mut sample: Option<Vec3> = None;
     let mut i_smp = 0usize;
@@ -1365,5 +1371,25 @@ mod tests {
         assert_eq!(q, s);
         let q = adjust_deriv_srf(&s, Direction::U, Boundary::Left, Boundary::Bottom).unwrap();
         assert_eq!(q.degrees(), (s.degrees().1, s.degrees().0));
+    }
+
+    #[test]
+    fn absurd_cross_section_degree_is_an_error() {
+        // fuzz (nlib.srf_adv_p4 fuzz00189, fuzz00067): `p * segments + 1` overflowed or
+        // sized the samples.
+        let c = line(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        let id = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for p in [i64::MAX as usize, 1 << 40] {
+            let bad = Curve::new(c.cpts().to_vec(), p, c.knots().to_vec()).unwrap();
+            let r = sweep_cross_tangent_crv(
+                Vec3::X,
+                Vec3::new(1.0, 1.0, 1.0),
+                Vec3::ZERO,
+                &id,
+                &id,
+                &bad,
+            );
+            assert!(r.is_err());
+        }
     }
 }

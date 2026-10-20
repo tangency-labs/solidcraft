@@ -68,7 +68,10 @@
 //!   `m + 1`; the port requires exactly `m + 1` (`InvalidInput` otherwise).
 //! - **`DampenKnotSpacing`** loops forever when a split never brings the span ratios
 //!   below the factor (e.g. a factor at most 1); the port stops after
-//!   `DAMPEN_SPLIT_LIMIT` splits with [`SolidError::NotConverged`].
+//!   `DAMPEN_SPLIT_LIMIT` splits with [`SolidError::NotConverged`]. Its
+//!   `InsertAt(.., lMultiplicityOfNewKnots)` growth fails softly upstream (ignored);
+//!   the port reserves it fallibly and returns `InvalidInput` when the caller's
+//!   multiplicity makes the new knots too large for memory.
 //! - **Tolerances of `Trim`.** `SmTol::GetZoneTol3d(this)` of a curve without edge is
 //!   the system zone tolerance and `SmTol::MapTo1d(tol, t, curve)` maps with the first
 //!   derivative of `Evaluate(t, 1, TRUE, .., bNonZeroTangents = TRUE)` (the `SmCurve.h`
@@ -789,7 +792,8 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` without a NURB or when the knot insertion fails;
-    /// [`SolidError::NotConverged`] after [`DAMPEN_SPLIT_LIMIT`] splits.
+    /// [`SolidError::NotConverged`] after [`DAMPEN_SPLIT_LIMIT`] splits;
+    /// `InvalidInput` when the new knots do not fit in memory.
     pub fn dampen_knot_spacing(
         &mut self,
         max_delta_factor: f64,
@@ -847,9 +851,14 @@ impl BSplineCurve {
                     .iter()
                     .position(|&k| k > split_knot)
                     .unwrap_or(new_knots.len());
-                for _ in 0..multiplicity {
-                    new_knots.insert(insert_point, split_knot);
-                }
+                // (InsertAt with a count; fallible, as the caller's multiplicity sizes it)
+                new_knots.try_reserve(multiplicity).map_err(|_| {
+                    SolidError::invalid_input(OP_DAMPEN, "new knots too large for memory")
+                })?;
+                new_knots.splice(
+                    insert_point..insert_point,
+                    core::iter::repeat_n(split_knot, multiplicity),
+                );
                 i += 1;
             }
         }
@@ -2388,5 +2397,16 @@ mod tests {
         let mut r = cubic();
         r.reparametrize_with_arc_length().unwrap();
         assert!(BSplineCurve::new(3).scale(1.0).is_err());
+    }
+
+    #[test]
+    fn dampen_absurd_multiplicity_is_an_error() {
+        // fuzz regressions (nurbs.b_spline_curve_n_lib fuzz00889, fuzz01344): a huge
+        // multiplicity inserted knots one at a time without end
+        let mut c = cubic();
+        let before = c.knots(None).unwrap();
+        let r = c.dampen_knot_spacing(0.5, usize::MAX);
+        assert!(r.is_err());
+        assert_eq!(c.knots(None).unwrap(), before);
     }
 }

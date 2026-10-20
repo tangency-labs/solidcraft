@@ -28,7 +28,7 @@
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour:
 //! well-formed clamped 3D surfaces and curves (`r = n+p+1`, `1 <= p <= n`, degrees at
-//! most 17, finite data, consistent rationality, non-decreasing knots with end
+//! most 17, finite data with Euclidean coordinates within [`MAX_COORD`], consistent rationality, non-decreasing knots with end
 //! multiplicity exactly `degree + 1` and interior multiplicity at most the degree);
 //! `Eval` needs a NURB, and for power-basis surfaces (form `10`) the v-power
 //! derivative rows of every evaluation (including the `2, 2` recursion) must fit
@@ -41,7 +41,7 @@
 //! standalone surface), and with more than four curves all UV curves and surfaces
 //! unless the blend is not bilinear.
 
-use crate::validate::{bad, NOW, NOZ};
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -50,6 +50,12 @@ pub const MAX_INDEX: usize = 512;
 pub const MAX_DEGREE: usize = 17;
 /// `NL_MAXDER`.
 const MAX_DERIVATIVE: usize = 4;
+/// Largest magnitude of a Euclidean control point coordinate (as `nlib.crv_approx`,
+/// `nurbs.b_spline_curve_n_lib` and the curve units): beyond it upstream's
+/// approximations corrupt the heap (`N_ApproxNurbsWithNonRatCrv`'s sample count
+/// overflows) or loop without end (`N_SrfExtendByDist`'s parameter step is lost to
+/// rounding, HANG-6).
+pub const MAX_COORD: f64 = 1e6;
 /// `SM_SF_POLYNOMIAL`.
 const FORM_POLYNOMIAL: usize = 10;
 
@@ -172,6 +178,12 @@ fn check_points(pts: &[[f64; 4]], what: &str) -> Result<bool, FfiError> {
         }
         if w != NOW && w <= 0.0 {
             return Err(bad(format!("{what}: non-positive weight")));
+        }
+    }
+    // huge coordinates corrupt the C++ heap or hang it (see `MAX_COORD`)
+    for &pt in pts {
+        if euclid(pt).iter().any(|c| c.abs() > MAX_COORD) {
+            return Err(bad(format!("{what}: Euclidean point out of range")));
         }
     }
     Ok(w0 != NOW)

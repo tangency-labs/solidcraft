@@ -30,6 +30,9 @@
 //!   arrays (`k` beyond the given derivative curves, a frame parameter past the
 //!   sampled ones, a polyline without segments) the functions return
 //!   [`SolidError::InvalidInput`].
+//! - `N_CreateSweepScale`: a trajectory, cross section or sweep degree above `32767`
+//!   (upstream's `NL_DEGREE` is a `short`, so it cannot be expressed there) is
+//!   `InvalidInput`.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
@@ -202,8 +205,12 @@ pub fn create_sweep_scale(
         e,
     } = *opt;
 
+    // Degrees upstream cannot express (`NL_DEGREE` is a `short`).
+    super::degree(deg, OP)?;
+    super::degree(cur_c.degree(), OP)?;
+
     // Get local notation.
-    let pt = cur_t.degree();
+    let pt = super::degree(cur_t.degree(), OP)?;
     let mut ruled = false;
 
     // Decompose trajectory into linear and curved pieces.
@@ -1410,5 +1417,26 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn absurd_degrees_are_errors() {
+        // fuzz (nlib.srf_adv_p6 fuzz00016, fuzz00101): degrees of i64::MAX reached the
+        // curve tools and the cross tangent sampling.
+        let t = arc_traj();
+        let c = section();
+        let opts = SweepScaleOptions {
+            e: 1e-2,
+            deg: i64::MAX as usize,
+            ..SweepScaleOptions::default()
+        };
+        assert!(create_sweep_scale(&t, &c, Vec3::Z, &opts).is_err());
+        let bad = Curve::new(c.cpts().to_vec(), i64::MAX as usize, c.knots().to_vec()).unwrap();
+        let opts = SweepScaleOptions {
+            e: 1e-2,
+            ..SweepScaleOptions::default()
+        };
+        assert!(create_sweep_scale(&t, &bad, Vec3::Z, &opts).is_err());
+        assert!(create_sweep_scale(&bad, &c, Vec3::Z, &opts).is_err());
     }
 }

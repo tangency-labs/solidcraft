@@ -97,6 +97,13 @@
 //!   [`SolidError::InvalidInput`]. Where upstream would index outside its arrays
 //!   (fewer multiplicities than knots in `CreateCanonical`, too few control points
 //!   or knots for the constructor) the port returns `InvalidInput`.
+//! - **Canonical knots.** `CreateCanonical` expands the knots by the caller's
+//!   multiplicities with `SmTArray::Add`, whose failed growth is ignored (the array is
+//!   memory-dependent then). The port keeps the expansion implicit and materialises
+//!   only the knots `N_Iges126Crv` reads (`0..=n + p + 1`) plus the interval knots
+//!   it looks up, so an absurd multiplicity gives the same result (or the same "too
+//!   few knots" error) without allocating; a total count above `usize::MAX` is
+//!   `InvalidInput`.
 //! - **Enums.** `SmNurbCircleParam` and `SmProjectionType` are Rust enums, so
 //!   upstream's "not one of the values" branches only exist for
 //!   [`ProjectionType::Rotation`] and [`ProjectionType::Unknown`].
@@ -1368,16 +1375,9 @@ impl BSplineCurve {
             }
         }
 
-        // Make compatible knots array
-        let mut new_knots = Vec::new();
-        for (i, &knot) in knots.iter().enumerate() {
-            let mult = *knot_multiplicities
-                .get(i)
-                .ok_or_else(|| invalid(OP_CANON, "fewer multiplicities than knots"))?;
-            for _ in 0..mult {
-                new_knots.push(knot);
-            }
-        }
+        // Make compatible knots array (only the part `N_Iges126Crv` and the interval
+        // read is materialised; its full length comes from the multiplicities)
+        let expanded = ExpandedKnots::new(knots, knot_multiplicities, OP_CANON)?;
 
         // Make compatible weight array
         let tmp_weights;
@@ -1399,12 +1399,15 @@ impl BSplineCurve {
             [t.min(), t.max()]
         } else {
             let short = || invalid(OP_CANON, "too few knots");
-            let last = new_knots.len().checked_sub(p + 1).ok_or_else(short)?;
+            let last = expanded.len().checked_sub(p + 1).ok_or_else(short)?;
             [
-                new_knots.get(p).copied().ok_or_else(short)?,
-                new_knots.get(last).copied().ok_or_else(short)?,
+                expanded.get(p).ok_or_else(short)?,
+                expanded.get(last).ok_or_else(short)?,
             ]
         };
+
+        // `N_Iges126Crv` reads knots `0..=n + p + 1` only
+        let new_knots = expanded.prefix(n.saturating_add(p).saturating_add(2), OP_CANON)?;
 
         // NLIB curve construction
         let mut cur = iges_126_curve(&Entity126 {
@@ -1742,6 +1745,68 @@ fn matrix_of(m: &[[f64; 4]; 4]) -> Result<RealMatrix> {
     Ok(rma)
 }
 
+/// Upstream's expanded knot array of `CreateCanonical` (`sNewKnots`): `knots[i]`
+/// repeated `mults[i]` times, kept implicit because the multiplicities come from the
+/// caller (an absurd multiplicity must not allocate).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExpandedKnots<'a> {
+    knots: &'a [f64],
+    mults: &'a [usize],
+    len: usize,
+}
+
+impl<'a> ExpandedKnots<'a> {
+    /// The expansion of `knots` by `mults`; `InvalidInput` for fewer multiplicities
+    /// than knots (upstream reads past the array) or a total count above `usize::MAX`.
+    pub(crate) fn new(knots: &'a [f64], mults: &'a [usize], op: &'static str) -> Result<Self> {
+        let mut len = 0usize;
+        for i in 0..knots.len() {
+            let mult = *mults
+                .get(i)
+                .ok_or_else(|| invalid(op, "fewer multiplicities than knots"))?;
+            len = len
+                .checked_add(mult)
+                .ok_or_else(|| invalid(op, "knot count overflow"))?;
+        }
+        Ok(Self { knots, mults, len })
+    }
+
+    /// Number of expanded knots (`sNewKnots.GetSize()`).
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Expanded knot `idx` (`sNewKnots[idx]`), `None` past the end.
+    pub(crate) fn get(&self, idx: usize) -> Option<f64> {
+        let mut start = 0usize;
+        for (&knot, &mult) in self.knots.iter().zip(self.mults) {
+            let end = start.saturating_add(mult);
+            if idx < end {
+                return Some(knot);
+            }
+            start = end;
+        }
+        None
+    }
+
+    /// The first `min(count, len)` expanded knots, allocated fallibly
+    /// (`InvalidInput` when they do not fit in memory).
+    pub(crate) fn prefix(&self, count: usize, op: &'static str) -> Result<Vec<f64>> {
+        let count = count.min(self.len);
+        let mut out = Vec::new();
+        out.try_reserve_exact(count)
+            .map_err(|_| invalid(op, "knot array too large"))?;
+        for (&knot, &mult) in self.knots.iter().zip(self.mults) {
+            let room = count.saturating_sub(out.len());
+            if room == 0 {
+                break;
+            }
+            out.extend(core::iter::repeat_n(knot, mult.min(room)));
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1942,5 +2007,47 @@ mod tests {
         let k = split_cubic_bezier(a, b, c, d);
         assert_eq!(k[3], CPoint::new(3.0, 1.0, NOZ, NOW));
         assert_eq!(k[6], d);
+    }
+
+    fn canonical(mults: &[usize]) -> Result<BSplineCurve> {
+        let pts = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0)];
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 1,
+            control_points: &pts,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: mults,
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+    }
+
+    #[test]
+    fn canonical_huge_multiplicity_does_not_allocate() {
+        // fuzz regression (nurbs.b_spline_curve_p1 fuzz00528): a 2^31 multiplicity
+        // aborted the knot expansion; only the knots N_Iges126Crv reads are built now
+        let plain = canonical(&[2, 2]).unwrap();
+        let huge = canonical(&[2, 1 << 31]).unwrap();
+        assert_eq!(plain.knots(None).unwrap(), huge.knots(None).unwrap());
+        assert!(canonical(&[2, usize::MAX - 2]).is_ok());
+        // total above usize::MAX, and a huge leading run (knots [0, 0, 0, 0] invalid)
+        assert!(canonical(&[2, usize::MAX]).is_err());
+        assert!(canonical(&[1 << 62, 2]).is_err());
+        assert!(canonical(&[2]).is_err());
+    }
+
+    #[test]
+    fn expanded_knots_lookup() {
+        let e = ExpandedKnots::new(&[0.0, 0.5, 1.0], &[2, 1, 3], "test").unwrap();
+        assert_eq!(e.len(), 6);
+        assert_eq!(e.get(1), Some(0.0));
+        assert_eq!(e.get(2), Some(0.5));
+        assert_eq!(e.get(5), Some(1.0));
+        assert_eq!(e.get(6), None);
+        assert_eq!(e.prefix(4, "test").unwrap(), vec![0.0, 0.0, 0.5, 1.0]);
+        assert_eq!(e.prefix(99, "test").unwrap().len(), 6);
+        assert!(ExpandedKnots::new(&[0.0, 1.0], &[usize::MAX, 1], "test").is_err());
     }
 }

@@ -38,7 +38,8 @@
 //! - The memory-layout helpers (`sm_ComputeNurbSurfaceSize`,
 //!   `sm_InitNurbSurfaceMemory`) have no counterpart: [`Surface`] owns its storage.
 //!   [`allocate_nurb_surface`] returns a zero-filled surface (upstream
-//!   `smos_Calloc`); [`copy_nurb_surface`] returns a compact copy (upstream returns
+//!   `smos_Calloc`), allocated fallibly: `InvalidInput` where the size overflows or
+//!   does not fit in memory (upstream: `NULL`); [`copy_nurb_surface`] returns a compact copy (upstream returns
 //!   NULL for a surface without a net, which a [`Surface`] cannot be).
 //! - `sm_DecomposeSrf` fills a caller-allocated array of `nsu * nsv` patches (degrees
 //!   `p`, `q`, highest knot indices `2p+1`, `2q+1`, as its caller
@@ -686,7 +687,8 @@ pub fn compute_surf_constants(
 /// `q` and highest knot indices `r`, `s` (`sm_AllocateNurbSurface`, memory from
 /// `smos_Calloc`).
 ///
-/// Errors with `InvalidInput` when an index is `usize::MAX` (no storage size).
+/// Errors with `InvalidInput` when an index is `usize::MAX` (no storage size) or the
+/// storage does not fit in memory (upstream: `smos_Calloc` returns `NULL`).
 pub fn allocate_nurb_surface(
     n: usize,
     m: usize,
@@ -701,9 +703,39 @@ pub fn allocate_nurb_surface(
     };
     let rows = n.checked_add(1).ok_or_else(too_big)?;
     let cols = m.checked_add(1).ok_or_else(too_big)?;
-    let net = vec![vec![CPoint::default(); cols]; rows];
-    let u = vec![0.0; r.checked_add(1).ok_or_else(too_big)?];
-    let v = vec![0.0; s.checked_add(1).ok_or_else(too_big)?];
+    let u_len = r.checked_add(1).ok_or_else(too_big)?;
+    let v_len = s.checked_add(1).ok_or_else(too_big)?;
+    let no_memory = || SolidError::InvalidInput {
+        operation: OP_ALLOC,
+        reason: "storage too large for memory",
+    };
+    // upstream allocates the whole surface as one smos_Calloc block and returns NULL
+    // (NERN) when that fails: reserve (and release) a block of that size first, so
+    // an absurd size fails before any row is allocated
+    let total = rows
+        .checked_mul(cols)
+        .and_then(|k| k.checked_mul(size_of::<CPoint>()))
+        .and_then(|b| b.checked_add(u_len.checked_add(v_len)?.checked_mul(size_of::<f64>())?))
+        .ok_or_else(too_big)?;
+    Vec::<u8>::new()
+        .try_reserve_exact(total)
+        .map_err(|_| no_memory())?;
+    let filled = |len: usize, value: f64| -> Result<Vec<f64>> {
+        let mut a = Vec::new();
+        a.try_reserve_exact(len).map_err(|_| no_memory())?;
+        a.resize(len, value);
+        Ok(a)
+    };
+    let mut net: Vec<Vec<CPoint>> = Vec::new();
+    net.try_reserve_exact(rows).map_err(|_| no_memory())?;
+    for _ in 0..rows {
+        let mut row = Vec::new();
+        row.try_reserve_exact(cols).map_err(|_| no_memory())?;
+        row.resize(cols, CPoint::default());
+        net.push(row);
+    }
+    let u = filled(u_len, 0.0)?;
+    let v = filled(v_len, 0.0)?;
     Surface::new(net, p, q, u, v)
 }
 
@@ -1187,5 +1219,16 @@ mod tests {
         assert_eq!(copy_nurb_surface(&s), s);
         assert!(!is_nsrf_degenerate(&s, EFF_ZERO).unwrap());
         assert!(is_nsrf_degenerate(&s, 100.0).unwrap());
+    }
+
+    #[test]
+    fn allocate_absurd_surface_is_an_error() {
+        // fuzz regressions (nurbs.nurbs_srf fuzz00748, fuzz01665): absurd sizes
+        // aborted the allocation
+        // (sizes beyond the 47-bit address space, so no test machine can grant them)
+        assert!(allocate_nurb_surface(1 << 46, 1, 1, 1, 3, 3).is_err());
+        assert!(allocate_nurb_surface(1 << 62, 1 << 62, 1, 1, 3, 3).is_err());
+        assert!(allocate_nurb_surface(1, 1, 1, 1, 1 << 47, 3).is_err());
+        assert!(allocate_nurb_surface(1, 1, 1, 1, 3, 3).is_ok());
     }
 }

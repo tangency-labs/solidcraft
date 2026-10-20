@@ -50,6 +50,10 @@
 //!   minutes and Rust aborts on (a 3.5 GB patch array in a `surface.surface_p11` run).
 //!   The port refuses to split a node once the tree holds [`MAX_SUBDIVISION_NODES`]
 //!   nodes, with [`SolidError::InvalidInput`].
+//! - **Cyclic trees.** `FindUVNodes` walks the child links of a tree whose links form a
+//!   cycle forever (its stack grows without bound): the port stops after more node
+//!   visits than a tree of that size has (twice the node count plus one) with
+//!   [`SolidError::InvalidInput`].
 //! - **Undefined behaviour.** Where upstream would dereference a null tree (a failed
 //!   `GetTree`), a null `m_pNurb`, a node without data or a node that already has
 //!   children, the port returns [`SolidError::InvalidInput`]. `SubdivideToTolerances`
@@ -274,8 +278,21 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // init a node stack
         stack.push(top);
 
+        // a tree visits each node, and each missing second child, at most once
+        let visit_limit = self
+            .tree_or(OP_FIND)?
+            .nodes()
+            .len()
+            .saturating_mul(2)
+            .saturating_add(1);
+        let mut visits = 0usize;
+
         // while nodes remain to be processed
         while let Some(entry) = stack.pop() {
+            visits += 1;
+            if visits > visit_limit {
+                return Err(invalid(OP_FIND, "tree node links are cyclic"));
+            }
             // get current node
             let Some(node) = entry else {
                 // upstream: "Error: Surface cache: Null node"

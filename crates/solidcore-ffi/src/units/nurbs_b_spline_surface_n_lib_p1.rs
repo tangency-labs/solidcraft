@@ -46,15 +46,20 @@
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour:
 //! well-formed clamped 3D surfaces and curves (`r = n+p+1`, `1 <= p <= n`, degrees at
-//! most 17, finite data, consistent rationality, non-decreasing knots with end
+//! most 17, finite data with Euclidean coordinates within [`MAX_COORD`], consistent rationality, non-decreasing knots with end
 //! multiplicity exactly `degree + 1` and interior multiplicity at most the degree), a
 //! surface without NURB only for `Offset` and `Reparam`, power-basis surfaces (form
 //! `10`) for `EvalSimple` only when the v-power derivative rows fit `NL_MAXDEG + 1`
 //! (`p + 1 + min(hv, q)(q + 1) + q <= 17`), positive finite distances and
 //! tolerances, join directions `U` / `V`, at least one n-sided curve, knot indices
-//! inside the knot array, `p >= 1` for `MakeKnots`.
+//! inside the knot array, `p >= 1` for `MakeKnots`; `NonRat` of a rational curve
+//! (which runs `N_ApproxNurbsWithNonRatCrv`) only with `APPROX_MIN_TOL <= tol <= 1`
+//! and homogeneous data and weights within [`MAX_COORD`], the `nlib.crv_approx` bounds (beyond them its
+//! sample count overflows `NL_INDEX` and it writes out of bounds); a non-translational
+//! `Sweep` only with `tol >= MIN_SWEEP_TOL_FRACTION` times the trajectory's control
+//! polygon length (`nlib.srf_adv_p6`; HANG-5 below it).
 
-use crate::validate::{bad, NOW, NOZ};
+use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -63,6 +68,18 @@ pub const MAX_INDEX: usize = 2048;
 pub const MAX_DEGREE: usize = 17;
 /// `NL_MAXDER`.
 const MAX_DERIVATIVE: usize = 4;
+/// Largest magnitude of a Euclidean control point coordinate (as `nlib.crv_approx`,
+/// `nurbs.b_spline_curve_n_lib` and the curve units): beyond it upstream's
+/// approximations corrupt the heap (`N_ApproxNurbsWithNonRatCrv`'s sample count
+/// overflows) or loop without end (`N_SrfExtendByDist`'s parameter step is lost to
+/// rounding, HANG-6).
+pub const MAX_COORD: f64 = 1e6;
+/// Smallest non-translational `Sweep` tolerance relative to the trajectory's control
+/// polygon length (`nlib.srf_adv_p6` `MIN_SWEEP_TOL_FRACTION`).
+pub const MIN_SWEEP_TOL_FRACTION: f64 = 1e-6;
+/// Smallest `NonRat` tolerance for a rational curve (`nlib.crv_approx` `MIN_TOL`).
+pub const APPROX_MIN_TOL: f64 = 1e-7;
+
 /// `SM_SF_POLYNOMIAL`.
 const FORM_POLYNOMIAL: usize = 10;
 
@@ -217,6 +234,12 @@ fn check_points(pts: &[[f64; 4]], what: &str) -> Result<(), FfiError> {
             return Err(bad(format!("{what}: non-positive weight")));
         }
     }
+    // huge coordinates corrupt the C++ heap or hang it (see `MAX_COORD`)
+    for &pt in pts {
+        if euclid(pt).iter().any(|c| c.abs() > MAX_COORD) {
+            return Err(bad(format!("{what}: Euclidean point out of range")));
+        }
+    }
     Ok(())
 }
 
@@ -248,8 +271,22 @@ fn surface(rd: &mut Reader<'_>) -> Result<(usize, usize), FfiError> {
     Ok((p, q))
 }
 
+/// Length of the Euclidean control polygon of `pts`.
+fn polygon_length(pts: &[[f64; 4]]) -> f64 {
+    pts.windows(2)
+        .map(|w| match *w {
+            [a, b] => {
+                let ([ax, ay, az], [bx, by, bz]) = (euclid(a), euclid(b));
+                let (dx, dy, dz) = (bx - ax, by - ay, bz - az);
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            }
+            _ => 0.0,
+        })
+        .sum()
+}
+
 /// Reads and validates a curve `dim n p m cpts knots`.
-fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+fn curve(rd: &mut Reader<'_>) -> Result<Vec<[f64; 4]>, FfiError> {
     if rd.index(3)? != 3 {
         return Err(bad("curve: dimension must be 3"));
     }
@@ -262,7 +299,8 @@ fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let pts = points(rd, n + 1)?;
     let knots = rd.finites(m + 1)?;
     check_points(&pts, "curve")?;
-    check_knots(&knots, p, "curve")
+    check_knots(&knots, p, "curve")?;
+    Ok(pts)
 }
 
 fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
@@ -305,12 +343,19 @@ fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
         }
         Op::Sweep => {
             curve(rd)?;
-            curve(rd)?;
+            let traj = curve(rd)?;
             if rd.flag()? {
                 curve(rd)?;
             }
-            rd.flag()?;
-            rd.positive("sweep tol")?;
+            let trans = rd.flag()?;
+            let tol = rd.positive("sweep tol")?;
+            // N_CreateSweepScale approximates the trajectory by a polyline within tol/2;
+            // N_ApproxCrvWithPolyline subdivides without end below floating-point
+            // resolution (HANG-5): the `nlib.srf_adv_p6` bound
+            let min_tol = MIN_SWEEP_TOL_FRACTION * polygon_length(&traj);
+            if !trans && tol.partial_cmp(&min_tol).is_none_or(std::cmp::Ordering::is_lt) {
+                return Err(bad("sweep: tolerance too small for the trajectory"));
+            }
         }
         Op::Swung => {
             curve(rd)?;
@@ -318,14 +363,27 @@ fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             rd.finite()?;
         }
         Op::NonRat => {
-            curve(rd)?;
+            let pts = curve(rd)?;
             if rd.flag()? {
                 curve(rd)?;
             }
             if rd.flag()? {
                 surface(rd)?;
             }
-            rd.positive("non-rational tol")?;
+            let tol = rd.positive("non-rational tol")?;
+            // a rational curve goes through N_ApproxNurbsWithNonRatCrv, whose sample
+            // count `(NL_INDEX)ceil((1/tol)^e * sqrt(max|C''|/8))` overflows (UB, then
+            // out-of-bounds writes) for tiny tolerances or huge coordinates: the
+            // `nlib.crv_approx` `NonRat` bounds
+            let rational = pts.first().is_some_and(|&[_, _, _, w]| w != NOW);
+            if rational {
+                if !(APPROX_MIN_TOL..=1.0).contains(&tol) {
+                    return Err(bad("non-rational: tol outside [MIN_TOL, 1] for a rational curve"));
+                }
+                if pts.iter().flatten().any(|v| v.abs() > MAX_COORD) {
+                    return Err(bad("non-rational: rational curve data above MAX_COORD"));
+                }
+            }
         }
         Op::MakeKnots => {
             let n = rd.index(MAX_INDEX)?;

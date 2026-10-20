@@ -32,12 +32,14 @@
 //! independent axes, planes with positive UV scales and ordered domains (a plane normal
 //! longer than `1e-6`), ordered edit domains with positive extents, clamped inline test
 //! NURBs with `1 <= degree <= n` and at most [`MAX_INDEX`] control points per direction
-//! and finite tolerances. The shim answers `SC_ERR_ARG` for a control point to perturb
+//! and finite tolerances, and for plane intersections (`Plane`, `Global` with a plane) a
+//! built surface whose extrusion vector's squared length does not overflow (upstream
+//! dereferences the failed generator projection). The shim answers `SC_ERR_ARG` for a control point to perturb
 //! outside the test NURB and for a cylinder whose bottom iso circle upstream would make
 //! from unset values (as the `surface.cone_p1` shim tests it).
 
 use crate::units::surface_surf_of_extrusion_p1::{
-    axes, check_knots, check_points, domain, finite, push_surf, Surf,
+    axes, check_knots, check_points, domain, finite, push_surf, Build, Surf,
 };
 use crate::units::topology_brep_data::Sim;
 use crate::validate::bad;
@@ -278,6 +280,17 @@ impl Op {
 /// `OP_IS_NURB`.
 const OP_IS_NURB: i32 = 5;
 
+/// A built surface whose extrusion vector's squared length overflows.
+fn vector_overflows(src: &Src) -> bool {
+    let Src::Built(s) = src else {
+        return false;
+    };
+    let v = match &s.build {
+        Build::Canonical { vec } | Build::Ctor { vec, .. } | Build::Infinite { vec } => vec,
+    };
+    !len(*v).is_finite()
+}
+
 fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
 }
@@ -478,7 +491,21 @@ impl Enc {
         Ok(())
     }
 
-    fn op(&mut self, op: &Op) -> Result<(), FfiError> {
+    fn op(&mut self, src: &Src, op: &Op) -> Result<(), FfiError> {
+        // IntersectWithPlane projects the generator along the extrusion vector
+        // (CreatePlaneProjection, status ignored) and dereferences the projected curve:
+        // N_CrvProjectOntoPlane fails for a vector whose squared length overflows
+        if matches!(
+            op,
+            Op::Plane { .. }
+                | Op::Global {
+                    target: Target::Plane(_),
+                    ..
+                }
+        ) && vector_overflows(src)
+        {
+            return Err(bad("extrusion vector length overflows"));
+        }
         match op {
             Op::State => {}
             Op::Plane {
@@ -609,7 +636,7 @@ pub fn surface_op(src: &Src, op: &Op) -> Result<Vec<f64>, FfiError> {
         bytes: Vec::new(),
     };
     e.src(src)?;
-    e.op(op)?;
+    e.op(src, op)?;
     call(op.code(), &e.o, &e.bytes)
 }
 

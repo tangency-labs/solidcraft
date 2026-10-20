@@ -1106,7 +1106,14 @@ fn rust_static(op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
             }
         }
         OpIn::MakeKnots { n, p, u } => {
-            let mut k = vec![0.0; n + p + 2];
+            // the caller's knot array; absurd counts (fuzz input the guard rejects)
+            // are a harness error instead of an allocation abort
+            let len = n
+                .checked_add(*p)
+                .and_then(|l| l.checked_add(2))
+                .filter(|&l| l <= u.len().saturating_add(64).max(4096))
+                .ok_or_else(|| harness("make_knots: knot count too large"))?;
+            let mut k = vec![0.0; len];
             match make_knots(u, *n, *p, &mut k) {
                 Ok(()) => {
                     o.extend_from_slice(&k);

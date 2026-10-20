@@ -30,7 +30,9 @@
 //! clamped B-splines (at most [`MAX_INDEX`] + 1 control points per direction, degree at
 //! most [`MAX_DEGREE`], positive weights or none), segments with distinct end points,
 //! planes with a non-zero normal and ellipses and circles without a zero radius (the
-//! upstream construction crashes).
+//! upstream construction crashes). A bounded plane with an empty or inverted domain has
+//! no NURB (`MakeNurb` fails): `Transform` of one, and a plane/plane intersection with a
+//! bounded one, dereference the NULL NURB upstream and are rejected.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -328,6 +330,36 @@ fn check_weights<'a>(mut ws: impl Iterator<Item = &'a [f64; 4]>) -> Result<(), F
     Ok(())
 }
 
+/// `SM_IS_INFINITE`: the unbounded parameter markers.
+fn is_infinite_param(a: f64) -> bool {
+    a == 1_234_567.0 || a == -1_234_567.0 || a == 1111.111 || a == -1111.111
+}
+
+/// A plane `SmPlane::MakeNurb` cannot make the NURB of: a bounded construction whose
+/// domain is empty or inverted in u or v (`N_IgesValidate` needs `min < max`; NaN is
+/// rejected by the finite check), so
+/// `GetOrCreateGwNurbPointer` returns NULL.
+fn nurb_less(p: &PlaneIn) -> bool {
+    match &p.make {
+        Make::Bounded { domain, .. } => {
+            let [u0, v0, u1, v1] = *domain;
+            u0 >= u1 || v0 >= v1
+        }
+        Make::Normal { .. } | Make::Canonical { .. } => false,
+    }
+}
+
+/// `SmPlane::IsBounded` (no domain value is an `SM_IS_INFINITE` marker) for a plane
+/// whose NURB cannot be made.
+fn bounded_nurb_less(p: &PlaneIn) -> bool {
+    match &p.make {
+        Make::Bounded { domain, .. } => {
+            nurb_less(p) && !domain.iter().any(|&d| is_infinite_param(d))
+        }
+        Make::Normal { .. } | Make::Canonical { .. } => false,
+    }
+}
+
 fn len_sq(v: &[f64; 3]) -> f64 {
     v[0] * v[0] + v[1] * v[1] + v[2] * v[2]
 }
@@ -494,6 +526,11 @@ impl Enc {
                 self.num(*dist)
             }
             Op::Transform { a, frame, scale } => {
+                // SmBSplineSurface::Transform hands GetOrCreateGwNurbPointer() to
+                // N_SrfTransform unchecked: NULL for a plane without a NURB
+                if nurb_less(a) {
+                    return Err(bad("transform of a plane whose NURB cannot be made"));
+                }
                 self.int(2);
                 self.plane(a)?;
                 for v in frame {
@@ -520,6 +557,14 @@ impl Enc {
                 db,
                 tol,
             } => {
+                // IntersectWithPlane of non-parallel planes boxes each bounded plane
+                // through CalculateBoundingBox, which reads GetOrCreateGwNurbPointer()->net
+                // unchecked (parallel planes without a NURB return first; rejected too)
+                if let OtherIn::Plane(p) = b {
+                    if bounded_nurb_less(a) || bounded_nurb_less(p) {
+                        return Err(bad("bounded plane whose NURB cannot be made"));
+                    }
+                }
                 self.int(if *global { 6 } else { 5 });
                 self.plane(a)?;
                 self.nums(da)?;

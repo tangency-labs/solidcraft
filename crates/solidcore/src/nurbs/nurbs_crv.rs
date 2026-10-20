@@ -52,6 +52,10 @@
 //!   `NL_INP_ERR` (14) for `ur <= ul`: [`NlibCode::Input`]. `sm_BasisEval` returns
 //!   its flag at the domain ends after filling `N` (so `sm_CrvEval` fails there):
 //!   [`SolidError::Unsupported`].
+//! - Arrays sized by a caller count (the rows of [`basis_derivs`],
+//!   [`crv_rational_basis_derivs`] and [`basis_i_derivs`] for `der`, the storage of
+//!   [`allocate_nurb_curve`]) are allocated fallibly: `InvalidInput` when they do not
+//!   fit in memory (upstream: the caller's arrays, or `smos_Calloc` returning `NULL`).
 //! - `sm_CrvDerivs` accepts `der == GW_MAX_DERIV`, then writes past its row arrays;
 //!   [`crv_derivs`] rejects `der >= MAX_DERIV` with [`NlibCode::MaxDerivative`]
 //!   (upstream's own `der > GW_MAX_DERIV` check returns the plain flag).
@@ -127,6 +131,7 @@ const OP_IEVAL: &str = "nurbs::nurbs_crv::basis_i_eval";
 const OP_MAXERR: &str = "nurbs::nurbs_crv::crv_remove_knot_max_err";
 const OP_IDERIVS: &str = "nurbs::nurbs_crv::basis_i_derivs";
 const OP_GMAX: &str = "nurbs::nurbs_crv::basis_find_global_max";
+const OP_ALLOC: &str = "nurbs::nurbs_crv::allocate_nurb_curve";
 
 fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
     SolidError::Nlib { operation, code }
@@ -266,17 +271,36 @@ pub fn get_knots(knt: &KnotVector<'_>, ivl: Option<&Extent1d>) -> (Vec<f64>, Vec
     (knots, mults)
 }
 
+/// `len` copies of `value`, allocated fallibly: `InvalidInput` instead of an
+/// allocation abort when a caller-given count (derivative order, array size) makes
+/// the array too large for memory.
+fn filled<T: Clone>(len: usize, value: T, op: &'static str) -> Result<Vec<T>> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(len)
+        .map_err(|_| SolidError::InvalidInput {
+            operation: op,
+            reason: "array too large for memory",
+        })?;
+    v.resize(len, value);
+    Ok(v)
+}
+
 /// A zero-filled curve with highest control point index `n`, degree `p` and highest
 /// knot index `m` (`sm_AllocateNurbCurve`, memory from `smos_Calloc`).
 ///
 /// Errors with `InvalidInput` when `n` or `m` is `usize::MAX` (no storage size).
 pub fn allocate_nurb_curve(n: usize, p: usize, m: usize) -> Result<Curve> {
     let too_big = || SolidError::InvalidInput {
-        operation: "nurbs::nurbs_crv::allocate_nurb_curve",
+        operation: OP_ALLOC,
         reason: "index too large",
     };
-    let pw = vec![CPoint::default(); n.checked_add(1).ok_or_else(too_big)?];
-    let u = vec![0.0; m.checked_add(1).ok_or_else(too_big)?];
+    // smos_Calloc failing makes upstream return NULL (NERN): allocate fallibly
+    let pw = filled(
+        n.checked_add(1).ok_or_else(too_big)?,
+        CPoint::default(),
+        OP_ALLOC,
+    )?;
+    let u = filled(m.checked_add(1).ok_or_else(too_big)?, 0.0, OP_ALLOC)?;
     Curve::new(pw, p, u)
 }
 
@@ -851,7 +875,7 @@ pub fn basis_derivs(
     side: Side,
     der: usize,
 ) -> Result<BasisDerivs> {
-    let mut nd = vec![[0.0_f64; MAX_DEGREE]; der.saturating_add(1)];
+    let mut nd = filled(der.saturating_add(1), [0.0_f64; MAX_DEGREE], OP_BDERIVS)?;
     let span = basis_derivs_into(knt, p, u, side, der, &mut nd)?;
     Ok(BasisDerivs {
         span,
@@ -879,7 +903,7 @@ fn rational_basis_derivs_into<const N: usize>(
     let nd: &mut [[f64; N]] = if let Some(rows) = nd_stack.get_mut(..=der) {
         rows
     } else {
-        nd_heap = vec![[0.0_f64; N]; der.saturating_add(1)];
+        nd_heap = filled(der.saturating_add(1), [0.0_f64; N], OP)?;
         &mut nd_heap
     };
     let mut d = [0.0_f64; MAX_DEGREE];
@@ -941,7 +965,7 @@ pub fn crv_rational_basis_derivs(
     side: Side,
     der: usize,
 ) -> Result<BasisDerivs> {
-    let mut rd = vec![[0.0_f64; MAX_DEGREE]; der.saturating_add(1)];
+    let mut rd = filled(der.saturating_add(1), [0.0_f64; MAX_DEGREE], OP_RBDERIVS)?;
     let span = rational_basis_derivs_into(cur, u, side, der, &mut rd)?;
     Ok(BasisDerivs {
         span,
@@ -1745,7 +1769,7 @@ pub fn basis_i_derivs(
     let n = m - pi - 1;
     let ii = sx(i, OP)?;
     let deri = sx(der, OP)?;
-    let mut nd_out = vec![0.0_f64; der.saturating_add(1)];
+    let mut nd_out = filled(der.saturating_add(1), 0.0_f64, OP)?;
 
     // Check index.
     if ii > n {
@@ -2147,5 +2171,22 @@ mod tests {
         let pw = vec![CPoint::new(1.0, 1.0, 1.0, NOW); 2];
         let d = Curve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
         assert!(is_ncrv_degenerate(&d, EFF_ZERO).unwrap());
+    }
+
+    #[test]
+    fn absurd_derivative_orders_are_errors() {
+        // fuzz regressions (nurbs.nurbs_crv fuzz00220, fuzz00094, fuzz00112): the
+        // derivative rows were allocated with an aborting `vec!`
+        let c = line(3);
+        let knt = c.knot_vector().unwrap();
+        // (sizes beyond the 47-bit address space, so no test machine can grant them)
+        for der in [1usize << 44, 1 << 62, usize::MAX] {
+            assert!(basis_derivs(&knt, 3, 0.5, Side::Left, der).is_err());
+            assert!(crv_rational_basis_derivs(&c, 0.5, Side::Left, der).is_err());
+            assert!(basis_i_derivs(&knt, 1, 3, 0.5, Side::Left, der).is_err());
+        }
+        assert!(allocate_nurb_curve(1 << 47, 3, 3).is_err());
+        assert!(allocate_nurb_curve(3, 3, 1 << 48).is_err());
+        assert!(allocate_nurb_curve(3, 3, 7).is_ok());
     }
 }
