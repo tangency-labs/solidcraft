@@ -2028,8 +2028,8 @@ fn rounds_meeting_at_wall_ends_off_square_by_a_modelling_error_merge_in_either_o
 #[test]
 fn a_small_part_far_from_the_origin_rounds_and_merges_as_at_it() {
     // [`wall_on_a_trapezoid`] at a hundredth, at the origin and 100 and 1000 mm from it: the foot's
-    // round alone builds wherever the part is (the check of what it adds measures about the part,
-    // not the origin), and so does the merge, either order alike.
+    // round alone builds wherever the part is (the fillet's check of what it adds measures the
+    // part moved to the origin), and so does the merge, either order alike.
     let (ra, rb) = (0.005, 0.01);
     let mut grown = Vec::new();
     for far in [0.0, 100.0, 1000.0] {
@@ -2043,12 +2043,13 @@ fn a_small_part_far_from_the_origin_rounds_and_merges_as_at_it() {
             assert_merged(result, &ends, (ra, rb), 1e-8, &format!("{far}: {how}"));
         }
         assert!(same_vertices(&a, &b, 1e-8), "{far}");
-        let v = |x: &Body| crate::measure_mass(x).unwrap().volume;
+        // Measured moved back to the origin: the measure's mesh cracks count for their distance
+        // from it.
+        let v = |x: &Body| crate::measure_mass(&crate::transform(x, -origin, Vec3::ZERO, Vec3::Z, 0.0).unwrap()).unwrap().volume;
         grown.push((v(&footed) - v(&body), v(&a) - v(&body), v(&b) - v(&body)));
     }
-    // What each adds, the same either order and wherever the part is (measured about the part, to
-    // a part in 10⁴ of the foot's round; about the origin, 1000 mm out, it was off by 300 times
-    // that round).
+    // What each adds, the same either order and wherever the part is, to a part in 10⁴ of the
+    // foot's round.
     let (g0, a0, b0) = grown[0];
     assert!(g0 > 0.0 && (a0 - b0).abs() < 1e-3 * g0, "{grown:?}");
     for (g, a, b) in &grown {
