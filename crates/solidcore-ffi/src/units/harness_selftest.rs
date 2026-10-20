@@ -17,6 +17,8 @@ pub const MAX_DEGREE: i32 = 17;
 mod sys {
     extern "C" {
         pub fn sc_harness_selftest_ping(x: f64, out: *mut f64) -> i32;
+        #[cfg(test)]
+        pub fn sc_harness_selftest_native_guard(mode: i32, available: *mut i64) -> i32;
         pub fn sc_harness_selftest_basis_eval(
             knots: *const f64,
             n_knots: i64,
@@ -44,6 +46,34 @@ pub fn ping(x: f64) -> Result<f64, FfiError> {
     let st = unsafe { sys::sc_harness_selftest_ping(x, &raw mut out) };
     check(st)?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sys;
+
+    fn guard_probe(mode: i32) -> (i32, i64) {
+        let mut available = -1;
+        // SAFETY: the probe only writes this live i64 and retains no pointers.
+        let status = unsafe { sys::sc_harness_selftest_native_guard(mode, &raw mut available) };
+        (status, available)
+    }
+
+    #[test]
+    fn native_guard_excludes_other_threads_and_allows_nested_shims() {
+        assert_eq!(guard_probe(0), (crate::SC_OK, 0));
+        assert_eq!(guard_probe(2), (crate::SC_OK, 0));
+    }
+
+    #[test]
+    fn native_guard_is_released_after_cpp_exception() {
+        assert_eq!(guard_probe(1), (crate::SC_ERR_EXCEPTION, 0));
+        // A different caller thread must be able to acquire it after unwinding.
+        assert_eq!(
+            std::thread::spawn(|| guard_probe(0)).join().unwrap(),
+            (crate::SC_OK, 0)
+        );
+    }
 }
 
 /// Result of [`basis_eval`].

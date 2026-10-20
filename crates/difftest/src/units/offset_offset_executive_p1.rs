@@ -2332,7 +2332,11 @@ fn rust_probe(k: &Kernel, branch: Probe, tolerance: f64) -> RResult<Output> {
         }
         Probe::RemoveNoMerge | Probe::RemoveEmpty => {
             executive.set_merge_results(matches!(branch, Probe::RemoveEmpty));
-            executive.remove_excess_faces(&kernel, &original, &mut Brep::new())
+            executive.remove_excess_faces_with_kernel_context(
+                &mut kernel,
+                &original,
+                &mut Brep::new(),
+            )
         }
         Probe::SideWallNull => executive.build_side_wall_of_edgeuse(&kernel, &mut original, None),
         Probe::SideWallUnmapped => {
@@ -3283,8 +3287,7 @@ mod tests {
         for (branch, dependency, status) in [
             (Probe::ReplaceEmpty, Some("topology.brep_p4"), 1000),
             (Probe::RemoveNoMerge, None, 1000),
-            // Both native and Rust adapters stop at the legacy editing-metadata boundary before RemoveFaces.
-            (Probe::RemoveEmpty, Some("topology.brep_p1"), 1000),
+            (Probe::RemoveEmpty, None, 1000),
             (Probe::SideWallNull, None, 1000),
             (Probe::SideWallUnmapped, None, 1000),
             (Probe::FillEmpty, None, 1000),

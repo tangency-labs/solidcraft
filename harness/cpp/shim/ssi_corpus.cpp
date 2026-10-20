@@ -294,6 +294,7 @@ SC_EXPORT int32_t sc_ssi_corpus_intersect(const double* s1, int64_t n1, const do
                                           double tol, int32_t use_default_tol, int32_t n_samples,
                                           int64_t* out_len)
 {
+    SC_TRY
     g_record.clear();
     *out_len = 0;
     if (s1 == nullptr || s2 == nullptr || n1 < 1 || n2 < 1 || n_samples < 2)
@@ -368,6 +369,7 @@ SC_EXPORT int32_t sc_ssi_corpus_intersect(const double* s1, int64_t n1, const do
         g_record.clear();
         return SC_ERR_EXCEPTION;
     }
+    SC_CATCH
 }
 
 SC_EXPORT int32_t sc_ssi_corpus_take(double* out, int64_t cap, int64_t* out_len)

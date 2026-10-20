@@ -574,6 +574,7 @@ SC_EXPORT int32_t sc_blend_fillet_intersector_run(const double* in, int64_t n_in
 {
     if (in == NULL || n_in < 2)
         return SC_ERR_ARG;
+    SC_NATIVE_LOCK;
     try
     {
         SmContext ctx;

@@ -53,6 +53,7 @@ void put(SmBrep* b, const std::vector<SmBrep*>& originals, std::vector<double>& 
 SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
     double* out, int64_t cap, int64_t* len) {
     if(!input || n<0 || !out || !len || cap<0) return SC_ERR_ARG;
+    SC_NATIVE_LOCK;
     try {
         Reader rd{input,n};
         int family=rd.integer(0,6); int operation=rd.integer(-64,64);

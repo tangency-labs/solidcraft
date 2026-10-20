@@ -1123,6 +1123,7 @@ SC_EXPORT int32_t sc_offset_offset_executive_p1_eval(
     if (!out_len || cap < 0 || (cap && !out) || !input || input_len < 0 || input_len > max_values)
         return SC_ERR_ARG;
     try {
+        SC_NATIVE_LOCK;
         Reader rd{input, input_len};
         std::vector<double> result;
         try {

@@ -126,6 +126,7 @@ struct Curves {
 SC_EXPORT int32_t sc_surface_cone_p3_intersect(int32_t op,const double* cone,const double* other,
     const double* domains,double tolerance,int32_t has_tolerance,int32_t same,
     double* out,int64_t cap,int64_t* len) {
+    SC_NATIVE_LOCK;
     try {
     SmContext ctx;
     std::unique_ptr<SmCone> a(make_cone(ctx,cone));

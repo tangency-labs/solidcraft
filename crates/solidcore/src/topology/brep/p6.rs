@@ -21,7 +21,9 @@
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
-//! names the face as its surface's owner. `SmSurface::SetOwner`'s `SM_NO_CHANGE_OWNER`
+//! names the face as its surface's owner. Kernel-bound construction borrows the live
+//! context only at notification sites; external null or distinct contexts stay explicit.
+//! `SmSurface::SetOwner`'s `SM_NO_CHANGE_OWNER`
 //! is sent to the kernel's context under [`FaceTopologyOptions::surface_key`] (a caller
 //! without surface identities passes `None`: not notified, and no surface argument in
 //! the final `SM_NO_ADD_TO_BREP`). `new SmFace` joins the B-rep's face list at
@@ -56,7 +58,7 @@ use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
-use crate::topology::edge::NotifyEnv;
+use crate::topology::edge::{NotifyEnv, NotifyState};
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell::{self, ShellMembers, ShellType};
 use crate::topology::topology::Topology;
@@ -216,7 +218,7 @@ fn deref<T>(value: Option<T>) -> Result<T> {
 }
 
 // `new (this) Sm*()`: every new topology object has its `SmTopology` part.
-fn register(env: &mut NotifyEnv<'_>, entity: EntityRef) {
+fn register(env: &mut NotifyState<'_>, entity: EntityRef) {
     env.records.entry((env.key_of)(entity).key).or_default();
 }
 
@@ -227,7 +229,7 @@ fn register(env: &mut NotifyEnv<'_>, entity: EntityRef) {
 fn set_surface_owner(
     k: &mut Kernel,
     brep: &mut Brep,
-    env: &mut NotifyEnv<'_>,
+    env: &mut NotifyState<'_>,
     face: FaceId,
     owner: Option<ObjectRef>,
     surface_key: Option<ObjectKey>,
@@ -264,18 +266,25 @@ fn set_surface_owner(
 // `delete pShell` of an emptied shell: `~SmShell` notifies `SM_NO_DESTRUCTION`
 // and resets the type. An arena record cannot be freed, so it is reset to
 // `SmShell()` (already off its region's list, so unreachable).
-fn delete_shell(brep: &mut Brep, env: &mut NotifyEnv<'_>, shell: ShellId) -> Result<()> {
+fn delete_shell(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    env: &mut NotifyState<'_>,
+    shell: ShellId,
+) -> Result<()> {
     let this = (env.key_of)(EntityRef::Shell(shell));
-    ignore_status(crate::topology::topology::notify(
-        env.records,
-        env.attributes,
-        env.context.as_deref_mut(),
-        NotifyOperation::Destruction,
-        this,
-        Some(this),
-        None,
-        None,
-    ))?;
+    env.with_env(k, |env| {
+        ignore_status(crate::topology::topology::notify(
+            env.records,
+            env.attributes,
+            env.context.as_deref_mut(),
+            NotifyOperation::Destruction,
+            this,
+            Some(this),
+            None,
+            None,
+        ))
+    })?;
     *brep.shell_mut(shell)? = Shell::default();
     Ok(())
 }
@@ -356,6 +365,52 @@ pub fn make_face_topology_attempt(
     orientation: OrientType,
     options: &FaceTopologyOptions<'_>,
 ) -> Result<FaceTopologyAttempt> {
+    make_face_topology_attempt_with_state(
+        k,
+        brep,
+        marks,
+        &mut NotifyState::from_env(env),
+        surface,
+        orientation,
+        options,
+    )
+}
+
+pub(crate) fn make_face_topology_with_state(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    state: &mut NotifyState<'_>,
+    surface: Option<Surface>,
+    orientation: OrientType,
+    options: &FaceTopologyOptions<'_>,
+) -> Result<FaceTopology> {
+    let attempt = make_face_topology_attempt_with_state(
+        k,
+        brep,
+        marks,
+        state,
+        surface,
+        orientation,
+        options,
+    )?;
+    attempt.status?;
+    Ok(FaceTopology {
+        face: deref(attempt.face)?,
+        shell: attempt.shell,
+        region: attempt.region,
+    })
+}
+
+fn make_face_topology_attempt_with_state(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyState<'_>,
+    surface: Option<Surface>,
+    orientation: OrientType,
+    options: &FaceTopologyOptions<'_>,
+) -> Result<FaceTopologyAttempt> {
     let mut attempt = FaceTopologyAttempt {
         status: Ok(()),
         face: None,
@@ -393,7 +448,7 @@ fn build_face(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
-    env: &mut NotifyEnv<'_>,
+    env: &mut NotifyState<'_>,
     surface: Option<Surface>,
     orientation: OrientType,
     options: &FaceTopologyOptions<'_>,
@@ -641,7 +696,7 @@ fn build_face(
                 Ok(()) | Err(SolidError::InvalidInput { .. }) => {}
                 Err(error) => return Err(error),
             }
-            delete_shell(brep, env, shell_vu)?;
+            delete_shell(k, brep, env, shell_vu)?;
             vu1
         } else {
             // vertex is connected to some Edges (any combination of wires and edges):
@@ -663,7 +718,7 @@ fn build_face(
                 region_remove(brep, reg, vertex_shell)?;
 
                 // delete the shell
-                delete_shell(brep, env, vertex_shell)?;
+                delete_shell(k, brep, env, vertex_shell)?;
             }
             vu1
         };
@@ -699,7 +754,7 @@ fn build_face(
     // Next - see if new Face splits the existing region - move shell children
     // appropriately
     if !options.edge_loops.is_empty() {
-        let split = test_closure_split_region_attempt(k, brep, marks, env, true, fu2)?;
+        let split = test_closure_split_region_attempt_with_state(k, brep, marks, env, true, fu2)?;
         out.shell = split.shell;
         out.region = split.region;
         split.status?;
@@ -711,17 +766,19 @@ fn build_face(
         type_code: surface_type,
         key,
     });
-    ignore_status(brep_p2::notify(
-        brep,
-        env,
-        None,
-        NotifyOperation::AddToBrep,
-        [
-            Some(NotifyArg::Entity(EntityRef::Face(face))),
-            Some(NotifyArg::Object(brep_p2::brep_ref(brep))),
-            surface_ref.map(NotifyArg::Object),
-        ],
-    ))?;
+    env.with_env(k, |env| {
+        ignore_status(brep_p2::notify(
+            brep,
+            env,
+            None,
+            NotifyOperation::AddToBrep,
+            [
+                Some(NotifyArg::Entity(EntityRef::Face(face))),
+                Some(NotifyArg::Object(brep_p2::brep_ref(brep))),
+                surface_ref.map(NotifyArg::Object),
+            ],
+        ))
+    })?;
 
     return_stat
 }
@@ -745,7 +802,7 @@ fn connect_edge_loops(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
-    env: &mut NotifyEnv<'_>,
+    env: &mut NotifyState<'_>,
     mark: MarkType,
     input: ConnectInput<'_, '_>,
     return_stat: &mut Result<()>,
@@ -797,7 +854,7 @@ fn connect_edge_loops(
                         region_remove(brep, reg, del_shell)?;
 
                         // delete the shell
-                        delete_shell(brep, env, del_shell)?;
+                        delete_shell(k, brep, env, del_shell)?;
                     }
                 }
             }
@@ -938,7 +995,7 @@ struct SectorInput {
 fn find_sector(
     k: &mut Kernel,
     brep: &mut Brep,
-    env: &mut NotifyEnv<'_>,
+    env: &mut NotifyState<'_>,
     input: SectorInput,
 ) -> Result<Option<EdgeuseId>> {
     let SectorInput {
@@ -1120,6 +1177,24 @@ pub fn test_closure_split_region_attempt(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyEnv<'_>,
+    do_infinite_region_testing: bool,
+    start: FaceuseId,
+) -> Result<RegionSplitAttempt> {
+    test_closure_split_region_attempt_with_state(
+        k,
+        brep,
+        marks,
+        &mut NotifyState::from_env(env),
+        do_infinite_region_testing,
+        start,
+    )
+}
+
+fn test_closure_split_region_attempt_with_state(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyState<'_>,
     _do_infinite_region_testing: bool,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
@@ -1136,7 +1211,7 @@ fn split_region_into(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
-    env: &mut NotifyEnv<'_>,
+    env: &mut NotifyState<'_>,
     start: FaceuseId,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
@@ -1159,7 +1234,7 @@ fn split_closed(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
-    env: &mut NotifyEnv<'_>,
+    env: &mut NotifyState<'_>,
     start: FaceuseId,
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
@@ -1206,21 +1281,25 @@ fn split_closed(
     // notify this Brep and the OldRegion for attribute propagation (SmBrep.cpp:27954-5;
     // both statuses ignored)
     let this = Some(NotifyArg::Object(brep_p2::brep_ref(brep)));
-    ignore_status(brep_p2::notify(
-        brep,
-        env,
-        None,
-        NotifyOperation::PreEdit,
-        [this, None, None],
-    ))?;
+    env.with_env(k, |env| {
+        ignore_status(brep_p2::notify(
+            brep,
+            env,
+            None,
+            NotifyOperation::PreEdit,
+            [this, None, None],
+        ))
+    })?;
     let region = |r| Some(NotifyArg::Entity(EntityRef::Region(r)));
-    ignore_status(brep_p2::notify(
-        brep,
-        env,
-        None,
-        NotifyOperation::SplitInBrep,
-        [region(old_region), region(old_region), region(new_region)],
-    ))?;
+    env.with_env(k, |env| {
+        ignore_status(brep_p2::notify(
+            brep,
+            env,
+            None,
+            NotifyOperation::SplitInBrep,
+            [region(old_region), region(old_region), region(new_region)],
+        ))
+    })?;
     // CalculateBoundingBox, infinite-region testing, classification of residual
     // faces/wires/shells and empty-shell/region cleanup follow.
     // UNPORTED(query.brep): SmBrep::CalculateBoundingBox

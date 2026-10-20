@@ -595,6 +595,7 @@ SC_EXPORT int32_t sc_intersect_surface_tracer_run(const double* in, int64_t n_in
         return SC_ERR_ARG;
     try
     {
+        SC_NATIVE_LOCK;
         SmContext ctx;
         std::vector<double> o;
         Rd rd{in, n_in, 0};

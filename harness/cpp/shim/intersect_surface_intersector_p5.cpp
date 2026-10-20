@@ -402,6 +402,7 @@ SC_EXPORT int32_t sc_intersect_surface_intersector_p5_run(const double* in, int6
     bool same = false;
     try
     {
+        SC_NATIVE_LOCK;
         SmContext ctx;
         std::vector<double> o;
         Rd rd{in, n_in, 0};

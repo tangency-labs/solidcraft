@@ -6,13 +6,42 @@
 #include <nurbs.h>
 
 #include <algorithm>
+#include <stdexcept>
+#include <thread>
 #include <vector>
 
 // Pure-C sanity probe: lets the harness verify the shim lib links at all.
 SC_EXPORT int32_t sc_harness_selftest_ping(double x, double* out)
 {
+    SC_TRY
     *out = x * 2.0 + 1.0;
     return SC_OK;
+    SC_CATCH
+}
+
+// Deterministic lock regression: another thread must fail try_lock while this
+// entrypoint holds SC_TRY's guard. Mode 1 tests unwinding; mode 2 nests a shim.
+SC_EXPORT int32_t sc_harness_selftest_native_guard(int32_t mode, int64_t* available)
+{
+    if (!available || mode < 0 || mode > 2) return SC_ERR_ARG;
+    SC_TRY
+    bool acquired = false;
+    std::thread observer([&] {
+        if (sc_native_mutex().try_lock()) {
+            acquired = true;
+            sc_native_mutex().unlock();
+        }
+    });
+    observer.join();
+    *available = acquired ? 1 : 0;
+    if (mode == 1) throw std::runtime_error("guard unwind probe");
+    if (mode == 2) {
+        double value = 0.0;
+        int32_t status = sc_harness_selftest_ping(3.0, &value);
+        if (status != SC_OK || value != 7.0) return SC_ERR_ARG;
+    }
+    return SC_OK;
+    SC_CATCH
 }
 
 // N_BasisEval(knt, p, u, flg, N, spn).

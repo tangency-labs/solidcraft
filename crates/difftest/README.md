@@ -288,6 +288,14 @@ the boundary (free upstream objects inside the shim); flatten points as
 kernel (taken from `bin/cpp/ffi.env`, or `bin/cpp/compile_commands.json` if
 it is missing — format in `crates/solidcore-ffi/build.rs`).
 
+`SC_TRY` also acquires the single native-call mutex: upstream's API context,
+callbacks and system tolerances are process-global. Handwritten `try/catch`
+entrypoints must acquire `SC_NATIVE_LOCK;` before touching native state, retaining
+it through native object destruction and any catch-path cleanup. Pure forwarding
+entrypoints may rely on the guarded callee. The mutex is recursive for nested
+shim calls; it serializes individual exports, not multi-call retained-result
+protocols such as SSI's `intersect`/`take` pair.
+
 Topology from C++: walk upstream lists in their native order and emit
 **traversal-order indices** (map each pointer to its first-seen index), never
 pointers.

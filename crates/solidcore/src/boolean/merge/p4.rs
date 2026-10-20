@@ -43,7 +43,9 @@ use crate::EntityRef;
 
 mod arena_pair;
 mod kernel_adapter;
-pub use kernel_adapter::KernelManifoldIntersector;
+mod notification_keys;
+pub use kernel_adapter::{KernelManifoldIntersector, ManifoldKernelAdapter};
+pub use notification_keys::ManifoldNotificationKeys;
 
 const OP: &str = "boolean::merge::p4::manifold_boolean";
 
@@ -1366,6 +1368,9 @@ fn editing_stages(
 /// editing changes and internally owned mark locks are restored on every return.
 /// Imprint exits deliberately leave the other operand editing-enabled, as
 /// `SmTemporaryChangeValue::Clear` does in the pinned source.
+/// Operand slots are authoritative on **all** exits: a late deferred cache call
+/// or inverse-transform error can follow deletion of `other`. `Err` does not
+/// promise retained ownership or rollback of topology, records or attributes.
 pub fn manifold_boolean(
     kernels: &mut BooleanKernels<'_>,
     primary: &mut Option<Brep>,
@@ -1548,11 +1553,33 @@ fn manifold_boolean_translated(
             *primary = None;
         }
     }
+    finish_boolean(
+        kernels,
+        primary,
+        other,
+        options,
+        operation,
+        delete_stale_caches,
+    )
+}
+
+// SmMerge.cpp:5059–5097 deletes other BEFORE the ignored cache status. An
+// Unported cache call (or later inverse-transform failure) can therefore follow
+// consumption. Keep that boundary explicit: callers must inspect the operand
+// slots on every exit, not infer ownership from Result::is_ok().
+fn finish_boolean(
+    kernels: &mut BooleanKernels<'_>,
+    primary: &mut Option<Brep>,
+    other: &mut Option<Brep>,
+    options: MergeOptions,
+    operation: BooleanOperation,
+    delete_caches: impl FnOnce(&mut Brep) -> Result<()>,
+) -> Result<bool> {
     if operation != BooleanOperation::PartialMerge && !options.keep_other_brep {
         *other = None;
     }
     if let Some(a) = primary.as_mut() {
-        ignored(delete_stale_caches(a))?;
+        ignored(delete_caches(a))?;
     }
     kernels.doing_boolean(false);
     Ok(operation != BooleanOperation::ExtractSeparate)
@@ -1593,6 +1620,55 @@ mod tests {
             .unwrap();
         assert!(!kernels.primary.context.is_mark_locked(marks.0));
         assert!(!kernels.other().context.is_mark_locked(marks.1));
+    }
+
+    #[test]
+    fn completion_reports_actual_consumption_before_late_cache_failure() {
+        for operation in [BooleanOperation::Difference, BooleanOperation::PartialMerge] {
+            for keep in [false, true] {
+                for late in [0, 1, 2] {
+                    let mut kernel = Kernel::default();
+                    kernel.context.set_doing_boolean(true);
+                    let mut kernels = BooleanKernels {
+                        primary: &mut kernel,
+                        other: None,
+                    };
+                    let mut primary = Some(Brep::new());
+                    let mut other = Some(Brep::new());
+                    let options = MergeOptions {
+                        keep_other_brep: keep,
+                        ..MergeOptions::default()
+                    };
+                    let mut called = false;
+                    let result = finish_boolean(
+                        &mut kernels,
+                        &mut primary,
+                        &mut other,
+                        options,
+                        operation,
+                        |_| {
+                            called = true;
+                            match late {
+                                0 => Ok(()),
+                                1 => Err(SolidError::sm_err("test::cache")),
+                                _ => Err(SolidError::unported(
+                                    "SmBrep::DeleteStaleCaches",
+                                    "topology.brep_p2",
+                                )),
+                            }
+                        },
+                    );
+                    assert!(called);
+                    assert!(primary.is_some());
+                    assert_eq!(
+                        other.is_none(),
+                        !keep && operation != BooleanOperation::PartialMerge
+                    );
+                    assert_eq!(result.is_err(), late == 2);
+                    assert_eq!(kernels.primary.context.doing_boolean(), late == 2);
+                }
+            }
+        }
     }
 
     #[test]

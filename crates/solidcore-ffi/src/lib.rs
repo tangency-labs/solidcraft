@@ -11,6 +11,12 @@
 //! `extern "C"` declaration must be private to its unit module and wrapped by
 //! a safe function that validates all lengths/indices *before* the call so the
 //! C++ side can never read or write out of bounds.
+//!
+//! Native shim bodies share a recursive mutex, acquired before native state is
+//! accessed and held through object destruction and callback restoration. This
+//! also covers wrappers that do not use [`call_with_buffer`]: upstream's API
+//! context, notification callbacks and system tolerances are process-global.
+//! Concurrent callers are therefore serialized at each native entrypoint.
 
 #![allow(unsafe_code)] // the only crate allowed unsafe: safe wrappers over extern "C" shims
 #![deny(missing_docs)]
