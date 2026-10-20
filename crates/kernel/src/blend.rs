@@ -34,24 +34,39 @@ pub(crate) fn too_large(msg: &str) -> KernelError {
 }
 
 /// A round running into the end of an earlier round of the other kind where it ends flush with a
-/// wall's end ([`crate::merge_corner::mixed_end`]), where the two cannot merge (the band between
-/// them needs more straight edge than there is, or the round has no one radius): no other route
-/// builds it, so this refusal, followed by why, is reported over any other ([`decisive`]). Shown as
-/// not supported yet, as every size refusal is.
+/// wall's end ([`crate::merge_corner::mixed_end`]), where the two cannot merge whatever their size
+/// (the round has no one radius, the faces there are not square to the top): no other route builds
+/// it, so this refusal, followed by why, is reported over any other ([`decisive`]). Shown as not
+/// supported yet, as every size refusal is.
 pub(crate) const MIXED_END: &str = "a round meeting the end of an earlier round of the other kind";
 
-/// Whether a refusal says what no other route gets round: it outranks every other refusal.
+/// [`MIXED_END`] where the rounds are too large to merge there (the band between them needs more
+/// straight edge than there is, or reaches past a face's end): smaller rounds may merge, so it is
+/// no [`decisive`] refusal, but it says more than any other refusal but one ([`rank`]).
+pub(crate) const MIXED_END_SIZE: &str = "rounds too large to merge at the end of an earlier round of the other kind";
+
+/// Whether a refusal says what no other route and no other size gets round: it outranks every
+/// other refusal, and a search for the size that fits stops at it.
 pub(crate) fn decisive(e: &KernelError) -> bool {
     matches!(e, KernelError::TooLarge(m) if m.starts_with(MIXED_END))
 }
 
-/// How much a refusal says: a decisive one, then a size (a smaller blend may fit), then any other.
+/// How much a refusal says: a decisive one, then rounds too large to merge at an end (a smaller
+/// pair may), then a size (a smaller blend may fit), then any other.
 fn rank(e: &KernelError) -> u8 {
     match e {
-        _ if decisive(e) => 2,
+        _ if decisive(e) => 3,
+        KernelError::TooLarge(m) if m.starts_with(MIXED_END_SIZE) => 2,
         KernelError::TooLarge(_) => 1,
         _ => 0,
     }
+}
+
+/// Whether a refusal is about a round meeting the end of an earlier round of the other kind,
+/// decisive or a size ([`MIXED_END`], [`MIXED_END_SIZE`]): what no other route builds, so it is
+/// reported over the other routes' refusals.
+fn at_mixed_end(e: &KernelError) -> bool {
+    rank(e) >= 2
 }
 
 pub(crate) fn vtx(v: &mt::Vertex) -> Vec3 {
@@ -1207,7 +1222,8 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
         return first;
     }
     let mut fallback: Option<Body> = None;
-    // Refused in every order: the first order's refusal, unless another order's is decisive.
+    // Refused in every order: the first order's refusal, unless another order's says more about a
+    // round meeting the end of an earlier round of the other kind.
     let mut other: Option<KernelError> = None;
     for order in orders(edges).into_iter().skip(1) {
         match blend_in_order(body, &order, r, shape, what, curved_ends) {
@@ -1218,7 +1234,7 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
                 fallback.get_or_insert(done);
             }
             Err(e) => {
-                if other.is_none() && decisive(&e) {
+                if other.as_ref().is_none_or(|o| rank(&e) > rank(o)) && at_mixed_end(&e) {
                     other = Some(e);
                 }
             }
@@ -1466,7 +1482,7 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
                             };
                             roll(ids).or_else(|first| if ids.len() > 1 { roll(&[edge.id()]).map_err(|_| first) } else { Err(first) }).map_err(|e2| {
                                 match e2 {
-                                    e2 if decisive(&e2) => e2,
+                                    e2 if at_mixed_end(&e2) => e2,
                                     KernelError::TooLarge(m) => KernelError::TooLarge(format!("{m} ({e})")),
                                     e2 => KernelError::Failed(format!("{e2} ({e})")),
                                 }
@@ -1765,7 +1781,7 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
             let next = all.iter().filter(|e| !ids.contains(&e.id()) && (*e.front() == v || *e.back() == v)).find_map(|e| {
                 let fwd = *e.front() == v;
                 let t = if fwd { dir(e, false)? } else { -dir(e, true)? };
-                (t.dot(d) > 1.0 - 1e-4 && !smooth_seam(solid, e) && keep(e) && !onto_round_cap(solid, &cur, e, &v, d)).then(|| (e.clone(), fwd))
+                (t.dot(d) > 1.0 - 1e-4 && !smooth_seam(solid, e) && keep(e) && !onto_round_cap(solid, &cur, e, &v)).then(|| (e.clone(), fwd))
             });
             let Some((e, fwd)) = next else { return Some(false) };
             ids.push(e.id());
@@ -1787,20 +1803,19 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
     Some(ids)
 }
 
-/// Whether a chain at vertex `v`, leaving edge `cur` along `d`, would run on into `next` only over
-/// the end of an earlier round of the other kind: one face of `cur` (`old`, a plane) gives way at
-/// `v` to a round (`new`) tangent to it along a seam that crosses the chain obliquely, and the
-/// round bends to the far side of `old` from the ball rolling along `cur` (a round taking material
-/// away where an earlier one added it, or the other way round). The ball's contact with `old` does
-/// not run on along that seam, so the chain ends at `v`, but only where the round ends flush with
-/// a wall's end as an earlier round does there ([`crate::merge_corner::mixed_end`]). A round of
-/// the same kind (an earlier round of the edge the chain runs into), a round whose seam runs
-/// across the chain (a corner rounded square to the chain's faces) and a curved face of the design
-/// (a cove, a slot's rounded corner) leave the chain as it was.
-fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex, d: Vec3) -> bool {
+/// Whether a chain at vertex `v`, leaving edge `cur`, would run on into `next` only over the end
+/// of an earlier round of the other kind: one face of `cur` (`old`, a plane) gives way at `v` to a
+/// round (`new`) tangent to it along a seam, and the round bends to the far side of `old` from the
+/// ball rolling along `cur` (a round taking material away where an earlier one added it, or the
+/// other way round). The ball's contact with `old` does not run on along that seam, so the chain
+/// ends at `v`, but only where the round ends flush with a wall's end as an earlier round does
+/// there ([`crate::merge_corner::mixed_end`]), at whatever angle its seam crosses the chain (square
+/// to it where the plate's side is square to the wall). A round of the same kind (an earlier round
+/// of the edge the chain runs into), a corner rounded square to the chain's faces (its seam with
+/// `old` is no round's contact with a plane under the chain) and a curved face of the design (a
+/// cove, a slot's rounded corner) leave the chain as it was.
+fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex) -> bool {
     use mt::{BoundedCurve, ParametricCurve};
-    // Under about 3° from square to the chain: the seam runs across it.
-    const OBLIQUE: f64 = 0.05;
     let faces_of = |e: &mt::Edge| solid.face_iter().filter(|f| f.edge_iter().any(|x| x.id() == e.id())).take(3).collect::<Vec<_>>();
     let (fc, fx) = (faces_of(cur), faces_of(next));
     let ([a, b], [c, e]) = (&fc[..], &fx[..]) else { return false };
@@ -1820,13 +1835,6 @@ fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex
     }
     let Some(seam) = old.edge_iter().find(|x| (x.front() == v || x.back() == v) && new.edge_iter().any(|y| y.id() == x.id())) else { return false };
     if !smooth_seam(solid, &seam) {
-        return false;
-    }
-    let sc = seam.oriented_curve();
-    let (s0, s1) = sc.range_tuple();
-    let sd = sc.der(if seam.front() == v { s0 } else { s1 });
-    let Some(sd) = Vec3::new(sd.x, sd.y, sd.z).normalized() else { return false };
-    if sd.dot(d).abs() < OBLIQUE {
         return false;
     }
     let p = from_p3(v.point());
@@ -2072,9 +2080,10 @@ fn keep_size(e: KernelError, e2: KernelError) -> KernelError {
     if rank(&e2) > rank(&e) { e2 } else { e }
 }
 
-/// The first refusal, unless the second is decisive and the first is not.
+/// The first refusal, unless the second is about a round meeting the end of an earlier round of
+/// the other kind and says more ([`at_mixed_end`], [`rank`]).
 fn keep_decisive(e: KernelError, e2: KernelError) -> KernelError {
-    if decisive(&e2) && !decisive(&e) { e2 } else { e }
+    if at_mixed_end(&e2) && rank(&e2) > rank(&e) { e2 } else { e }
 }
 
 /// Blend the edges together, rebuilding the corners where they meet on faces of any surface
