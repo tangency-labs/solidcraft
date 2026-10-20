@@ -6,16 +6,13 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Pushes to main run on the org's self-hosted runners (`self-hosted-fast`): everything but
-# cargo-deny, which is a container action. Every pull request (fork or not) and Run workflow
-# use Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs like GitHub's, outside the
-# org's 20-runner cap), so PRs never queue behind main. To fall back when Blacksmith minutes
-# run out, change the `blacksmith-*` labels below back to `ubuntu-latest`. The
-# self-hosted runners keep their Cargo build directory and the C++ reference build between jobs
-# (scripts/ci/warm-target.sh) instead of using actions/cache, and refuse any other job.
-# The org shares 20 concurrent runners across all its repositories. A new push to a
-# PR supersedes the run on its previous head, so cancel it. Runs on main are keyed
-# by commit, so they never queue behind or cancel each other: every merge is checked.
+# Every job runs on Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs, sponsored
+# minutes, outside the org's 20-runner cap): pushes to main, every pull request (fork or not)
+# and Run workflow. Builds are cached with actions/cache (Swatinem/rust-cache and the C++
+# reference build cache below). To fall back when the sponsorship ends, change the
+# `blacksmith-*` labels back to `ubuntu-latest`. A new push to a PR supersedes the run on its
+# previous head, so cancel it. Runs on main are keyed by commit, so they never queue behind or
+# cancel each other: every merge is checked.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -26,54 +23,38 @@ env:
   # Must match ATTRIBUTION.md / AGENTS.md (full SHA so a shallow fetch works).
   UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
   UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
-  # True when the job runs on the org's self-hosted-fast runners (same test as runs-on).
-  # Blacksmith runners also report runner.environment == 'self-hosted', so steps branch
-  # on this instead.
-  ON_ORG_RUNNERS: ${{ github.event_name == 'push' }}
 
 jobs:
   fmt:
-    runs-on: ${{ github.event_name == 'push' && 'self-hosted-fast' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo fmt --all --check
 
   clippy:
-    runs-on: ${{ github.event_name == 'push' && 'self-hosted-fast' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - name: Warm build directory (self-hosted runner)
-        if: env.ON_ORG_RUNNERS == 'true'
-        run: scripts/ci/warm-target.sh
-      - if: env.ON_ORG_RUNNERS != 'true'
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    runs-on: ${{ github.event_name == 'push' && 'self-hosted-fast' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - name: Warm build directory (self-hosted runner)
-        if: env.ON_ORG_RUNNERS == 'true'
-        run: scripts/ci/warm-target.sh
-      - if: env.ON_ORG_RUNNERS != 'true'
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: cargo test --workspace
 
   wasm:
-    runs-on: ${{ github.event_name == 'push' && 'self-hosted-fast' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - name: Warm build directory (self-hosted runner)
-        if: env.ON_ORG_RUNNERS == 'true'
-        run: scripts/ci/warm-target.sh
-      - if: env.ON_ORG_RUNNERS != 'true'
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: rustup target add wasm32-unknown-unknown
@@ -81,14 +62,10 @@ jobs:
 
   # Same packaging check the release workflow runs before publishing (no secrets).
   publish-dry-run:
-    runs-on: ${{ github.event_name == 'push' && 'self-hosted-fast' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - name: Warm build directory (self-hosted runner)
-        if: env.ON_ORG_RUNNERS == 'true'
-        run: scripts/ci/warm-target.sh
-      - if: env.ON_ORG_RUNNERS != 'true'
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: cargo publish -p solidcore --locked --dry-run
@@ -102,7 +79,7 @@ jobs:
           command: check licenses bans sources
 
   difftest:
-    runs-on: ${{ github.event_name == 'push' && 'self-hosted-fast' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     needs: [test]
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
@@ -128,27 +105,14 @@ jobs:
             || git -C upstream fetch origin
           git -C upstream checkout --detach "$UPSTREAM_COMMIT"
 
-      # Preinstalled on the self-hosted runners, which have no sudo.
       - name: Install C++ build tools
-        if: steps.green.outputs.any == 'true' && env.ON_ORG_RUNNERS != 'true'
+        if: steps.green.outputs.any == 'true'
         run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
 
       # The C++ build lives outside cargo's target dir (bin/): rust-cache's post-step
       # cleans bin/ before this cache saves, which once cached an empty bin/cpp.
-      # The self-hosted runners keep their C++ build in their home instead: their newer
-      # compiler and glibc must never reach GitHub's runners through this cache.
-      - name: Keep the C++ reference build (self-hosted runner)
-        if: steps.green.outputs.any == 'true' && env.ON_ORG_RUNNERS == 'true'
-        env:
-          KEY: ${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
-        run: |
-          dir="$HOME/cpp/$KEY"
-          # Only the current build is kept.
-          find "$HOME/cpp" -mindepth 1 -maxdepth 1 ! -name "$KEY" -exec rm -rf {} + 2>/dev/null || true
-          mkdir -p "$dir"
-          echo "SOLIDCORE_CPP_DIR=$dir" >> "$GITHUB_ENV"
       - name: Cache C++ reference build
-        if: steps.green.outputs.any == 'true' && env.ON_ORG_RUNNERS != 'true'
+        if: steps.green.outputs.any == 'true'
         uses: actions/cache@v4
         with:
           path: .cpp
@@ -165,11 +129,8 @@ jobs:
             harness/cpp/build.sh --jobs "$(nproc)"
           fi
 
-      - name: Warm build directory (self-hosted runner)
-        if: steps.green.outputs.any == 'true' && env.ON_ORG_RUNNERS == 'true'
-        run: scripts/ci/warm-target.sh
       - uses: Swatinem/rust-cache@v2
-        if: steps.green.outputs.any == 'true' && env.ON_ORG_RUNNERS != 'true'
+        if: steps.green.outputs.any == 'true'
         with:
           workspaces: ". -> bin"
           key: difftest
