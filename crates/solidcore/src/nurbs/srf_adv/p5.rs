@@ -33,6 +33,10 @@
 //!   reach the surfaces until the curve gets new storage. The Rust function
 //!   reproduces these writes on `der` (the shared array's contents are tracked by
 //!   `make_compatible_knot_tol_traced`).
+//! - A derivative strip whose adjustment fails after its in-place u/v swap (the
+//!   extension of a strip that is not Bezier in the swapped direction) is left
+//!   swapped, as upstream's in-place `N_AdjustDerivSrf`; `SmBSplineSurface::
+//!   CreateSkinnedSurface` retries on it.
 //! - Every array access is bounds checked; where upstream would index outside its
 //!   arrays (cross sections or derivative strips that are not compatible although
 //!   `cmp` says so, rails that are not compatible with each other, too few `ts`
@@ -344,7 +348,21 @@ pub fn create_skin_srf_boundary_continuity(
             for (slot, (b, t)) in der.iter_mut().zip(bnd.iter().zip(targets)) {
                 if let Some(d) = slot.as_mut() {
                     if *b != t {
-                        *d = adjust_deriv_srf(d, in_bnd(*b), *b, t)?;
+                        match adjust_deriv_srf(d, in_bnd(*b), *b, t) {
+                            Ok(adjusted) => *d = adjusted,
+                            Err(e) => {
+                                // Upstream adjusts in place (`surP == surQ`): where it swaps
+                                // u and v before the extension that fails, the strip stays
+                                // swapped (a caller retrying the skinning sees it so).
+                                if matches!(
+                                    (*b, t),
+                                    (Left, Top) | (Bottom, Right) | (Right, Bottom) | (Top, Left)
+                                ) {
+                                    d.swap_uv();
+                                }
+                                return Err(e);
+                            }
+                        }
                     }
                 }
             }

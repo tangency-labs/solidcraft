@@ -432,6 +432,13 @@ impl OffsetSurface {
         &self.surface
     }
 
+    /// The base surface, mutably: for a caller's temporary change of the shared base's
+    /// state (`SmTemporaryChangeValue` on its `GetOutOfBoundsEnabled()`), which that
+    /// caller restores.
+    pub(crate) fn base_surface_mut(&mut self) -> &mut Surface {
+        &mut self.surface
+    }
+
     /// `GetExtendedBaseSurface`.
     #[must_use]
     pub fn extended_base_surface(&self) -> Option<&Surface> {

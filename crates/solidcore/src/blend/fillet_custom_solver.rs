@@ -30,8 +30,9 @@
 //!   missing surface or an out-of-range rail index (upstream dereferences `NULL` or
 //!   indexes past the two-element arrays) is [`SolidError::InvalidInput`]. The
 //!   base-class constructor from an edge use ([`ConstantRadiusAssistedFs::from_edgeuse`])
-//!   belongs to `blend.fillet_standard_solver_p1` and returns
-//!   [`SolidError::Unported`]; [`ConstantRadiusAssistedFs::from_parts`] builds the
+//!   is `blend.fillet_standard_solver_p1`'s `constant_radius_from_edgeuse` (it takes the
+//!   B-rep mutably: `SmEdgeuse::EvaluateBinormal` may create UV trim curves);
+//!   [`ConstantRadiusAssistedFs::from_parts`] builds the
 //!   members directly with the base-class defaults.
 //! - **Offset surfaces.** A rail surface is an [`OffsetSurface`]: the ported
 //!   `SmOffsetSurface` ([`offset_surface::OffsetSurface`], which owns a copy of its
@@ -180,12 +181,12 @@ impl OffsetSurface {
 }
 
 /// `SmOffsetSurface::EvaluatePoint`.
-fn offset_evaluate_point(s: &mut OffsetSurface, uv: Point2) -> Result<Point3> {
+pub(crate) fn offset_evaluate_point(s: &mut OffsetSurface, uv: Point2) -> Result<Point3> {
     s.surface.evaluate_point_extending(uv)
 }
 
 /// `SmOffsetSurface::GetNaturalUVDomain`.
-fn offset_natural_uv_domain(s: &OffsetSurface) -> Extent2d {
+pub(crate) fn offset_natural_uv_domain(s: &OffsetSurface) -> Extent2d {
     s.surface.natural_uv_domain()
 }
 
@@ -201,7 +202,7 @@ pub(crate) fn offset_evaluate_1st(
 
 /// `Evaluate2ndDerivatives(uv, TRUE, TRUE, ..)` of an offset surface:
 /// `(P, S_u, S_v, S_uv, S_uu, S_vv)`.
-fn offset_evaluate_2nd(s: &mut OffsetSurface, uv: Point2) -> Result<[Vec3; 6]> {
+pub(crate) fn offset_evaluate_2nd(s: &mut OffsetSurface, uv: Point2) -> Result<[Vec3; 6]> {
     let d = s
         .surface
         .with_evaluator(|e| evaluate_2nd_derivatives(e, uv, Side::Left, Side::Left))?;
@@ -210,7 +211,7 @@ fn offset_evaluate_2nd(s: &mut OffsetSurface, uv: Point2) -> Result<[Vec3; 6]> {
 
 /// `SmSurface::ComputeInwardVector` of an offset surface (it evaluates the offset
 /// surface).
-fn offset_compute_inward_vector(s: &mut OffsetSurface, uv: Point2) -> Result<Vec3> {
+pub(crate) fn offset_compute_inward_vector(s: &mut OffsetSurface, uv: Point2) -> Result<Vec3> {
     s.surface.with_evaluator(|e| compute_inward_vector(e, uv))
 }
 
@@ -219,7 +220,7 @@ fn offset_compute_inward_vector(s: &mut OffsetSurface, uv: Point2) -> Result<Vec
 /// `None` when no answer was found. The solve runs on a copy of the offset (the solver
 /// is borrowed shared), so a base extension it makes is not kept (see the module
 /// deviations).
-fn offset_local_point_solve(
+pub(crate) fn offset_local_point_solve(
     k: &Kernel,
     s: &OffsetSurface,
     domain: &Extent2d,
@@ -248,7 +249,7 @@ fn offset_local_point_solve(
 
 /// `GlobalPointSolve(domain, SM_SO_MINIMIZE, point, SM_EFF_ZERO_SQ, NULL, SM_SR_SINGLE,
 /// ..)` of a base surface: the UV points of the solutions.
-fn surface_global_point_solve(
+pub(crate) fn surface_global_point_solve(
     k: &Kernel,
     s: &Surface,
     domain: &Extent2d,
@@ -336,22 +337,29 @@ impl ConstantRadiusAssistedFs {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] (`SmConstantRadiusFS::SmConstantRadiusFS`, unit
-    /// `blend.fillet_standard_solver_p1`).
+    /// Those of `SmConstantRadiusFS::SmConstantRadiusFS`
+    /// ([`crate::blend::fillet_standard_solver::p1::constant_radius_from_edgeuse`]).
+    #[allow(clippy::too_many_arguments)]
     pub fn from_edgeuse(
-        _brep: &Brep,
-        _approx_tol_3d: f64,
-        _ang_tol_rad: f64,
-        _tangency_tolerance: f64,
-        _fillet_radius1: f64,
-        _fillet_radius2: f64,
-        _edgeuse: EdgeuseId,
+        k: &Kernel,
+        brep: &mut Brep,
+        approx_tol_3d: f64,
+        ang_tol_rad: f64,
+        tangency_tolerance: f64,
+        fillet_radius1: f64,
+        fillet_radius2: f64,
+        edgeuse: EdgeuseId,
     ) -> Result<Self> {
-        // UNPORTED(blend.fillet_standard_solver_p1): SmConstantRadiusFS::SmConstantRadiusFS
-        Err(SolidError::Unported {
-            upstream: "SmConstantRadiusFS::SmConstantRadiusFS",
-            unit: "blend.fillet_standard_solver_p1",
-        })
+        crate::blend::fillet_standard_solver::p1::constant_radius_from_edgeuse(
+            k,
+            brep,
+            approx_tol_3d,
+            ang_tol_rad,
+            tangency_tolerance,
+            fillet_radius1,
+            edgeuse,
+            Some(fillet_radius2),
+        )
     }
 
     /// `GetSurface(lRailIndex)`.

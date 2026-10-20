@@ -435,9 +435,8 @@ impl FilletVertexType {
 }
 
 /// How a fillet surface is trimmed (`SmBoundaryTrimmingType`); discriminants are the
-/// upstream values. PR #168 (`blend.fillet_standard_solver_p1`) co-ports the same enum,
-/// identically, at `blend::fillet_standard_solver::p1::BoundaryTrimmingType`; whichever
-/// lands second re-exports the other's.
+/// upstream values. `blend.fillet_standard_solver_p1` (PR #168) re-exports it at
+/// `blend::fillet_standard_solver::p1::BoundaryTrimmingType`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BoundaryTrimmingType {
     /// `SM_BT_NONE`.

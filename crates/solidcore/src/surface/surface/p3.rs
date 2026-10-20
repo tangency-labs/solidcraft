@@ -127,7 +127,7 @@ fn surface_approx_tol_3d(
 /// surface, a plane or a surface of revolution); `None` for the other kinds
 /// (`SM_CAST_NONNULL_PTR(SmBSplineSurface, ..)` is null, so `SmTemporaryChangeValue`
 /// changes a local instead). An `SmSTEPSurface` is an `SmSurface`, not a B-spline surface.
-fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
+pub(crate) fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
     match surface.kind() {
         SurfaceKind::BSpline(s) => Some(s.is_out_of_bounds_enabled()),
         SurfaceKind::Plane(s) => Some(s.is_out_of_bounds_enabled()),
@@ -143,7 +143,7 @@ fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
 /// kinds). Only the `SmBSplineSurface` member changes, as `SmTemporaryChangeValue`
 /// through `GetOutOfBoundsEnabled()` does: a surface of revolution's generator keeps its
 /// own flag (the virtual `SmSurfOfRevolution::SetOutOfBoundsEnabled` is not called).
-fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
+pub(crate) fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
     match surface.kind_mut() {
         SurfaceKind::BSpline(s) => *s.out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::Plane(s) => s.set_out_of_bounds_enabled(enabled),

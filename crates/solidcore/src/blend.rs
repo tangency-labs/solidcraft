@@ -8,4 +8,5 @@
 pub mod fillet_custom_solver;
 pub mod fillet_geom;
 pub mod fillet_intersector;
+pub mod fillet_standard_solver;
 pub mod hcr;
