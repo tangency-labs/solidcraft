@@ -495,14 +495,10 @@ pub(crate) struct MixedEnd {
     pub(crate) contact_other: mt::Edge,
     /// Where the earlier round's end meets `L`: its contact with `Y` there.
     pub(crate) u: mt::Vertex,
-    /// The end face `E`, and its edge with `X2` from `u` along `L`: none where `E` is `X2` itself
-    /// (the wall's end in one plane with the face beside the chain, `L` no edge below `u`). Where
-    /// `E` is `Y` (the earlier round's other face in that plane) its edge with `X2` is `Y`'s.
+    /// The end face `E` (`Y` itself where the wall's end is in one plane with the plate's side),
+    /// and its edge with `X2` from `u` along `L`.
     pub(crate) end: mt::FaceID,
-    pub(crate) end_side: Option<mt::Edge>,
-    /// The far end of `E`'s run along `L` from `u` past `T`: of its edge with `X2`, or where `L`
-    /// leaves `X2` where `E` is `X2`.
-    pub(crate) far_l: Vec3,
+    pub(crate) end_side: mt::Edge,
     /// The fit tolerance the end was recognised to.
     pub(crate) tolerance: f64,
 }
@@ -596,8 +592,9 @@ impl MixedEnd {
         // The later round's contact with `X2` meets `L` inside `E`'s edge with `X2`.
         let q_x = if self.earlier_adds { zone.q_s } else { zone.q_w };
         let u = from_p3(self.u.point());
-        let length = self.far_l.dist(u);
-        let along = (self.far_l - u).normalized().map_or(f64::NAN, |d| (q_x - u).dot(d));
+        let far_l = far_end(&self.end_side, u);
+        let length = far_l.dist(u);
+        let along = (far_l - u).normalized().map_or(f64::NAN, |d| (q_x - u).dot(d));
         if !(along > length * 1e-6 && along < length * (1.0 - 1e-6)) {
             return Err(too_large("the later round reaches past the far end of the face beside it"));
         }
@@ -613,31 +610,6 @@ impl MixedEnd {
 pub(crate) struct Run {
     pub(crate) reach: Vec3,
     pub(crate) end: Option<(Vec3, Vec3)>,
-}
-
-/// How far the line from `from` along the unit `d`, in the planar face `f`, runs inside it: to
-/// the nearest crossing of its boundary more than `tolerance` on (sampled, each edge in 64 pieces).
-fn leaves(f: &mt::Face, from: Vec3, d: Vec3, tolerance: f64) -> Option<Vec3> {
-    use mt::{BoundedCurve, ParametricCurve};
-    let across = plane_normal(f)?.cross(d).normalized()?;
-    let mut nearest = f64::INFINITY;
-    for e in f.edge_iter() {
-        let c = e.curve();
-        let (t0, t1) = c.range_tuple();
-        let pts: Vec<Vec3> = (0..=64).map(|i| from_p3(c.subs(t0 + (t1 - t0) * f64::from(i) / 64.0)) - from).collect();
-        for w in pts.windows(2) {
-            let [a, b] = w else { continue };
-            let (da, db) = (a.dot(across), b.dot(across));
-            if (da > 0.0) == (db > 0.0) || da == db {
-                continue;
-            }
-            let at = a.dot(d) + (b.dot(d) - a.dot(d)) * da / (da - db);
-            if at > tolerance * 10.0 {
-                nearest = nearest.min(at);
-            }
-        }
-    }
-    nearest.is_finite().then(|| from + d * nearest)
 }
 
 /// The earlier round at vertex `v` of a chain between planes `top` and `side`, when `round` (the
@@ -675,8 +647,7 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         return None;
     }
     // The four faces at `u`: the round, `side`, `Y` (the round's other face) and `E`; or three,
-    // `E` in one plane with `side` or with `Y` (a wall's end flush with the plate's side beneath
-    // it), `L` the edge of `side` with `Y` there.
+    // `E` in one plane with `Y`.
     let around: Vec<&mt::Face> = faces.iter().filter(|f| f.vertex_iter().any(|x| x == u)).take(5).collect();
     if !(3..=4).contains(&around.len()) || !around.iter().any(|f| f.id() == round.id()) || !around.iter().any(|f| f.id() == side.id()) {
         return None;
@@ -689,7 +660,7 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         let far = if edge.front() == &u { edge.back() } else { edge.front() };
         (from_p3(far.point()) - q).normalized()
     };
-    let (y, e, end_side, l1, far_l) = match others[..] {
+    let (y, e, end_side, l1) = match others[..] {
         [a, b] => {
             let (y, e) = if shared(a, round, &u).is_some() { (a, b) } else { (b, a) };
             if shared(e, round, &u).is_some() {
@@ -701,27 +672,25 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
             if l1.dot(l2) > -1.0 + 1e-6 || l1.dot(n_t).abs() < 1.0 - 1e-6 {
                 return None;
             }
-            let far = far_end(&end_side, q);
-            (y, e, Some(end_side), l1, far)
+            (y, e, end_side, l1)
         }
         [y] => {
-            // `L` runs on from `u` as the edge of `side` with `Y` only: away from the top where `E`
-            // is `side` (`E`'s edge with `Y` above the earlier round), back over it where `E` is `Y`
-            // (`E`'s edge with `side`).
+            // Three: `E` in one plane with `Y`, the plate's side beneath a wall's end flush with it,
+            // where the earlier round takes material away (along the plate's edge) and `L` runs on
+            // from `u` back over the top as `side`'s edge with `Y`. (With the earlier round adding
+            // material and `E` in one plane with `side`, the faces are those of a pocket's rim
+            // meeting a rounded inner corner, or a boss's foot a rounded outer one, which a chain
+            // runs round: no end.)
+            if rise >= 0.0 {
+                return None;
+            }
             shared(y, round, &u)?;
             let seam = shared(y, side, &u)?;
             let l = away(&seam)?;
-            if l.dot(n_t).abs() < 1.0 - 1e-6 {
+            if l.dot(n_t) < 1.0 - 1e-6 {
                 return None;
             }
-            if l.dot(n_t) * rise > 0.0 {
-                // `E`'s run along `L` past `u`: within `side`, to where `L` leaves it.
-                let far = leaves(side, q, -l, tolerance)?;
-                (y, side, None, l, far)
-            } else {
-                let far = far_end(&seam, q);
-                (y, y, Some(seam), l, far)
-            }
+            (y, y, seam, l)
         }
         _ => return None,
     };
@@ -774,7 +743,6 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         u: u.clone(),
         end: e.id(),
         end_side,
-        far_l,
         tolerance,
     })
 }

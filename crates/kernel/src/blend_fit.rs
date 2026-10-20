@@ -623,7 +623,9 @@ fn volume_in(sel: &Selection, input: &Body, out: Body, size: Size) -> Result<Bod
     }
     // Well within the bound on the meshes the check made anyway: accepted. Otherwise measured
     // finely, as a coarse mesh of a cone or a blend is off by more than a small blend.
-    if let Ok(m) = out.tessellate(sel.chord).map(|m| solidcraft_geom::MeshMeasure { volume: crate::measure::mesh_volume_about(&m, sel.centre), ..m.measure() }) {
+    if let Ok(m) =
+        out.tessellate(sel.chord).map(|m| solidcraft_geom::MeshMeasure { volume: crate::measure::mesh_volume_about(&m, sel.centre), ..m.measure() })
+    {
         let (va, aa) = sel.coarse;
         // A chord's sag over every face bounds what the meshes miss.
         let slack = (aa + m.area) * sel.chord;
