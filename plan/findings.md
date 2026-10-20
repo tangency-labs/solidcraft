@@ -5297,6 +5297,10 @@ there is no new SSI implementation or external corpus use.
   WR-160..166 (first WR-81..87, then WR-97..103, then WR-159..165), HANG-21 and HANG-22
   (first HANG-13/14, then HANG-14/15, then HANG-17/18, then HANG-19/20).
 
+## topology.topology_traverser (audit #294, 2026-10-20)
+
+Generated traversal operations require entity kinds present in the native fixture; RemoveShell uses distinct source and target shells. Fixed null/missing-seed fixtures remain covered. This removes matched missing-seed errors from generated parity coverage without changing kernel code or tolerances. Historical 2026-10-21 head f9c3add35 passed full Linux CI; the 2026-10-22 independent verification also passed 909 cases (898 passed, 11 deferred, 0 failed). The earlier macOS stall was absent on Linux. Current main has since promoted the unit to green through kernel dependency repairs; fresh validation of the merged generator change is required before merge.
+
 ## topology.vertexuse (`SmVertexuse`, 2026-10-14; partial, no disagreements)
 
 - **B-rep import.** As `topology.edgeuse_p1`: the shim builds real `SmBrep`s (15 upstream
