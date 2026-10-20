@@ -1281,13 +1281,15 @@ impl MergeEnd {
 
 /// The merge at the end `k` of the chain (end face `fi`, tangent to the chain's side `side`), if
 /// the end face is an earlier round of the other kind ending flush with a wall's end, planned or
-/// refused decisively where the corner does not fit. `tols`: the chain's tolerance and the fit's.
+/// refused where the corner does not fit. `end_faces`: the faces the chain ends on, by vertex
+/// (the first reached by side 1's contact); `tols`: the chain's tolerance and the fit's.
 #[allow(clippy::too_many_arguments)]
 fn merge_end(
     faces: &[mt::Face],
     (side1, side2): (&[usize], &[usize]),
     chain: &[mt::Edge],
     verts: &[mt::Vertex],
+    end_faces: &[(usize, usize)],
     (k, fi, side): (usize, usize, u8),
     convex: bool,
     fixed: Option<f64>,
@@ -1305,10 +1307,21 @@ fn merge_end(
     let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END));
     let r = fixed.ok_or_else(|| refuse("not with a chord width or a radius law"))?;
     let p = from_p3(v.point());
-    // The chain runs straight back from its end as far as its last edge is straight.
+    // The chain runs straight back from its end as far as its last edge is straight; its contact
+    // with `T` as far as the plane the chain ends on there, if it ends there on a plane (on into
+    // the next edge, the contact's straight run ends square to the edge, as the edge's does).
     let far = if terminal.front() == v { terminal.back() } else { terminal.front() };
-    let reach = if straight(terminal, tol * 10.0) { from_p3(far.point()) } else { p };
-    let zone = end.plan(p, r, reach)?;
+    let is_straight = straight(terminal, tol * 10.0);
+    let reach = if is_straight { from_p3(far.point()) } else { p };
+    let kf = if k == 0 { 1 } else { k.saturating_sub(1) };
+    let ends: Vec<usize> = end_faces.iter().filter(|(kk, _)| *kk == kf).map(|(_, f)| *f).collect();
+    let on = match ends[..] {
+        [one] => Some(one),
+        [first, second] => Some(if side == 1 { first } else { second }),
+        _ => None,
+    };
+    let end_plane = on.filter(|_| is_straight).and_then(|i| faces.get(i)).and_then(crate::blend::plane_normal).map(|n| (from_p3(far.point()), n));
+    let zone = end.plan(p, r, crate::merge_corner::Run { reach, end: end_plane })?;
     Ok(Some(MergeEnd { k, ke, g: fi, top: side, zone, end }))
 }
 
@@ -1318,7 +1331,7 @@ fn merge_end(
 /// `tolerance` along its length, between its own contacts and within its own part.
 fn merge_cap(fit: &Fit, m: &MergeEnd, tolerance: f64) -> Result<(f64, f64, mt::Curve)> {
     use mt::{BoundedCurve, ParametricCurve, ParametricSurface, SearchNearestParameter};
-    let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END));
+    let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END_SIZE));
     let off = || refuse("the merged corner does not lie on the round");
     let (lo, hi) = (fit.range.0.min(fit.range.1), fit.range.0.max(fit.range.1));
     let inside = |t: f64| t > lo + 1e-6 && t < hi - 1e-6;
@@ -1859,7 +1872,9 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         // An earlier round of the other kind ending flush with a wall's end, tangent to the side
         // the chain shares with it ([`crate::merge_corner`]): the two rounds merge there.
         let merge = match *tangent {
-            Some(side) if round => merge_end(&faces, (&side1, &side2), &chain, &verts, (*k, *fi, side), convex, fixed, (tol, fit_tolerance))?,
+            Some(side) if round => {
+                merge_end(&faces, (&side1, &side2), &chain, &verts, &end_faces, (*k, *fi, side), convex, fixed, (tol, fit_tolerance))?
+            }
             _ => None,
         };
         let width = at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale);

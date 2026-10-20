@@ -136,7 +136,7 @@ pub(crate) fn zone(faces: &Faces, ra: f64, rb: f64) -> Result<Zone> {
         return Err(KernelError::Invalid("merge corner: point or direction not finite".into()));
     }
     if ra.min(rb) < SCALE * v.len().max(1.0) {
-        return Err(unsupported("rounds meeting at an end that are too small for their distance from the origin"));
+        return Err(KernelError::Invalid("rounds meeting at an end that are too small for their distance from the origin".into()));
     }
     let n = unit(top, "the top's normal")?;
     let (wall, side, end) = (unit(wall, "the wall's normal")?, unit(side, "the side's normal")?, unit(end, "the end's normal")?);
@@ -167,7 +167,7 @@ pub(crate) fn zone(faces: &Faces, ra: f64, rb: f64) -> Result<Zone> {
     let p_star = v + to_p_star;
     // The band lies along the wall, not past its end.
     if !(to_p_star.dot(end) < -SQUARE * r) {
-        return Err(unsupported("rounds meeting at an end that reach past the wall's end"));
+        return Err(KernelError::TooLarge("rounds meeting at an end that reach past the wall's end".into()));
     }
     let zone = Zone {
         v,
@@ -249,17 +249,43 @@ impl Zone {
     /// `[0, 1]` (`g′ = −k + 2 tan(θ0/2)·r·(1 − t²)/(1 + t²)²`, the fraction falling from 1 to 0),
     /// so it peaks at `t = 0` or where `g′` is zero: `(1 − t²)/(1 + t²)² = α`, a quadratic in `t²`.
     fn reach(&self, r: f64) -> f64 {
+        let (k, half, t) = (self.k(), (self.theta / 2.0).tan(), self.peak(r));
+        (k * (1.0 - t) - half * r * (1.0 - t).powi(2) / (1.0 + t * t)).max(0.0)
+    }
+
+    /// Where `g` peaks for the round of radius `r` ([`Zone::reach`]).
+    fn peak(&self, r: f64) -> f64 {
         let (k, half) = (self.k(), (self.theta / 2.0).tan());
-        let g = |t: f64| k * (1.0 - t) - half * r * (1.0 - t).powi(2) / (1.0 + t * t);
         let steep = 2.0 * half * r;
-        let t = if steep <= k {
+        if steep <= k {
             0.0
         } else {
             // α t⁴ + (2α + 1) t² + α − 1 = 0, its root in [0, 1] in the form that keeps its digits.
             let alpha = k / steep;
             (2.0 * (1.0 - alpha) / (2.0 * alpha + 1.0 + (8.0 * alpha + 1.0).sqrt())).clamp(0.0, 1.0).sqrt()
+        }
+    }
+
+    /// Where the band's edge on the round of radius `r` (`A`'s or `B`'s) runs past that round's
+    /// straight run, if it does: the worst point's reach along the trace and the run there. The
+    /// round runs straight `top` along its contact with `T` and `other` along its contact with its
+    /// other face, and its far end stands square to `T` between them (a face square to `T`, or the
+    /// section where its edge stops being straight), so the run is linear in a point's distance
+    /// from the other face: `other + (top − other)·(1 − t)²/(1 + t²)` at the edge's point at `t`
+    /// (`r(1 − t)²/(1 + t²)` from that face). The edge reaches `g(t)` ([`Zone::reach`]).
+    pub(crate) fn overrun(&self, r: f64, top: f64, other: f64) -> Option<(f64, f64)> {
+        let (k, half) = (self.k(), (self.theta / 2.0).tan());
+        let at = |t: f64| {
+            let f = (1.0 - t).powi(2) / (1.0 + t * t);
+            (k * (1.0 - t) - half * r * f, other + (top - other) * f)
         };
-        g(t).max(0.0)
+        // The peak of `g` (the worst point where the run is the same throughout), and samples
+        // between for a run that narrows towards `T` or away from it.
+        let worst = std::iter::once(self.peak(r))
+            .chain((0..=256).map(|i| f64::from(i) / 256.0))
+            .map(at)
+            .max_by(|x, y| (x.0 - x.1).total_cmp(&(y.0 - y.1)))?;
+        (!(worst.0 < worst.1)).then_some((worst.0.max(0.0), worst.1))
     }
 
     /// Where the section at `t` cuts `W`'s trace (`ρ = ρ*(1 − t)`).
@@ -462,9 +488,11 @@ pub(crate) struct MixedEnd {
     pub(crate) n_side: Vec3,
     pub(crate) n_other: Vec3,
     pub(crate) n_end: Vec3,
-    /// The earlier round's contact with `T`, from `v`, and its end on `X2`, from `v` to `u`.
+    /// The earlier round's contact with `T`, from `v`, its end on `X2`, from `v` to `u`, and its
+    /// contact with `Y`, from `u`.
     pub(crate) contact: mt::Edge,
     pub(crate) cap: mt::Edge,
+    pub(crate) contact_other: mt::Edge,
     /// Where the earlier round's end meets `L`: its contact with `Y` there.
     pub(crate) u: mt::Vertex,
     /// The end face `E`, and its edge with `X2` from `u` along `L`.
@@ -499,28 +527,41 @@ impl MixedEnd {
     }
 
     /// The merge corner of this end with the later round of radius `r`, its chain ending at `v`
-    /// and running straight back to `reach` (the far end of its last edge where that is straight;
-    /// else `v`). Refused, decisively, where it does not fit: the rounds need more straight run
-    /// along a trace than it has, or the later round's contact with `X2` meets `L` past the far
-    /// end of `E`'s edge with `X2` (a round as deep as the face beside it).
-    pub(crate) fn plan(&self, v: Vec3, r: f64, reach: Vec3) -> Result<Zone> {
+    /// and running straight back as `run` says. Refused where it does not fit, as too large
+    /// ([`crate::blend::MIXED_END_SIZE`]: smaller rounds may fit) where a band's edge runs past the
+    /// straight run of its round ([`Zone::overrun`], the earlier round's from its contacts, the
+    /// later's from `run`), the band reaches past the wall's end, or the later round's contact with
+    /// `X2` meets `L` past the far end of `E`'s edge with `X2` (a round as deep as the face beside
+    /// it); decisively ([`crate::blend::MIXED_END`]) where the faces there take no band of any size.
+    pub(crate) fn plan(&self, v: Vec3, r: f64, run: Run) -> Result<Zone> {
         let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END));
+        let too_large = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END_SIZE));
         let faces = self.faces(v)?;
         let (ra, rb) = if self.earlier_adds { (self.radius, r) } else { (r, self.radius) };
-        let zone = zone(&faces, ra, rb).map_err(|e| refuse(&e.to_string()))?;
-        // The straight run each trace has from `V`: the earlier round's contact to its far end,
-        // the later round's chain to `reach`.
-        let (d_side, d_other) = if self.earlier_adds { (zone.s, zone.w) } else { (zone.w, zone.s) };
-        let have_other = (far_end(&self.contact, v) - zone.v).dot(d_other);
-        let have_side = (reach - zone.v).dot(d_side);
-        let (need_w, need_s) = zone.needed_run();
-        let (need_side, need_other) = if self.earlier_adds { (need_s, need_w) } else { (need_w, need_s) };
-        let short = [(need_side, have_side), (need_other, have_other)]
+        let zone = zone(&faces, ra, rb).map_err(|e| match e {
+            KernelError::Failed(m) => refuse(m.trim_start_matches("not supported yet: ")),
+            KernelError::TooLarge(m) | KernelError::Invalid(m) | KernelError::Internal(m) => too_large(&m),
+        })?;
+        // Each round's straight runs from `V` along its trace: along its contact with `T` and with
+        // its other face. The earlier round's from its contacts; the later round's along its edge
+        // with `X2` to `reach`, and along its contact with `T` (`r` into `T`) to `run.end`.
+        let (d_side, d_other, m_side) = if self.earlier_adds { (zone.s, zone.w, zone.m_s) } else { (zone.w, zone.s, zone.m_w) };
+        let from_v = |p: Vec3, d: Vec3| (p - zone.v).dot(d);
+        let other_top = from_v(far_end(&self.contact, v), d_other);
+        let other_other = from_v(far_end(&self.contact_other, from_p3(self.u.point())), d_other);
+        let side_other = from_v(run.reach, d_side);
+        let side_top = run
+            .end
+            .filter(|(_, n)| d_side.dot(*n).abs() > 1e-3)
+            .map(|(p, n)| ((p - zone.v).dot(n) - r * m_side.dot(n)) / d_side.dot(n))
+            .filter(|x| x.is_finite())
+            .unwrap_or(side_other);
+        let short = [zone.overrun(r, side_top, side_other), zone.overrun(self.radius, other_top, other_other)]
             .into_iter()
-            .filter(|(need, have)| !(need < have))
+            .flatten()
             .max_by(|x, y| (x.0 - x.1).total_cmp(&(y.0 - y.1)));
         if let Some((need, have)) = short {
-            return Err(refuse(&format!(
+            return Err(too_large(&format!(
                 "the rounds meeting at the end of the edge need {need:.3} mm of straight edge before it, {:.3} mm available",
                 have.max(0.0)
             )));
@@ -532,10 +573,20 @@ impl MixedEnd {
         let length = far_l.dist(u);
         let along = (far_l - u).normalized().map_or(f64::NAN, |d| (q_x - u).dot(d));
         if !(along > length * 1e-6 && along < length * (1.0 - 1e-6)) {
-            return Err(refuse("the later round reaches past the far end of the face beside it"));
+            return Err(too_large("the later round reaches past the far end of the face beside it"));
         }
         Ok(zone)
     }
+}
+
+/// How far the later round's chain runs straight back from its end ([`MixedEnd::plan`]): its edge
+/// with the face beside it to `reach` (the far end of its last edge where that is straight; else
+/// the end itself), and its contact with `T` as far as the plane `end` (a point and its normal)
+/// cuts it where the chain ends on a plane there; else as far as the edge.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Run {
+    pub(crate) reach: Vec3,
+    pub(crate) end: Option<(Vec3, Vec3)>,
 }
 
 /// The earlier round at vertex `v` of a chain between planes `top` and `side`, when `round` (the
@@ -630,6 +681,7 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         (flat(x - centre).len() - r).abs() <= tolerance * 10.0
     });
     let end_side = shared(e, side, &u)?;
+    let contact_other = shared(y, round, &u)?;
     on_cylinder.then(|| MixedEnd {
         earlier_adds: rise > 0.0,
         radius: r,
@@ -640,6 +692,7 @@ pub(crate) fn mixed_end(faces: &[mt::Face], v: &mt::Vertex, top: &mt::Face, side
         n_end: n_e,
         contact: contact.clone(),
         cap: cap.clone(),
+        contact_other: contact_other.clone(),
         u: u.clone(),
         end: e.id(),
         end_side,
