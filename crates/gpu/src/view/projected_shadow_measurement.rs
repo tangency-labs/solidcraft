@@ -345,12 +345,12 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
                                 view: &color,
                                 depth_slice: None,
                                 resolve_target: None,
-                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Discard },
+                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store },
                             })],
                             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                                 view: &depth,
-                                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
-                                stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
+                                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                                stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
                             }),
                             ..Default::default()
                         })
@@ -406,7 +406,7 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
     let result = json!({"adapter":info.name,"backend":format!("{:?}",info.backend),"timestamps":timestamps,"inside_pass":inside,
         "triangles":meshes.iter().map(|m|m.triangles.len()).sum::<usize>(),"updates":update_rows,"cached":cached_rows,
         "renderer_init_cpu":pipeline_rows,
-        "notes":"Cached shadow uses the production Renderer after the shared opaque model in the same MSAA4 pass; full pass includes model and clears. 3340x1676 is SSAA2 working resolution, excluding final downsample."});
+        "notes":"Cached shadow uses the production Renderer after the shared opaque model in the same MSAA4 pass; full pass includes model and clears. Stored MSAA4 attachments prevent unused-output elimination; presentation, MSAA resolve and final downsample are excluded. 3340x1676 is SSAA2 working resolution."});
     let output = std::env::var_os("SOLIDCRAFT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set SOLIDCRAFT_BENCH_OUTPUT_DIR")?;
     std::fs::create_dir_all(&output)?;
     let path = output.join("projected-shadow-comparison.json");
