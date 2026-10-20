@@ -215,5 +215,19 @@
     "ui.heading_left": "左视",
     "ui.navigation_cube_view": "{view}视图。拖动以环绕；按住 Shift 可吸附。",
     "ui.navigation_cube_view_free": "{view}视图。拖动以环绕。"
+  },
+  "da": {
+    "ui.heading_back": "BAGFRA",
+    "ui.heading_bottom": "NEDEFRA",
+    "ui.heading_left": "FRA VENSTRE",
+    "ui.navigation_cube_view": "Visning {view}. Træk for at rotere; hold Skift for at fastgøre.",
+    "ui.navigation_cube_view_free": "Visning {view}. Træk for at rotere."
+  },
+  "vi": {
+    "ui.heading_back": "HÌNH CHIẾU SAU",
+    "ui.heading_bottom": "HÌNH CHIẾU DƯỚI",
+    "ui.heading_left": "HÌNH CHIẾU CẠNH TRÁI",
+    "ui.navigation_cube_view": "Hướng nhìn {view}. Kéo để xoay; giữ Shift để bắt dính.",
+    "ui.navigation_cube_view_free": "Hướng nhìn {view}. Kéo để xoay."
   }
 }
