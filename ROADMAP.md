@@ -498,6 +498,13 @@ completed drawings publish atomically. The browser still exports synchronously.
   both, that keeps the wall's end and the plate's side beneath it; it needs a short straight run
   before the end (refused with the length it needs), the wall's end and the plate's side as two
   faces, and a plate corner away from 81-99 degrees for the edge round first;
+  the wall's upright corner at such an end (one line with the plate's corner beneath, the two
+  edges' chains stopping where they meet) ends in the plate's top, which takes its end and keeps
+  the wall's end down to the plate; the plate's corner follows with it or after it, leaving a ledge
+  of the top between them (alone it is refused: the wall's corner would overhang it); at its top
+  it ends in earlier rounds of its radius, fitted ones too, along their crease where one top edge
+  is round and in a piece of the ball in place of their mitre where both are; with the foot's
+  cove or the plate edge's round at that end it is not supported yet;
   whole smooth loops of a planar face, picked whole or by one edge (tangent
   chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
   plate outlines), loops with sharp corners between straight or mixed arc/line edges (straight

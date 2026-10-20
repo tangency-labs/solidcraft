@@ -907,6 +907,144 @@ fn round_the_plate_top_edge_up_to_the_wall_ends() {
     assert!(refused.contains("larger than the neighbouring faces"), "{refused}");
 }
 
+/// The ends of the wall in [`wall_on_a_plate`]: the vertex where the wall's corner stands on the
+/// plate, flush with its side; the directions along the wall's end and along its face from there
+/// (both level, away from the corner); the plate's slanted side, the same way; and a point on
+/// the corner above the plate and on the plate's corner beneath it.
+fn flush_corners() -> [(Vec3, Vec3, Vec3, Vec3, Vec3, Vec3); 2] {
+    let n = |x: f64, y: f64| Vec3::new(x, y, 0.0).normalized().unwrap();
+    [
+        (Vec3::new(0.0, 2.0, 2.0), n(0.0, -1.0), n(1.0, 0.0), n(12.0, 8.0), Vec3::new(0.0, 2.0, 4.0), Vec3::new(0.0, 2.0, 1.0)),
+        (Vec3::new(20.0, -20.0, 2.0), n(-1.0, 0.0), n(0.0, 1.0), n(8.0, 16.0), Vec3::new(20.0, -20.0, 4.0), Vec3::new(20.0, -20.0, 1.0)),
+    ]
+}
+
+/// What a round of radius `r` takes off a straight corner of `length` whose faces meet at the
+/// inside angle `alpha`: the section between the faces and the arc touching both.
+fn corner_round_removed(r: f64, alpha: f64, length: f64) -> f64 {
+    r * r * (1.0 / (alpha / 2.0).tan() - (std::f64::consts::PI - alpha) / 2.0) * length
+}
+
+#[test]
+fn round_a_wall_corner_down_to_the_plate_it_stands_flush_on() {
+    // The wall's outer corner at each end stands on the plate, its end flush with the plate's
+    // side beneath, which runs on slanted: the vertical line there is two edges, the wall's corner
+    // and the plate's, with the plate's top between the wall's face and the plate's side. A round
+    // of the wall's corner ends in the plate's top (its end section a quarter disc of the top,
+    // the new edge along the wall's end down to the plate kept); a round of the plate's corner
+    // alone would leave the wall's corner overhanging it, and is refused; both together, or the
+    // plate's after the wall's, leave a ledge of the plate's top between their two ends.
+    let body = wall_on_a_plate();
+    for (v, along_end, along_face, along_side, up, down) in flush_corners() {
+        // The chain stops there: each piece is rounded on its own.
+        for p in [up, down] {
+            let (idx, _) = body.nearest_edge(p, 1e-3).unwrap().unwrap();
+            assert_eq!(crate::fillet_chain(&body, idx).unwrap().len(), 1, "{p:?}");
+        }
+        // The plate's corner's inside angle.
+        let alpha = along_end.dot(along_side).acos();
+        for r in [0.5, 1.0] {
+            let how = format!("{v:?} r {r}");
+            let wall = fillet(&body, &[up], r).unwrap();
+            assert!(wall.validity().is_empty(), "{how}: {:?}", wall.validity());
+            assert_eq!(wall.crossed_face_loops().unwrap(), 0, "{how}");
+            let removed = planned_volume(&body) - planned_volume(&wall);
+            let expected = corner_round_removed(r, std::f64::consts::FRAC_PI_2, 4.0);
+            assert!((removed - expected).abs() < 0.002, "{how}: removed {removed}, expected {expected}");
+            // The corner on the plate stays; the round's contacts reach the plate's top.
+            for p in [v, v + along_end * r, v + along_face * r] {
+                assert_eq!(vertices_at(&wall, p, 1e-6), 1, "{how}: {p:?}");
+            }
+            let refused = fillet(&body, &[down], r).unwrap_err().to_string();
+            assert!(refused.contains("blend that corner first"), "{how}: {refused}");
+            // Together in either order, or one after the other: the same body.
+            let below = corner_round_removed(r, alpha, 2.0);
+            let then = fillet(&wall, &[down], r).unwrap();
+            for (name, both) in
+                [("together", fillet(&body, &[up, down], r).unwrap()), ("reversed", fillet(&body, &[down, up], r).unwrap()), ("after", then.clone())]
+            {
+                assert!(both.validity().is_empty(), "{how} {name}: {:?}", both.validity());
+                assert_eq!(both.crossed_face_loops().unwrap(), 0, "{how} {name}");
+                let removed = planned_volume(&body) - planned_volume(&both);
+                assert!((removed - expected - below).abs() < 0.002, "{how} {name}: removed {removed}, expected {}", expected + below);
+                assert!(same_vertices(&both, &then, 1e-6), "{how} {name}");
+                // The corner is gone; the plate's top keeps a ledge along the wall's end between
+                // the two rounds' contacts.
+                assert_eq!(vertices_at(&both, v, 1e-6), 0, "{how} {name}");
+                let ledge = r / (alpha / 2.0).tan();
+                for p in [v + along_end * r, v + along_end * ledge] {
+                    assert_eq!(vertices_at(&both, p, 1e-6), 1, "{how} {name}: {p:?}");
+                }
+            }
+        }
+        // Chamfered: the same end, a flat one.
+        let flat = crate::chamfer(&body, &[up], 0.5).unwrap();
+        assert!(flat.validity().is_empty(), "{:?}", flat.validity());
+        let removed = planned_volume(&body) - planned_volume(&flat);
+        assert!((removed - 0.5 * 0.5 * 0.5 * 4.0).abs() < 0.002, "chamfer removed {removed}");
+        // As wide as the wall's end: refused or sound; wider: refused.
+        if let Ok(b) = fillet(&body, &[up], 2.0) {
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+            assert_eq!(b.crossed_face_loops().unwrap(), 0);
+        }
+        assert!(fillet(&body, &[up], 2.5).is_err());
+    }
+}
+
+/// [`wall_on_a_plate`] with the wall's outer top edge (its face's, round the corner) rounded `r`
+/// first, and with `both` its end's top edge at the first end too: rounds the rolling ball fitted.
+fn wall_with_round_top(r: f64, both: bool) -> Body {
+    let body = wall_on_a_plate();
+    let top = fillet(&body, &[Vec3::new(10.0, 2.0, 6.0)], r).unwrap();
+    if both { fillet(&top, &[Vec3::new(0.0, 1.0, 6.0)], r).unwrap() } else { top }
+}
+
+#[test]
+fn round_a_wall_corner_into_earlier_rounds_of_its_top_edges() {
+    // The wall's top edges rounded first, as the rolling ball fits them (the face's runs round
+    // the corner's round): the corner's round of the same radius ends in them at the top as if
+    // all were rounded together, and in the plate's top at the bottom. Where only the face's top
+    // edge is rounded, the two cylinders cut each other along a crease; where the end's top edge
+    // is too, a piece of the ball touching the three faces takes the corner in place of the
+    // mitre between the earlier rounds.
+    let r = 0.5;
+    let quarter = corner_round_removed(r, std::f64::consts::FRAC_PI_2, 1.0) / (r * r);
+    // The crease: the corner's round less where it overlaps the face's round (the two cylinders'
+    // common corner, r³ (5/3 - π/2)).
+    let crease = wall_with_round_top(r, false);
+    let upper = Vec3::new(0.0, 2.0, 4.0);
+    let result = fillet(&crease, &[upper], r).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+    let removed = planned_volume(&crease) - planned_volume(&result);
+    let expected = quarter * r * r * 4.0 - (5.0 / 3.0 - std::f64::consts::FRAC_PI_2) * r.powi(3);
+    assert!((removed - expected).abs() < 0.002, "crease: removed {removed}, expected {expected}");
+    // The crease ends where the corner's round meets the end's top edge, at the end of the face's
+    // round on the wall's end.
+    assert_eq!(vertices_at(&result, Vec3::new(0.0, 2.0 - r, 6.0), 1e-6), 1);
+    assert_eq!(vertices_at(&result, Vec3::new(0.0, 2.0, 6.0 - r), 1e-6), 0);
+    // The other end too, and with the plate's corner beneath.
+    let other = fillet(&crease, &[Vec3::new(20.0, -20.0, 4.0), Vec3::new(20.0, -20.0, 1.0)], r).unwrap();
+    assert!(other.validity().is_empty(), "{:?}", other.validity());
+    assert_eq!(other.crossed_face_loops().unwrap(), 0);
+    // The ball: the corner's round up to the ball's centre, and the corner of the cube about it
+    // less the ball's eighth beyond what the two earlier rounds left (r³ (2/3 - π/6)).
+    let ball = wall_with_round_top(r, true);
+    for picks in [vec![upper], vec![upper, Vec3::new(0.0, 2.0, 1.0)]] {
+        let result = fillet(&ball, &picks, r).unwrap();
+        assert!(result.validity().is_empty(), "{:?}", result.validity());
+        assert_eq!(result.crossed_face_loops().unwrap(), 0);
+        if picks.len() == 1 {
+            let removed = planned_volume(&ball) - planned_volume(&result);
+            let expected = quarter * r * r * (4.0 - r) + (2.0 / 3.0 - std::f64::consts::FRAC_PI_6) * r.powi(3);
+            assert!((removed - expected).abs() < 0.002, "ball: removed {removed}, expected {expected}");
+        }
+        // The mitre's far end is where the ball touches the wall's top; the corner below it is gone.
+        assert_eq!(vertices_at(&result, Vec3::new(r, 2.0 - r, 6.0), 1e-6), 1);
+        assert_eq!(vertices_at(&result, Vec3::new(0.0, 2.0, 6.0 - r), 1e-6), 0);
+    }
+}
+
 /// The foot of the wall in [`wall_on_a_plate`] rounded `r` (line, the corner's round, line).
 fn round_the_foot(body: &Body, r: f64) -> crate::Result<Body> {
     let corner = Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0);
