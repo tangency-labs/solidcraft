@@ -267,8 +267,12 @@ fn scaled_zero_n(objs: &[Obj]) -> Result<Vec<f64>, HarnessError> {
 fn rust_values(op: Op, i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
     let k = kernel(i.model, i.ratio);
     let a = |n| arg(i, n);
-    let small = SmallTopoType::from_code(i.small)
-        .ok_or_else(|| HarnessError::new(format!("small {}", i.small)))?;
+    // only the ops that take it parse `small` (the C++ side replaces it by the
+    // object count for `scaled_zero_n`)
+    let small = || {
+        SmallTopoType::from_code(i.small)
+            .ok_or_else(|| HarnessError::new(format!("small {}", i.small)))
+    };
     let v1 = |x: f64| Ok(vec![x]);
     let vec3 = |n: usize| Vec3::new(a(n), a(n + 1), a(n + 2));
     Ok(match op {
@@ -323,12 +327,12 @@ fn rust_values(op: Op, i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, Harnes
             i.flag.then(|| tol::xsect_tol3d(&k, a(3))),
         ))),
         Op::GapGain => v1(tol::gap_gain(&k)),
-        Op::ZoneSys => v1(tol::zone_tol_3d(&k, small)),
-        Op::ZoneCtx => v1(tol::context_zone_tol_3d(&k, None, small)),
-        Op::ApproxSys => v1(tol::approx_tol_3d(&k, small)),
-        Op::ApproxCtx => v1(tol::context_approx_tol_3d(&k, None, small)),
-        Op::XSectSys => v1(tol::xsect_tol_3d(&k, small)),
-        Op::XSectCtx => v1(tol::context_xsect_tol_3d(&k, None, small)),
+        Op::ZoneSys => v1(tol::zone_tol_3d(&k, small()?)),
+        Op::ZoneCtx => v1(tol::context_zone_tol_3d(&k, None, small()?)),
+        Op::ApproxSys => v1(tol::approx_tol_3d(&k, small()?)),
+        Op::ApproxCtx => v1(tol::context_approx_tol_3d(&k, None, small()?)),
+        Op::XSectSys => v1(tol::xsect_tol_3d(&k, small()?)),
+        Op::XSectCtx => v1(tol::context_xsect_tol_3d(&k, None, small()?)),
         Op::ScaledZeroSys => Ok(vec![
             tol::scaled_zero(),
             tol::scaled_zero_sq(),
@@ -397,6 +401,10 @@ fn rust_relation(i: &Inputs) -> Result<Output, HarnessError> {
         out.push(v.len() as i64);
         out.extend(v);
     };
+    // the object counts are harness data: same bound as the FFI guard
+    if !(0..=10_000).contains(&i.n1) || !(0..=10_000).contains(&i.n2) {
+        return Err(HarnessError::new("object count"));
+    }
     for f in 0..i.n1 {
         out.push(rel.second(f).unwrap_or(-1));
         push_list(&mut out, rel.seconds(f));

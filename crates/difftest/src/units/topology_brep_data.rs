@@ -424,7 +424,9 @@ fn rust(i: &Inputs) -> Result<Result<Vec<Item>, SolidError>, HarnessError> {
     if mode == Mode::Construct {
         let source = DataSourceType::from_code(i.source)
             .ok_or_else(|| harness("data source type out of range"))?;
-        let manifold = i32::try_from(i.dim as i64).map_err(|_| harness("manifold"))?;
+        // the shim's `(SmBoolean)dim`: an `int64_t` to `int` conversion, which keeps the
+        // low 32 bits (GCC), as `as i32` does
+        let manifold = i.dim as i64 as i32;
         let mut bd = BrepData::new(manifold, source);
         let mut d = Dump {
             o: Vec::new(),
@@ -456,6 +458,11 @@ fn rust(i: &Inputs) -> Result<Result<Vec<Item>, SolidError>, HarnessError> {
         return Ok(Ok(d.o));
     }
 
+    // the FFI refuses `pre > 64` (its validate); mirror it so a fuzzed count cannot make
+    // the runner build billions of attributes
+    if i.pre > 64 {
+        return Err(harness("pre > 64"));
+    }
     let mut store = AttributeStore::new();
     let mut all: Vec<Option<AttributeHandle>> = Vec::new();
     for k in 0..i.pre {

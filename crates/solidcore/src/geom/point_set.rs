@@ -54,6 +54,8 @@
 //! - `SetUpTightPseudoBox` calls the const `ProjectPointToPlane` on its boundary and
 //!   neighbour points and discards the results, so the angles are measured between
 //!   the unprojected points; kept (see `plan/findings.md`).
+//! - The tolerance member `m_dDistTol3d` is an `SmTol3d`: the constructors store
+//!   `|tol3d|` ([`crate::geom::tol::tol3d`]) as upstream's conversion does.
 //! - `SM_DEBUG_CODE` blocks and `SM_DBG_WARN` messages are omitted.
 
 use core::ops::{Deref, DerefMut};
@@ -64,7 +66,7 @@ use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{polygon_area, PointSetType};
 use crate::geom::geom_utility::p2::{best_fit_plane_to_points, is_point_on_segment};
 use crate::geom::pseudo_box::PseudoBox;
-use crate::geom::tol::is_zero;
+use crate::geom::tol::{is_zero, tol3d as to_tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 
@@ -154,13 +156,21 @@ impl Cache {
 }
 
 /// `v.MakeUnitOrthoVectors(pYRef, rX, rY, rZ)` with the status ignored, as the new
-/// values of `[rX, rY, rZ]`: a zero-length `v` only sets `rX` to `(0, 0, 1)` and
-/// keeps the other two of `current`.
+/// values of `[rX, rY, rZ]`. On failure the out-params upstream wrote before
+/// returning ([`Vec3::unit_ortho_vectors_on_failure`]) replace those of `current`:
+/// a zero-length `v` only sets `rX` to `(0, 0, 1)`; a `v` whose squared length
+/// overflows sets `rX` and `rZ` and keeps `rY`.
 fn unit_ortho(v: Vec3, y_ref: Option<Vec3>, current: [Vec3; 3]) -> [Vec3; 3] {
-    // Unitize failed: upstream stored (0, 0, 1) in rX and returned. The other
-    // failure (no perpendicular for a unit vector) cannot happen.
-    let [_, y, z] = current;
-    v.make_unit_ortho_vectors(y_ref).unwrap_or([Vec3::Z, y, z])
+    if let Ok(frame) = v.make_unit_ortho_vectors(y_ref) {
+        return frame;
+    }
+    let mut out = current;
+    for (slot, w) in out.iter_mut().zip(v.unit_ortho_vectors_on_failure()) {
+        if let Some(w) = w {
+            *slot = w;
+        }
+    }
+    out
 }
 
 impl PointSet3d {
@@ -174,13 +184,15 @@ impl PointSet3d {
     pub fn new(points: Vec<Point3>, tol3d: f64, normal: Option<&mut Vec3>) -> Self {
         let mut s = Self {
             points,
-            dist_tol3d: tol3d,
+            // the member is an `SmTol3d`, whose constructor takes `fabs`
+            dist_tol3d: to_tol3d(tol3d),
             cache: Cache::default(),
             point_set_type: PointSetType::Unknown,
-            centroid: Vec3::ZERO,
-            x_axis: Vec3::ZERO,
-            y_axis: Vec3::ZERO,
-            normal: Vec3::ZERO,
+            // `SmVector3d` members default to SM_UNDEF_DOUBLE components
+            centroid: Vec3::UNDEF,
+            x_axis: Vec3::UNDEF,
+            y_axis: Vec3::UNDEF,
+            normal: Vec3::UNDEF,
             max_centroid_dev: 0.0,
             max_dev: 0.0,
             bbox: Extent3d::default(),
@@ -405,7 +417,7 @@ impl PointSet3d {
                     let _ = self.pbox.set_basis(self.x_axis, self.y_axis, self.normal);
                 }
                 Some(z) => {
-                    let [sz, sx, sy] = unit_ortho(*z, None, [*z, Vec3::ZERO, Vec3::ZERO]);
+                    let [sz, sx, sy] = unit_ortho(*z, None, [*z, Vec3::UNDEF, Vec3::UNDEF]);
                     *z = sz;
                     let _ = self.pbox.set_basis(sx, sy, sz);
                 }
@@ -796,6 +808,23 @@ mod tests {
         assert_eq!(c(&mut seq, 3.0, 1.0), PointContainment::Outside);
         assert_eq!(c(&mut seq, 1.0, 0.0), PointContainment::OnBoundary);
         assert_eq!(c(&mut seq, 2.0, 2.0), PointContainment::OnBoundary);
+    }
+
+    /// Fuzz regression: the tolerance is an `SmTol3d` upstream, so a negative one
+    /// behaves as its magnitude.
+    #[test]
+    fn negative_tolerance_is_its_magnitude() {
+        let p = Vec3::new(1.0, 0.05, 0.0);
+        let mut neg = PointSequence::new(square(), -0.1, true, None);
+        let mut pos = PointSequence::new(square(), 0.1, true, None);
+        assert_eq!(
+            neg.point_containment(p).unwrap(),
+            PointContainment::OnBoundary
+        );
+        assert_eq!(
+            neg.point_containment(p).unwrap(),
+            pos.point_containment(p).unwrap()
+        );
     }
 
     #[test]

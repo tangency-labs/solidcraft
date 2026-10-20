@@ -297,8 +297,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             for op in ops {
                 let res = match op {
                     SeqIn::Add(s) | SeqIn::Contains(s) => {
-                        let mut spec = rust_spec(s)?;
-                        // the sequence shim passes NULL strings
+                        // the sequence shim passes NULL strings (so the type
+                        // string indices are not looked up either)
+                        let mut spec = rust_spec(&SpecIn {
+                            owner_ts: None,
+                            other_ts: None,
+                            message: None,
+                            ..s.clone()
+                        })?;
                         spec.owner_type_string = None;
                         spec.other_type_string = None;
                         spec.message = None;

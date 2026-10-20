@@ -3363,6 +3363,22 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/fuzz_regressions.json#0 (upstream fuzz sweep ['/card = -1', '/small = -1'] (was: rust: small -1))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00769",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/fuzz_regressions.json#1 (upstream fuzz sweep ['/small = -1'] (was: rust: small -1))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "relation_c0_basic",
       "outcome": "pass",
       "pass": true,
@@ -27525,8 +27541,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3440,
-  "cases_total": 3440,
+  "cases_passed": 3442,
+  "cases_total": 3442,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

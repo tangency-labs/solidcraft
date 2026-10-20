@@ -181,12 +181,18 @@ impl<I: ArenaId, T> Arena<I, T> {
     /// Appends an item and returns its id.
     ///
     /// Fails with [`SolidError::InvalidInput`] if the arena already holds `u32::MAX`
-    /// items.
+    /// items or cannot grow (allocation failure).
     pub fn insert(&mut self, item: T) -> Result<I> {
         let index = u32::try_from(self.items.len()).map_err(|_| SolidError::InvalidInput {
             operation: "topology::Arena::insert",
             reason: "arena is full",
         })?;
+        self.items
+            .try_reserve(1)
+            .map_err(|_| SolidError::InvalidInput {
+                operation: "topology::Arena::insert",
+                reason: "arena cannot grow",
+            })?;
         self.items.push(item);
         Ok(I::from_index(index))
     }

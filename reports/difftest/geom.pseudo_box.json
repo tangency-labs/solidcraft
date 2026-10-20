@@ -91,6 +91,14 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00509",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.pseudo_box/fuzz_regressions.json#0 (upstream fuzz sweep ['/prog/12/proj/vec/2 = 1e+300'] (was: values.c013_basis[2]: cpp=-0e0 rust=1e0))",
+      "values_compared": 69
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -24093,8 +24101,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3011,
-  "cases_total": 3011,
+  "cases_passed": 3012,
+  "cases_total": 3012,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

@@ -58,6 +58,11 @@
 //!   queries it makes can fail (counts past the fixed arrays, calls into
 //!   unported geometry). `FindBestSubdivisionNode`'s `SM_ERR` is
 //!   [`SolidError::Upstream`] with code `1001`.
+//! - **Recursion bound.** [`GlobalSolve::solve_it`] first checks the trees
+//!   ([`GlobalSolver::check_solve_depth`]): cyclic child links (unbounded
+//!   recursion upstream) or trees whose heights add up to more than
+//!   [`MAX_SOLVE_DEPTH`] (1000 levels) return [`SolidError::InvalidInput`], so
+//!   the `SolveBranch` recursion depth is bounded.
 //! - The `ERR(SM_ERR)` of `BranchMayContainAnswers` for operations it does not
 //!   handle only prints a message upstream and falls through to `TRUE`; here
 //!   it is silently `true`. `SM_ASSERT`s, `Dump` and the `SM_DEBUG_CODE`
@@ -80,6 +85,12 @@ use crate::math::{max2, max3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT,
 
 /// `SM_GS_MAX_TREES`: most trees a global solver traverses together.
 pub const MAX_SOLVER_TREES: usize = 3;
+
+/// Most tree levels one solve may descend through: the heights of the
+/// traversed trees (counted from their top nodes) must add up to at most this.
+/// `SolveBranch` recurses once per level (each subdivision descends one tree by
+/// one level), so this bounds the recursion; upstream trees are far shallower.
+pub const MAX_SOLVE_DEPTH: usize = 1_000;
 
 /// One node per traversed tree (`SmTreeNode* apBranch[SM_GS_MAX_TREES]`);
 /// `None` is a null pointer. Slots past the solver's tree count are `None`.
@@ -379,6 +390,65 @@ pub struct GlobalSolver<'t, O> {
     pub solutions: SolutionArray<O>,
 }
 
+/// Height of the subtree of `tree` below `top` along the child links (a leaf
+/// is 0), with an explicit stack; `InvalidInput` when the links are cyclic.
+/// Each node is measured once, so shared children cost nothing extra.
+fn subtree_height<O: Copy + PartialEq>(
+    tree: &Tree<O>,
+    top: NodeId,
+    operation: &'static str,
+) -> Result<usize> {
+    const OPEN: u8 = 1;
+    const DONE: u8 = 2;
+    let n = tree.nodes().len();
+    let mut state = vec![0u8; n];
+    let mut height = vec![0usize; n];
+    let mut stack = vec![(top, false)];
+    let slot = |id: NodeId| {
+        (id.0 < n).then_some(id.0).ok_or(SolidError::InvalidInput {
+            operation,
+            reason: "tree node id out of range",
+        })
+    };
+    while let Some((id, expanded)) = stack.pop() {
+        let k = slot(id)?;
+        let node = tree.node(id)?;
+        let children = [node.child1, node.child2];
+        if expanded {
+            let mut h = 0;
+            for c in children.into_iter().flatten() {
+                h = h.max(height.get(slot(c)?).copied().unwrap_or(0) + 1);
+            }
+            if let Some(x) = height.get_mut(k) {
+                *x = h;
+            }
+            if let Some(x) = state.get_mut(k) {
+                *x = DONE;
+            }
+            continue;
+        }
+        match state.get(k).copied() {
+            Some(DONE) => continue,
+            // still open: `id` is on the current path, so a child link loops back
+            Some(OPEN) => {
+                return Err(SolidError::InvalidInput {
+                    operation,
+                    reason: "tree child links are cyclic",
+                })
+            }
+            _ => {}
+        }
+        if let Some(x) = state.get_mut(k) {
+            *x = OPEN;
+        }
+        stack.push((id, true));
+        for c in children.into_iter().flatten() {
+            stack.push((c, false));
+        }
+    }
+    Ok(height.get(slot(top)?).copied().unwrap_or(0))
+}
+
 /// Error for a branch slot, tree or child that upstream would dereference as
 /// a null pointer.
 fn null_node(operation: &'static str) -> SolidError {
@@ -509,6 +579,31 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             return Err(SolidError::InvalidInput {
                 operation,
                 reason: "solver tree count exceeds SM_GS_MAX_TREES",
+            });
+        }
+        Ok(())
+    }
+
+    /// Checks that the child links below the start nodes of `branch` are
+    /// acyclic and that their heights add up to at most [`MAX_SOLVE_DEPTH`]
+    /// (the bound on the `SolveBranch` recursion).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for cyclic child links (upstream recurses
+    /// without end) or trees deeper than the bound.
+    pub fn check_solve_depth(&self, branch: &Branch) -> Result<()> {
+        const OP: &str = "geom::global_solver::GlobalSolver::check_solve_depth";
+        let mut total = 0usize;
+        for (i, slot) in branch.iter().enumerate() {
+            if let Some(top) = *slot {
+                total = total.saturating_add(subtree_height(self.tree(i)?, top, OP)?);
+            }
+        }
+        if total > MAX_SOLVE_DEPTH {
+            return Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "trees deeper than MAX_SOLVE_DEPTH",
             });
         }
         Ok(())
@@ -1551,6 +1646,9 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
             *slot = Some(s.tree(i)?.top_node().ok_or(null_node(OP))?);
         }
 
+        // bound the SolveBranch recursion (not upstream: see MAX_SOLVE_DEPTH)
+        s.check_solve_depth(&start_branch)?;
+
         // store the output array, execute the solver tree/tree iteration
         std::mem::swap(&mut s.solutions, solutions);
         let result = self.solve_branch(&start_branch);
@@ -2032,6 +2130,51 @@ mod tests {
                 &mut sols,
             )
             .is_err());
+    }
+
+    /// Fuzz regression: a child link back to the top node made `SolveBranch`
+    /// recurse until the stack overflowed; now the solve is refused up front.
+    #[test]
+    fn cyclic_or_too_deep_trees_are_errors() {
+        let request = SolveRequest {
+            operation: SolverOperation::Intersect,
+            ..SolveRequest::default()
+        };
+        let mut cyclic = split_tree(0.0);
+        if let Ok(n) = cyclic.node_mut(NodeId(1)) {
+            n.child1 = Some(NodeId(0));
+            n.child2 = Some(NodeId(2));
+        }
+        let mut solver = GlobalSolver::with_tree(&cyclic, 0);
+        let mut sols = SolutionArray::new();
+        assert!(matches!(
+            solver.solve_it(&request, &mut sols),
+            Err(SolidError::InvalidInput { .. })
+        ));
+
+        // a chain of MAX_SOLVE_DEPTH + 1 levels (shared leaf siblings)
+        let mut deep = Tree::new(None);
+        let leaf_id = deep.add_node(leaf([0.0; 3], [1.0; 3]));
+        let mut below = leaf_id;
+        for _ in 0..=MAX_SOLVE_DEPTH {
+            let mut n = leaf([0.0; 3], [1.0; 3]);
+            n.child1 = Some(below);
+            n.child2 = Some(leaf_id);
+            below = deep.add_node(n);
+        }
+        deep.set_top_node(Some(below));
+        let mut solver = GlobalSolver::with_tree(&deep, 0);
+        assert!(matches!(
+            solver.solve_it(&request, &mut sols),
+            Err(SolidError::InvalidInput { .. })
+        ));
+
+        // the ordinary two-level tree passes the check
+        let ok = split_tree(0.0);
+        let solver = GlobalSolver::with_tree(&ok, 0);
+        assert!(solver
+            .check_solve_depth(&[ok.top_node(), None, None])
+            .is_ok());
     }
 
     #[test]

@@ -361,17 +361,19 @@ fn apply(
     of: &mut Vec<f64>,
 ) -> Result<(), RunError> {
     match op {
-        Op::New { cap } => *arr = SolutionArray::with_capacity(usz(*cap)?),
+        Op::New { cap } => *arr = SolutionArray::try_with_capacity(usz(*cap)?)?,
         Op::Add { s } => oi.push(arr.add(&to_sol(s)?) as i64),
         Op::AddSorted { key, s } => {
             let key = SortKey::from_code(*key as i32).ok_or_else(|| harness("sort key"))?;
             let r = arr.add_sorted_solution(&to_sol(s)?, key)?;
             oi.push(r.map_or(BIG_ULONG, |i| i as i64));
         }
-        Op::InsertAt { idx, count, s } => arr.insert_at(usz(*idx)?, &to_sol(s)?, usz(*count)?),
+        Op::InsertAt { idx, count, s } => {
+            arr.try_insert_at(usz(*idx)?, &to_sol(s)?, usz(*count)?)?;
+        }
         Op::RemoveAt { idx, count } => arr.remove_at(usz(*idx)?, usz(*count)?),
         Op::Swap { i, j } => arr.swap(usz(*i)?, usz(*j)?)?,
-        Op::SetSize { n } => arr.set_size(usz(*n)?),
+        Op::SetSize { n } => arr.try_set_size(usz(*n)?)?,
         Op::SetAt { idx, s } => arr.set_at(usz(*idx)?, &to_sol(s)?)?,
         Op::GetAt { idx } => put_sol(oi, of, &arr.get_at(usz(*idx)?)?),
         Op::Reset => arr.reset(),

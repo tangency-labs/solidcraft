@@ -35,6 +35,9 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
+/// Most placeholder edges the Rust side builds for a `coincident` case.
+const MAX_PLACEHOLDER_EDGES: usize = 1 << 20;
+
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 600;
 
@@ -187,7 +190,9 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
                 .iter()
                 .map(|&[x, y, z, t]| {
                     let v = brep.add_vertex(p3([x, y, z]))?;
-                    brep.vertex_mut(v)?.tolerance = t;
+                    // the shim assigns the double to the `SmZoneTol3d` member
+                    // (`operator=(double)` takes `fabs` only)
+                    brep.vertex_mut(v)?.tolerance = solidcore::geom::tol::tol3d(t);
                     Ok(v)
                 })
                 .collect::<Result<_, SolidError>>()
@@ -206,6 +211,11 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
         } => {
             if edge >= n_edges {
                 return Err(harness(&format!("edge {edge} of {n_edges}")));
+            }
+            // placeholder edges are harness data (the C++ side checks the count
+            // against the file); a count no fixture file reaches is not a case
+            if *n_edges > MAX_PLACEHOLDER_EDGES {
+                return Err(harness(&format!("{n_edges} placeholder edges")));
             }
             let mut brep = Brep::new();
             let a = brep.add_vertex(p3([0.0; 3])).map_err(|e| harness(&e))?;

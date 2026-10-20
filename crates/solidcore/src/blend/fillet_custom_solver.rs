@@ -52,7 +52,9 @@
 //!   (the only use of those pointers) and their offsets by value (never written);
 //!   `rbFoundAnswer` is the result. `LoadInitialValues` returns the rail index of
 //!   `rpSurface2` (always `GetSurface(1 - lRailIndex)`) and `rlSurface2Index`, or
-//!   `None` when `rbDoSurf2Calcs` is `0` (nothing is touched). `CreateSurface` takes
+//!   `None` when `rbDoSurf2Calcs` is `0` (nothing is touched); on an error nothing
+//!   is returned (upstream has already set `rpSurface2`, to that same surface).
+//!   `CreateSurface` takes
 //!   the solver's `GetThisApproxTol3d()` (the only solver value it reads) and drops
 //!   its unused centre line, surface and UV curve arguments; the rails are plain
 //!   B-spline curves (the fillet intersector builds them with `sm_FlushCrv`) and are

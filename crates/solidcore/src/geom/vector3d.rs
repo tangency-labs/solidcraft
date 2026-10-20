@@ -46,7 +46,7 @@
 //! | [`Vec3::component`], [`Vec3::component_mut`] | `operator[] const`, `operator[]`                 |
 //! | [`Vec3::approx_eq`]                          | `operator==`                                     |
 //! | [`Vec3::is_inside_sector`]                   | `IsInsideSector`                                 |
-//! | [`Vec3::make_unit_ortho_vectors`]            | `MakeUnitOrthoVectors`                           |
+//! | [`Vec3::make_unit_ortho_vectors`], [`Vec3::unit_ortho_vectors_on_failure`] | `MakeUnitOrthoVectors` |
 //! | [`Vec3::rotate_vec_about_axis`]              | `RotateVecAboutAxis`                             |
 //! | [`Vec3::unitized_derivative`]                | `UnitizedDerivative`                             |
 //! | [`Vec3::unitized_derivative2`]               | `UnitizedDerivative2`                            |
@@ -668,6 +668,25 @@ impl Vec3 {
         Ok([x_axis, y_axis, z_axis])
     }
 
+    /// The out-params upstream's `MakeUnitOrthoVectors` has written when it fails
+    /// (when [`Vec3::make_unit_ortho_vectors`] returns an error), as `[x, y, z]`
+    /// with `None` for an out-param left unchanged: only `x` (`Unitize`'s
+    /// `(0, 0, 1)`) for a zero-length `self`; otherwise the unit `x` and
+    /// `z = x × (0, 0, 1)`, written before `SER(SM_ERR)` (reached when the unit
+    /// vector underflows to zero because `|self|^2` overflows). Callers that pass
+    /// their own members as out-params use this to keep upstream's partial state.
+    #[must_use]
+    pub fn unit_ortho_vectors_on_failure(self) -> [Option<Self>; 3] {
+        match self.unitize() {
+            Ok(x_axis) => [
+                Some(x_axis),
+                None,
+                Some(x_axis.cross(Self::new(0.0, 0.0, 1.0))),
+            ],
+            Err(_) => [Some(self.unitize_or_z()), None, None],
+        }
+    }
+
     /// The vector rotated by `ang_rad` about `axis` (right-handed; `axis` need not be
     /// unit length) (`RotateVecAboutAxis`).
     #[must_use]
@@ -951,6 +970,23 @@ impl DivAssign<f64> for Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
+    /// zero and upstream fails after writing the x and z out-params.
+    #[test]
+    fn ortho_vectors_on_overflow() {
+        let v = Vec3::new(1.0, -1.0, -1e300);
+        assert!(v.make_unit_ortho_vectors(None).is_err());
+        let [x, y, z] = v.unit_ortho_vectors_on_failure();
+        let x = x.unwrap();
+        assert_eq!(x.length_squared(), 0.0);
+        assert!(y.is_none());
+        assert_eq!(z, Some(x.cross(Vec3::new(0.0, 0.0, 1.0))));
+        assert_eq!(
+            Vec3::ZERO.unit_ortho_vectors_on_failure(),
+            [Some(Vec3::Z), None, None]
+        );
+    }
     use crate::math::EFF_ZERO_DEG;
 
     fn close(a: f64, b: f64) -> bool {

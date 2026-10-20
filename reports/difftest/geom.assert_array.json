@@ -123,6 +123,14 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.assert_array/fuzz_regressions.json#0 (upstream fuzz sweep ['/ops/0/set_last_add = false', '/ops/9/add/other_ts = 14'] (was: rust: type string index 14))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -29877,8 +29885,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3734,
-  "cases_total": 3734,
+  "cases_passed": 3735,
+  "cases_total": 3735,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

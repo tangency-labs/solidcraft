@@ -515,7 +515,9 @@ impl RustRun {
             }
             return self.handles.get(i).copied();
         }
-        let k = -r - 1;
+        // i64::MIN resolves to nothing (the C++ side's `-ref - 1` wraps to a
+        // huge object index)
+        let k = r.checked_neg()? - 1;
         let (o, i) = (k / REF_STRIDE, k % REF_STRIDE);
         let o = usize::try_from(o).ok()?;
         if o >= self.objs.len() {

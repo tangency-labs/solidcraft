@@ -40,7 +40,9 @@
 //!   caller-chosen `Copy` handle `O` (upstream `void*` user data and `SmSurface*`);
 //!   polygon elements hold the [`NodeId`] of their `SmBrepCache` tree node.
 //! - `SmGrid(bbox, lSize)` rejects a zero voxel count (upstream builds a grid its
-//!   destructor then reads out of bounds) and a voxel count whose total overflows.
+//!   destructor then reads out of bounds) and a voxel count whose total overflows;
+//!   a voxel array that cannot be allocated is `SM_ERR`, as upstream's failed
+//!   `smos_Calloc`.
 //! - `AddElement`'s `SM_GE_HIERARCHY` type (a null-pointer crash upstream) cannot be
 //!   expressed: [`ElementSource`] has no such variant.
 //! - Surface elements need the surface subdivision caches, pseudo boxes and polar
@@ -52,6 +54,9 @@
 //!   adds a leaf whose data the caller filled in.
 //!   `ExpandHierarchy` on a plain [`HierarchyElement::new`] is upstream's base-class
 //!   "pure virtual" body: `SM_ERR`.
+//! - `Step3DDDA` returns [`SolidError::InvalidInput`] after more than
+//!   `1 + nx + ny + nz` voxel steps in one call (a walk that advances leaves the grid
+//!   sooner); upstream loops forever when the chosen axis has step 0.
 //! - `GetVoxelAddress` truncates with Rust's saturating `as` cast, so a NaN
 //!   coordinate (a grid with a zero-size axis) gives index 0 instead of undefined
 //!   behaviour. Its status (always `SM_SUCCESS`) is dropped.
@@ -65,7 +70,7 @@
 //!   [`SolidError::InvalidInput`].
 //! - The 3DDDA step/exit increments of an axis the ray does not move along keep
 //!   their previous values (zero for a new grid); upstream leaves them
-//!   uninitialised. Neither is ever read.
+//!   uninitialised. They are read only by a walk that stalls (see the next item).
 //! - `SmHierarchyGridElement`'s sphere centre starts as [`Vec3::UNDEF`] and its box as
 //!   [`Extent3d::new`] (upstream's default constructors).
 //! - `GetMemoryUsed`, the drawing methods and `SmVoxel::m_pGrid` (a back pointer)
@@ -445,7 +450,8 @@ impl<O: Copy> Grid<O> {
     /// A grid of `size[0] x size[1] x size[2]` empty voxels over `bbox`
     /// (`SmGrid(crGridBBox, lSize)`).
     ///
-    /// Fails when a count is zero or the voxel total overflows.
+    /// Fails when a count is zero, the voxel total overflows or the voxels cannot be
+    /// allocated.
     pub fn new(bbox: &Extent3d, size: [usize; 3]) -> Result<Self> {
         const OP: &str = "geom::grid::Grid::new";
         let [nx, ny, nz] = size;
@@ -470,13 +476,20 @@ impl<O: Copy> Grid<O> {
 
         let voxel_tolerance = EFF_ZERO_SQRT * (1.0 + voxel_size.max_dimension()) / 100.0;
 
+        // Upstream's `smos_Calloc` of the voxel array fails softly (`SM_ERR`).
+        let mut voxels = Vec::new();
+        voxels
+            .try_reserve_exact(total)
+            .map_err(|_| SolidError::sm_err(OP))?;
+        voxels.resize(total, Voxel::default());
+
         Ok(Self {
             bbox: *bbox,
             size,
             voxel_size,
             voxel_tolerance,
             current_mark: 0,
-            voxels: vec![Voxel::default(); total],
+            voxels,
             elements: Vec::new(),
             hierarchy: Vec::new(),
             dda: Dda::default(),
@@ -852,7 +865,24 @@ impl<O: Copy> Grid<O> {
         let rv = self.dda.ray_vector;
         let mark = self.current_mark;
 
+        // Every step moves one address coordinate one voxel towards its exit, so a
+        // walk that advances leaves the grid within nx + ny + nz steps. Upstream
+        // loops forever when the chosen axis does not move (step 0, e.g. all
+        // plane parameters at SM_BIG_DOUBLE on a grid with huge voxels).
+        let max_steps = self
+            .size
+            .iter()
+            .fold(1usize, |acc, &n| acc.saturating_add(n));
+        let mut steps = 0usize;
+
         loop {
+            steps += 1;
+            if steps > max_steps {
+                return Err(SolidError::InvalidInput {
+                    operation: OP,
+                    reason: "3DDDA ray walk does not advance",
+                });
+            }
             let vi = self
                 .voxel_index(self.dda.address)
                 .ok_or_else(|| bad_address(OP))?;
@@ -999,6 +1029,21 @@ mod tests {
         assert!(g.voxel([2, 0, 0]).is_err());
         assert!(Grid::<u32>::new(&bbox, [0, 1, 1]).is_err());
         assert!(Grid::<u32>::new(&bbox, [usize::MAX, 2, 1]).is_err());
+    }
+
+    /// Fuzz regression (geom.grid fuzz09254): with voxels of size ~1e299 the
+    /// plane parameters reach `SM_BIG_DOUBLE` and the walk picks an axis that does
+    /// not move; upstream loops forever, the port stops with an error.
+    #[test]
+    fn stalled_walk_is_an_error() {
+        let bbox = Extent3d::from_bounds(-1e-4, -1e-4, -1e-4, 1e300, 1.0001, 1.0001);
+        let mut g: Grid<u32> = Grid::new(&bbox, [10, 10, 10]).unwrap();
+        let start = Point3::new(1.000003, 0.5, 0.5);
+        assert!(!g.setup_3ddda(start, Vec3::new(1.0, 0.0, 0.0)).unwrap());
+        assert!(matches!(
+            g.step_3ddda(1e20),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]

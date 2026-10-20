@@ -395,6 +395,30 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00885",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_custom_solver/fuzz_regressions.json#0 (upstream fuzz sweep ['/solver/b/net/1/2/1 = -1e+300'] (was: values.surface2[0]: cpp=0e0 rust=-1e0))",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz01617",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_custom_solver/fuzz_regressions.json#1 (upstream fuzz sweep ['/per/1 = true', '/do2 = true', '/solver/b/net/0/2/2 = 1e+300'] (was: values.surface2[0]: cpp=1e0 rust=-1e0))",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz01638",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_custom_solver/fuzz_regressions.json#2 (upstream fuzz sweep ['/solver/b/net/0/0/2 = -1e+300'] (was: values.surface2[0]: cpp=0e0 rust=-1e0))",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -3777,8 +3801,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 47,
   "cases_failed": 0,
-  "cases_passed": 401,
-  "cases_total": 448,
+  "cases_passed": 404,
+  "cases_total": 451,
   "deferred_by_unit": {
     "blend.fillet_standard_solver_p2": 47
   },

@@ -30,10 +30,10 @@
 //! | `are_sequential` (private)                    | `sm_AreSequential`                                         |
 //! | [`SolutionObject`], [`ObjectKind`]            | the `SmObject*` of `m_apObjects` and its `IsKindOf` tests  |
 //! | [`SolutionArray`], [`SolutionArray::new`]     | `SmSolutionArray`, `SmSolutionArray()`                     |
-//! | [`SolutionArray::with_capacity`]              | `SmSolutionArray(ULONG, SmSolution* = NULL)`               |
+//! | [`SolutionArray::with_capacity`], [`SolutionArray::try_with_capacity`] | `SmSolutionArray(ULONG, SmSolution* = NULL)`               |
 //! | `Drop` (implicit)                             | `~SmSolutionArray`                                         |
 //! | [`SolutionArray::len`]                        | `SmSolutionArray::GetSize`                                 |
-//! | [`SolutionArray::set_size`]                   | `SmSolutionArray::SetSize`                                 |
+//! | [`SolutionArray::set_size`], [`SolutionArray::try_set_size`] | `SmSolutionArray::SetSize`                                 |
 //! | [`SolutionArray::reset`]                      | `SmSolutionArray::ReSet`                                   |
 //! | [`SolutionArray::as_slice`]                   | `SmSolutionArray::GetDataArray`                            |
 //! | [`SolutionArray::get`], [`SolutionArray::get_mut`] | `SmSolutionArray::operator[]`                         |
@@ -42,7 +42,7 @@
 //! | `set_at_grow` (private)                       | `SmSolutionArray::SetAtGrow`                               |
 //! | [`SolutionArray::append`]                     | `SmSolutionArray::Append`                                  |
 //! | [`SolutionArray::add_sorted_solution`]        | `SmSolutionArray::AddSortedSolution`                       |
-//! | [`SolutionArray::insert_at`]                  | `SmSolutionArray::InsertAt(ULONG, const SmSolution&, ULONG)` |
+//! | [`SolutionArray::insert_at`], [`SolutionArray::try_insert_at`] | `SmSolutionArray::InsertAt(ULONG, const SmSolution&, ULONG)` |
 //! | [`SolutionArray::remove_at`]                  | `SmSolutionArray::RemoveAt`                                |
 //! | [`SolutionArray::swap`]                       | `SmSolutionArray::Swap`                                    |
 //! | [`SolutionArray::TYPE`], [`SolutionArray::type_code`], [`SolutionArray::type_string`], [`SolutionArray::is_kind_of`] | `SmSolutionArray::GetType`, `GetTypeString`, `IsKindOf` |
@@ -78,7 +78,11 @@
 //! - **Storage.** The array is a `Vec`; slots past the size are never visible
 //!   upstream (every growth path zeroes them), so the allocation size
 //!   (`m_lMaxSize`) and borrowed arrays (`m_bIsBorrowed`) have no counterpart.
-//!   [`SolutionArray::with_capacity`] only reserves. New slots made by growth
+//!   [`SolutionArray::with_capacity`] only reserves. The `try_` variants
+//!   ([`SolutionArray::try_set_size`], [`SolutionArray::try_insert_at`],
+//!   [`SolutionArray::try_with_capacity`]) take caller-chosen sizes and return
+//!   [`SolidError::InvalidInput`] when the slots cannot be allocated (upstream
+//!   writes through the `NULL` of a failed `smos_Calloc`). New slots made by growth
 //!   are [`Solution::zeroed`] (type [`SolutionType::NodesOnly`], as calloc'd
 //!   memory reads upstream).
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
@@ -1164,11 +1168,29 @@ impl<O: SolutionObject> SolutionArray<O> {
 
     /// An empty array with room for `capacity` solutions
     /// (`SmSolutionArray(nDataSize, NULL)`).
+    ///
+    /// For small capacities; use [`SolutionArray::try_with_capacity`] for
+    /// capacities that come from caller input.
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    /// [`SolutionArray::with_capacity`] for capacities that come from caller input.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when the room cannot be allocated (upstream's
+    /// `smos_Calloc` returns `NULL`).
+    pub fn try_with_capacity(capacity: usize) -> Result<Self> {
+        let mut a = Self::new();
+        a.reserve_to(
+            capacity,
+            "geom::solution_array::SolutionArray::try_with_capacity",
+        )?;
+        Ok(a)
     }
 
     /// `SmSolutionArray_TYPE` (`GetType`).
@@ -1203,8 +1225,34 @@ impl<O: SolutionObject> SolutionArray<O> {
 
     /// Sets the size, zero-filling new slots ([`Solution::zeroed`]) and dropping
     /// solutions past `size` (`SetSize`).
+    ///
+    /// For sizes bounded by data already held. Like any `Vec`, it aborts when the
+    /// slots cannot be allocated; use [`SolutionArray::try_set_size`] for sizes that
+    /// come from caller input.
     pub fn set_size(&mut self, size: usize) {
         self.data.resize(size, Solution::zeroed());
+    }
+
+    /// [`SolutionArray::set_size`] for sizes that come from caller input.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when the slots cannot be allocated (upstream's
+    /// `smos_Calloc` returns `NULL` and is written through); the array is then
+    /// unchanged.
+    pub fn try_set_size(&mut self, size: usize) -> Result<()> {
+        self.reserve_to(size, "geom::solution_array::SolutionArray::try_set_size")?;
+        self.set_size(size);
+        Ok(())
+    }
+
+    /// Makes room for a total of `size` solutions, `InvalidInput` when that cannot
+    /// be allocated.
+    fn reserve_to(&mut self, size: usize, operation: &'static str) -> Result<()> {
+        let extra = size.saturating_sub(self.data.len());
+        self.data
+            .try_reserve_exact(extra)
+            .map_err(|_| too_large(operation))
     }
 
     /// Removes every solution (`ReSet`).
@@ -1298,6 +1346,32 @@ impl<O: SolutionObject> SolutionArray<O> {
         for slot in self.data.iter_mut().skip(index).take(count) {
             *slot = *solution;
         }
+    }
+
+    /// [`SolutionArray::insert_at`] for an index and count that come from caller
+    /// input.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when the grown size overflows or cannot be
+    /// allocated (upstream's `smos_Calloc` returns `NULL` and is written through);
+    /// the array is then unchanged.
+    pub fn try_insert_at(
+        &mut self,
+        index: usize,
+        solution: &Solution<O>,
+        count: usize,
+    ) -> Result<()> {
+        const OP: &str = "geom::solution_array::SolutionArray::try_insert_at";
+        let base = if index >= self.data.len() {
+            index
+        } else {
+            self.data.len()
+        };
+        let size = base.checked_add(count).ok_or_else(|| too_large(OP))?;
+        self.reserve_to(size, OP)?;
+        self.insert_at(index, solution, count);
+        Ok(())
     }
 
     /// Removes `count` solutions at `index` (`RemoveAt`). As upstream, when
@@ -1448,6 +1522,13 @@ impl<O: SolutionObject> SolutionArray<O> {
 
         // all done
         Ok(Some(insertion_index))
+    }
+}
+
+fn too_large(operation: &'static str) -> SolidError {
+    SolidError::InvalidInput {
+        operation,
+        reason: "solution array too large to allocate",
     }
 }
 
@@ -1723,6 +1804,30 @@ mod tests {
         assert!(a.is_empty() && a.get(0).is_none());
         a.remove_at(0, 3);
         assert!(a.is_empty());
+    }
+
+    /// Fuzz regression: caller-chosen sizes, indices and counts that cannot be
+    /// allocated return `InvalidInput` instead of aborting, leaving the array as is.
+    #[test]
+    fn huge_sizes_fail_softly() {
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        a.add(&single(1.0, &[]));
+        a.add(&single(2.0, &[]));
+        let keep = a.clone();
+        assert!(a.try_set_size(1 << 40).is_err());
+        assert!(a.try_set_size(usize::MAX).is_err());
+        assert!(a
+            .try_insert_at(1 << 32, &single(3.0, &[]), 1 << 32)
+            .is_err());
+        assert!(a.try_insert_at(usize::MAX, &single(3.0, &[]), 1).is_err());
+        assert!(a.try_insert_at(1, &single(3.0, &[]), usize::MAX).is_err());
+        assert!(SolutionArray::<Obj>::try_with_capacity(usize::MAX).is_err());
+        assert_eq!(a, keep);
+        a.try_set_size(3).unwrap();
+        a.try_insert_at(1, &single(9.0, &[]), 2).unwrap();
+        assert_eq!(a.len(), 5);
+        assert_eq!(a.get(1).unwrap().start.solution_value, 9.0);
+        assert_eq!(a.get(4).unwrap().solution_type, SolutionType::NodesOnly);
     }
 
     #[test]

@@ -153,7 +153,7 @@ fn rust_run(op: Op, i: &Inputs) -> Result<solidcore::Result<Output>, HarnessErro
             Op::Resize => {
                 let (r, c) = (idx(i.i), idx(i.j));
                 let same = r == a.num_rows() && c == a.num_columns();
-                a.set_size(r, c);
+                a.set_size(r, c)?;
                 if !same && a.make_identity().is_err() {
                     a.clear();
                 }

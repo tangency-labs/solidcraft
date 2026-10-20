@@ -44,7 +44,9 @@
 //!   Unitize failures are `SolidError::InvalidInput` (`SM_ERR_INVALID_INPUT`).
 //! - The constructors ignore `SetCanonical`'s status, as upstream does. A zero plane
 //!   normal leaves both axes at [`Vec3::UNDEF`] (upstream's default-constructed
-//!   members, untouched when `MakeUnitOrthoVectors` fails).
+//!   members, untouched when `MakeUnitOrthoVectors` fails); a normal whose squared
+//!   length overflows gets the Y axis upstream writes before failing
+//!   ([`Vec3::unit_ortho_vectors_on_failure`]).
 //! - Upstream's tolerant `operator==` is [`Axis2Placement::approx_eq`]; Rust `==`
 //!   (`PartialEq`) is exact component equality.
 //! - `SM_ASSERT`, `SE`, `SE_MSG` and `ERR` are no-ops in the release build and omitted;
@@ -125,10 +127,13 @@ impl Axis2Placement {
         let mut origin = normal;
         origin *= -d / size / size;
         // Upstream writes MakeUnitOrthoVectors' Y and Z outputs straight into the
-        // members, which stay default-constructed (undefined) when it fails.
-        let (x_axis, y_axis) = match normal.make_unit_ortho_vectors(None) {
-            Ok([_, y, z]) => (y, z),
-            Err(_) => (Vec3::UNDEF, Vec3::UNDEF),
+        // members, which keep their default (undefined) value where it fails
+        // before writing them.
+        let (x_axis, y_axis) = if let Ok([_, y, z]) = normal.make_unit_ortho_vectors(None) {
+            (y, z)
+        } else {
+            let [_, y, z] = normal.unit_ortho_vectors_on_failure();
+            (y.unwrap_or(Vec3::UNDEF), z.unwrap_or(Vec3::UNDEF))
         };
         Self {
             origin,

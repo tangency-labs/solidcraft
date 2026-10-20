@@ -210,7 +210,7 @@
       "values_compared": 39
     },
     {
-      "max_rel_err": 0.0,
+      "max_rel_err": 2.1419601097972088e-16,
       "name": "arc_to_region",
       "outcome": "pass",
       "pass": true,
@@ -240,6 +240,30 @@
       "pass": true,
       "source": "fixture:fixtures/geom.polar_box/cases.json#29 (upstream source/SMLib/src/SmAdvSurfaceIntersector.cpp:1728)",
       "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.polar_box/fuzz_regressions.json#0 (upstream fuzz sweep ['/prog/0/v/2 = -1e+300'] (was: values.c007_basis[6]: cpp=0e0 rust=1.23456e-61))",
+      "values_compared": 65
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.polar_box/fuzz_regressions.json#1 (upstream fuzz sweep ['/prog/7/v/1 = -1e+300'] (was: values.c012_basis[6]: cpp=0e0 rust=1.235488944104678e-1))",
+      "values_compared": 43
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.polar_box/fuzz_regressions.json#2 (upstream fuzz sweep ['/prog/7/v/2 = 1e+300'] (was: values.c008_basis[6]: cpp=0e0 rust=1.23456e-61))",
+      "values_compared": 78
     },
     {
       "max_rel_err": 0.0,
@@ -24245,10 +24269,10 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3030,
-  "cases_total": 3030,
+  "cases_passed": 3033,
+  "cases_total": 3033,
   "deferred_by_unit": {},
-  "max_rel_err": 0.0,
+  "max_rel_err": 2.1419601097972088e-16,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,

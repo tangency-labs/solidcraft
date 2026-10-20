@@ -235,6 +235,30 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.point_set/fuzz_regressions.json#0 (upstream fuzz sweep ['/closed = false', '/closed = true', '/tol = -1e+300'] (was: values.c02_normal[0]: cpp=0e0 rust=9.329240259671637e-1))",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00672",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.point_set/fuzz_regressions.json#1 (upstream fuzz sweep ['/pts/1/2 = 0.0', '/pts/0/1 = 1e+300', '/tol = -1e-300'] (was: values.c02_normal[0]: cpp=NaN rust=1e0))",
+      "values_compared": 51
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz01116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.point_set/fuzz_regressions.json#2 (upstream fuzz sweep ['/tol = -1.0', '/pts element 3 duplicated'] (was: ints.c03_contain[0]: cpp=3 rust=1))",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -16237,8 +16261,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2029,
-  "cases_total": 2029,
+  "cases_passed": 2032,
+  "cases_total": 2032,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

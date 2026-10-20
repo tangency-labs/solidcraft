@@ -847,6 +847,13 @@ impl AttributeStore {
             operation: "geom::attribute::AttributeStore::insert",
             reason: "too many attributes",
         })?;
+        // upstream's `new` of an attribute fails on memory exhaustion; never abort
+        self.slots
+            .try_reserve(1)
+            .map_err(|_| SolidError::InvalidInput {
+                operation: "geom::attribute::AttributeStore::insert",
+                reason: "attribute store cannot grow",
+            })?;
         self.slots.push(Some(attribute));
         Ok(AttributeHandle(index))
     }

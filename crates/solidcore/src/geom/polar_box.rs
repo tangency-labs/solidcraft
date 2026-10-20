@@ -53,9 +53,9 @@
 //!   internal callers use the `(SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE)` point as upstream.
 //! - `GetBasis(lIndex)` returns a pointer to one basis vector;
 //!   [`PolarBox::basis`] returns all three.
-//! - `MakeUnitOrthoVectors` cannot fail for the vectors passed here (their squared
-//!   length is at least `SM_EFF_ZERO_SQ`); its out-of-contract fallback mirrors
-//!   upstream's in-place `Unitize` (see `set_ortho_basis`).
+//! - `MakeUnitOrthoVectors` fails here only for vectors whose squared length
+//!   overflows (the unit vector underflows to zero); `set_ortho_basis` then
+//!   leaves the partial basis upstream's out-params hold.
 //! - `SM_ASSERT`, `SM_DEBUG_CODE` blocks and the error-log side effect of `SE(...)`
 //!   are compiled out upstream (release build) and omitted.
 
@@ -208,10 +208,14 @@ impl PolarBox {
     fn set_ortho_basis(&mut self, v: Vec3) {
         match v.make_unit_ortho_vectors(None) {
             Ok(frame) => self.basis = frame,
-            // Not reachable for the callers here (|v|^2 >= SM_EFF_ZERO_SQ). Upstream's
-            // in-place `Unitize` of the x axis then leaves (0, 0, 1) or the unit
-            // vector in basis[0] and the other axes unchanged.
-            Err(_) => self.basis[0] = v.unitize_or_z(),
+            // upstream's out-params are the basis members: keep what it wrote
+            Err(_) => {
+                for (slot, w) in self.basis.iter_mut().zip(v.unit_ortho_vectors_on_failure()) {
+                    if let Some(w) = w {
+                        *slot = w;
+                    }
+                }
+            }
         }
     }
 

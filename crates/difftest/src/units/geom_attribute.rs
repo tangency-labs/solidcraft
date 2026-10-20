@@ -365,7 +365,9 @@ fn run_cpp_case(v: &Value) -> Result<Output, HarnessError> {
         stream.as_ref(),
     ) {
         Ok(raw) => to_output(s.n_objects, s.ops.len(), &raw.ints, &raw.dbls),
-        Err(e @ FfiError::InvalidArgument(_)) => {
+        // the shim checks object indices and op operands itself (SC_ERR_ARG): a
+        // guard rejection like the wrapper's, as the Rust side's harness errors
+        Err(e @ (FfiError::InvalidArgument(_) | FfiError::Status(solidcore_ffi::SC_ERR_ARG))) => {
             Err(HarnessError::new(format!("ffi rejected: {e}")))
         }
         Err(e) => Ok(Output::err(e.to_string())),
@@ -802,6 +804,15 @@ impl RustRun {
                 Ok(Step::Status(0))
             }
             op::MR_SET_REGIONS => {
+                // as the shim: the kind check comes before the object check
+                if self
+                    .store
+                    .get(h)
+                    .and_then(Attribute::merge_region_data)
+                    .is_none()
+                {
+                    return Ok(Step::Status(ST_SKIP));
+                }
                 let (r1, r2) = (self.obj(a[3])?, self.obj(a[5])?);
                 let Some(d) = self
                     .store

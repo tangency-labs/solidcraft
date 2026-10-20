@@ -387,6 +387,30 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00092",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.axis2_placement/fuzz_regressions.json#0 (upstream fuzz sweep ['/b/v/0/1 = 1e+300'] (was: values.r[20]: cpp=0e0 rust=1.23456e-61))",
+      "values_compared": 27
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz01310",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.axis2_placement/fuzz_regressions.json#1 (upstream fuzz sweep ['/b/v/5/2 = -1e-300', '/b/v/1/2 = -0.0', '/a/v/0/2 = 1e+300'] (was: values.r[7]: cpp=0e0 rust=1.23456e-61))",
+      "values_compared": 25
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz01575",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.axis2_placement/fuzz_regressions.json#2 (upstream fuzz sweep ['/a/v/0/1 = 1e+300'] (was: values.r[7]: cpp=0e0 rust=1.23456e-61))",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -32389,8 +32413,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 4048,
-  "cases_total": 4048,
+  "cases_passed": 4051,
+  "cases_total": 4051,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

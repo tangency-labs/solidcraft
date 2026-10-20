@@ -3035,6 +3035,22 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz00731",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tools/fuzz_regressions.json#0 (upstream fuzz sweep ['/vertices/0/0 = 1e-300', '/pnt/1 = 1.0', '/vertices/0/3 = -1e+300'] (was: ints.found[0]: cpp=1 rust=0))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz_regression_fuzz01267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tools/fuzz_regressions.json#1 (upstream fuzz sweep ['/vertices/2/3 = -1.0'] (was: ints.found[0]: cpp=1 rust=0))",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -7837,8 +7853,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 132,
   "cases_failed": 0,
-  "cases_passed": 781,
-  "cases_total": 913,
+  "cases_passed": 783,
+  "cases_total": 915,
   "deferred_by_unit": {
     "curve.curve_p2": 68,
     "curve.curve_p6": 32,

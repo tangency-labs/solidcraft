@@ -503,7 +503,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             pair_rust(r, f)
         }
         Inputs::Queue { size, step, steps } => {
-            let mut q = IterQueue1d::new(u64::from(*size));
+            let mut q = match IterQueue1d::try_new(u64::from(*size)) {
+                Ok(q) => q,
+                Err(e) => return Err(HarnessError::new(format!("queue size: {e}"))),
+            };
             let mut v = Vec::with_capacity(steps.len());
             for s in steps {
                 q.add(&IterationValue {

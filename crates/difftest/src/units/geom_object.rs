@@ -160,6 +160,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             edges,
             vertices,
         } => {
+            no_unselected_brep(source, *whole_brep, faces, edges, vertices)?;
             let src = match source {
                 SourceIn::None => ShapeSource::None,
                 SourceIn::Box(b) => ShapeSource::Box(*b),
@@ -174,6 +175,23 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             Ok(Output::new().values("v", ffi::shape(&src, &sel).map_err(harness)?))
         }
     }
+}
+
+/// Both sides refuse a B-rep source with nothing selected: the C++ output then
+/// lists `IsInShape` for every entity of that B-rep, which the Rust side (which
+/// builds no B-rep) cannot reproduce; with a selection the Rust side defers.
+fn no_unselected_brep(
+    source: &SourceIn,
+    whole_brep: bool,
+    faces: &[i64],
+    edges: &[i64],
+    vertices: &[i64],
+) -> Result<(), HarnessError> {
+    let empty = !whole_brep && faces.is_empty() && edges.is_empty() && vertices.is_empty();
+    if empty && !matches!(source, SourceIn::None) {
+        return Err(harness("B-rep source without a selection"));
+    }
+    Ok(())
 }
 
 // ---- Rust side ---------------------------------------------------------------------
@@ -492,6 +510,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             if matches!(source, SourceIn::None) && !empty {
                 return Err(harness("selection without B-rep"));
             }
+            no_unselected_brep(source, *whole_brep, faces, edges, vertices)?;
             Ok(match rust_shape(*whole_brep, faces, edges, vertices) {
                 Ok(v) => Output::new().values("v", v),
                 Err(e) => rust_err(&e),

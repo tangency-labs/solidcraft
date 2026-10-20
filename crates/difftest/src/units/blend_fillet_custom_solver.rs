@@ -657,7 +657,14 @@ fn rust_jac(
     };
     let (mut ne, mut np) = (ne, np);
     let mut f = f.to_vec();
-    let mut j = jac.map(|[r, c]| Matrix::new(r, c));
+    // the Jacobian size is harness data: same bound as the FFI guard
+    if jac.is_some_and(|[r, c]| r > ffi::MAX_ARRAY || c > ffi::MAX_ARRAY) {
+        return Err(harness("jacobian size"));
+    }
+    let mut j = jac
+        .map(|[r, c]| Matrix::try_new(r, c))
+        .transpose()
+        .map_err(|e| HarnessError::new(format!("jacobian size: {e}")))?;
     let (res, offsets) = match kind {
         Kind::Eiffel => {
             let mut fs = EiffelTowerFs::new(base, solver.angle);
@@ -730,6 +737,13 @@ fn rust_init(
     }
     let mut per = per.to_vec();
     let mut guess = guess.to_vec();
+    // upstream writes rpSurface2 = GetSurface(1 - rail) before anything can fail;
+    // the Rust API returns it only on success, so an error reports it from here
+    let surface2_on_err = if do2 && rail <= 1 && base.surface(1 - rail).is_ok() {
+        (1 - rail) as f64
+    } else {
+        -1.0
+    };
     let res = match kind {
         Kind::Eiffel => EiffelTowerFs::new(base, solver.angle).load_initial_values(
             &k,
@@ -762,7 +776,7 @@ fn rust_init(
             if let Some(out) = Output::unported(e) {
                 return Ok(out);
             }
-            o.extend([status(e), -1.0, 999.0]);
+            o.extend([status(e), surface2_on_err, 999.0]);
         }
     }
     for i in 0..intervals.len() {

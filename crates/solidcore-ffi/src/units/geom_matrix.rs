@@ -114,7 +114,16 @@ pub fn op(
             v.len()
         )));
     }
-    let max_out = rows.max(i.unsigned_abs() as usize) * cols.max(j.unsigned_abs() as usize);
+    // `i`, `j` only size the output for `Resize`, where they were checked above
+    // (other ops leave them unchecked, so they must not size an allocation).
+    let (out_rows, out_cols) = match op {
+        Op::Resize => (
+            rows.max(i.unsigned_abs() as usize),
+            cols.max(j.unsigned_abs() as usize),
+        ),
+        _ => (rows, cols),
+    };
+    let max_out = out_rows * out_cols;
     let mut out = vec![0.0f64; 3 * max_out + rows + 8];
     let mut ints = vec![0i64; rows + 8];
     let (mut out_len, mut ints_len, mut status) = (0i64, 0i64, 0i32);

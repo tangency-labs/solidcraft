@@ -330,6 +330,10 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             }
         }
         Op::GlobalSolve => {
+            // the pre-fill is harness data: same bound as the FFI guard
+            if !(0..=4).contains(&i.n) {
+                return Err(HarnessError::new("pre-filled solutions"));
+            }
             let mut sols: SolutionArray<ThisVolume> = SolutionArray::new();
             for k in 0..i.n {
                 let mut s = Solution::new();

@@ -7,7 +7,7 @@
 //! | Rust                                   | Upstream                                   |
 //! |----------------------------------------|--------------------------------------------|
 //! | [`Matrix`]                             | `SmMatrix`                                 |
-//! | [`Matrix::new`]                        | `SmMatrix(ULONG, ULONG)`                   |
+//! | [`Matrix::new`], [`Matrix::try_new`]   | `SmMatrix(ULONG, ULONG)`                   |
 //! | [`Clone`] / [`Drop`] (derived)         | `SmMatrix(const SmMatrix&)`, `~SmMatrix`   |
 //! | [`Matrix::from_row_major`]             | (none: constructor from values, for callers and tests) |
 //! | [`Matrix::num_rows`], [`Matrix::num_columns`] | `GetNumRows`, `GetNumColumns`       |
@@ -38,6 +38,11 @@
 //!   zero the elements where upstream leaves small matrices uninitialized (large
 //!   ones are `calloc`ed); `set_size` to the current size keeps the values, as
 //!   upstream.
+//! - [`Matrix::try_new`] (caller-chosen sizes) and [`Matrix::set_size`] return
+//!   `InvalidInput` when `rows * cols` overflows or cannot be allocated, leaving the
+//!   matrix unchanged (upstream's `smos_Calloc` returns `NULL` and the row-pointer
+//!   loop writes through it). [`Matrix::new`] is for small sizes fixed at the call
+//!   site.
 //! - Element access outside the matrix returns `InvalidInput` (upstream asserts).
 //! - Status out-params become return values: `LUDecompose`'s `SM_ERR_WARNING` (a
 //!   pivot below `SM_EFF_ZERO` was replaced by `±SM_EFF_ZERO`) is
@@ -138,6 +143,10 @@ struct JacobiState {
 impl Matrix {
     /// A `rows x cols` matrix of zeros (`SmMatrix(ULONG, ULONG)`; upstream leaves
     /// small matrices uninitialized).
+    ///
+    /// For small sizes known at the call site. Like any `Vec`, it aborts when the
+    /// elements cannot be allocated; use [`Matrix::try_new`] for sizes that come
+    /// from caller input.
     #[must_use]
     pub fn new(rows: usize, cols: usize) -> Self {
         Self {
@@ -145,6 +154,30 @@ impl Matrix {
             cols,
             data: vec![0.0; rows.saturating_mul(cols)],
         }
+    }
+
+    /// A `rows x cols` matrix of zeros (`SmMatrix(ULONG, ULONG)`) for sizes that
+    /// come from caller input.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `rows * cols` overflows or the elements
+    /// cannot be allocated (upstream's `smos_Calloc` then returns `NULL` and the
+    /// constructor writes through it).
+    pub fn try_new(rows: usize, cols: usize) -> Result<Self> {
+        const OP: &str = "geom::matrix::Matrix::try_new";
+        let len = rows.checked_mul(cols).ok_or(SolidError::InvalidInput {
+            operation: OP,
+            reason: "element count overflows",
+        })?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(|_| SolidError::InvalidInput {
+                operation: OP,
+                reason: "matrix too large to allocate",
+            })?;
+        data.resize(len, 0.0);
+        Ok(Self { rows, cols, data })
     }
 
     /// A `rows x cols` matrix holding `data` in row-major order, or `InvalidInput`
@@ -239,11 +272,16 @@ impl Matrix {
 
     /// Resizes to `rows x cols` (`SetSize`). The same size keeps the values;
     /// otherwise every element is zero (upstream: uninitialized).
-    pub fn set_size(&mut self, rows: usize, cols: usize) {
+    ///
+    /// # Errors
+    ///
+    /// As [`Matrix::try_new`]; the matrix is then unchanged.
+    pub fn set_size(&mut self, rows: usize, cols: usize) -> Result<()> {
         if rows == self.rows && cols == self.cols {
-            return;
+            return Ok(());
         }
-        *self = Self::new(rows, cols);
+        *self = Self::try_new(rows, cols)?;
+        Ok(())
     }
 
     /// True when the matrix is square, non-empty and every off-diagonal pair agrees
@@ -778,15 +816,35 @@ mod tests {
         a.row_mut(1).unwrap()[0] = 7.0;
         assert_eq!(a.at(1, 0).unwrap(), 7.0);
         let keep = a.clone();
-        a.set_size(3, 3);
+        a.set_size(3, 3).unwrap();
         assert_eq!(a, keep);
-        a.set_size(2, 4);
+        a.set_size(2, 4).unwrap();
         assert_eq!((a.num_rows(), a.num_columns()), (2, 4));
         assert!(a.make_identity().is_err());
         a.clear();
         assert!(a.as_slice().iter().all(|&x| x == 0.0));
         assert!(!Matrix::new(0, 0).is_symmetric());
         assert!(Matrix::from_row_major(2, 2, vec![1.0]).is_err());
+    }
+
+    /// Fuzz regression: caller-chosen sizes whose element count overflows or cannot
+    /// be allocated return `InvalidInput` instead of aborting.
+    #[test]
+    fn huge_sizes_fail_softly() {
+        assert!(matches!(
+            Matrix::try_new(1 << 32, 1 << 32),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            Matrix::try_new(usize::MAX / 8, 2),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let mut a = m(2, 2, &[1.0, 2.0, 3.0, 4.0]);
+        let keep = a.clone();
+        assert!(a.set_size(usize::MAX, 3).is_err());
+        assert!(a.set_size(1 << 40, 1 << 20).is_err());
+        assert_eq!(a, keep);
+        assert_eq!(Matrix::try_new(2, 3).unwrap(), Matrix::new(2, 3));
     }
 
     #[test]

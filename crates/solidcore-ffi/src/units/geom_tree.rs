@@ -139,6 +139,48 @@ pub fn spatial(prog: &[f64]) -> Result<(Vec<i64>, Vec<f64>), FfiError> {
     Ok((ints, floats))
 }
 
+/// Rejects node links upstream cannot walk. The neighbour searches
+/// (`GetLeftNeighbors` .. `GetTopNeighbors`, `SmTree.cpp:3027-3240`) recurse up
+/// through `m_pParent` and into `m_pParent->m_pChild1/2`, the `Get*Side` searches
+/// (`SmTree.cpp:3244-3510`) recurse into `m_pChild1` and `m_pChild2`, and
+/// `PropagateToParents` (`SmTree.cpp:2749`) reads the sibling's data, all without
+/// null or cycle checks: a node with one child, a parent that does not list the
+/// node, a child whose parent is another node, or cyclic parent links crash
+/// (null dereference or unbounded recursion). Accepted: every node has no child
+/// or two distinct children, parent and child links agree, and every parent
+/// chain ends. Trees built by upstream (and the generator) always have this shape.
+fn well_formed(desc: &[i64], n_nodes: i64) -> Result<(), FfiError> {
+    let link = |k: i64, j: usize| -> Result<i64, FfiError> {
+        let k = usize::try_from(k).map_err(|_| bad("node link"))?;
+        at(desc, k * 9 + j)
+    };
+    for k in 0..n_nodes {
+        let (parent, c1, c2) = (link(k, 0)?, link(k, 1)?, link(k, 2)?);
+        if (c1 < 0) != (c2 < 0) || (c1 >= 0 && c1 == c2) {
+            return Err(bad("node with one child"));
+        }
+        for c in [c1, c2] {
+            if c >= 0 && link(c, 0)? != k {
+                return Err(bad("child whose parent is another node"));
+            }
+        }
+        if parent >= 0 && link(parent, 1)? != k && link(parent, 2)? != k {
+            return Err(bad("parent that does not list the node"));
+        }
+        // the parent chain ends within n_nodes steps
+        let mut cur = parent;
+        let mut steps = 0;
+        while cur >= 0 {
+            steps += 1;
+            if steps > n_nodes {
+                return Err(bad("cyclic parent links"));
+            }
+            cur = link(cur, 0)?;
+        }
+    }
+    Ok(())
+}
+
 /// Runs a subdivision-tree program over `desc` (9 ints per node, see the shim);
 /// returns its output stream.
 pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
@@ -160,6 +202,7 @@ pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
             return Err(bad("node object"));
         }
     }
+    well_formed(desc, n_nodes)?;
     let mut i = 0usize;
     while i < prog.len() {
         let op = at(prog, i)?;
