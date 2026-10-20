@@ -145,5 +145,6 @@ jobs:
       - name: Difftest green units
         if: steps.green.outputs.any == 'true'
         # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
-        # faster than the debug build that used to take ~35 min here.
-        run: cargo run --profile difftest -p difftest --features cpp -- --green
+        # faster than the debug build that used to take ~35 min here. --jobs 0: one child
+        # process per unit, one per vCPU (same output and reports as a serial run).
+        run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0

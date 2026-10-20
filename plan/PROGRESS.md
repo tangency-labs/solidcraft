@@ -157,7 +157,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [x] ✅ `curve.composite_curve_p1` (1700 lines) — green, 3093 cases
 - [x] ✅ `curve.composite_curve_p2` (1345 lines) — green, 661 cases
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
-- [x] ✅ `curve.curve_p9` (1783 lines) — green, 3093 cases
+- [x] ✅ `curve.curve_p9` (1783 lines) — green, 3111 cases
 
 ### surface (40/40)
 
@@ -189,7 +189,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [x] ✅ `surface.sphere` (2861 lines) — green, 800 cases
 - [ ] 🟡 `surface.surf_of_extrusion_p2` (1420 lines) — partial, 1373 cases
 - [x] ✅ `surface.surface_p5` (2321 lines) — green, 3046 cases
-- [ ] 🟡 `surface.cone_p3` (1939 lines) — partial, 1415 cases
+- [ ] 🟡 `surface.cone_p3` (1939 lines) — partial, 1416 cases
 - [ ] 🟡 `surface.surface_p1` (2458 lines) — partial, 806 cases
 - [x] ✅ `surface.surface_p6` (2150 lines) — green, 2099 cases
 - [ ] 🟡 `surface.srf_in_volume` (779 lines) — partial, 2036 cases
@@ -225,7 +225,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `topology.topology_traverser` (784 lines) — partial, 909 cases
 - [ ] 🟡 `topology.brep_p7` (2503 lines) — partial, 316 cases
 - [ ] 🟡 `topology.face_p1` (2171 lines) — partial, 2312 cases
-- [ ] 🟡 `topology.brep_p1` (2454 lines) — partial, 2589 cases
+- [ ] 🟡 `topology.brep_p1` (2454 lines) — partial, 2627 cases
 - [ ] 🟡 `topology.brep_p6` (1479 lines) — partial, 498 cases
 - [ ] 🟡 `topology.brep_cache` (389 lines) — partial, 663 cases
 - [ ] 🔨 `topology.brep_p4` (2113 lines) — in progress: #173 @froglemonade2 (ready for review)
@@ -315,7 +315,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 ### boolean (7/9)
 
-- [ ] 🟡 `boolean.topology_intersector_p1` (2491 lines) — partial, 827 cases
+- [ ] 🟡 `boolean.topology_intersector_p1` (2491 lines) — partial, 830 cases
 - [ ] 🟡 `boolean.topology_intersector_p2` (2195 lines) — partial, 841 cases
 - [ ] 🔨 `boolean.topology_intersector_p3` (1849 lines) — in progress: #211 @oursland (draft)
 - [ ] 🟡 `boolean.merge_p1` (993 lines) — partial, 248 cases

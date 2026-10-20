@@ -16,13 +16,15 @@ nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --list
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest --perturb   # sensitivity check
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green          # every status=green|partial unit
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green --jobs 4 # same, 4 units at a time (below)
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --status-of nlib.knots   # prints green|partial|fail
 nice -n 10 cargo test -p difftest --features cpp                     # harness self-tests
 ```
 
 | flag | meaning |
 |---|---|
-| `--unit <id>` | run one unit (repeatable) |
+| `--unit <id>` | run one unit (repeatable; `*` and `?` match several registered runners, e.g. `--unit 'nlib.*'`) |
+| `--jobs N` / `-j N` | run N units at a time, each in its own child process (default `1`: one process, in order; `0`: every core). Output, reports and exit status are the same as with `1` (below) |
 | `--green` | all units with `status = "green"` or `"partial"` in `plan/modules.toml` (one without a runner FAILS; a `green` unit that comes out partial FAILS) |
 | `--status-of <id>` | run the unit (no report) and print only `green`, `partial` or `fail`; exit `1` on `fail` (also when no runner is registered) |
 | `--all` | every registered runner |
@@ -55,6 +57,35 @@ first topology id (`+1`, or an empty adjacency entry gains a neighbour); else
 the first float of an all-zero / non-finite array (`0`→`1e-8`, NaN→`0`,
 ±inf→∓inf). The line reports `perturbed`, `detected`, `unperturbed` (cases
 with an empty output) and `deferred` (never perturbed).
+
+## Parallel runs (`--jobs`)
+
+```sh
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0   # CI (16 vCPU)
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green --jobs 4   # shared machine
+```
+
+With `--jobs N` and more than one unit (`--green`, `--all`, several or a glob of
+`--unit`), every unit runs in its own child process (the same binary run as `--unit
+<id>` with the other options; the C++ kernel keeps global state, so units never share a
+process or run on threads). At most N children run at once; the queue is ordered longest
+first by the `cases_total` of each unit's previous report (in `--report-dir`, else
+`reports/difftest/`), and the next unit starts as soon as a child exits. The parent
+prints each unit's lines in the serial order and the usual summary line, so stdout,
+`reports/difftest/*.json` and the exit status are identical to a serial run's. Timing
+goes to stderr only: `difftest --jobs N: wall … s, sum of unit times … s, longest unit
+<id> … s`.
+
+A child that dies (signal, e.g. a C++ segfault, or no summary line) fails only its own
+unit: `FAIL <unit> (worker process killed by signal 11)` followed by the tail of its
+stderr; the other units still run and the run exits `1`. Ctrl-C reaches every child
+(same process group); a parent that is killed closes the children's stdin, and they exit
+too, so none outlive it.
+
+Machine budget (AGENTS.md section 2): `--jobs 0` uses every core; on a shared machine
+use `--jobs 4` or less. Memory is per child: most units peak under 0.6 GiB, the heaviest
+at 1.5-5.4 GiB (`blend.hcr` 5.4, `topology.edgeuse_p2`/`_p3` 3.0, `topology.loopuse`,
+`query.edge`, `query.api_queries` 2-2.4); `--green --jobs 8` peaked at 8.7 GiB in total.
 
 ## Fuzzing the FFI guard (`--fuzz`)
 

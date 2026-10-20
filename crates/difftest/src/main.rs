@@ -3,10 +3,12 @@
 //! ```text
 //! cargo run -p difftest --features cpp -- --unit <id> [--unit <id>...]
 //! cargo run -p difftest --features cpp -- --green      # all status=green|partial units in plan/modules.toml
+//! cargo run -p difftest --features cpp -- --green --jobs 0   # same, one child process per unit, all cores
 //! cargo run -p difftest --features cpp -- --all        # every registered runner
 //! cargo run -p difftest --features cpp -- --list
 //! cargo run -p difftest --features cpp -- --status-of <id>   # prints green|partial|fail
 //! options: --seeds N (default 16)  --filter <substr>  --perturb  --report-dir <dir>  --no-report
+//!          --jobs N (-j; default 1, 0 = all cores)   # units in N child processes (`difftest::jobs`)
 //! cargo run -p difftest --features cpp -- --unit <id> --fuzz N [--fuzz-out <dir>]   # FFI guard probing
 //! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
 //! ```
@@ -21,7 +23,7 @@ use difftest::case::repo_root;
 use difftest::{fuzz, plan, registry, report, run_unit, CaseContext, RunOptions, UnitStatus};
 
 const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] \
-[--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]
+[--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report] [--jobs N]
        difftest --unit <id>... --fuzz N [--fuzz-out <dir>] [--seeds N] [--filter <substr>]
        difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]";
 
@@ -99,6 +101,9 @@ fn parse_args() -> Result<Args, String> {
 fn main() -> ExitCode {
     // Child of `--ssi-corpus`: one engine on one case (see `difftest::ssi::run_child`).
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    if std::env::var_os(difftest::jobs::WORKER_ENV).is_some() {
+        difftest::jobs::watch_parent();
+    }
     if raw.first().map(String::as_str) == Some("--ssi-case") {
         #[cfg(feature = "cpp")]
         return difftest::ssi::run_child(raw.get(1..).unwrap_or(&[]));
@@ -150,8 +155,12 @@ fn main() -> ExitCode {
         };
         return difftest::ssi::run_corpus(&root, &opts);
     }
-    if args.tol.is_some() || args.jobs.is_some() {
-        eprintln!("difftest: --tol and --jobs only apply to --ssi-corpus");
+    if args.tol.is_some() {
+        eprintln!("difftest: --tol only applies to --ssi-corpus");
+        return ExitCode::from(2);
+    }
+    if args.jobs.is_some() && (args.fuzz.is_some() || args.list || args.status_of.is_some()) {
+        eprintln!("difftest: --jobs does not apply to --fuzz, --list or --status-of");
         return ExitCode::from(2);
     }
 
@@ -195,7 +204,20 @@ fn main() -> ExitCode {
         };
     }
 
-    let mut wanted: Vec<String> = args.units.clone();
+    // `--unit` takes globs (`*`, `?`) over the registered runners.
+    let mut wanted: Vec<String> = Vec::new();
+    for u in &args.units {
+        let hits: Vec<String> = reg
+            .iter()
+            .map(|r| r.id().to_string())
+            .filter(|id| u.contains(['*', '?']) && difftest::ssi::glob_match(u, id))
+            .collect();
+        if hits.is_empty() {
+            wanted.push(u.clone());
+        } else {
+            wanted.extend(hits);
+        }
+    }
     if args.green {
         match plan::load(&root) {
             Ok(p) => wanted.extend(plan::green_units(&p)),
@@ -228,6 +250,15 @@ fn main() -> ExitCode {
         .report_dir
         .clone()
         .unwrap_or_else(|| root.join("reports").join("difftest"));
+
+    let jobs = difftest::jobs::resolve(args.jobs.unwrap_or(1)).min(wanted.len());
+    if jobs > 1 {
+        let fwd = difftest::jobs::forwarded_args(&raw);
+        // Previous reports order the queue; a fresh --report-dir falls back to the default.
+        let default_dir = root.join("reports").join("difftest");
+        let dirs = [report_dir.as_path(), default_dir.as_path()];
+        return difftest::jobs::run_parallel(&wanted, &fwd, jobs, &dirs);
+    }
 
     let mut failed = 0usize;
     let mut partial = 0usize;

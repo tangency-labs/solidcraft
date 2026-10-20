@@ -177,8 +177,11 @@ into `upstream/` (see README), build the C++ reference with
    cargo test -p solidcore
    cargo check -p solidcore --target wasm32-unknown-unknown
    cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
-   cargo run --profile difftest -p difftest --features cpp -- --green            # what CI runs (~2 min)
+   cargo run --profile difftest -p difftest --features cpp -- --green --jobs 4   # what CI runs (with --jobs 0)
    ```
+   `--jobs N` runs N units at a time, each in its own process (`0` = every core; the
+   output and reports are the same as a serial run). On a shared machine stay within the
+   section 2 budget: `--jobs 4` at most, fewer when the load is high.
 5. **Before you mark a PR ready**, check each item. Earlier PRs passed CI yet still
    disagreed with the C++ because of these:
    1. **Default arguments** match upstream (e.g. `IsDegenerate()` defaults to
