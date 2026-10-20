@@ -323,8 +323,9 @@ fn run_ffi(op: Op, i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 
 // ---- outputs ----------------------------------------------------------------------------
 
-/// The out-params' starting values on both sides: values `ClassifyLoops` never leaves
-/// in them, so an early return is visible.
+/// The out-params' starting values on both sides (the shim's `run_op` starts from the
+/// same `SM_HNF_NO_LOOP_TREE_ROOT`, `SM_CD_LAMINA` and `[77]`): values `ClassifyLoops`
+/// never leaves together with its status, so an early return is visible.
 fn initial_out() -> ClassifyLoopsOut {
     ClassifyLoopsOut {
         classifiable: HealNotYetFaceType::NoLoopTreeRoot,

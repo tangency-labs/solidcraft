@@ -407,7 +407,9 @@ pub fn classify_loops<O: LoopObject>(
         };
         let crosses_u = truthy(props.closed_u) && loop_props(props)?.seam_crossing_cnt_u > 0;
         let crv: ClassifyCrv;
-        let done: Vec<TouchData<O>>;
+        // upstream holds a pointer to one of the face's done touch lists (seams) or to
+        // the crossings it just computed (bisector): borrow the former, own the latter
+        let bisector_done: Vec<TouchData<O>>;
         if crosses_u && truthy(props.closed_v) && loop_props(props)?.seam_crossing_cnt_v > 0 {
             // a Loop on a Torus crossing both Seams: use the U touch lists unless the
             // loop winds once about V only
@@ -421,22 +423,19 @@ pub fn classify_loops<O: LoopObject>(
             } else {
                 ClassifyCrv::SeamV
             };
-            done = match crv {
-                ClassifyCrv::SeamV => props.done_touch_list_v.clone(),
-                _ => props.done_touch_list_u.clone(),
-            };
+            bisector_done = Vec::new();
             start_on_seam = true;
             stop_on_seam = true;
         } else if crosses_u {
             // Srf is U Periodic and Loop crosses SeamU
             crv = ClassifyCrv::SeamU;
-            done = props.done_touch_list_u.clone();
+            bisector_done = Vec::new();
             start_on_seam = doubly_periodic;
             stop_on_seam = doubly_periodic;
         } else if truthy(props.closed_v) && loop_props(props)?.seam_crossing_cnt_v > 0 {
             // Srf is V Periodic and Loop crosses SeamV
             crv = ClassifyCrv::SeamV;
-            done = props.done_touch_list_v.clone();
+            bisector_done = Vec::new();
             start_on_seam = doubly_periodic;
             stop_on_seam = doubly_periodic;
         } else {
@@ -464,8 +463,14 @@ pub fn classify_loops<O: LoopObject>(
 
             // UVTrimLine Vertex and Edge TgtLoop_Crossings (the status is not checked)
             crv = ClassifyCrv::Bisector;
-            done = ignored(get_loop_crossings(k, b, scratch, loops, props))?.unwrap_or_default();
+            bisector_done =
+                ignored(get_loop_crossings(k, b, scratch, loops, props))?.unwrap_or_default();
         }
+        let done: &[TouchData<O>] = match crv {
+            ClassifyCrv::SeamU => &props.done_touch_list_u,
+            ClassifyCrv::SeamV => &props.done_touch_list_v,
+            ClassifyCrv::Bisector => &bisector_done,
+        };
 
         // for every Loop being classified - Get UVTrimLine/Loop crossings to Set Loop
         // LoopuseType, Area/NoArea, Orientation, and containment props
@@ -477,7 +482,7 @@ pub fn classify_loops<O: LoopObject>(
                 continue;
             }
 
-            let this_touches = get_connected_touches(Some(O::from_loop(loop_jj)), &done);
+            let this_touches = get_connected_touches(Some(O::from_loop(loop_jj)), done);
             let crossing_cnt = (this_touches.len() / 2) as u64;
 
             // check state - LoopCrossingCount should be greater than 0 after strut
@@ -591,10 +596,10 @@ pub fn classify_loops<O: LoopObject>(
         } else {
             let mut jj = 0;
             while jj < done_size {
-                if touch_at(&done, jj)?.loop_dir == CrvDirOnFaceType::Out
-                    && touch_at(&done, jj + 1)?.loop_dir == CrvDirOnFaceType::In
+                if touch_at(done, jj)?.loop_dir == CrvDirOnFaceType::Out
+                    && touch_at(done, jj + 1)?.loop_dir == CrvDirOnFaceType::In
                 {
-                    let loop_indx = touch_at(&done, jj)?.loop_index;
+                    let loop_indx = touch_at(done, jj)?.loop_index;
                     if (no_area_loop_cnt > 0
                         && io_at(&out.classify_loop_ios, loop_indx)?.area_loop == Tri::False)
                         || no_area_loop_cnt == 0
@@ -627,7 +632,7 @@ pub fn classify_loops<O: LoopObject>(
             let (p_loop, loop_indx) = if jj == done_size {
                 (None, NO_VERTEX_POLE)
             } else {
-                let t = touch_at(&done, j1)?;
+                let t = touch_at(done, j1)?;
                 (touch_loop(&t)?, t.loop_index)
             };
             let io_indx = if p_loop.is_some() {
@@ -679,7 +684,7 @@ pub fn classify_loops<O: LoopObject>(
                 if let Some(io_i) = io_indx {
                     // EnterEvent: Orient block (a subsequent entry is only asserted
                     // upstream)
-                    let orient = touch_orient(&done, j1)?;
+                    let orient = touch_orient(done, j1)?;
                     let io = io_at_mut(&mut out.classify_loop_ios, io_i as u64)?;
                     if io.orient == OrientType::Unknown {
                         io.orient = orient;
@@ -737,7 +742,7 @@ pub fn classify_loops<O: LoopObject>(
                 }
             } else if pairing {
                 if let Some(io_i) = io_indx {
-                    let orient = touch_orient(&done, j1)?;
+                    let orient = touch_orient(done, j1)?;
                     let io = io_at_mut(&mut out.classify_loop_ios, io_i as u64)?;
                     if io.orient == OrientType::Unknown {
                         io.orient = orient;

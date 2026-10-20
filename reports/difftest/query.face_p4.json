@@ -2,6 +2,354 @@
   "abs_floors": [],
   "cases": [
     {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_wind_u2_v1_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#0",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_wind_u1_v2_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#1",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_two_diagonals_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#2",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_both_pole_vertices_band_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#3",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_both_pole_vertices_cap_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#4",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_three_spans_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#5",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_five_spans_rev_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#6",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_eight_spans_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#7",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_three_same_dir_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#8",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_seven_spans_reversed_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#9",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cone_three_spans_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#10",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_natural_cone_swap0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#11",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_pole_vertex_only_start_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#12",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_near_both_poles_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#13",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_band_diag_reversed_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#14",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_two_copies_mode4_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#15",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_tiny_scale_three_swap0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#16",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_wind_u2_v1_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#17",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_wind_u1_v2_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#18",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_two_diagonals_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#19",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_both_pole_vertices_band_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#20",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_both_pole_vertices_cap_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#21",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_three_spans_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#22",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_five_spans_rev_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#23",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_eight_spans_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#24",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_three_same_dir_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#25",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_seven_spans_reversed_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#26",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cone_three_spans_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#27",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_natural_cone_swap1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#28",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_pole_vertex_only_start_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#29",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_near_both_poles_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#30",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_band_diag_reversed_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#31",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_two_copies_mode4_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#32",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sphere_tiny_scale_three_swap1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#33",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_face_without_loops_sm_err_fresh",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#34",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_face_without_loops_explicit_reversed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#35",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_natural_torus_reversed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#36",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_natural_sphere_drop_last",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#37",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_cylinder_rect_only",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#38",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_diag_backwards",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#39",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_torus_antidiag",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/query.face_p4/adversarial.json#40",
+      "values_compared": 1
+    },
+    {
       "deferred": {
         "symbol": "SmFace::GetTolerance",
         "unit": "topology.face_p2"
@@ -4102,12 +4450,12 @@
     }
   ],
   "cases_both_errored": 27,
-  "cases_deferred": 100,
+  "cases_deferred": 105,
   "cases_failed": 0,
-  "cases_passed": 359,
-  "cases_total": 459,
+  "cases_passed": 395,
+  "cases_total": 500,
   "deferred_by_unit": {
-    "topology.face_p2": 100
+    "topology.face_p2": 105
   },
   "max_rel_err": 0.0,
   "pass": true,

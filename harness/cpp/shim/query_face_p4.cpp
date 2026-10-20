@@ -1171,9 +1171,12 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     o.push_back(c.rejected ? 1.0 : 0.0);
     if (c.rejected)
         return;
-    SmHealNotYetFaceType classifiable = (SmHealNotYetFaceType)7;
+    // the out-params start from the values the runner's `initial_out` gives the Rust
+    // side (values ClassifyLoops never leaves with status 0 or SM_ERR before its init),
+    // so an early return compares what it leaves
+    SmHealNotYetFaceType classifiable = SM_HNF_NO_LOOP_TREE_ROOT;
     SmTArray<SmClassifyLoopIO> ios;
-    SmCrvDirOnFaceType start = (SmCrvDirOnFaceType)99, stop = (SmCrvDirOnFaceType)99;
+    SmCrvDirOnFaceType start = SM_CD_LAMINA, stop = SM_CD_LAMINA;
     SmTArray<ULONG> no_area;
     no_area.Add(77);
     SmLooptreeItem* root = nullptr;
