@@ -1161,7 +1161,8 @@ impl Dialog {
         if crate::dialogs_assembly::alignment_side(&self.kind, self.active).is_some()
             && let Hit::SketchCurve { sketch, id, straight: true, .. } = h
         {
-            return Some(Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() });
+            let sel = Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() };
+            return crate::dialogs_assembly::alignment_accepts(s, self, &sel).then_some(sel);
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
@@ -1178,6 +1179,7 @@ impl Dialog {
         }
         // The snap looked the face under the cursor up already, planar or not.
         inp.accepts(h, |body, face| snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some()))
+            .filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
     }
 
     /// Extrude's automatic To Object: with profiles picked, a face or vertex off their plane, or
@@ -1238,7 +1240,7 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
-        if self.take_extrude_target(s, &sel) {
+        if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
         }
         if let Some(key) = feature_pattern_reference_key(self, self.active) {

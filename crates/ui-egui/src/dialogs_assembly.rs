@@ -515,6 +515,35 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
     Some(snap)
 }
 
+/// Same centre marker as a primary snap, but the arrow is the persisted cylinder axis,
+/// not the outward end normal used when mating primary origins.
+fn alignment_snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
+    let mut snap = snap_of(s, sel)?;
+    if snap.kind == SnapKind::CircleCenter {
+        let st = s.world_state();
+        let cylinders = match sel {
+            Sel::Edge { body, index, .. } => {
+                let b = st.body(body)?;
+                let mesh = b.mesh();
+                mesh.edge_faces
+                    .get(*index)?
+                    .iter()
+                    .filter_map(|f| solidcraft_engine::kernel::cylinder_face(&b.body, &mesh, *f as usize))
+                    .collect::<Vec<_>>()
+            }
+            Sel::Face { body, index, .. } => {
+                let b = st.body(body)?;
+                solidcraft_engine::kernel::cylinder_face(&b.body, &b.mesh(), *index).into_iter().collect()
+            }
+            _ => Vec::new(),
+        };
+        if let [c] = cylinders.as_slice() {
+            snap.z = *c.axis;
+        }
+    }
+    Some(snap)
+}
+
 /// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
 fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
     let ax = s.z.any_perp();
@@ -901,6 +930,52 @@ pub(crate) fn clear_alignment(k: &mut Kind, input: usize) {
     }
 }
 
+/// Exact authored path, independent of the solved preview's body placement.
+fn alignment_occurrence(s: &Session, sel: &Sel) -> Option<u64> {
+    match sel {
+        Sel::Face { body, .. } | Sel::Edge { body, .. } => {
+            let model = s.model.state();
+            let frames = s.doc.body_frames_with_source(&model);
+            let (_, _, _, path, _) = frames.iter().find(|(name, ..)| name == body)?;
+            (path.len() <= 1).then(|| path.first().copied().unwrap_or(0))
+        }
+        Sel::ExternalSketchCurve { sketch, .. } => feature_occurrence(s, *sketch),
+        Sel::Axis { name } | Sel::Plane { name } => {
+            if matches!(name.as_str(), "X" | "Y" | "Z" | "XY" | "XZ" | "YZ") {
+                return Some(0);
+            }
+            feature_occurrence(s, s.model.state().construct.iter().find(|c| c.name == *name)?.feature)
+        }
+        _ => None,
+    }
+}
+
+fn feature_occurrence(s: &Session, feature: u64) -> Option<u64> {
+    let component = s.doc.feature(feature)?.component;
+    if component == 0 {
+        return Some(0);
+    }
+    let mut occurrences = s.doc.occurrences.iter().filter(|o| o.component == component);
+    let first = occurrences.next()?;
+    (first.parent == 0 && occurrences.next().is_none()).then_some(first.id)
+}
+
+/// Reject a wrong component before hover, Select Other or a click can replace an input.
+/// The engine independently validates persisted references and programmatic commands.
+pub(crate) fn alignment_accepts(s: &Session, d: &Dialog, sel: &Sel) -> bool {
+    let Some(side) = alignment_side(&d.kind, d.active) else { return true };
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    let expected = if let Some(id) = f.editing {
+        s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| if side == 0 { j.a.occurrence } else { j.b.occurrence })
+    } else {
+        d.inputs.get(side).and_then(|i| i.items.first()).and_then(|primary| {
+            let path = alignment_occurrence(s, primary)?;
+            (snap_of(s, primary)?.param["occurrence"].as_u64() == Some(path)).then_some(path)
+        })
+    };
+    expected.is_some() && alignment_occurrence(s, sel) == expected
+}
+
 /// Keep the picked occurrence explicit, including repeated definitions. Nested paths have no
 /// independent joint frames yet and are refused instead of aliasing to a primary instance.
 fn alignment_pick(s: &Session, sel: &Sel) -> Result<Value, String> {
@@ -934,7 +1009,31 @@ fn alignment_pick(s: &Session, sel: &Sel) -> Result<Value, String> {
             };
             let name = names.get(*index).cloned().filter(|n| !n.is_empty()).ok_or("alignment geometry has no persistent name")?;
             let mut value = if matches!(sel, Sel::Edge { .. }) {
-                json!({"reference":{"type":"edge","name":name}})
+                let mesh = b.mesh();
+                if mesh.edges.get(*index).and_then(|e| circle_of(e)).is_some() {
+                    // A hole rim may be split into arcs or named by inexact edge history.
+                    // Its adjacent cylinder supplies the same persistent axis as a primary
+                    // circle-centre origin. Never choose between several cylindrical faces.
+                    let cylinders: Vec<_> = mesh
+                        .edge_faces
+                        .get(*index)
+                        .into_iter()
+                        .flatten()
+                        .filter(|f| solidcraft_engine::kernel::cylinder_face(&b.body, &mesh, **f as usize).is_some())
+                        .collect();
+                    match cylinders.as_slice() {
+                        [face] => {
+                            let names = solidcraft_engine::doc::naming::face_names(b);
+                            let name =
+                                names.get(**face as usize).filter(|n| !n.is_empty()).ok_or("circle axis has no persistent cylindrical face")?;
+                            json!({"reference":{"type":"cylinder","name":name}})
+                        }
+                        [] => json!({"reference":{"type":"edge","name":name}}),
+                        _ => return Err("circle axis is ambiguous; select its cylindrical face or a construction axis".into()),
+                    }
+                } else {
+                    json!({"reference":{"type":"edge","name":name}})
+                }
             } else {
                 let faces = b.body.faces((b.body.size() * 2e-3).max(1e-3)).map_err(|e| e.to_string())?;
                 if faces.get(*index).is_some_and(|f| f.plane_normal.is_some()) {
@@ -1283,6 +1382,9 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
+    let aligning = alignment_side(&d.kind, d.active).is_some();
+    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
+    let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
     let t = Tokens::get();
     let Kind::Assembly(k) = &mut d.kind else { return };
     if let Asm::Interference { overlaps, .. } = k {
@@ -1341,11 +1443,9 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         glyph(painter, proj, s, *c, app.cam.half_height(), two.then_some(tag.as_str()));
     }
     // The snap under the cursor (found again only when the hovered item changes).
-    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS);
-    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting);
     match under {
         Some(sel) => {
-            let fresh = !matches!(hover, Some((s, _)) if *s == sel);
+            let fresh = aligning || !matches!(hover, Some((s, _)) if *s == sel);
             if fresh {
                 let mut source = sel.clone();
                 if app.preview.draw_active()
@@ -1360,10 +1460,12 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
                         _ => {}
                     }
                 }
-                *hover = Some((sel.clone(), snap_of(&app.session, &source).map(|s| placed_snap(app, &source, s))));
+                let snap = if aligning { alignment_snap_of(&app.session, &source) } else { snap_of(&app.session, &source) };
+                *hover = Some((sel.clone(), snap.map(|s| placed_snap(app, &source, s))));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
-                glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_name(s.kind)));
+                let label = if aligning && s.kind == SnapKind::CircleCenter { "Circle axis" } else { snap_name(s.kind) };
+                glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(label));
             }
         }
         None => *hover = None,

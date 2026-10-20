@@ -423,6 +423,14 @@ primary joint axis. The root origin widget can reference a root-side joint origi
 a different part's frame. Scripts may explicitly name an origin axis/plane in that side's
 component frame.
 
+Each alignment picker only offers references on its primary origin's exact occurrence.
+Hovering or clicking the other component leaves the confirmed reference and pose unchanged.
+A circular hole rim shows the same centre-and-axis marker as an origin pick, labelled
+**Circle axis** for alignment. Its unique adjacent cylindrical face supplies the persistent
+axis even when the raw edge history is inexact. A centre point alone is not a direction;
+an axis parallel to the primary joint axis remains invalid. Multiple possible cylinders
+are refused rather than choosing one arbitrarily.
+
 Each **Invert alignment** checkbox reverses only its own direction. The authored **Angle**
 expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
 After choosing the primary origins, picking and highlighting continue on the solved placement.

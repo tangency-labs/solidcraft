@@ -212,7 +212,7 @@ fn alignment_direction(doc: &Document, st: &ModelState, reference: &super::Align
             for body in component_bodies(doc, st, component) {
                 let Ok(hit) = crate::name_lookup::locate_edge(body, name, Vec3::ZERO) else { continue };
                 if hit.split || !hit.verified {
-                    return Err(bad("alignment edge identity is ambiguous; pick it again"));
+                    return Err(bad("alignment edge identity is ambiguous; select the hole's circular rim, cylindrical face or a construction axis"));
                 }
                 let mesh = body.mesh();
                 let points = mesh.edges.get(hit.edge).ok_or_else(|| bad("alignment edge no longer exists"))?;

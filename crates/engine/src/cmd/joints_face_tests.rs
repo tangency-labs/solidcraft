@@ -45,6 +45,32 @@ fn joint_origin_names_in_face_or_circle_explain_the_correct_form() {
 /// stored at the old width lies beside the moved hole) and large ones.
 const WIDTHS: [f64; 9] = [302.0, 304.0, 310.0, 330.0, 400.0, 450.0, 510.0, 301.0, 300.0];
 
+#[test]
+fn secondary_alignment_hole_axis_keeps_identity_but_rejects_ambiguous_seam_and_wrong_owner() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "solid.hole", json!({"position":[10,10,10],"diameter":6}));
+    let st = s.model.state();
+    let body = st.body("Body1").unwrap();
+    let names = solidcraft_doc::naming::edge_names(body);
+    let seam = names.iter().find(|name| solidcraft_doc::naming::locate_edge(body, name, Vec3::ZERO).is_ok_and(|h| !h.verified)).unwrap();
+    p["a_alignment"] = json!({"reference":{"type":"edge","name":seam}});
+    assert!(s.execute("joint.create", &p).unwrap_err().to_string().contains("ambiguous"));
+    let component = s.doc.find_component("A").unwrap();
+    let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, component, Vec3::new(13.0, 10.0, 5.0), true).unwrap();
+    // Use X-facing primaries so the hole's Z axis supplies a valid secondary direction.
+    p["a"]["face"] = json!([20, 10, 5]);
+    p["b"]["face"] = json!([30, 10, 5]);
+    p["a_alignment"] = json!({"reference":{"type":"cylinder","name":wall}});
+    p.as_object_mut().unwrap().remove("b_alignment");
+    run(&mut s, "joint.create", p);
+    let before = s.doc.clone();
+    let error =
+        s.execute("joint.edit", &json!({"joint":"Aligned","b_alignment":{"reference":{"type":"cylinder","name":wall}}})).unwrap_err().to_string();
+    assert!(error.contains("origin's component"), "{error}");
+    assert_eq!(s.doc, before);
+}
+
 fn alignment_boxes() -> (Session, String, String, Value) {
     let mut s = Session::default();
     run(&mut s, "parameters.change", json!({"name": "jointTurn", "expression": "17 deg"}));

@@ -74,6 +74,24 @@ fn documents() -> (Document, Document) {
 }
 
 #[test]
+fn secondary_alignment_hole_axis_clone_remaps_cylinder_face_and_occurrence() {
+    use solidcraft_doc::joints::AlignmentRef;
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap = Snap::FaceCenter {
+        pick: Vec3::ZERO,
+        face: Some("F1:top".into()),
+        x: Some(XRef::Reference { reference: AlignmentRef::Cylinder { name: "F10:bore:side:0".into() }, reverse: true }),
+    };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    let a = &destination.assembly.joints[4].a;
+    assert_eq!(a.occurrence, 101);
+    assert!(
+        matches!(&a.snap,Snap::FaceCenter{x:Some(XRef::Reference{reference:AlignmentRef::Cylinder{name},reverse:true}),..} if name=="F110:bore:side:0")
+    );
+}
+
+#[test]
 fn internal_relationships_receive_independent_ids_and_remapped_typed_references() {
     let (source, mut destination) = documents();
     destination.next_id = 1000;
