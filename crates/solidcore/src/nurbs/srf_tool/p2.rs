@@ -488,7 +488,11 @@ pub fn remove_one_knot(
     mr: f64,
 ) -> Result<f64> {
     const OP: &str = "nurbs::srf_tool::p2::remove_one_knot";
-    let Local { p, q, pw, u, v, .. } = Local::of(sur, OP)?;
+    // Local notation; the net is read in place below (upstream reads `Pw` directly),
+    // not copied and transposed.
+    let idx = sur.indices();
+    let (p, q) = (sx(idx.p, OP)?, sx(idx.q, OP)?);
+    let (u, v) = (sur.u_knots(), sur.v_knots());
     let (r, s, f, l) = (sx(r, OP)?, sx(s, OP)?, sx(f, OP)?, sx(l, OP)?);
 
     let a = p.max(q);
@@ -503,10 +507,19 @@ pub fn remove_one_knot(
         mr = -1.0;
     }
 
-    let (lines, deg, kn) = match dir {
-        Direction::U => (transpose(&pw), p, u),
-        Direction::V => (pw, q, v),
+    let (deg, kn) = match dir {
+        Direction::U => (p, u),
+        Direction::V => (q, v),
         Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+    };
+    // Entry `i` of line `row`: `Pw[i][row]` in u (a column), `Pw[row][i]` in v.
+    let line_at = |row: isize, i: isize| -> Result<CPoint> {
+        let (a, b) = if dir == Direction::U {
+            (i, row)
+        } else {
+            (row, i)
+        };
+        at(sur.row(ix(a, OP)?).map_err(|_| oob(OP))?, b, OP)
     };
 
     let first = r - deg;
@@ -542,27 +555,26 @@ pub fn remove_one_knot(
 
     // Update maximum error for the requested rows.
     for row in f..=l {
-        let line = lines.get(ix(row, OP)?).ok_or_else(|| oob(OP))?;
         let mut i = first;
         let mut j = last;
         let mut ii: isize = 1;
         let mut jj = last - off;
 
-        put(&mut rw, 0, at(line, off, OP)?, OP)?;
-        put(&mut rw, last + 1 - off, at(line, last + 1, OP)?, OP)?;
+        put(&mut rw, 0, line_at(row, off)?, OP)?;
+        put(&mut rw, last + 1 - off, line_at(row, last + 1)?, OP)?;
 
         // Get new control points for one removal step.
         while j - i > 0 {
             let c = CPoint::combine2(
                 at(&alf, i - first, OP)?,
-                at(line, i, OP)?,
+                line_at(row, i)?,
                 at(&oma, i - first, OP)?,
                 at(&rw, ii - 1, OP)?,
             );
             put(&mut rw, ii, c, OP)?;
             let c = CPoint::combine2(
                 at(&bet, j - first, OP)?,
-                at(line, j, OP)?,
+                line_at(row, j)?,
                 at(&omb, j - first, OP)?,
                 at(&rw, jj + 1, OP)?,
             );
@@ -578,7 +590,7 @@ pub fn remove_one_knot(
             dist_cpt_cpt_homo(at(&rw, ii - 1, OP)?, at(&rw, jj + 1, OP)?)
         } else {
             let c = CPoint::combine2(del, at(&rw, jj + 1, OP)?, omd, at(&rw, ii - 1, OP)?);
-            dist_cpt_cpt_homo(at(line, i, OP)?, c)
+            dist_cpt_cpt_homo(line_at(row, i)?, c)
         };
 
         if dw > mr {

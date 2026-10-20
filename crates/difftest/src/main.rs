@@ -294,6 +294,15 @@ fn main() -> ExitCode {
             continue;
         }
         println!("{}", report::summary_line(&res));
+        eprintln!("{}", res.timing.line(id, res.cases.len()));
+        if let Some(dir) = std::env::var_os("DIFFTEST_RUST_DIGEST") {
+            let path = Path::new(&dir).join(format!("{id}.digest"));
+            let body = res.timing.rust_digests.join("\n") + "\n";
+            if let Err(e) = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, body))
+            {
+                eprintln!("difftest: {}: {e}", path.display());
+            }
+        }
         for c in res.cases.iter().filter(|c| c.fail()).take(5) {
             let first = c
                 .harness_error

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -193,6 +194,57 @@ pub struct UnitResult {
     pub abs_floors: Vec<AbsFloor>,
     /// `--seeds` value used.
     pub seeds: usize,
+    /// Wall time spent per phase (not written to the report).
+    pub timing: UnitTiming,
+}
+
+/// Wall time of one unit's run, split by phase (diagnostic only; printed to stderr).
+#[derive(Debug, Clone, Default)]
+pub struct UnitTiming {
+    /// Building the case list (`UnitDiff::cases`).
+    pub cases: Duration,
+    /// All `run_cpp` calls.
+    pub cpp: Duration,
+    /// All `run_rust` calls.
+    pub rust: Duration,
+    /// All comparisons.
+    pub compare: Duration,
+    /// Slowest single `run_rust` call: case name and time.
+    pub slowest_rust: Option<(String, Duration)>,
+    /// With `DIFFTEST_RUST_DIGEST` set: one `<case>\t<fnv1a64 of the Rust output's Debug form>`
+    /// line per case (f64 `Debug` is the shortest round-trip form, so equal digests mean
+    /// bit-identical Rust outputs across builds).
+    pub rust_digests: Vec<String>,
+}
+
+fn fnv1a64(s: &str) -> u64 {
+    s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+impl UnitTiming {
+    /// One `TIME` line: `TIME <unit> cases=<s> cpp=<s> rust=<s> compare=<s> ratio=<rust/cpp> slowest_rust=<case>:<s>`.
+    pub fn line(&self, unit: &str, n_cases: usize) -> String {
+        let ratio = if self.cpp.as_secs_f64() > 0.0 {
+            self.rust.as_secs_f64() / self.cpp.as_secs_f64()
+        } else {
+            f64::NAN
+        };
+        let slow = self
+            .slowest_rust
+            .as_ref()
+            .map_or_else(String::new, |(n, d)| {
+                format!(" slowest_rust={n}:{:.6}", d.as_secs_f64())
+            });
+        format!(
+            "TIME {unit} n={n_cases} cases={:.6} cpp={:.6} rust={:.6} compare={:.6} ratio={ratio:.3}{slow}",
+            self.cases.as_secs_f64(),
+            self.cpp.as_secs_f64(),
+            self.rust.as_secs_f64(),
+            self.compare.as_secs_f64(),
+        )
+    }
 }
 
 impl UnitResult {
@@ -359,8 +411,13 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
         harness_error: None,
         abs_floors: unit.abs_floors().to_vec(),
         seeds: ctx.seeds,
+        timing: UnitTiming::default(),
     };
-    let cases = match unit.cases(ctx) {
+    let digest = std::env::var_os("DIFFTEST_RUST_DIGEST").is_some();
+    let t0 = Instant::now();
+    let cases = unit.cases(ctx);
+    res.timing.cases = t0.elapsed();
+    let cases = match cases {
         Ok(c) => c,
         Err(e) => {
             res.harness_error = Some(e.0);
@@ -373,7 +430,9 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 continue;
             }
         }
+        let t0 = Instant::now();
         let cpp = guarded(|| unit.run_cpp(&case), "cpp");
+        res.timing.cpp += t0.elapsed();
 
         let mut cr = CaseResult {
             name: case.name.clone(),
@@ -393,7 +452,25 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 continue;
             }
         }
+        let t0 = Instant::now();
         let rust = guarded(|| unit.run_rust(&case), "rust");
+        let dt = t0.elapsed();
+        res.timing.rust += dt;
+        if digest {
+            let d = fnv1a64(&format!("{rust:?}"));
+            res.timing
+                .rust_digests
+                .push(format!("{}\t{d:016x}", case.name));
+        }
+        if res
+            .timing
+            .slowest_rust
+            .as_ref()
+            .is_none_or(|(_, d)| dt > *d)
+        {
+            res.timing.slowest_rust = Some((case.name.clone(), dt));
+        }
+        let t0 = Instant::now();
         match (cpp, rust) {
             (_, Ok(r)) if r.rejected.is_some() => {
                 cr.harness_error =
@@ -414,6 +491,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 cr.harness_error = Some(msgs.join("; "));
             }
         }
+        res.timing.compare += t0.elapsed();
         res.cases.push(cr);
     }
     res
@@ -487,6 +565,7 @@ mod tests {
             harness_error: None,
             abs_floors: Vec::new(),
             seeds: 0,
+            timing: UnitTiming::default(),
         };
         assert_eq!(r.cases[1].outcome(), CaseOutcome::Deferred);
         assert_eq!(r.status(), UnitStatus::Partial);

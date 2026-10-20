@@ -59,6 +59,10 @@
 //!   arrays (degrees of `GW_MAX_DEGREE` or more, malformed curves, indices the
 //!   routines do not check) the port returns [`SolidError::InvalidInput`]; for every
 //!   input upstream handles inside its arrays the results are the same, bit for bit.
+//!   The scratch arrays of [`crv_derivs`] and the rational basis derivatives are
+//!   `SMALL_DEGREE` (8) wide for degrees below 8 and `GW_MAX_DEGREE` otherwise, and
+//!   `sm_BasisDerivs`' `a` keeps only the two rows (`s1`, `s2`) it uses (same values
+//!   and errors; this only avoids zeroing large stack arrays).
 //! - `sm_CrvRemoveKnots` writes into an output curve that may be the input; the port
 //!   works in place ([`crv_remove_knots`]; clone first for a separate output). Its
 //!   return flag can be left over from a failed (and recovered) basis-maximum search;
@@ -83,13 +87,18 @@ use crate::math::{max2, Vec3, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::basis_basic::SpanMaxima;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::dist_cpt_cpt_homo;
-use crate::nurbs::knots::{Basis, KnotVector, Side};
-use crate::nurbs::math::{pascal_triangle, CPoint, BIGD, NOW, NOZ};
+use crate::nurbs::knots::{Basis, KnotVector, Side, MAX_DEGREE as KNOT_MAX_DEGREE};
+use crate::nurbs::math::{pascal_entry, pascal_triangle, CPoint, BIGD, NOW, NOZ};
 
 /// `GW_MAX_DEGREE`: size of the fixed scratch arrays; degrees must stay below it.
 pub const MAX_DEGREE: usize = 32;
 /// `GW_MAX_DERIV`: number of derivative rows of the fixed scratch arrays.
 pub const MAX_DERIV: usize = 5;
+/// Scratch width used by the hot evaluators for degrees below it (performance only:
+/// every index those routines touch is at most the degree, so a width of
+/// `SMALL_DEGREE` gives the same values and errors as [`MAX_DEGREE`] while zeroing
+/// far less stack per call).
+const SMALL_DEGREE: usize = 8;
 
 /// `WMIN`: smallest weight knot removal may create.
 const WMIN: f64 = 1.0e-03;
@@ -696,25 +705,33 @@ pub struct BasisDerivs {
 /// Fills the `der + 1` rows of `nd` (at least `p + 1` columns each) with the
 /// non-vanishing basis functions and derivatives at `u` and returns the span
 /// (`sm_BasisDerivs`).
-fn basis_derivs_into(
+///
+/// `N` is the scratch width (`GW_MAX_DEGREE` upstream): [`MAX_DEGREE`], or
+/// [`SMALL_DEGREE`] for degrees below it. Only rows `s1`, `s2` (0 and 1) of
+/// upstream's `a[GW_MAX_DEGREE][GW_MAX_DEGREE]` are ever used, so `a` has two rows.
+#[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
+fn basis_derivs_into<const N: usize>(
     knt: &KnotVector<'_>,
     pu: usize,
     u: f64,
     side: Side,
     der: usize,
-    nd: &mut [[f64; MAX_DEGREE]],
+    nd: &mut [[f64; N]],
 ) -> Result<usize> {
     const OP: &str = OP_BDERIVS;
     check_degree(pu, OP)?;
+    if pu >= N {
+        return Err(oob(OP));
+    }
     let knot_tol = EFF_ZERO_SQ;
     let p = sx(pu, OP)?;
     let der = sx(der, OP)?;
     let uk = knt.knots();
 
-    let mut left = [0.0_f64; MAX_DEGREE];
-    let mut right = [0.0_f64; MAX_DEGREE];
-    let mut ndu = [[0.0_f64; MAX_DEGREE]; MAX_DEGREE];
-    let mut a = [[0.0_f64; MAX_DEGREE]; MAX_DEGREE];
+    let mut left = [0.0_f64; N];
+    let mut right = [0.0_f64; N];
+    let mut ndu = [[0.0_f64; N]; N];
+    let mut a = [[0.0_f64; N]; 2];
 
     // Find the knot span u is in.
     let i = sx(knt.find_span(pu, u, side)?, OP)?;
@@ -722,15 +739,15 @@ fn basis_derivs_into(
 
     // Get maximum derivative index and set zero derivatives.
     let mder = p.min(der);
-    for k in p + 1..=der {
-        for j in 0..=p {
+    for k in p + 1..der + 1 {
+        for j in 0..p + 1 {
             set2(nd, k, j, 0.0, OP)?;
         }
     }
 
     // Compute the basis functions.
     set2(&mut ndu, 0, 0, 1.0, OP)?;
-    for j in 1..=p {
+    for j in 1..p + 1 {
         set(&mut left, j, u - get(uk, i + 1 - j, OP)?, OP)?;
         set(&mut right, j, get(uk, i + j, OP)? - u, OP)?;
         let mut saved = 0.0;
@@ -753,16 +770,16 @@ fn basis_derivs_into(
     }
 
     // Load the basis functions.
-    for j in 0..=p {
+    for j in 0..p + 1 {
         set2(nd, 0, j, get2(&ndu, j, p, OP)?, OP)?;
     }
 
     // Compute derivatives.
-    for r in 0..=p {
+    for r in 0..p + 1 {
         let mut s1: isize = 0;
         let mut s2: isize = 1;
         set2(&mut a, 0, 0, 1.0, OP)?;
-        for k in 1..=mder {
+        for k in 1..mder + 1 {
             let mut d = 0.0;
             let rk = r - k;
             let pk = p - k;
@@ -777,7 +794,7 @@ fn basis_derivs_into(
             }
             let j1 = if rk >= -1 { 1 } else { -rk };
             let j2 = if r - 1 <= pk { k - 1 } else { p - r };
-            for j in j1..=j2 {
+            for j in j1..j2 + 1 {
                 let den = get2(&ndu, pk + 1, rk + j, OP)?;
                 if den.abs() <= knot_tol {
                     return Err(degenerate(OP));
@@ -802,8 +819,8 @@ fn basis_derivs_into(
 
     // Multiply through by the correct factors.
     let mut r = p;
-    for k in 1..=mder {
-        for j in 0..=p {
+    for k in 1..mder + 1 {
+        for j in 0..p + 1 {
             let v = get2(nd, k, j, OP)? * r as f64;
             set2(nd, k, j, v, OP)?;
         }
@@ -842,24 +859,34 @@ pub fn basis_derivs(
     })
 }
 
-/// Rational basis derivatives into `rd` (rows `0..=der`, already sized).
-fn rational_basis_derivs_into(
+/// Rational basis derivatives into `rd` (rows `0..=der`, already sized); `N` as in
+/// [`basis_derivs_into`].
+fn rational_basis_derivs_into<const N: usize>(
     cur: &Curve,
     u: f64,
     side: Side,
     der: usize,
-    rd: &mut [[f64; MAX_DEGREE]],
+    rd: &mut [[f64; N]],
 ) -> Result<usize> {
     const OP: &str = OP_RBDERIVS;
     let pw = cur.cpts();
     let pu = cur.degree();
     let p = sx(pu, OP)?;
     let knt = cur.knot_vector()?;
-    let mut nd = vec![[0.0_f64; MAX_DEGREE]; der.saturating_add(1)];
+    // `der + 1` rows: on the stack for the usual `der < MAX_DERIV`.
+    let mut nd_stack = [[0.0_f64; N]; MAX_DERIV];
+    let mut nd_heap: Vec<[f64; N]>;
+    let nd: &mut [[f64; N]] = if let Some(rows) = nd_stack.get_mut(..=der) {
+        rows
+    } else {
+        nd_heap = vec![[0.0_f64; N]; der.saturating_add(1)];
+        &mut nd_heap
+    };
     let mut d = [0.0_f64; MAX_DEGREE];
 
     // Get derivatives of all basis functions.
-    let nsp = sx(basis_derivs_into(&knt, pu, u, side, der, &mut nd)?, OP)?;
+    let nsp = sx(basis_derivs_into(&knt, pu, u, side, der, nd)?, OP)?;
+    let der_u = der;
     let der = sx(der, OP)?;
 
     // Get derivatives of the denominator.
@@ -867,20 +894,35 @@ fn rational_basis_derivs_into(
         set(&mut d, k, 0.0, OP)?;
         for j in nsp - p..=nsp {
             let w = get(pw, j, OP)?.w;
-            let v = get(&d, k, OP)? + w * get2(&nd, k, j - nsp + p, OP)?;
+            let v = get(&d, k, OP)? + w * get2(nd, k, j - nsp + p, OP)?;
             set(&mut d, k, v, OP)?;
         }
     }
 
-    // Compute derivatives of rational basis function.
-    let tri = pascal_triangle(ux(der, OP)?)?;
+    // Compute derivatives of rational basis function. Rows up to `KNOT_MAX_DEGREE`
+    // come from the constant table (no allocation); larger `der` builds them as before.
+    let tri = if der_u > KNOT_MAX_DEGREE {
+        Some(pascal_triangle(der_u)?)
+    } else {
+        None
+    };
+    let tri_at = |k: isize, j: isize| -> Result<f64> {
+        let (k, j) = (ux(k, OP)?, ux(j, OP)?);
+        match &tri {
+            Some(t) => t
+                .get(k)
+                .and_then(|row| row.get(j))
+                .map(|&b| b as f64)
+                .ok_or_else(|| oob(OP)),
+            None => pascal_entry(k, j).ok_or_else(|| oob(OP)),
+        }
+    };
     for i in 0..=p {
         let w = get(pw, nsp - p + i, OP)?.w;
         for k in 0..=der {
-            let mut v = w * get2(&nd, k, i, OP)?;
-            let tk = tri.get(ux(k, OP)?).ok_or_else(|| oob(OP))?;
+            let mut v = w * get2(nd, k, i, OP)?;
             for j in 1..=k {
-                let t = get(tk, j, OP)? as f64;
+                let t = tri_at(k, j)?;
                 v -= t * get(&d, j, OP)? * get2(rd, k - j, i, OP)?;
             }
             set2(rd, k, i, v / get(&d, 0, OP)?, OP)?;
@@ -919,8 +961,18 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
     if der >= MAX_DERIV {
         return Err(nlib(OP, NlibCode::MaxDerivative));
     }
+    if cur.degree() < SMALL_DEGREE {
+        crv_derivs_n::<SMALL_DEGREE>(cur, u, side, der)
+    } else {
+        crv_derivs_n::<MAX_DEGREE>(cur, u, side, der)
+    }
+}
+
+/// [`crv_derivs`] with scratch width `N` (see [`basis_derivs_into`]); `der < MAX_DERIV`.
+fn crv_derivs_n<const N: usize>(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
+    const OP: &str = OP_CDERIVS;
     let pu = cur.degree();
-    let mut bd = [[0.0_f64; MAX_DEGREE]; MAX_DERIV];
+    let mut bd = [[0.0_f64; N]; MAX_DERIV];
     let rows_bd = bd.get_mut(..=der).ok_or_else(|| oob(OP))?;
 
     // Compute basis function derivatives.
@@ -933,7 +985,14 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
     let k0 = spn
         .checked_sub(pu)
         .ok_or_else(|| nlib(OP, NlibCode::Index))?;
-    let pts = crv_get_epolygon(cur, k0, spn)?;
+    // `crv_get_epolygon` into a stack array (`pu < N`, so `pu + 1` points fit).
+    let mut pts = [Vec3::ZERO; N];
+    let mut npts = 0;
+    for (slot, q) in pts.iter_mut().zip(cur.epolygon_iter(k0, spn)?) {
+        *slot = q;
+        npts += 1;
+    }
+    let pts = pts.get(..npts).ok_or_else(|| oob(OP))?;
 
     // C^(k) = Sum_i(BasisVal[k][i] * P[i]).
     let mut cd = Vec::with_capacity(der + 1);
@@ -957,6 +1016,7 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
 /// (upstream fills `N` with `[1, 0, .., 0]` / `[0, .., 0, 1]` there but returns its
 /// error flag) and with [`SolidError::Degenerate`] when a knot difference is below
 /// `SM_EFF_ZERO_SQ`.
+#[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
 pub fn basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<Basis> {
     const OP: &str = OP_BEVAL;
     check_degree(p, OP)?;
@@ -980,7 +1040,7 @@ pub fn basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<
     let mut left = [0.0_f64; MAX_DEGREE];
     let mut right = [0.0_f64; MAX_DEGREE];
     set(&mut n, 0, 1.0, OP)?;
-    for k in 1..=pi {
+    for k in 1..pi + 1 {
         set(&mut left, k, u - get(uk, i + 1 - k, OP)?, OP)?;
         set(&mut right, k, get(uk, i + k, OP)? - u, OP)?;
         let mut saved = 0.0;

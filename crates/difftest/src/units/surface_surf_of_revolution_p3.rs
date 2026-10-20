@@ -24,9 +24,10 @@
 //! `surface.surface_p5`); the intersections without approximation tolerance (the
 //! bounding box's zone tolerance, `SmSurface::GetFace`, `surface.surface_p1`) or
 //! reaching `ConvertUVFromNURBSToSTEP` without exact conversion (`SmSTEPSurface`,
-//! `surface.surface_p1`); `UpdateAnalyticalDomain` reaching the latter; every
-//! `IntersectWithCone` case (the Rust side cannot build the `SmCone` operand:
-//! `surface.cone_p1`).
+//! `surface.surface_p1`); `UpdateAnalyticalDomain` reaching the latter.
+//!
+//! `IntersectWithCone` builds its operand with `SmCone::CreateCanonical` on both sides
+//! ([`Cone::create_canonical`]) and is compared in full.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,6 +39,7 @@ use solidcore::geom::solution_array::{ObjectKind, SolutionObject};
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::surface::cone::Cone;
 use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -418,7 +420,7 @@ fn rust_op(
         } => {
             let built;
             let other_s: &SurfOfRevolution = match other {
-                OtherIn::Revolution { surf: None } | OtherIn::Sphere { .. } => s,
+                OtherIn::Revolution { surf: None } | OtherIn::Sphere { .. } | OtherIn::Cone { .. } => s,
                 OtherIn::Revolution { surf: Some(os) } => match rust_surf(k, os)? {
                     Err(e) if e.is_unported() => return Ok(Err(e)),
                     Err(e) => {
@@ -430,12 +432,6 @@ fn rust_op(
                         &built
                     }
                 },
-                OtherIn::Cone { .. } => {
-                    return Ok(Err(solidcore::SolidError::unported(
-                        "SmCone::CreateCanonical",
-                        "surface.cone_p1",
-                    )))
-                }
             };
             let sphere = match other {
                 OtherIn::Sphere { frame, r } => {
@@ -450,9 +446,33 @@ fn rust_op(
                 }
                 _ => None,
             };
+            // `SmCone::CreateCanonical(ctx, a2p, r0, r1, h, c)` (bSwapUV, bInsideOut FALSE)
+            let cone = match other {
+                OtherIn::Cone { frame, r0, r1, h } => {
+                    let f = Axis2Placement::new(v3(frame[0]), v3(frame[1]), v3(frame[2]));
+                    match Cone::create_canonical(k, &f, *r0, *r1, *h, false, false) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            o.push(status(&e));
+                            return Ok(Ok(()));
+                        }
+                    }
+                }
+                _ => None,
+            };
             o.push(0.0);
-            match &sphere {
-                Some(sp) => s.intersect_with_sphere(
+            match (&sphere, &cone) {
+                (_, Some(c)) => s.intersect_with_cone(
+                    k,
+                    &dom_of(s, *dom),
+                    c,
+                    &other_dom.map_or_else(
+                        || c.rev().base().natural_uv_domain(),
+                        |[a, b, cc, e]| Extent2d::from_bounds(a, b, cc, e),
+                    ),
+                    *tol,
+                ),
+                (Some(sp), None) => s.intersect_with_sphere(
                     k,
                     &dom_of(s, *dom),
                     sp,
@@ -462,7 +482,7 @@ fn rust_op(
                     ),
                     *tol,
                 ),
-                None => s.intersect_with_surf_of_revolution(
+                (None, None) => s.intersect_with_surf_of_revolution(
                     k,
                     &dom_of(s, *dom),
                     other_s,
@@ -847,7 +867,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
         }
         9..=13 => {
             let b = built.as_ref()?;
-            let other = match rng.below(12) {
+            let other = match rng.below(15) {
                 0..=4 => OtherIn::Revolution {
                     surf: Some(Box::new(other_surf(rng, b, true))),
                 },
@@ -858,8 +878,23 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
                     surf: Some(Box::new(other_surf(rng, b, false))),
                 },
                 9 => OtherIn::Revolution { surf: None },
-                10 => {
-                    let f = frame(rng);
+                10..=13 => {
+                    // mostly coaxial with the surface (a random axis only reaches the
+                    // general-intersection early return)
+                    let f = if rng.chance(0.7) {
+                        let pos = b.position();
+                        let (o, z) = (pos.origin(), pos.z_axis());
+                        let (x, y) = (pos.x_axis(), pos.y_axis());
+                        let t = rng.uniform(-1.0, 1.0);
+                        (
+                            [o.x + t * z.x, o.y + t * z.y, o.z + t * z.z],
+                            [x.x, x.y, x.z],
+                            [y.x, y.y, y.z],
+                        )
+                    } else {
+                        let f = frame(rng);
+                        (f.0, f.1, f.2)
+                    };
                     OtherIn::Cone {
                         frame: [f.0, f.1, f.2],
                         r0: rng.uniform(0.5, 3.0),

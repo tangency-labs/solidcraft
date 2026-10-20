@@ -418,8 +418,8 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         // SmCurveClassification::MergeInterval then crashes (plan/upstream-issues.md).
         // Skip (FP1_NOT_RUN) every call that can reach that branch: a SplitAtSeam asked
         // to merge in both directions on a face periodic in either, and every MoveSeam
-        // with split that gets past its early return. The Rust side defers these cases
-        // (MergeIntervals is unported).
+        // with split that gets past its early return. The runner defers these cases under
+        // the crash-guard label `cpp-crash-guard:UB-137`: they never become comparable.
         SmSurface* srf = f->GetSurface();
         SmExtent2d nat = srf->GetNaturalUVDomain();
         // (the face properties' closed flags decide SplitAtSeam's own periodicity test,

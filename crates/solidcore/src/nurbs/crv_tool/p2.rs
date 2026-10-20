@@ -240,9 +240,17 @@ impl Curve {
         let mut error: Option<SolidError> = None;
 
         // The removal error bound of `U[r]` (multiplicity `s`) on the current curve.
+        // (`Curve::with_indices` on copies of `qw`, `uq`, then `remove_knot_max_err`; the
+        // same size check and the same `Pw[0..=n]`, `U[0..=m]`, without the copies)
         let max_err = |qw: &[CPoint], uq: &[f64], n: isize, m: isize, r: isize, s: isize| {
-            let c = Curve::with_indices(qw.to_vec(), ux(n, op)?, pu, uq.to_vec(), ux(m, op)?)?;
-            c.remove_knot_max_err(ux(r, op)?, ux(s, op)?)
+            let (n, m) = (ux(n, op)?, ux(m, op)?);
+            let (Some(pw), Some(uk)) = (qw.get(..=n), uq.get(..=m)) else {
+                return Err(SolidError::InvalidInput {
+                    operation: "nurbs::crv_basic::Curve::with_indices",
+                    reason: "storage smaller than (n, m)",
+                });
+            };
+            Curve::remove_knot_max_err_of(pw, uk, pu, ux(r, op)?, ux(s, op)?)
         };
 
         // Compute knot removal errors for each distinct knot.

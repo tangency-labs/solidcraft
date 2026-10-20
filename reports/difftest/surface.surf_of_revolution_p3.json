@@ -338,16 +338,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "surfaces_line_x_cone",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surf_of_revolution_p3/cases.json#42 (upstream tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis))",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -206766,16 +206762,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0040",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322036",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -206823,7 +206815,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322042",
-      "values_compared": 107
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -206882,16 +206874,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0054",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322050",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -206939,7 +206927,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322056",
-      "values_compared": 49
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -206995,7 +206983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322063",
-      "values_compared": 11
+      "values_compared": 127
     },
     {
       "max_rel_err": 0.0,
@@ -207027,7 +207015,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322067",
-      "values_compared": 49
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -207115,7 +207103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322078",
-      "values_compared": 49
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207347,7 +207335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322107",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207454,16 +207442,12 @@
       "values_compared": 417
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0125",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322121",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207543,7 +207527,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322131",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -207615,7 +207599,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322140",
-      "values_compared": 123
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -207623,7 +207607,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322141",
-      "values_compared": 11
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -207799,7 +207783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322163",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208079,7 +208063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322198",
-      "values_compared": 67
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208087,19 +208071,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322199",
-      "values_compared": 67
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0204",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322200",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -208107,7 +208087,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322201",
-      "values_compared": 59
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208139,7 +208119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322205",
-      "values_compared": 11
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -208179,7 +208159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322210",
-      "values_compared": 67
+      "values_compared": 243
     },
     {
       "max_rel_err": 0.0,
@@ -208195,7 +208175,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322212",
-      "values_compared": 11
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -208251,7 +208231,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322219",
-      "values_compared": 67
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208259,7 +208239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322220",
-      "values_compared": 11
+      "values_compared": 185
     },
     {
       "max_rel_err": 0.0,
@@ -208275,7 +208255,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322222",
-      "values_compared": 151
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -208315,7 +208295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322227",
-      "values_compared": 183
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208358,16 +208338,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0237",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322233",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208399,7 +208375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322237",
-      "values_compared": 69
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208562,16 +208538,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0262",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322258",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208659,7 +208631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322269",
-      "values_compared": 107
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208803,7 +208775,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322287",
-      "values_compared": 107
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208814,16 +208786,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0293",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322289",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -208983,7 +208951,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322309",
-      "values_compared": 69
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209015,7 +208983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322313",
-      "values_compared": 77
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209127,7 +209095,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322327",
-      "values_compared": 11
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -209223,7 +209191,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322339",
-      "values_compared": 49
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -209327,7 +209295,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322352",
-      "values_compared": 49
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209359,7 +209327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322356",
-      "values_compared": 11
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -209367,7 +209335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322357",
-      "values_compared": 11
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -209375,7 +209343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322358",
-      "values_compared": 111
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209431,7 +209399,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322365",
-      "values_compared": 127
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209455,7 +209423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322368",
-      "values_compared": 69
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209471,7 +209439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322370",
-      "values_compared": 69
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209495,7 +209463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322373",
-      "values_compared": 59
+      "values_compared": 127
     },
     {
       "max_rel_err": 0.0,
@@ -209719,7 +209687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322401",
-      "values_compared": 87
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209903,19 +209871,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322424",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0429",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322425",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -209939,7 +209903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322428",
-      "values_compared": 11
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -210011,7 +209975,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322437",
-      "values_compared": 59
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210086,16 +210050,12 @@
       "values_compared": 334
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0451",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322447",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -210143,7 +210103,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322453",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210159,7 +210119,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322455",
-      "values_compared": 11
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -210175,7 +210135,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322457",
-      "values_compared": 171
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210279,7 +210239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322470",
-      "values_compared": 11
+      "values_compared": 127
     },
     {
       "max_rel_err": 0.0,
@@ -210314,16 +210274,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0479",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322475",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210387,7 +210343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322483",
-      "values_compared": 49
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210467,7 +210423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322493",
-      "values_compared": 67
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -210563,7 +210519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322505",
-      "values_compared": 171
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210611,7 +210567,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322511",
-      "values_compared": 67
+      "values_compared": 127
     },
     {
       "max_rel_err": 0.0,
@@ -210702,16 +210658,12 @@
       "values_compared": 374
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0527",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322523",
-      "values_compared": 0
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -210759,7 +210711,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322529",
-      "values_compared": 11
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -210818,16 +210770,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0541",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322537",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210843,7 +210791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322539",
-      "values_compared": 49
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210875,7 +210823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322543",
-      "values_compared": 69
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -210939,7 +210887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322551",
-      "values_compared": 11
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -211003,7 +210951,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322559",
-      "values_compared": 11
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -211075,7 +211023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322568",
-      "values_compared": 49
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211083,7 +211031,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322569",
-      "values_compared": 11
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -211123,7 +211071,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322574",
-      "values_compared": 11
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -211219,7 +211167,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322586",
-      "values_compared": 95
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211318,16 +211266,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0603",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322599",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211423,7 +211367,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322611",
-      "values_compared": 77
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211455,7 +211399,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322615",
-      "values_compared": 127
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -211783,7 +211727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322656",
-      "values_compared": 39
+      "values_compared": 185
     },
     {
       "max_rel_err": 0.0,
@@ -211823,7 +211767,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322661",
-      "values_compared": 59
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -211871,7 +211815,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322667",
-      "values_compared": 87
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212023,7 +211967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322686",
-      "values_compared": 107
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -212087,7 +212031,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322694",
-      "values_compared": 125
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212183,7 +212127,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322706",
-      "values_compared": 155
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -212218,16 +212162,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0715",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322711",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212371,7 +212311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322729",
-      "values_compared": 39
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -212387,7 +212327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322731",
-      "values_compared": 87
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212443,7 +212383,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322738",
-      "values_compared": 69
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212499,7 +212439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322745",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212723,7 +212663,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322773",
-      "values_compared": 77
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -212787,7 +212727,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322781",
-      "values_compared": 127
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -212803,7 +212743,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322783",
-      "values_compared": 11
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -212819,7 +212759,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322785",
-      "values_compared": 11
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -212883,7 +212823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322793",
-      "values_compared": 39
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -212894,16 +212834,12 @@
       "values_compared": 283
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0799",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322795",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213007,7 +212943,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322808",
-      "values_compared": 87
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -213127,7 +213063,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322823",
-      "values_compared": 123
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -213154,16 +213090,12 @@
       "values_compared": 177
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0831",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322827",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213275,7 +213207,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322841",
-      "values_compared": 67
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -213283,7 +213215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322842",
-      "values_compared": 107
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213299,7 +213231,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322844",
-      "values_compared": 39
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213363,19 +213295,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322852",
-      "values_compared": 131
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmCone::CreateCanonical",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0857",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440996037211322853",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213423,7 +213351,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322859",
-      "values_compared": 155
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213551,7 +213479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322875",
-      "values_compared": 11
+      "values_compared": 131
     },
     {
       "max_rel_err": 0.0,
@@ -213607,7 +213535,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=4440996037211322882",
-      "values_compared": 97
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -213715,17 +213643,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 18,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 26687,
+  "cases_passed": 26705,
   "cases_total": 26705,
-  "deferred_by_unit": {
-    "surface.cone_p1": 18
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.surf_of_revolution_p3"
 }

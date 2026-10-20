@@ -718,6 +718,16 @@ impl Curve {
     ///
     /// [`NlibCode::Index`] (`NL_IND_ERR`) when `k > l` or `l > n`.
     pub fn epolygon(&self, k: usize, l: usize) -> Result<Vec<Vec3>> {
+        Ok(self.epolygon_iter(k, l)?.collect())
+    }
+
+    /// [`Curve::epolygon`] without the allocation: the Euclidean images of
+    /// `Pw[k..=l]`, in order.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::epolygon`].
+    pub fn epolygon_iter(&self, k: usize, l: usize) -> Result<impl Iterator<Item = Vec3> + '_> {
         if k > l || l > self.n {
             return Err(nlib("nurbs::crv_basic::Curve::epolygon", NlibCode::Index));
         }
@@ -725,7 +735,7 @@ impl Curve {
             .cpts()
             .get(k..=l)
             .ok_or_else(|| nlib("nurbs::crv_basic::Curve::epolygon", NlibCode::Index))?;
-        Ok(part.iter().map(|pw| pw.to_euclid()).collect())
+        Ok(part.iter().map(|pw| pw.to_euclid()))
     }
 
     // ---- conversions ----------------------------------------------------------------

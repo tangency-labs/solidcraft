@@ -48,6 +48,7 @@
 //! | [`float_op_is_bad`], [`FloatOp`]      | `N_FloatOpIsBad`                 |
 //! | `core::mem::swap`                     | `N_SwapIntegers`, `N_SwapReals`, `N_SwapCPts` |
 //! | [`pascal_triangle`]                   | `N_PascalTriRow`                 |
+//! | `PASCAL_TRI`, `pascal_entry` (crate)  | `NL_PascalTri` (`NL_Globals.cpp`) |
 //! | [`RealMatrix`], [`MatrixType`]        | `NL_RMATRIX`, `NL_MATRIXTYPE`    |
 //! | [`RealMatrix::null`]                  | `N_InitRealMatrix`               |
 //! | [`RealMatrix::from_rows`]             | `N_CreateRealMatrix`             |
@@ -854,6 +855,44 @@ pub fn float_op_is_bad(x: f64, y: f64, op: FloatOp) -> bool {
             true
         }
     }
+}
+
+/// Rows `0..=MAX_DEGREE` of Pascal's triangle as a constant table (upstream's static
+/// `NL_INTEGER NL_PascalTri[18][18]`, `NL_Globals.cpp`, written out the same way);
+/// entries right of the diagonal are zero. Equal to [`pascal_triangle`]`(MAX_DEGREE)`
+/// (checked by a unit test), without the per-call allocation.
+#[rustfmt::skip]
+pub(crate) const PASCAL_TRI: [[i64; MAX_DEGREE + 1]; MAX_DEGREE + 1] = [
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 3, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 4, 6, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 5, 10, 10, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 6, 15, 20, 15, 6, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 7, 21, 35, 35, 21, 7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 8, 28, 56, 70, 56, 28, 8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 9, 36, 84, 126, 126, 84, 36, 9, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 10, 45, 120, 210, 252, 210, 120, 45, 10, 1, 0, 0, 0, 0, 0, 0, 0],
+    [1, 11, 55, 165, 330, 462, 462, 330, 165, 55, 11, 1, 0, 0, 0, 0, 0, 0],
+    [1, 12, 66, 220, 495, 792, 924, 792, 495, 220, 66, 12, 1, 0, 0, 0, 0, 0],
+    [1, 13, 78, 286, 715, 1287, 1716, 1716, 1287, 715, 286, 78, 13, 1, 0, 0, 0, 0],
+    [1, 14, 91, 364, 1001, 2002, 3003, 3432, 3003, 2002, 1001, 364, 91, 14, 1, 0, 0, 0],
+    [1, 15, 105, 455, 1365, 3003, 5005, 6435, 6435, 5005, 3003, 1365, 455, 105, 15, 1, 0, 0],
+    [1, 16, 120, 560, 1820, 4368, 8008, 11440, 12870, 11440, 8008, 4368, 1820, 560, 120, 16, 1, 0],
+    [1, 17, 136, 680, 2380, 6188, 12376, 19448, 24310, 24310, 19448, 12376, 6188, 2380, 680, 136, 17, 1],
+];
+
+/// `NL_PascalTri[k][j]` as `f64`; `None` outside the triangle (`j > k`) or the table.
+#[inline]
+pub(crate) fn pascal_entry(k: usize, j: usize) -> Option<f64> {
+    if j > k {
+        return None;
+    }
+    PASCAL_TRI
+        .get(k)
+        .and_then(|row| row.get(j))
+        .map(|&b| b as f64)
 }
 
 /// Rows `0..=row` of Pascal's triangle; row `k` has `k + 1` entries
@@ -2281,6 +2320,19 @@ mod tests {
         assert!(float_op_is_bad(f64::NAN, 2.0, Multiplication));
         assert!(float_op_is_bad(1.0, f64::NAN, Division));
         assert_eq!(Division.flag(), 4);
+    }
+
+    #[test]
+    fn pascal_const_table_matches_rows() {
+        let t = pascal_triangle(MAX_DEGREE).unwrap();
+        for (k, row) in t.iter().enumerate() {
+            for (j, &b) in row.iter().enumerate() {
+                assert_eq!(PASCAL_TRI[k][j], b);
+                assert_eq!(pascal_entry(k, j), Some(b as f64));
+            }
+            assert_eq!(pascal_entry(k, k + 1), None);
+        }
+        assert_eq!(pascal_entry(MAX_DEGREE + 1, 0), None);
     }
 
     #[test]

@@ -2,8 +2,8 @@
 // difftest shim for unit `curve.crv_in_volume`: the SmCrvInVolume members owned by the unit
 // (source/SMLib/src/SmCrvInVolume.cpp, source/SMLib/inc/SmCrvInVolume.h), called through
 // SmCrvInVolume / SmCurve on objects built from an SmBSplineCurve or SmHermiteCurve base
-// curve and an identity SmTransform volume (the simplest SmVolume; the Rust side has no
-// volume yet, so every op that reaches the volume is deferred there).
+// curve and an identity SmTransform volume (the simplest SmVolume; the Rust side builds
+// the same volume and runs every op through it).
 //
 // One entry point, sc_curve_crv_in_volume_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/curve_crv_in_volume.rs, which validates every
