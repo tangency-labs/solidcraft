@@ -327,7 +327,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     crate::dialogs_assembly::update_alignment_order(app);
-    app.preview.retain_joint_pose = app.dialog.as_ref().is_some_and(crate::dialogs_assembly::alignment_dialog);
+    app.preview.retain_joint_pose = app.dialog.as_ref().is_some_and(|d| d.preview_enabled && crate::dialogs_assembly::alignment_dialog(d));
     let mut cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),

@@ -2044,7 +2044,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let alignment = crate::dialogs_assembly::stored_alignment(&d.kind, i);
-        let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).or(alignment.as_ref()).filter(|_| inp.items.is_empty());
+        let stored_reference =
+            feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).or(alignment.as_ref()).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active;
@@ -2052,33 +2053,35 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
                 let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
                 let text = if filled {
-                    RichText::new(if let Some(face) = alignment.as_ref().and_then(|v| v.get("face")).and_then(Value::as_str).filter(|_| inp.items.is_empty()) {
-                        face.to_string()
-                    } else if let Some(reference) = alignment.as_ref().and_then(|v| v.get("reference")).filter(|_| inp.items.is_empty()) {
-                        reference
-                            .get("name")
-                            .or_else(|| reference.get("axis"))
-                            .or_else(|| reference.get("plane"))
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .unwrap_or_else(|| {
-                                let name = reference
-                                    .get("feature")
-                                    .or_else(|| reference.get("sketch"))
-                                    .and_then(Value::as_u64)
-                                    .and_then(|id| s.doc.feature(id))
-                                    .map(|feature| feature.name.clone())
-                                    .unwrap_or_else(|| "Missing reference".into());
-                                reference.get("curve").and_then(Value::as_str).map_or_else(|| name.clone(), |curve| format!("{name} / {curve}"))
-                            })
-                    } else if custom_axis || stored_reference.is_some() {
-                        crate::i18n::tr("dialog.custom_axis").into()
-                    } else if !inp.multi {
-                        inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
-                    } else {
-                        let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
-                        crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
-                    })
+                    RichText::new(
+                        if let Some(face) = alignment.as_ref().and_then(|v| v.get("face")).and_then(Value::as_str).filter(|_| inp.items.is_empty()) {
+                            face.to_string()
+                        } else if let Some(reference) = alignment.as_ref().and_then(|v| v.get("reference")).filter(|_| inp.items.is_empty()) {
+                            reference
+                                .get("name")
+                                .or_else(|| reference.get("axis"))
+                                .or_else(|| reference.get("plane"))
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                                .unwrap_or_else(|| {
+                                    let name = reference
+                                        .get("feature")
+                                        .or_else(|| reference.get("sketch"))
+                                        .and_then(Value::as_u64)
+                                        .and_then(|id| s.doc.feature(id))
+                                        .map(|feature| feature.name.clone())
+                                        .unwrap_or_else(|| "Missing reference".into());
+                                    reference.get("curve").and_then(Value::as_str).map_or_else(|| name.clone(), |curve| format!("{name} / {curve}"))
+                                })
+                        } else if custom_axis || stored_reference.is_some() {
+                            crate::i18n::tr("dialog.custom_axis").into()
+                        } else if !inp.multi {
+                            inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
+                        } else {
+                            let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
+                            crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
+                        },
+                    )
                     .color(t.on_accent)
                 } else {
                     RichText::new(crate::i18n::tr("dialog.select")).color(t.text)
@@ -2086,7 +2089,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
                 let enabled = crate::dialogs_assembly::alignment_input_available(d, i);
-                let chip = ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
+                let chip =
+                    ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
                         let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(inp.label));

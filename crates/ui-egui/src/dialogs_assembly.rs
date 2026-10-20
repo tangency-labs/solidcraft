@@ -18,7 +18,9 @@ use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
-use crate::selection::{AXES, BODIES, EDGES, FACES, PLANES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
+use crate::selection::{
+    AXES, BODIES, EDGES, FACES, PLANES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid,
+};
 use crate::theme::Tokens;
 
 use crate::viewport::Proj;
@@ -232,8 +234,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             (
                 Asm::Joint(Box::new(form)),
                 vec![
-                    SelInput::new(if moving_first { "Moving component" } else { "Fixed component" }, SNAPS, false),
-                    SelInput::new(if moving_first { "Fixed component" } else { "Moving component" }, SNAPS, false),
+                    SelInput::new("Component 1", SNAPS, false),
+                    SelInput::new("Component 2", SNAPS, false),
                     SelInput::new("Alignment 1 (optional)", ALIGNMENTS, false),
                     SelInput::new("Alignment 2 (optional)", ALIGNMENTS, false),
                 ],
@@ -644,11 +646,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let mut reverse = f.reverse_alignment[0] ^ f.reverse_alignment[1];
                 form_row(ui, "Invert alignment", |ui| {
                     let response = ui.add_enabled(selected.is_some(), egui::Checkbox::new(&mut reverse, ""));
-                    if response.changed() && let Some(side) = selected { f.reverse_alignment[side] = !f.reverse_alignment[side]; }
+                    if response.changed()
+                        && let Some(side) = selected
+                    {
+                        f.reverse_alignment[side] = !f.reverse_alignment[side];
+                    }
                     crate::scenario::publish_handle("dialog:invert-alignment", response.rect.center());
                 });
                 if let Some(problem) = f.alignment_origin_problem {
-                    form_row(ui, "", |ui| { ui.label(RichText::new(problem).color(t.warning)); });
+                    form_row(ui, "", |ui| {
+                        ui.label(RichText::new(problem).color(t.warning));
+                    });
                 }
                 enter |= expr_row(ui, "Angle", &mut f.angle);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
@@ -940,10 +948,6 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
 }
 
 // ---- commands ----
-
-fn sel_items(inputs: &[SelInput], i: usize) -> &[Sel] {
-    inputs.get(i).map(|x| x.items.as_slice()).unwrap_or(&[])
-}
 
 pub(crate) fn alignment_side(k: &Kind, input: usize) -> Option<usize> {
     let Kind::Assembly(Asm::Joint(f)) = k else { return None };
@@ -1793,7 +1797,8 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
             let fresh = aligning || !matches!(hover, Some((s, _)) if *s == sel);
             if fresh {
                 let mut source = sel.clone();
-                if app.preview.draw_active()
+                if app.preview.active
+                    && !app.preview.rolled_back
                     && let Some(interaction) = &app.preview.interaction
                 {
                     match &mut source {
@@ -1822,7 +1827,8 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
 }
 
 fn placed_snap(app: &SolveApp, sel: &Sel, mut snap: SnapPt) -> SnapPt {
-    if app.preview.draw_active()
+    if app.preview.active
+        && !app.preview.rolled_back
         && let Some(interaction) = &app.preview.interaction
         && let Some(body) = body_of(sel)
         && let Some(frame) = interaction.to_document.get(body).and_then(solidcraft_engine::doc::mat_inverse)

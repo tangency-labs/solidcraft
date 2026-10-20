@@ -454,7 +454,9 @@ Once its counterpart is confirmed, hovering a valid reference previews that cand
 temporarily; leaving it restores the authored pose, and only a click fills the selection.
 Cancel discards the operation; accepted edits can be undone.
 
-Preferences > Design offers **Select moving component first**, off by default. Off preserves
+Preferences > Design offers **Invert joint selection order**, off by default. Its visible help
+explains moving-then-fixed selection when enabled. The primary fields retain their original
+**Component 1** and **Component 2** labels in either mode. Off preserves
 the fixed-then-moving primary pick order; on reverses the two primary input rows while the
 backend keeps the same fixed/moving origins. The preference is captured when a new Joint
 command opens: changing it never reorders a dialog in progress or an existing joint.

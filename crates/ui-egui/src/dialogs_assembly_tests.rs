@@ -67,7 +67,8 @@ fn secondary_alignment_primary_pick_preference_normalizes_both_sequences_and_sna
         app.preferences = serde_json::from_value(settings).unwrap();
         app.start("joint.create");
         let mut d = app.dialog.take().unwrap();
-        assert_eq!(d.inputs[0].label, if moving_first { "Moving component" } else { "Fixed component" });
+        assert_eq!(d.inputs[0].label, "Component 1");
+        assert_eq!(d.inputs[1].label, "Component 2");
         let (_, a) = rim(&app.session, "Body1", Vec3::new(20.0, 20.0, 10.0));
         let (_, b) = rim(&app.session, "Body2", Vec3::new(170.0, 20.0, 0.0));
         let picks = if moving_first { [b, a] } else { [a, b] };
@@ -461,6 +462,29 @@ fn secondary_alignment_feedback_invalid_first_pick_keeps_the_last_pose() {
     assert!(h.app.preview.error.is_none(), "a rejected candidate cannot create an authored error");
     assert!(h.app.dialog.as_ref().unwrap().inputs[2].items.is_empty());
     assert!(h.app.session.doc.assembly.joints.is_empty());
+}
+
+#[test]
+fn secondary_alignment_preview_toggle_clears_and_restores_pickable_pose() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    assert!(app.preview.active && app.preview.interaction.is_some());
+    let doc = app.session.doc.clone();
+    app.dialog.as_mut().unwrap().preview_enabled = false;
+    crate::preview::update(&mut app, &ctx);
+    assert!(!app.preview.active, "the upstream preview toggle must hide the retained joint pose");
+    assert!(app.preview.interaction.is_none(), "disabled preview must stop picking solved geometry");
+    app.dialog.as_mut().unwrap().preview_enabled = true;
+    settle_alignment_update(&mut app, &ctx);
+    assert!(app.preview.active && app.preview.interaction.is_some());
+    assert_eq!(app.session.doc, doc);
 }
 
 fn settle_alignment_update(app: &mut SolveApp, ctx: &egui::Context) {

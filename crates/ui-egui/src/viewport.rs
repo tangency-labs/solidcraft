@@ -1495,7 +1495,8 @@ impl<T: PartialOrd + Copy> Near<T> {
 }
 
 fn interaction_state(app: &SolveApp) -> std::sync::Arc<solidcraft_engine::doc::ModelState> {
-    if app.preview.draw_active()
+    if app.preview.active
+        && !app.preview.rolled_back
         && let Some(interaction) = &app.preview.interaction
     {
         return interaction.state.clone();
@@ -1504,7 +1505,7 @@ fn interaction_state(app: &SolveApp) -> std::sync::Arc<solidcraft_engine::doc::M
 }
 
 fn interaction_session(app: &SolveApp) -> Option<solidcraft_engine::Session> {
-    if !app.preview.draw_active() {
+    if !(app.preview.active && !app.preview.rolled_back) {
         return None;
     }
     let interaction = app.preview.interaction.as_ref()?;
@@ -1822,7 +1823,7 @@ fn feature_geometry(app: &SolveApp, id: u64) -> Vec<Sel> {
 }
 
 fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
-    if app.preview.draw_active() && app.preview.interaction.is_some() && matches!(item, Sel::Face { .. } | Sel::Edge { .. }) {
+    if app.preview.active && !app.preview.rolled_back && app.preview.interaction.is_some() && matches!(item, Sel::Face { .. } | Sel::Edge { .. }) {
         return vec![item.clone()];
     }
     match item {
@@ -2078,7 +2079,8 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     if crate::dialogs_assembly::alignment_dialog(&d)
         && matches!(&d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Joint(f)) if f.editing.is_none())
         && d.active < 2
-        && app.preview.draw_active()
+        && app.preview.active
+        && !app.preview.rolled_back
         && let Some(interaction) = &app.preview.interaction
     {
         match &mut sel {
@@ -2426,7 +2428,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
     // Faces lit over the model use the triangles the model shows them with.
     let shown = |b: &solidcraft_engine::doc::ModelBody| {
-        if app.preview.draw_active() && app.preview.interaction.is_some() { b.mesh() } else { shown_mesh(app, b, &active_bodies) }
+        if app.preview.active && !app.preview.rolled_back && app.preview.interaction.is_some() {
+            b.mesh()
+        } else {
+            shown_mesh(app, b, &active_bodies)
+        }
     };
     let mut sel = Vec::new();
     for item in app.highlighted() {
@@ -2548,7 +2554,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 if let Some(b) = st.body(body)
                     && app.session.body_visible(body)
                     && let mesh = shown(b)
-                    && let Some(e) = if app.preview.draw_active() && app.preview.interaction.is_some() {
+                    && let Some(e) = if app.preview.active && !app.preview.rolled_back && app.preview.interaction.is_some() {
                         mesh.edges.get(*index)
                     } else {
                         edge_of(&mesh, *index, *point)
