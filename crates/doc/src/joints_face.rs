@@ -196,7 +196,7 @@ fn end_named(b: &ModelBody, face: usize, own: &CylinderFace, name: &str) -> Opti
     }
 }
 
-fn alignment_direction(doc: &Document, st: &ModelState, reference: &super::AlignmentRef, component: u64) -> Result<Vec3> {
+fn alignment_direction(doc: &Document, st: &ModelState, reference: &super::AlignmentRef, component: u64, origin: Vec3) -> Result<Vec3> {
     use super::AlignmentRef;
     let bad = |message: &str| DocError::Invalid(message.into());
     let owns = |feature| -> Result<()> {
@@ -207,6 +207,20 @@ fn alignment_direction(doc: &Document, st: &ModelState, reference: &super::Align
         Ok(())
     };
     match reference {
+        AlignmentRef::CircleCenter(rim) => {
+            let (name, end) = (&rim.name, &rim.end);
+            // Both identities are strict. A missing rim must never fall back to the nearest
+            // end of the cylinder or to a captured centre/vector.
+            let (owner, pick) = named_face_spot(doc, st, None, name).map_err(DocError::Invalid)?;
+            let (end_owner, _) = named_face_spot(doc, st, None, end).map_err(DocError::Invalid)?;
+            if owner != component || end_owner != component {
+                return Err(bad("alignment center is not on the origin's component"));
+            }
+            let nf = named_face(doc, st, pick, name)?;
+            let cylinder = nf.own_cylinder().ok_or_else(|| bad("alignment center must remain a cylindrical rim"))?;
+            let at = end_named(nf.body, nf.face, &cylinder, end).ok_or_else(|| bad("alignment circle rim is missing or ambiguous"))?;
+            Ok(Round::at(placed(&nf.offset, cylinder), at).centre - origin)
+        }
         AlignmentRef::Edge { name } => {
             let mut found = None;
             for body in component_bodies(doc, st, component) {
@@ -275,11 +289,15 @@ pub(super) fn x_axis(doc: &Document, st: &ModelState, x: Option<&XRef>, o: Vec3,
         None => None,
         Some(XRef::Dir(d)) => Some(*d),
         Some(XRef::Reference { reference, reverse }) => {
-            let direction = alignment_direction(doc, st, reference, super::component_of(doc, occurrence)?)?;
+            let direction = alignment_direction(doc, st, reference, super::component_of(doc, occurrence)?, o)?;
             let z = z.normalized().ok_or_else(|| DocError::Invalid("alignment origin has no axis".into()))?;
-            let x = (direction - z * direction.dot(z))
-                .normalized()
-                .ok_or_else(|| DocError::Invalid("alignment direction is parallel to the joint axis".into()))?;
+            let x = (direction - z * direction.dot(z)).normalized().ok_or_else(|| {
+                DocError::Invalid(if matches!(reference, super::AlignmentRef::CircleCenter(_)) {
+                    "alignment center coincides with the primary axis; select a different hole".into()
+                } else {
+                    "alignment direction is parallel to the joint axis".into()
+                })
+            })?;
             Some(if *reverse { -x } else { x })
         }
         Some(XRef::Planar { planar_face, reverse }) => {

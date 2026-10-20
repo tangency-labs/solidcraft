@@ -84,6 +84,9 @@ type Job = Result<Built, String>;
 /// Picking and feedback use the same placed geometry as the joint preview. The inverse
 /// placement maps a primary re-pick back to the unchanged document's coordinates.
 pub struct JointInteraction {
+    pub source_revision: u64,
+    /// The solver's actual fixed roots, including its implicit root for a floating assembly.
+    pub fixed_occurrences: Vec<u64>,
     pub document: std::sync::Arc<solidcraft_engine::doc::Document>,
     pub state: std::sync::Arc<ModelState>,
     pub to_document: std::collections::HashMap<String, solidcraft_engine::doc::Mat>,
@@ -323,6 +326,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::dialogs_assembly::update_alignment_order(app);
     app.preview.retain_joint_pose = app.dialog.as_ref().is_some_and(crate::dialogs_assembly::alignment_dialog);
     let mut cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
@@ -357,8 +361,9 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
+    app.preview.poll(key, stream_key);
+    crate::dialogs_assembly::update_alignment_order(app);
     let pv = &mut app.preview;
-    pv.poll(key, stream_key);
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
@@ -631,6 +636,16 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 /// The preview scene: changed and new bodies (new surface tinted) and, as a ghost, the old
 /// version of changed or removed bodies.
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
+    build_scene(before, after, c, true)
+}
+
+/// Assembly motion never removes material, even when placed/retessellated meshes have
+/// slightly different measured volumes. Only the original placement is a cut-colour ghost.
+pub(crate) fn build_motion(before: &ModelState, after: &ModelState, c: Colors) -> Built {
+    build_scene(before, after, c, false)
+}
+
+fn build_scene(before: &ModelState, after: &ModelState, c: Colors, material_changes: bool) -> Built {
     let mut sc = GpuScene::default();
     let mut replaced = Vec::new();
     for construct in &after.construct {
@@ -664,7 +679,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         };
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side.
-        let cut = old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let cut = material_changes && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = added.get(*f as usize).copied().unwrap_or(true);
             let col = match (new, old.is_some()) {
@@ -1101,6 +1116,25 @@ mod tests {
         // A feature that only adds material shows no cut.
         let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
         assert_eq!(count(&build(&p.before, &p.after, colors()).scene.xray, 28, colors().removed), 0);
+    }
+
+    #[test]
+    fn assembly_motion_keeps_the_real_part_solid_and_only_the_original_pose_red() {
+        let mut a = Session::default();
+        let mut b = Session::default();
+        a.execute("solid.box", &json!({"length":100,"width":80,"height":10})).unwrap();
+        // Stand in for the small volume drift of a moved display mesh. The caller knows
+        // these are two placements, not a material-removing feature.
+        b.execute("solid.box", &json!({"length":100,"width":80,"height":9.99999999,"corner":[150,0,0]})).unwrap();
+        let (before, after) = (a.model.state(), b.model.state());
+        let c = colors();
+        let generic = build(&before, &after, c);
+        assert!(count(&generic.scene.xray, 28, c.removed) > 0, "reproduce the cut heuristic's false positive");
+        let motion = build_motion(&before, &after, Colors { added: c.body, new_body: c.body, ..c });
+        assert_eq!(count(&motion.scene.xray, 28, c.removed), 0);
+        assert!(count(&motion.scene.tris, crate::gpu::TRI_SIZE, c.body) > 0);
+        assert!(count(&motion.scene.ghost, 28, c.removed) > 0);
+        assert_eq!(motion.replaced, ["Body1"]);
     }
 
     fn plate() -> Session {

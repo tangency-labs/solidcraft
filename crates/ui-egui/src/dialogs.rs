@@ -1293,10 +1293,12 @@ impl Dialog {
         }
         self.error = None;
         self.sync_thread(s);
+        crate::dialogs_assembly::resolve_alignment_order(s, self, None);
     }
 
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        let sels: Vec<_> = sels.into_iter().filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel)).collect();
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -2083,7 +2085,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, r
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
-                let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
+                let enabled = crate::dialogs_assembly::alignment_input_available(d, i);
+                let chip = ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
                         let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(inp.label));

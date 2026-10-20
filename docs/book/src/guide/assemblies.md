@@ -418,25 +418,41 @@ Joint creation and editing offer optional **Alignment 1** and **Alignment 2** in
 Pick a planar face, a straight or circular edge, a cylindrical face's axis, a sketch line,
 or an axis/plane of construction geometry on the same occurrence as that side's primary
 face or cylindrical-face origin. Planes supply their normal, straight lines their direction,
-and circular edges/cylindrical faces their axis. The direction is projected square to the
+and Axis-mode circular edges/cylindrical faces their axis. The direction is projected square to the
 primary joint axis. The root origin widget can reference a root-side joint origin; it cannot silently stand for
 a different part's frame. Scripts may explicitly name an origin axis/plane in that side's
 component frame.
 
 Each alignment picker only offers references on its primary origin's exact occurrence.
 Hovering or clicking the other component leaves the confirmed reference and pose unchanged.
-A circular hole rim shows the same centre-and-axis marker as an origin pick, labelled
-**Circle axis** for alignment. Its unique adjacent cylindrical face supplies the persistent
-axis even when the raw edge history is inexact. A centre point alone is not a direction;
-an axis parallel to the primary joint axis remains invalid. Multiple possible cylinders
-are refused rather than choosing one arbitrarily.
+A circular hole rim shows the centre marker, labelled **Circle center alignment** in Center
+mode or **Circle axis** in Axis mode. A unique adjacent cylinder supplies the persistent
+identity even when raw edge history is inexact. Multiple possible cylinders are refused
+rather than choosing one arbitrarily.
+
+The UI orders the references by the solved motion: **Alignment 1** is on the moving
+component and **Alignment 2** on the fixed component, independently of primary pick order.
+With both references empty, hovering only highlights geometry and shows snap markers.
+Click the first reference before hovering the second to preview its temporary solution;
+leaving restores the confirmed solution. Wrong-component and degenerate picks are ignored.
+
+Circular references have explicit **Center** and **Axis** modes. Center stores the cylindrical
+face and the adjacent face naming the picked rim. Its clocking direction is the vector from
+the primary origin to that circle centre, projected into the joint plane. Thus another hole
+can orient two plates even when the hole axes are parallel. The centre is recomputed when
+geometry changes; a lost/ambiguous rim or a centre on the primary axis is refused. Axis keeps
+direction-only semantics and refuses an axis parallel to the primary joint axis. Existing
+saved axis references reopen in Axis mode; changing one to Center requires picking its rim.
+Assembly motion displays the solved body as solid and its original placement as the ghost;
+it never treats display-mesh volume drift as material removal.
 
 Each **Invert alignment** checkbox reverses only its own direction. The authored **Angle**
 expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
 After choosing the primary origins, picking and highlighting continue on the solved placement.
 An incomplete or invalid secondary input keeps the last valid pose while explaining the error.
-Hovering a valid reference previews that candidate temporarily; leaving it restores the authored
-pose, and only a click fills the selection. Cancel discards the operation; accepted edits can be undone.
+Once its counterpart is confirmed, hovering a valid reference previews that candidate
+temporarily; leaving it restores the authored pose, and only a click fills the selection.
+Cancel discards the operation; accepted edits can be undone.
 
 References keep persistent geometry names or feature/curve identities through save/reopen,
 geometry changes and independent component copies. Missing, ambiguous, wrong-component,
@@ -452,7 +468,8 @@ Scripts use `a_alignment` and `b_alignment` on `joint.create` or `joint.edit`:
 `{"face": "<persistent planar face name>", "occurrence": "<occurrence name>", "reverse": true}`,
 or a typed reference, for example
 `{"reference": {"type": "edge", "name": "<persistent edge name>"}, "occurrence": "<occurrence name>"}`.
-The other reference types are `cylinder` (`name`), `construction` (`feature` id), `sketch_line`
+The other reference types are `circle_center` (`name` of the cylindrical face and `end` naming
+the adjacent rim face), `cylinder` (`name`), `construction` (`feature` id), `sketch_line`
 (`sketch` id and `curve` id), `origin_axis` (`axis`: X/Y/Z), and `origin_plane` (`plane`: XY/XZ/YZ).
 Omit a field to leave that side unchanged; pass `null` to clear it. Supplying `occurrence`
 also checks the exact picked instance of a shared definition.

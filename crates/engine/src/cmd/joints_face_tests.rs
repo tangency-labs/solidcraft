@@ -46,6 +46,59 @@ fn joint_origin_names_in_face_or_circle_explain_the_correct_form() {
 const WIDTHS: [f64; 9] = [302.0, 304.0, 310.0, 330.0, 400.0, 450.0, 510.0, 301.0, 300.0];
 
 #[test]
+fn secondary_alignment_circle_centers_clock_parallel_hole_origins_and_recompute() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name":"guideY","expression":"20 mm"}));
+    for (name, x) in [("A", 0), ("B", 150)] {
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        run(&mut s, "component.create", json!({"name":name}));
+        run(&mut s, "solid.box", json!({"length":100,"width":80,"height":10,"corner":[x,0,0]}));
+        run(&mut s, "solid.hole", json!({"position":[x+20,20,10],"diameter":6}));
+        run(&mut s, "solid.hole", json!({"position":[x+80,"guideY",10],"diameter":6}));
+    }
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence":"A:1","grounded":true}));
+    let names = |s: &Session, component: &str, x: f64| {
+        let c = s.doc.find_component(component).unwrap();
+        let st = s.model.state();
+        let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, Vec3::new(x + 83.0, 20.0, 5.0), true).unwrap();
+        let end = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, Vec3::new(x + 50.0, 40.0, 10.0), false).unwrap();
+        json!({"reference":{"type":"circle_center","name":wall,"end":end}})
+    };
+    let (a, b) = (names(&s, "A", 0.0), names(&s, "B", 150.0));
+    let p = json!({"name":"Clocked","type":"rigid","a":{"occurrence":"A","circle":[23,20,9]},"b":{"occurrence":"B","circle":[173,20,9]},"a_alignment":a,"b_alignment":b});
+    run(&mut s, "joint.create", p);
+    run(&mut s, "parameters.change", json!({"name":"guideY","expression":"40 mm"}));
+    let joint = &s.doc.assembly.joints[0];
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &joint.a).unwrap();
+    let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    assert!(x.dot(Vec3::new(60.0, 20.0, 0.0).normalized().unwrap()) > 0.999);
+    let reopened: solidcraft_doc::Document = serde_json::from_value(serde_json::to_value(&*s.doc).unwrap()).unwrap();
+    assert_eq!(reopened.assembly.joints, s.doc.assembly.joints);
+    let before = s.doc.clone();
+    let wrong = s.execute("joint.edit", &json!({"joint":"Clocked","b_alignment":a})).unwrap_err().to_string();
+    assert!(wrong.contains("origin's component"), "{wrong}");
+    assert_eq!(s.doc, before);
+    let mut missing = b.clone();
+    missing["reference"]["end"] = json!("missing-end");
+    assert!(s.execute("joint.edit", &json!({"joint":"Clocked","b_alignment":missing})).is_err());
+    let c = s.doc.find_component("A").unwrap();
+    let first = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), c, Vec3::new(23.0, 20.0, 5.0), true).unwrap();
+    let mut coincident = a.clone();
+    coincident["reference"]["name"] = json!(first);
+    let error = s.execute("joint.edit", &json!({"joint":"Clocked","a_alignment":coincident})).unwrap_err().to_string();
+    assert!(error.contains("primary axis"), "{error}");
+    assert_eq!(s.doc, before);
+    // Explicit Axis mode remains directional, so parallel hole axes are still refused.
+    assert!(
+        s.execute("joint.edit", &json!({"joint":"Clocked","a_alignment":{"reference":{"type":"cylinder","name":a["reference"]["name"]}}}))
+            .unwrap_err()
+            .to_string()
+            .contains("parallel")
+    );
+}
+
+#[test]
 fn secondary_alignment_hole_axis_keeps_identity_but_rejects_ambiguous_seam_and_wrong_owner() {
     let (mut s, _, _, mut p) = alignment_boxes();
     run(&mut s, "component.activate", json!({"component":"A"}));

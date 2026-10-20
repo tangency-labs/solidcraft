@@ -12,6 +12,169 @@ fn two_boxes() -> SolveApp {
     SolveApp::new(s, Services::default())
 }
 
+fn round_plates() -> SolveApp {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 150)] {
+        s.execute("component.activate", &json!({"component":"root"})).unwrap();
+        s.execute("component.create", &json!({"name":name})).unwrap();
+        s.execute("solid.box", &json!({"length":100,"width":80,"height":10,"corner":[x,0,0]})).unwrap();
+        for (a, b) in [(20, 20), (80, 20), (20, 60), (80, 60)] {
+            s.execute("solid.hole", &json!({"position":[x+a,b,10],"diameter":6})).unwrap();
+        }
+    }
+    s.execute("component.activate", &json!({"component":"root"})).unwrap();
+    s.execute("occurrence.ground", &json!({"occurrence":"A:1","grounded":true})).unwrap();
+    SolveApp::new(s, Services::default())
+}
+
+fn rim(s: &Session, body: &str, center: Vec3) -> (crate::viewport::Hit, Sel) {
+    let st = s.world_state();
+    let b = st.body(body).unwrap();
+    let mesh = b.mesh();
+    let index = mesh.edges.iter().position(|e| circle_of(e).is_some_and(|(c, _)| c.dist(center) < 1e-6)).unwrap();
+    let point = mesh.edges[index][0];
+    (crate::viewport::Hit::Edge { body: body.into(), index, mid: point }, Sel::Edge { body: body.into(), index, point })
+}
+
+#[test]
+fn secondary_alignment_round_origins_start_with_the_actual_moving_occurrence_in_either_pick_order() {
+    for reverse in [false, true] {
+        let mut app = round_plates();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        let mut picks = [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)];
+        if reverse {
+            picks.reverse();
+        }
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        assert_eq!(alignment_side(&d.kind, 2), Some(if reverse { 0 } else { 1 }));
+        let (moving, _) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+        let (fixed, _) = rim(&app.session, "Body1", Vec3::new(80.0, 20.0, 10.0));
+        assert!(d.candidate(&app.session, &moving).is_some());
+        assert!(d.candidate(&app.session, &fixed).is_none());
+        assert!(!alignment_input_available(&d, 3), "the fixed component is second");
+        app.dialog = Some(d.clone());
+        app.viewport.hover = Some(moving);
+        assert!(alignment_hover_commands(&app, &d).is_none(), "no confirmed alignment: highlight only");
+    }
+}
+
+#[test]
+fn secondary_alignment_order_uses_measured_preview_motion_without_an_explicit_ground() {
+    for reverse in [false, true] {
+        let mut app = round_plates();
+        app.run("occurrence.ground", json!({"occurrence":"A:1","grounded":false})).unwrap();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        let mut picks = [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)];
+        if reverse {
+            picks.reverse();
+        }
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        app.dialog = Some(d);
+        settle_alignment_update(&mut app, &egui::Context::default());
+        let view = app.preview.interaction.as_ref().unwrap();
+        let a = !solidcraft_engine::doc::is_identity(&view.to_document["Body1"]);
+        let b = !solidcraft_engine::doc::is_identity(&view.to_document["Body2"]);
+        assert_ne!(a, b, "this fixture has exactly one actual moving body");
+        let expected = if a { usize::from(reverse) } else { usize::from(!reverse) };
+        let d = app.dialog.as_ref().unwrap();
+        assert_eq!(alignment_side(&d.kind, 2), Some(expected));
+        assert!(alignment_input_available(d, 2));
+        let d = app.dialog.take().unwrap();
+        crate::dialogs::run_dialog(&mut app, &d).unwrap();
+        app.dialog = edit_joint(&app, app.session.doc.assembly.joints[0].id);
+        settle_alignment_update(&mut app, &egui::Context::default());
+        let edit = app.dialog.as_ref().unwrap();
+        assert_eq!(alignment_side(&edit.kind, 0), Some(expected));
+        assert!(alignment_input_available(edit, 0), "an already solved floating joint reuses the solver's actual fixed root");
+    }
+}
+
+#[test]
+fn secondary_alignment_round_origins_zero_then_one_confirmed_hover_leave_and_click() {
+    let mut app = round_plates();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let (moving, sel) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    let zero = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    app.viewport.hover = Some(moving.clone());
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], zero);
+    assert!(app.dialog.as_ref().unwrap().inputs[2].items.is_empty());
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, sel);
+    let params = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert_eq!(params["b_alignment"]["reference"]["type"], "circle_center");
+    assert!(params.get("a_alignment").is_none());
+    app.dialog = Some(d);
+    app.viewport.hover = None;
+    settle_alignment_update(&mut app, &ctx);
+    let authored = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    let doc = app.session.doc.clone();
+    let candidates: Vec<_> = [Vec3::new(80.0, 20.0, 10.0), Vec3::new(20.0, 60.0, 10.0)].into_iter().map(|p| rim(&app.session, "Body1", p)).collect();
+    let (hit, sel) = candidates
+        .into_iter()
+        .find(|(hit, _)| {
+            app.viewport.hover = Some(hit.clone());
+            alignment_hover_commands(&app, app.dialog.as_ref().unwrap())
+                .and_then(|c| world_preview(&app.session, &c, crate::preview::Colors::from_tokens(&crate::theme::Tokens::get())))
+                .and_then(Result::ok)
+                .and_then(|b| b.interaction)
+                .is_some_and(|i| i.to_document["Body2"] != authored)
+        })
+        .unwrap();
+    app.viewport.hover = Some(hit.clone());
+    settle_alignment_update(&mut app, &ctx);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert!(app.dialog.as_ref().unwrap().inputs[3].items.is_empty());
+    assert_eq!(app.session.doc, doc);
+    app.viewport.hover = None;
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    crate::viewport::dialog_pick(&mut app, &hit, sel);
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.dialog.as_ref().unwrap().inputs[3].items.len(), 1);
+    assert_eq!(app.session.doc, doc);
+    let d = app.dialog.take().unwrap();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let edit = edit_joint(&app, app.session.doc.assembly.joints[0].id).unwrap();
+    assert_eq!(alignment_side(&edit.kind, 0), Some(1));
+    assert_eq!(stored_alignment(&edit.kind, 0).unwrap()["reference"]["type"], "circle_center");
+}
+
+#[test]
+fn secondary_alignment_circle_mode_widgets_distinguish_center_and_parallel_axis() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = round_plates();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let (hit, _) = rim(&h.app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    h.step(&json!({"click":{"handle":"dialog:circle-axis:1"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &hit).is_none(), "parallel Axis is refused before a click");
+    h.step(&json!({"click":{"handle":"dialog:circle-center:1"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &hit).is_some());
+    let (same, _) = rim(&h.app.session, "Body2", Vec3::new(170.0, 20.0, 10.0));
+    assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &same).is_none(), "coincident center cannot define clocking");
+}
+
 #[test]
 fn secondary_alignment_hole_contour_uses_persistent_cylinder_axis_and_center_affordance() {
     let mut app = two_boxes();
@@ -23,6 +186,11 @@ fn secondary_alignment_hole_contour_uses_persistent_cylinder_axis_and_center_aff
     let mut d = app.dialog.take().unwrap();
     for p in [Vec3::new(20.0, 10.0, 5.0), Vec3::new(30.0, 10.0, 5.0)] {
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
+    d.active = 3;
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.circle_center[0] = false;
     }
     let state = app.session.model.state();
     let body = state.body("Body1").unwrap();
@@ -42,7 +210,7 @@ fn secondary_alignment_hole_contour_uses_persistent_cylinder_axis_and_center_aff
     let loaded: solidcraft_engine::doc::Document = serde_json::from_value(saved).unwrap();
     assert_eq!(loaded.assembly.joints, app.session.doc.assembly.joints);
     let edit = edit_joint(&app, app.session.doc.assembly.joints[0].id).unwrap();
-    assert_eq!(stored_alignment(&edit.kind, 0).unwrap()["reference"]["type"], "cylinder");
+    assert_eq!(stored_alignment(&edit.kind, 1).unwrap()["reference"]["type"], "cylinder");
 }
 
 #[test]
@@ -50,12 +218,12 @@ fn secondary_alignment_wrong_occurrence_hover_and_click_are_ignored() {
     let mut app = two_boxes();
     app.start("joint.create");
     let mut d = app.dialog.take().unwrap();
-    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0)] {
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0)] {
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
     }
     d.active = 2;
     let before = apply_commands(&app, &d).unwrap();
-    let wrong = face_sel(&app.session, Vec3::new(50.0, 10.0, 5.0)).unwrap();
+    let wrong = face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap();
     let Sel::Face { body, index, point } = &wrong else { panic!() };
     let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
     assert!(d.candidate(&app.session, &hit).is_none());
@@ -66,8 +234,8 @@ fn secondary_alignment_wrong_occurrence_hover_and_click_are_ignored() {
     assert!(alignment_hover_commands(&app, &d).is_none());
     app.session.scratch().execute(&before[0].0, &before[0].1).unwrap();
     // Same definition, different occurrence is still the wrong path.
-    app.run("occurrence.copy", json!({"component":app.session.doc.find_component("A").unwrap(),"translate":[70,0,0]})).unwrap();
-    let wrong = face_sel(&app.session, Vec3::new(90.0, 10.0, 5.0)).unwrap();
+    app.run("occurrence.copy", json!({"component":app.session.doc.find_component("B").unwrap(),"translate":[70,0,0]})).unwrap();
+    let wrong = face_sel(&app.session, Vec3::new(120.0, 10.0, 5.0)).unwrap();
     let saved = d.inputs[2].items.clone();
     d.pick(&app.session, wrong);
     assert_eq!(d.inputs[2].items, saved);
@@ -77,6 +245,7 @@ fn secondary_alignment_wrong_occurrence_hover_and_click_are_ignored() {
 fn secondary_alignment_filter_covers_construction_sketch_and_nested_occurrences() {
     let mut app = two_boxes();
     let mut features = Vec::new();
+    let mut curves = Vec::new();
     for component in ["A", "B"] {
         app.run("component.activate", json!({"component":component})).unwrap();
         app.run("construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,1,0]},"name":format!("{component}Axis")})).unwrap();
@@ -88,6 +257,8 @@ fn secondary_alignment_filter_covers_construction_sketch_and_nested_occurrences(
         app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         features.push(app.session.active_sketch.unwrap());
         app.run("sketch.line", json!({"points":[[0,0],[0,10]]})).unwrap();
+        let sketch = *features.last().unwrap();
+        curves.push(app.session.model.state().sketch(sketch).unwrap().sketch.curves[0].id.clone());
         app.run("sketch.finish", json!({})).unwrap();
     }
     app.run("component.activate", json!({"component":"root"})).unwrap();
@@ -96,19 +267,27 @@ fn secondary_alignment_filter_covers_construction_sketch_and_nested_occurrences(
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
     }
-    for (side, good, bad) in [(2, "A", "B"), (3, "B", "A")] {
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
+    for (side, good, bad) in [(2, "B", "A"), (3, "A", "B")] {
         d.active = side;
         for sel in [
             Sel::Axis { name: format!("{good}Axis") },
             Sel::Plane { name: format!("{good}Plane") },
-            Sel::ExternalSketchCurve { sketch: features[side - 2], id: "line".into() },
+            Sel::ExternalSketchCurve { sketch: features[3 - side], id: curves[3 - side].clone() },
         ] {
-            assert!(alignment_accepts(&app.session, &d, &sel));
+            assert!(
+                alignment_accepts(&app.session, &d, &sel),
+                "side {side}, selection {sel:?}, form {:?}, owner {:?}, frame {:?}, projection {}",
+                d.kind,
+                alignment_occurrence(&app.session, &sel),
+                primary_alignment_frame(&app.session, &d, 3 - side),
+                alignment_projection_valid(&app.session, &d, &sel, 3 - side)
+            );
         }
         for sel in [
             Sel::Axis { name: format!("{bad}Axis") },
             Sel::Plane { name: format!("{bad}Plane") },
-            Sel::ExternalSketchCurve { sketch: features[3 - side], id: "line".into() },
+            Sel::ExternalSketchCurve { sketch: features[side - 2], id: curves[side - 2].clone() },
             Sel::Axis { name: "X".into() },
         ] {
             assert!(!alignment_accepts(&app.session, &d, &sel));
@@ -117,8 +296,8 @@ fn secondary_alignment_filter_covers_construction_sketch_and_nested_occurrences(
     d.active = 2;
     let a = occ(&app, "A");
     let b = occ(&app, "B");
-    app.session.doc_mut().occurrences.iter_mut().find(|o| o.id == a).unwrap().parent = b;
-    assert!(!alignment_accepts(&app.session, &d, &Sel::Axis { name: "AAxis".into() }));
+    app.session.doc_mut().occurrences.iter_mut().find(|o| o.id == b).unwrap().parent = a;
+    assert!(!alignment_accepts(&app.session, &d, &Sel::Axis { name: "BAxis".into() }));
 }
 
 fn settle_alignment_preview(h: &mut crate::scenario::Harness) {
@@ -166,12 +345,13 @@ fn secondary_alignment_feedback_invalid_first_pick_keeps_the_last_pose() {
     h.app.dialog = Some(d);
     settle_alignment_preview(&mut h);
     let key = h.app.preview.key;
-    let invalid = face_sel(&h.app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let invalid = face_sel(&h.app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap();
     h.app.dialog.as_mut().unwrap().pick(&h.app.session, invalid);
     settle_alignment_preview(&mut h);
     assert!(h.app.preview.active, "an invalid/partial secondary pick must not return the part to its original pose");
     assert_eq!(h.app.preview.key, key);
-    assert!(h.app.preview.error.is_some(), "invalid authored input must still prevent OK");
+    assert!(h.app.preview.error.is_none(), "a rejected candidate cannot create an authored error");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[2].items.is_empty());
     assert!(h.app.session.doc.assembly.joints.is_empty());
 }
 
@@ -192,12 +372,12 @@ fn secondary_alignment_feedback_hover_is_temporary_and_invalid_hover_restores_au
     let mut app = two_boxes();
     app.start("joint.create");
     let mut d = app.dialog.take().unwrap();
-    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0)] {
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0)] {
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
     }
-    let candidate = face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap();
+    let candidate = face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap();
     let Sel::Face { body, index, .. } = &candidate else { panic!() };
-    let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: Vec3::new(10.0, 20.0, 15.0) };
+    let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: Vec3::new(20.0, 10.0, 5.0) };
     app.dialog = Some(d);
     let ctx = egui::Context::default();
     settle_alignment_update(&mut app, &ctx);
@@ -208,7 +388,7 @@ fn secondary_alignment_feedback_hover_is_temporary_and_invalid_hover_restores_au
     assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
     assert!(app.dialog.as_ref().unwrap().inputs[3].items.is_empty());
     assert_eq!(app.session.doc, doc);
-    let Sel::Face { index: parallel, .. } = face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap() else { panic!() };
+    let Sel::Face { index: parallel, .. } = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap() else { panic!() };
     app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: parallel, point: Vec3::new(10.0, 10.0, 10.0) });
     settle_alignment_update(&mut app, &ctx);
     assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
@@ -287,14 +467,14 @@ fn secondary_alignment_feedback_accepts_named_edge_and_tracks_sketch_namespace()
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
     }
     let state = app.session.model.state();
-    let body = state.body("Body1").unwrap();
+    let body = state.body("Body2").unwrap();
     let mesh = body.mesh();
     let index = mesh.edges.iter().position(|e| e.len() >= 2 && (e.last().unwrap().x - e[0].x).abs() > 19.0).unwrap();
-    let hit = crate::viewport::Hit::Edge { body: "Body1".into(), index, mid: (mesh.edges[index][0] + *mesh.edges[index].last().unwrap()) / 2.0 };
+    let hit = crate::viewport::Hit::Edge { body: "Body2".into(), index, mid: (mesh.edges[index][0] + *mesh.edges[index].last().unwrap()) / 2.0 };
     let selection = d.candidate(&app.session, &hit).unwrap();
     d.pick(&app.session, selection);
     let commands = apply_commands(&app, &d).unwrap();
-    assert_eq!(commands[0].1["a_alignment"]["reference"]["type"], "edge");
+    assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
     app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
     d.active = 2;
     let hit = crate::viewport::Hit::SketchCurve { sketch: 99, id: "l1".into(), straight: true };
@@ -332,7 +512,7 @@ fn secondary_alignment_dialog_preview_edit_clear_and_cancel_keep_references() {
     app.start("joint.create");
     let mut d = app.dialog.clone().unwrap();
     assert_eq!(d.inputs.len(), 4);
-    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0), Vec3::new(40.0, 20.0, 5.0)] {
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
     }
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
@@ -351,11 +531,11 @@ fn secondary_alignment_dialog_preview_edit_clear_and_cancel_keep_references() {
     let old = app.session.doc.assembly.joints[0].clone();
     let mut edit = edit_joint(&app, old.id).unwrap();
     assert_eq!(edit.inputs.len(), 2);
-    assert_eq!(stored_alignment(&edit.kind, 0).unwrap()["face"], apply_commands(&app, &d).unwrap()[0].1["a_alignment"]["face"]);
+    assert_eq!(stored_alignment(&edit.kind, 1).unwrap()["face"], apply_commands(&app, &d).unwrap()[0].1["a_alignment"]["face"]);
     let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
     assert_eq!(params["angle"], "jointTurn");
     assert_eq!(params["a_alignment"]["reverse"], true);
-    clear_alignment(&mut edit.kind, 0);
+    clear_alignment(&mut edit.kind, 1);
     let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
     assert_eq!(params["a_alignment"], Value::Null);
     assert!(params["b_alignment"]["face"].is_string());
@@ -372,14 +552,14 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
     let mut d = app.dialog.clone().unwrap();
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
-    // Alignment 1 picked on B is ignored before it can change A's reference.
-    d.pick(&app.session, face_sel(&app.session, Vec3::new(50.0, 10.0, 5.0)).unwrap());
+    // The moving B is first; picking fixed A here is ignored.
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
     let p = apply_commands(&app, &d).unwrap()[0].1.clone();
     assert!(d.inputs[2].items.is_empty());
-    assert!(p.get("a_alignment").is_none());
+    assert!(p.get("b_alignment").is_none());
     app.session.scratch().execute("joint.create", &p).unwrap();
     d.active = 2;
-    d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         f.offset[0] = "2 mm".into();
     }
@@ -396,7 +576,8 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
     d.active = 2;
     d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
     assert!(d.inputs[3].items.is_empty(), "only the first alignment is supplied");
-    assert!(apply_commands(&app, &d).unwrap_err().contains("aliases another instance"));
+    assert!(d.inputs[2].items.is_empty());
+    assert!(!alignment_input_available(&d, 2), "aliased primary occurrence must be corrected first");
 }
 
 #[test]
@@ -405,7 +586,7 @@ fn secondary_alignment_widgets_invert_independently_and_clear_saved_references()
     h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
-    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0), Vec3::new(40.0, 20.0, 5.0)] {
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
         d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
     }
     h.app.dialog = Some(d);
@@ -415,8 +596,8 @@ fn secondary_alignment_widgets_invert_independently_and_clear_saved_references()
         h.step(&json!({"click":{"handle":format!("dialog:invert-alignment:{side}")}})).unwrap();
         h.frames(3);
         let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
-        assert_eq!(p["a_alignment"]["reverse"], true);
-        assert_eq!(p["b_alignment"]["reverse"], side == 2);
+        assert_eq!(p["b_alignment"]["reverse"], true);
+        assert_eq!(p["a_alignment"]["reverse"], side == 2);
     }
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
@@ -431,8 +612,8 @@ fn secondary_alignment_widgets_invert_independently_and_clear_saved_references()
     h.step(&json!({"click":{"handle":"dialog:clear:Alignment 1 (optional)"}})).unwrap();
     h.frames(3);
     let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
-    assert_eq!(p["a_alignment"], Value::Null);
-    assert!(p["b_alignment"]["face"].is_string());
+    assert_eq!(p["b_alignment"], Value::Null);
+    assert!(p["a_alignment"]["face"].is_string());
 }
 
 fn occ(app: &SolveApp, name: &str) -> u64 {
