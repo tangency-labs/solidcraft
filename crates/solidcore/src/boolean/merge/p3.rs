@@ -675,12 +675,8 @@ fn stitch_and_orient(
     )
 }
 
-fn shrink_geometry(_k: &mut Kernel, _brep: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::ShrinkGeometry
-    Err(SolidError::unported(
-        "SmBrep::ShrinkGeometry",
-        "topology.brep_p4",
-    ))
+fn shrink_geometry(k: &mut Kernel, brep: &mut Brep) -> Result<()> {
+    crate::topology::brep::p4::shrink_geometry(k, brep)
 }
 
 fn boolean_2d(

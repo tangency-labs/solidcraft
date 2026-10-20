@@ -119,7 +119,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1;
 use crate::topology::brep::p10::{self, MakeTopologyOptions, TopologyEnv};
-use crate::topology::brep::p2;
+use crate::topology::brep::p4;
 use crate::topology::brep::p6;
 use crate::topology::brep_data::BrepData;
 use crate::topology::database_io::FileType;
@@ -247,13 +247,15 @@ fn make_wire_edge_vertex(
     )
 }
 
-/// `DeleteEdge(edge)`.
-fn delete_edge(_b: &mut Brep, _e: EdgeId) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-    Err(SolidError::unported(
-        "SmBrep::DeleteEdge",
-        "topology.brep_p4",
-    ))
+/// `DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`), with the caller's
+/// notification records, attributes and identities (the context is the kernel's).
+fn delete_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut ed::NotifyEnv<'_>) -> Result<()> {
+    let mut d = p4::DeleteEnv {
+        records: &mut *env.records,
+        attributes: &mut *env.attributes,
+        key_of: env.key_of,
+    };
+    p4::delete_edge(k, b, &mut d, e, None)
 }
 
 /// `GlueVertices(survivor, other)` (default `pOptWireEdgesInBrep = NULL`), with the
@@ -1334,7 +1336,8 @@ pub fn glue_edges_general(
 
     // a wire edge is just deleted
     if ed::is_wire(b, del)? {
-        delete_edge(b, del)?;
+        // status ignored upstream
+        ignore_status(delete_edge(k, b, del, env))?;
         return Ok(());
     }
 

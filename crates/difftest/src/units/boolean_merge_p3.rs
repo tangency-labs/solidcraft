@@ -840,12 +840,11 @@ impl PiecewiseAccess for Pool {
 }
 
 fn destroy_brep(
-    _k: &mut Kernel,
-    _brep: &mut Brep,
+    k: &mut Kernel,
+    brep: &mut Brep,
     _attributes: &mut AttributeStore,
 ) -> solidcore::Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::~SmBrep
-    Err(SolidError::unported("SmBrep::~SmBrep", "topology.brep_p4"))
+    solidcore::topology::brep::p4::destroy(k, brep)
 }
 
 /// `new SmBrep(dSize, dRatio, pOptContextForStack)`
@@ -1285,10 +1284,10 @@ mod tests {
         assert!(matches!(
             pool.delete_other(&mut k),
             Err(SolidError::Unported {
-                unit: "topology.brep_p4",
+                unit: "topology.brep_p2",
                 ..
             })
         ));
-        assert_eq!(pool.other, Some(1)); // an unported destructor consumes nothing
+        assert_eq!(pool.other, Some(1)); // a destructor stopped at SmBrep::Notify consumes nothing
     }
 }

@@ -284,7 +284,7 @@ impl Brep {
     ///
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_face_list(&mut self, order: Vec<FaceId>) -> Result<()> {
-        check_order(&order, self.faces.len())?;
+        check_order(&order, self.faces.ids())?;
         self.face_list = order;
         Ok(())
     }
@@ -296,7 +296,7 @@ impl Brep {
     ///
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_edge_list(&mut self, order: Vec<EdgeId>) -> Result<()> {
-        check_order(&order, self.edges.len())?;
+        check_order(&order, self.edges.ids())?;
         self.edge_list = order;
         Ok(())
     }
@@ -308,7 +308,7 @@ impl Brep {
     ///
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_vertex_list(&mut self, order: Vec<VertexId>) -> Result<()> {
-        check_order(&order, self.vertices.len())?;
+        check_order(&order, self.vertices.ids())?;
         self.vertex_list = order;
         Ok(())
     }
@@ -339,16 +339,20 @@ impl Brep {
     }
 }
 
-/// Whether `order` is a permutation of the `count` arena ids.
-fn check_order<I: crate::topology::ArenaId>(order: &[I], count: usize) -> Result<()> {
-    let mut seen = vec![false; count];
+/// Whether `order` is a permutation of the live arena ids `live` (records removed by
+/// `topology.brep_p4`'s deletions leave gaps in the id range).
+fn check_order<I: crate::topology::ArenaId>(
+    order: &[I],
+    live: impl Iterator<Item = I>,
+) -> Result<()> {
+    let mut seen: BTreeMap<u32, bool> = live.map(|id| (id.index(), false)).collect();
     for id in order {
-        match seen.get_mut(id.index() as usize) {
+        match seen.get_mut(&id.index()) {
             Some(s) if !*s => *s = true,
             _ => return Err(null("list order is not a permutation of the records")),
         }
     }
-    if order.len() != count {
+    if order.len() != seen.len() {
         return Err(null("list order is not a permutation of the records"));
     }
     Ok(())

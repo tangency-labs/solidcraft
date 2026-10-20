@@ -46,7 +46,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepQuery};
+use crate::topology::brep::p4;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell;
 use crate::topology::topology::{self as topo, Topology};
@@ -493,8 +493,8 @@ pub fn boolean_post_process(
                 endpoints.push(v);
             }
         }
-        // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-        let (): () = unavailable("SmBrep::DeleteEdge", "topology.brep_p4")?;
+        // SER(DeleteEdge(pEdge, pSurfToKeep)); the cleanup holds no notification state
+        p4::with_local_env(|env| p4::delete_edge(k, brep, env, e, Some(keep)))?;
         // The native output starts as a default SmExtent2d and is written back
         // unconditionally, even if IsTopological left it untouched.
         let domain = topological.merged_face_domain.unwrap_or_default();
@@ -515,8 +515,8 @@ pub fn boolean_post_process(
             continue;
         }
         if vertex::is_loop_vertex(brep, v)? {
-            // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex
-            let (): () = unavailable("SmBrep::DeleteVertex", "topology.brep_p4")?;
+            // SER(DeleteVertex(pVertex))
+            p4::with_local_env(|env| p4::delete_vertex(k, brep, env, v))?;
             continue;
         }
         if vertex::is_topological_vertex(k, brep, v)? {

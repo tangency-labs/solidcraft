@@ -79,7 +79,7 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
-use crate::topology::brep::p7::{self as bp7, FaceCurvesInput, SelfIntersectionCurve};
+use crate::topology::brep::p4::shrink_geometry;
 use crate::topology::brep_cache::{
     arena_identity, make_brep_cache, BrepCache, BrepObjects, CacheObject, CacheSource,
 };
@@ -504,20 +504,35 @@ impl OffsetExecutive {
     }
 
     /// Replaces implicit offset surfaces with approximations (`ReplaceImplicitOffsets`).
-    /// The unconditional initial shrink is owned by `topology.brep_p4`.
+    /// The unconditional initial shrink is `topology.brep_p4`'s `ShrinkGeometry`.
     pub fn replace_implicit_offsets(
-        _kernel: &Kernel,
-        _brep: &mut Brep,
+        kernel: &Kernel,
+        brep: &mut Brep,
         _approximation_tol_3d: f64,
     ) -> Result<()> {
+        // remove curve and surface portions not used by edges and faces (status
+        // ignored upstream)
+        ignore_status(shrink_geometry(kernel, brep))?;
         // Continuation cpp:1978–2035: enumerate offset surfaces, approximate their
         // extended-or-original B-spline bases, then notify/replace each surface.
-        // Neither shrink nor offset surfaces (#62) may be bypassed or co-ported here.
-        // UNPORTED(topology.brep_p4): SmBrep::ShrinkGeometry
-        Err(SolidError::unported(
-            "SmBrep::ShrinkGeometry",
-            "topology.brep_p4",
-        ))
+        // A B-rep without offset surfaces leaves both loops empty (SM_SUCCESS); with
+        // one, the replacement loop's SmBrep::ReplaceSurface is not ported, so the
+        // continuation defers before building any approximation.
+        for f in bp1::faces(brep, None)? {
+            let is_offset = brep
+                .face(f)?
+                .surface
+                .as_ref()
+                .is_some_and(|s| matches!(s.kind(), SurfaceKind::OffsetSurface(_)));
+            if is_offset {
+                // UNPORTED(topology.brep_p2): SmBrep::ReplaceSurface
+                return Err(SolidError::unported(
+                    "SmBrep::ReplaceSurface",
+                    "topology.brep_p2",
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Removes result faces too close to the original (`RemoveExcessFaces`).
@@ -1053,13 +1068,15 @@ impl OffsetExecutive {
             }
         }
         self.clear_relations();
+        // Shrink the geometry - this helps some for self intersections
+        shrink_geometry(kernel, required(self.offset_brep.as_mut())?)?;
         // Continuation cpp:2429–2474: construct a merge B-rep with the original
         // tolerance, editing enabled; SmMerge uses 20*PI/180 angular tolerance,
         // PiecewiseMerge(&no_ssi, TRUE, TRUE). It keeps the original offset B-rep.
-        // UNPORTED(topology.brep_p4): SmBrep::ShrinkGeometry
+        // UNPORTED(boolean.merge_p3): SmMerge::PiecewiseMerge
         Err(SolidError::unported(
-            "SmBrep::ShrinkGeometry",
-            "topology.brep_p4",
+            "SmMerge::PiecewiseMerge",
+            "boolean.merge_p3",
         ))
     }
 
@@ -2630,11 +2647,10 @@ mod tests {
         assert_eq!(result.edges().len(), 2);
         assert_eq!(result.edgeuses().len(), 2);
         assert!(result.faces().is_empty());
-        assert_dependency(
-            OffsetExecutive::replace_implicit_offsets(&kernel, &mut result, 1.0e-6),
-            "SmBrep::ShrinkGeometry",
-            "topology.brep_p4",
-        );
+        // ShrinkGeometry trims the two edge curves; without offset surfaces the
+        // continuation's loops are empty (SM_SUCCESS)
+        OffsetExecutive::replace_implicit_offsets(&kernel, &mut result, 1.0e-6).unwrap();
+        assert_eq!(result.edges().len(), 2);
     }
 
     #[test]
@@ -2947,10 +2963,12 @@ mod tests {
         executive.set_merge_results(true);
         executive.set_offset_brep(Brep::new());
         executive.relate_edgeuses(EdgeuseId::from_index(1), EdgeuseId::from_index(2));
+        // ShrinkGeometry of the (empty) offset B-rep succeeds; the merge continuation
+        // defers at SmMerge::PiecewiseMerge
         assert_dependency(
             executive.piecewise_merge(&mut kernel, &mut original),
-            "SmBrep::ShrinkGeometry",
-            "topology.brep_p4",
+            "SmMerge::PiecewiseMerge",
+            "boolean.merge_p3",
         );
         assert!(executive.offset_brep().is_some());
         assert_eq!(executive.offset_edgeuse(EdgeuseId::from_index(1)), None);

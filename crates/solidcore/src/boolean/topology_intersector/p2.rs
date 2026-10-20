@@ -255,7 +255,7 @@ impl<O: Ord + Copy> Mates<O> for MapMates<O> {
 
 /// `SmBrep::DeleteEdge(pEdge, pOptSurfaceToKeep)`.
 fn brep_delete_edge<O>(_brep: O, _edge: O, _opt_surface_to_keep: Option<O>) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
+    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge (justified: plan/findings.md "topology.brep_p4: back-edges on opaque object handles": the B-rep, edge and surface are generic `O` handles, no `&mut Brep` / `EdgeId` to call with)
     Err(SolidError::unported(
         "SmBrep::DeleteEdge",
         "topology.brep_p4",
@@ -264,7 +264,7 @@ fn brep_delete_edge<O>(_brep: O, _edge: O, _opt_surface_to_keep: Option<O>) -> R
 
 /// `SmBrep::DeleteVertex(pVertex)`.
 fn brep_delete_vertex<O>(_brep: O, _vertex: O) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex
+    // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex (justified: plan/findings.md "topology.brep_p4: back-edges on opaque object handles": the B-rep and vertex are generic `O` handles, no `&mut Brep` / `VertexId` to call with)
     Err(SolidError::unported(
         "SmBrep::DeleteVertex",
         "topology.brep_p4",

@@ -90,6 +90,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
+use crate::topology::brep::p4;
 use crate::topology::brep::p6;
 use crate::topology::brep_cache::{make_brep_cache, BrepObjects, CacheObject, CacheSource};
 use crate::topology::brep_data::{BrepData, TopologyData, NO_OBJECT, UNSURE};
@@ -2116,12 +2117,10 @@ fn brep_wire_edges(b: &Brep) -> Result<Vec<EdgeId>> {
     p1::wire_edges(b, None)
 }
 
-fn delete_edge(_k: &mut Kernel, _b: &mut Brep, _e: EdgeId) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-    Err(SolidError::Unported {
-        upstream: "SmBrep::DeleteEdge",
-        unit: "topology.brep_p4",
-    })
+/// `SmBrep::DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`); `RemoveAllTopology`
+/// holds no notification state, so it runs on call-local records.
+fn delete_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    p4::with_local_env(|env| p4::delete_edge(k, b, env, e, None))
 }
 
 /// `GetShellVertices` ([`crate::topology::brep::p2::shell_vertices`], no attribute filter).
@@ -2129,12 +2128,9 @@ fn brep_shell_vertices(b: &Brep) -> Result<Vec<VertexId>> {
     crate::topology::brep::p2::shell_vertices(b, None)
 }
 
-fn delete_vertex(_k: &mut Kernel, _b: &mut Brep, _v: VertexId) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex
-    Err(SolidError::Unported {
-        upstream: "SmBrep::DeleteVertex",
-        unit: "topology.brep_p4",
-    })
+/// `SmBrep::DeleteVertex(vertex)`, on call-local records (as [`delete_edge`]).
+fn delete_vertex(k: &mut Kernel, b: &mut Brep, v: VertexId) -> Result<()> {
+    p4::with_local_env(|env| p4::delete_vertex(k, b, env, v))
 }
 
 /// `SmBrep::RemoveAllTopology`: deletes every face, wire edge and shell vertex.

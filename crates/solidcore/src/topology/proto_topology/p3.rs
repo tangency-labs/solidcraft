@@ -208,7 +208,7 @@ pub trait BrepGlue<O> {
 
 /// `SmBrep::DeleteEdge` of B-rep `which`.
 fn brep_delete_edge<O>(_which: i32, _edge: O) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
+    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge (justified: plan/findings.md "topology.brep_p4: back-edges on opaque object handles": B-rep `which` and the edge are an index and a generic `O` handle, no `&mut Brep` / `EdgeId` to call with)
     Err(SolidError::unported(
         "SmBrep::DeleteEdge",
         "topology.brep_p4",

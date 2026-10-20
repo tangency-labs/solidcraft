@@ -49,6 +49,7 @@ use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::heal::face_props::{HealerOpType, LoopObject};
 use crate::kernel::Kernel;
 use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p4;
 use crate::topology::topology::TrackTopologyChanges;
 use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
@@ -447,7 +448,7 @@ impl<O: LoopObject> HealData<O> {
             }
             let (a, d) = edge::start_end_vertices(b, e)?;
             let edits = if a == d {
-                delete_edge(b, e)?
+                delete_edge(k, b, e)?
             } else {
                 squeeze_edge(
                     k,
@@ -597,12 +598,13 @@ fn squeeze_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId, survivor: VertexId) -> 
     });
     r.map(|()| changes)
 }
-fn delete_edge(_b: &mut Brep, _e: EdgeId) -> Result<Changes> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-    Err(SolidError::unported(
-        "SmBrep::DeleteEdge",
-        "topology.brep_p4",
-    ))
+/// `SmBrep::DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`) under the tracker;
+/// the healer holds no notification state, so the edit runs on call-local records.
+fn delete_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<Changes> {
+    let ((), changes) = capture_changes(k, b, |k, b| {
+        p4::with_local_env(|env| p4::delete_edge(k, b, env, e, None))
+    })?;
+    Ok(changes)
 }
 
 impl<O: LoopObject> HealData<O> {
@@ -719,17 +721,20 @@ impl<O: LoopObject> HealData<O> {
                             edge::vertex(b, e)?.ok_or_else(|| invalid("wire without vertex"))?;
                         let d = edge::other_vertex(b, e, Some(a))?
                             .ok_or_else(|| invalid("wire without other vertex"))?;
-                        changes.append(ignore_soft(delete_edge(b, e))?.unwrap_or_default());
+                        changes.append(ignore_soft(delete_edge(k, b, e))?.unwrap_or_default());
                         if a == d && vertex::is_shell_vertex(b, a)? {
-                            changes.append(ignore_soft(delete_vertex(b, a))?.unwrap_or_default());
+                            changes
+                                .append(ignore_soft(delete_vertex(k, b, a))?.unwrap_or_default());
                         } else {
                             if vertex::is_shell_vertex(b, a)? {
-                                changes
-                                    .append(ignore_soft(delete_vertex(b, a))?.unwrap_or_default());
+                                changes.append(
+                                    ignore_soft(delete_vertex(k, b, a))?.unwrap_or_default(),
+                                );
                             }
                             if vertex::is_shell_vertex(b, d)? {
-                                changes
-                                    .append(ignore_soft(delete_vertex(b, d))?.unwrap_or_default());
+                                changes.append(
+                                    ignore_soft(delete_vertex(k, b, d))?.unwrap_or_default(),
+                                );
                             }
                         }
                         if !removed_duplicates {
@@ -1146,12 +1151,13 @@ fn squeeze_face(
     Ok((output.new_edges, output.deleted_edges, changes))
 }
 
-fn delete_vertex(_b: &mut Brep, _v: VertexId) -> Result<Changes> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex
-    Err(SolidError::unported(
-        "SmBrep::DeleteVertex",
-        "topology.brep_p4",
-    ))
+/// `SmBrep::DeleteVertex(vertex)` under the tracker, on call-local records (as
+/// [`delete_edge`]).
+fn delete_vertex(k: &mut Kernel, b: &mut Brep, v: VertexId) -> Result<Changes> {
+    let ((), changes) = capture_changes(k, b, |k, b| {
+        p4::with_local_env(|env| p4::delete_vertex(k, b, env, v))
+    })?;
+    Ok(changes)
 }
 /// The face as the owner of its surface (`this` of the face's members): the surface's
 /// owner, or the face's arena identity when it has none.
