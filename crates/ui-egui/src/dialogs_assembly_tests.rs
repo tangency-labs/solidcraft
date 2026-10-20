@@ -12,6 +12,101 @@ fn two_boxes() -> SolveApp {
     SolveApp::new(s, Services::default())
 }
 
+#[test]
+fn secondary_alignment_dialog_preview_edit_clear_and_cancel_keep_references() {
+    let mut app = two_boxes();
+    app.run("parameters.add", json!({"name": "jointTurn", "expression": "17 deg"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs.len(), 4);
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0), Vec3::new(40.0, 20.0, 5.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.angle = "jointTurn".into();
+        f.reverse_alignment[0] = true;
+    }
+    let commands = apply_commands(&app, &d).unwrap();
+    assert!(commands[0].1["a_alignment"]["face"].is_string());
+    assert_eq!(commands[0].1["a_alignment"]["reverse"], true);
+    let before = serde_json::to_value(&*app.session.doc).unwrap();
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before, "preview/cancel cannot change the document");
+    for (id, p) in commands {
+        app.run(&id, p).unwrap();
+    }
+    let old = app.session.doc.assembly.joints[0].clone();
+    let mut edit = edit_joint(&app, old.id).unwrap();
+    assert_eq!(edit.inputs.len(), 2);
+    assert_eq!(stored_alignment(&edit.kind, 0).unwrap()["face"], apply_commands(&app, &d).unwrap()[0].1["a_alignment"]["face"]);
+    let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
+    assert_eq!(params["angle"], "jointTurn");
+    assert_eq!(params["a_alignment"]["reverse"], true);
+    clear_alignment(&mut edit.kind, 0);
+    let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
+    assert_eq!(params["a_alignment"], Value::Null);
+    assert!(params["b_alignment"]["face"].is_string());
+    app.run("joint.edit", params).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.angle.as_deref(), Some("jointTurn"));
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0], old);
+}
+
+#[test]
+fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    // Alignment 1 picked on B cannot attach A to B's geometry.
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(50.0, 10.0, 5.0)).unwrap());
+    let p = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert!(app.session.scratch().execute("joint.create", &p).is_err());
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[0] = "2 mm".into();
+    }
+    assert!(apply_commands(&app, &d).unwrap_err().contains("Offset X"));
+}
+
+#[test]
+fn secondary_alignment_widgets_invert_independently_and_clear_saved_references() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0), Vec3::new(40.0, 20.0, 5.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let before = h.app.session.doc.clone();
+    for side in [1, 2] {
+        h.step(&json!({"click":{"handle":format!("dialog:invert-alignment:{side}")}})).unwrap();
+        h.frames(3);
+        let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+        assert_eq!(p["a_alignment"]["reverse"], true);
+        assert_eq!(p["b_alignment"]["reverse"], side == 2);
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc, before);
+    for (id, p) in commands {
+        h.app.run(&id, p).unwrap();
+    }
+    let id = h.app.session.doc.assembly.joints[0].id;
+    h.app.dialog = edit_joint(&h.app, id);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:clear:Alignment 1 (optional)"}})).unwrap();
+    h.frames(3);
+    let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+    assert_eq!(p["a_alignment"], Value::Null);
+    assert!(p["b_alignment"]["face"].is_string());
+}
+
 fn occ(app: &SolveApp, name: &str) -> u64 {
     let c = app.session.doc.find_component(name).unwrap();
     app.session.doc.occurrence_of(c).unwrap().id
@@ -116,7 +211,8 @@ fn edit_joint_runs_edit_and_limits() {
         .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
-    assert!(d.inputs.is_empty());
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Alignment 1 (optional)", "Alignment 2 (optional)"]);
+    assert!(d.inputs.iter().all(|i| i.accept == PLANAR_FACES), "editing never asks to replace the primary origins");
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         assert_eq!(TYPES[f.kind], "slider");
         f.limits[0] = (true, "0 mm".into(), "15 mm".into());

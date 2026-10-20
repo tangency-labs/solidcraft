@@ -94,6 +94,13 @@ pub enum Snap {
 pub enum XRef {
     /// A direction (component coordinates); its part square to z is taken.
     Dir(Vec3),
+    /// A secondary alignment face. Unlike legacy x references it must remain one planar
+    /// face on the origin's component, with a nonzero projection square to its axis.
+    Planar {
+        planar_face: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
     /// A face: a plane's outward normal, a cylinder's way from the origin to its axis (another
     /// hole), any other face's way from the origin to the point of it nearest `pick` (component
     /// coordinates; it also tells the pieces of a split face apart, default the origin).
@@ -111,7 +118,7 @@ impl Snap {
         let mut out = Vec::new();
         if let Snap::FaceCenter { face, x, .. } | Snap::CircleCenter { face, x, .. } = self {
             out.extend(face.iter());
-            if let Some(XRef::Face { face, .. }) = x {
+            if let Some(XRef::Face { face, .. } | XRef::Planar { planar_face: face, .. }) = x {
                 out.push(face);
             }
         }
@@ -130,14 +137,14 @@ impl Snap {
         match self {
             Snap::FaceCenter { face, x, .. } => {
                 out.extend(face.iter_mut());
-                if let Some(XRef::Face { face, .. }) = x {
+                if let Some(XRef::Face { face, .. } | XRef::Planar { planar_face: face, .. }) = x {
                     out.push(face);
                 }
             }
             Snap::CircleCenter { face, end, x, .. } => {
                 out.extend(face.iter_mut());
                 out.extend(end.iter_mut());
-                if let Some(XRef::Face { face, .. }) = x {
+                if let Some(XRef::Face { face, .. } | XRef::Planar { planar_face: face, .. }) = x {
                     out.push(face);
                 }
             }
@@ -172,6 +179,7 @@ impl Snap {
     pub fn is_finite(&self) -> bool {
         let x_ok = |x: &Option<XRef>| match x {
             Some(XRef::Dir(d)) => d.is_finite(),
+            Some(XRef::Planar { planar_face, .. }) => !planar_face.is_empty() && planar_face.len() <= 512,
             Some(XRef::Face { pick, .. }) => pick.is_none_or(|p| p.is_finite()),
             None => true,
         };
@@ -784,12 +792,12 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
                 Some(cn) => cn,
                 None => nearest_plane(doc, st, o, named.as_ref().map_or(*pick, |f| f.point))?,
             };
-            frame(c, n, face::x_axis(doc, st, x.as_ref(), c)?).ok_or_else(bad)
+            frame(c, n, face::x_axis(doc, st, x.as_ref(), c, n, o.occurrence)?).ok_or_else(bad)
         }
         Snap::Edge { .. } => edge::edge_frame(doc, st, component_of(doc, o.occurrence)?, &o.snap),
         Snap::CircleCenter { x, .. } => {
             let r = round_of(doc, st, o)?;
-            frame(r.centre, r.z, face::x_axis(doc, st, x.as_ref(), r.centre)?).ok_or_else(bad)
+            frame(r.centre, r.z, face::x_axis(doc, st, x.as_ref(), r.centre, r.z, o.occurrence)?).ok_or_else(bad)
         }
     }
 }

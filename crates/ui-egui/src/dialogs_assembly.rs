@@ -12,13 +12,13 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::joints::JointKind;
+use solidcraft_engine::doc::joints::{JointKind, Snap, XRef};
 use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
-use crate::selection::{BODIES, EDGES, FACES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
+use crate::selection::{BODIES, EDGES, FACES, PLANAR_FACES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
 use crate::theme::Tokens;
 
 use crate::viewport::Proj;
@@ -136,6 +136,9 @@ pub struct JointForm {
     /// Animation phase, 0…1.
     pub phase: f64,
     pub hover: Hover,
+    /// Saved secondary references while editing; picked replacements live in the inputs.
+    pub alignment: [Option<Value>; 2],
+    pub reverse_alignment: [bool; 2],
 }
 
 impl JointForm {
@@ -151,6 +154,8 @@ impl JointForm {
             animate: false,
             phase: 0.0,
             hover: None,
+            alignment: [None, None],
+            reverse_alignment: [false; 2],
         }
     }
 
@@ -204,7 +209,12 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
         "joint.create" => (
             Asm::Joint(Box::new(JointForm::new(false))),
-            vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)],
+            vec![
+                SelInput::new("Component 1", SNAPS, false),
+                SelInput::new("Component 2", SNAPS, false),
+                SelInput::new("Alignment 1 (optional)", PLANAR_FACES, false),
+                SelInput::new("Alignment 2 (optional)", PLANAR_FACES, false),
+            ],
         ),
         "joint.as_built" => {
             (Asm::Joint(Box::new(JointForm::new(true))), vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)])
@@ -310,6 +320,14 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     f.editing = Some(id);
     f.kind = TYPES.iter().position(|t| JointKind::parse(t) == Some(j.kind)).unwrap_or(0);
     f.flip = j.flip;
+    for (i, origin) in [&j.a, &j.b].into_iter().enumerate() {
+        if let Snap::FaceCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
+        | Snap::CircleCenter { x: Some(XRef::Planar { planar_face, reverse }), .. } = &origin.snap
+        {
+            f.alignment[i] = Some(json!({"face": planar_face, "occurrence": origin.occurrence}));
+            f.reverse_alignment[i] = *reverse;
+        }
+    }
     // An offset or angle typed as an expression shows (and is sent back) as that expression, so
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
@@ -321,7 +339,10 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
             *l = (true, fmt(*lo), fmt(*hi));
         }
     }
-    Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), vec![]))
+    Some(Dialog::new(
+        Kind::Assembly(Asm::Joint(Box::new(f))),
+        vec![SelInput::new("Alignment 1 (optional)", PLANAR_FACES, false), SelInput::new("Alignment 2 (optional)", PLANAR_FACES, false)],
+    ))
 }
 
 /// The Drive Joints dialog on a joint (by id).
@@ -535,6 +556,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
             f.fit_limits();
             if !f.as_built {
+                for (i, label) in ["Invert alignment 1", "Invert alignment 2"].into_iter().enumerate() {
+                    let selected = f.alignment[i].is_some() || !sel_items(inputs, i + if f.editing.is_some() { 0 } else { 2 }).is_empty();
+                    form_row(ui, label, |ui| {
+                        let response = ui.add_enabled(selected, egui::Checkbox::new(&mut f.reverse_alignment[i], ""));
+                        crate::scenario::publish_handle(&format!("dialog:invert-alignment:{}", i + 1), response.rect.center());
+                    });
+                }
                 enter |= expr_row(ui, "Angle", &mut f.angle);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
                     for (l, v) in ["Offset X", "Offset Y", "Offset Z"].iter().zip(f.offset.iter_mut()) {
@@ -826,6 +854,70 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
 
 // ---- commands ----
 
+fn sel_items(inputs: &[SelInput], i: usize) -> &[Sel] {
+    inputs.get(i).map(|x| x.items.as_slice()).unwrap_or(&[])
+}
+
+fn alignment_side(k: &Kind, input: usize) -> Option<usize> {
+    let Kind::Assembly(Asm::Joint(f)) = k else { return None };
+    if f.as_built {
+        return None;
+    }
+    let side = input.checked_sub(if f.editing.is_some() { 0 } else { 2 })?;
+    (side < 2).then_some(side)
+}
+
+pub(crate) fn stored_alignment(k: &Kind, input: usize) -> Option<Value> {
+    let side = alignment_side(k, input)?;
+    let Kind::Assembly(Asm::Joint(f)) = k else { return None };
+    f.alignment.get(side)?.clone()
+}
+
+pub(crate) fn clear_alignment(k: &mut Kind, input: usize) {
+    let Some(side) = alignment_side(k, input) else { return };
+    if let Kind::Assembly(Asm::Joint(f)) = k {
+        f.alignment[side] = None;
+        f.reverse_alignment[side] = false;
+    }
+}
+
+/// Keep the picked occurrence explicit, including repeated definitions. Nested paths have no
+/// independent joint frames yet and are refused instead of aliasing to a primary instance.
+fn alignment_pick(s: &Session, sel: &Sel) -> Result<Value, String> {
+    let Sel::Face { body, index, .. } = sel else { return Err("select a planar alignment face".into()) };
+    let model = s.model.state();
+    let frames = s.doc.body_frames_with_source(&model);
+    let (_, source, _, path, _) = frames.iter().find(|(name, ..)| name == body).ok_or("alignment occurrence no longer exists")?;
+    if path.len() > 1 {
+        return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+    }
+    let b = model.body(source).ok_or("alignment body no longer exists")?;
+    let face = solidcraft_engine::doc::naming::face_names(b)
+        .get(*index as usize)
+        .cloned()
+        .filter(|n| !n.is_empty())
+        .ok_or("alignment face has no persistent name")?;
+    Ok(json!({"face": face, "occurrence": path.first().copied().unwrap_or(0)}))
+}
+
+fn alignment_params(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Result<[Option<Value>; 2], String> {
+    let mut out = [None, None];
+    if f.as_built {
+        return Ok(out);
+    }
+    for (side, slot) in out.iter_mut().enumerate() {
+        let picked = sel_items(inputs, side + if f.editing.is_some() { 0 } else { 2 }).first();
+        *slot = match picked {
+            Some(sel) => Some(alignment_pick(s, sel)?),
+            None => f.alignment[side].clone(),
+        };
+        if let Some(value) = slot {
+            value["reverse"] = json!(f.reverse_alignment[side]);
+        }
+    }
+    Ok(out)
+}
+
 /// The body a pick is on.
 pub(crate) fn body_of(sel: &Sel) -> Option<&str> {
     match sel {
@@ -900,12 +992,25 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
         }
         Asm::Joint(f) => {
+            let alignment = alignment_params(s, f, inputs)?;
             let kind = TYPES.get(f.kind).copied().unwrap_or("rigid");
             let jk = f.joint_kind();
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
-                let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2], "angle": f.angle}));
+                let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2], "angle": f.angle});
+                let old = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or("joint no longer exists")?;
+                for (i, (key, origin)) in [("a_alignment", &old.a), ("b_alignment", &old.b)].into_iter().enumerate() {
+                    if alignment[i].is_some()
+                        || matches!(
+                            &origin.snap,
+                            Snap::FaceCenter { x: Some(XRef::Planar { .. }), .. } | Snap::CircleCenter { x: Some(XRef::Planar { .. }), .. }
+                        )
+                    {
+                        p[key] = alignment[i].clone().unwrap_or(Value::Null);
+                    }
+                }
+                let mut out = cmd("joint.edit", p);
                 for (i, l) in limits.iter().enumerate() {
                     let p = match l.as_array() {
                         Some(a) => json!({"joint": id, "index": i, "min": a.first(), "max": a.get(1)}),
@@ -927,15 +1032,31 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(cmd("joint.as_built", p));
             }
             let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
+            for (side, origin) in [&a, &b].into_iter().enumerate() {
+                if alignment[side].is_some() {
+                    let picked = sel_items(inputs, side).first().ok_or("select the primary face origin first")?;
+                    if alignment_pick(s, picked)?["occurrence"] != origin.param["occurrence"] {
+                        return Err("this primary origin aliases another instance; select an unambiguous occurrence before adding alignment".into());
+                    }
+                }
+            }
             if a.param.get("occurrence").is_some() && a.param.get("occurrence") == b.param.get("occurrence") {
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
+            if alignment.iter().any(Option::is_some) && (x.abs() > 1e-12 || y.abs() > 1e-12) {
+                return Err("secondary alignment needs a persistent face origin; set Offset X and Offset Y to zero first".into());
+            }
             let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { shifted(&a, x, y) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            for (i, key) in ["a_alignment", "b_alignment"].into_iter().enumerate() {
+                if let Some(value) = &alignment[i] {
+                    p[key] = value.clone();
+                }
+            }
             cmd("joint.create", p)
         }
         Asm::JointOrigin { name, .. } => {

@@ -197,10 +197,24 @@ fn end_named(b: &ModelBody, face: usize, own: &CylinderFace, name: &str) -> Opti
 }
 
 /// The x axis an x reference gives a frame at `o` with axis `z` (`None`: no reference).
-pub(super) fn x_axis(doc: &Document, st: &ModelState, x: Option<&XRef>, o: Vec3) -> Result<Option<Vec3>> {
+pub(super) fn x_axis(doc: &Document, st: &ModelState, x: Option<&XRef>, o: Vec3, z: Vec3, occurrence: u64) -> Result<Option<Vec3>> {
     Ok(match x {
         None => None,
         Some(XRef::Dir(d)) => Some(*d),
+        Some(XRef::Planar { planar_face, reverse }) => {
+            // locate_one refuses ambiguous split names; never choose a nearest replacement.
+            let (on, pick) = named_face_spot(doc, st, None, planar_face).map_err(DocError::Invalid)?;
+            if on != super::component_of(doc, occurrence)? {
+                return Err(DocError::Invalid("alignment face is not on the origin's component".into()));
+            }
+            let nf = named_face(doc, st, pick, planar_face)?;
+            let (_, n) = nf.plane()?.ok_or_else(|| DocError::Invalid("alignment reference must remain planar".into()))?;
+            let z = z.normalized().ok_or_else(|| DocError::Invalid("alignment origin has no axis".into()))?;
+            let x = (n - z * n.dot(z))
+                .normalized()
+                .ok_or_else(|| DocError::Invalid("alignment normal is parallel to the joint axis; pick another face".into()))?;
+            Some(if *reverse { -x } else { x })
+        }
         Some(XRef::Face { face, pick }) => {
             let nf = named_face(doc, st, pick.unwrap_or(o), face)?;
             if let Some((_, n)) = nf.plane()? {
