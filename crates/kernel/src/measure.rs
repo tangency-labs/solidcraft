@@ -71,6 +71,12 @@ pub struct MassMeasure {
     pub bbox: Aabb3,
 }
 
+/// The volume a mesh encloses, taken about `o` ([`face_sums`]: a point in or near the body).
+pub(crate) fn mesh_volume_about(m: &Mesh, o: Vec3) -> f64 {
+    let o = if o.is_finite() { o } else { Vec3::ZERO };
+    m.triangles.iter().filter_map(|t| m.tri(t)).map(|[a, b, c]| (a - o).dot((b - o).cross(c - o))).sum::<f64>() / 6.0
+}
+
 /// Measure a body from a fine tessellation (chord tolerance 5e-5 of the body size, finer for
 /// small radii down to 5e-6). Faces whose fine tessellation disagrees with a coarse one (a
 /// meshing failure) use the coarse result.

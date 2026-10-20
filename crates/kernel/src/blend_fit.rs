@@ -258,8 +258,9 @@ struct Selection {
     planar: Vec<bool>,
     size: f64,
     chord: f64,
-    /// The body's volume and area from that mesh.
+    /// The body's volume (about `centre`, the middle of its box) and area from that mesh.
     coarse: (f64, f64),
+    centre: Vec3,
 }
 
 fn select(body: &Body, pts: &[Vec3]) -> Result<Selection> {
@@ -298,9 +299,10 @@ fn select_in(body: &Body, pts: &[Vec3]) -> Result<Selection> {
         frames.push(frame);
     }
     let m = mesh.measure();
-    let coarse = (m.volume, m.area);
+    let centre = mesh.bounds().center();
+    let coarse = (crate::measure::mesh_volume_about(&mesh, centre), m.area);
     let tris = mesh.triangles.iter().zip(&mesh.tri_face).filter_map(|(t, f)| Some((mesh.tri(t)?, *f as usize))).collect();
-    Ok(Selection { frames, tris, planar, size, chord, coarse })
+    Ok(Selection { frames, tris, planar, size, chord, coarse, centre })
 }
 
 fn frame(faces: &[&mt::Face], e: &mt::Edge) -> Option<Frame> {
@@ -621,7 +623,7 @@ fn volume_in(sel: &Selection, input: &Body, out: Body, size: Size) -> Result<Bod
     }
     // Well within the bound on the meshes the check made anyway: accepted. Otherwise measured
     // finely, as a coarse mesh of a cone or a blend is off by more than a small blend.
-    if let Ok(m) = out.tessellate(sel.chord).map(|m| m.measure()) {
+    if let Ok(m) = out.tessellate(sel.chord).map(|m| solidcraft_geom::MeshMeasure { volume: crate::measure::mesh_volume_about(&m, sel.centre), ..m.measure() }) {
         let (va, aa) = sel.coarse;
         // A chord's sag over every face bounds what the meshes miss.
         let slack = (aa + m.area) * sel.chord;
