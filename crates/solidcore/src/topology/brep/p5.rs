@@ -148,13 +148,6 @@ fn require_editing(enabled: bool) -> Result<()> {
     }
 }
 
-/// Reads the owning B-rep's editing member once its record support lands. Unlike
-/// the explicit-state entry points, opaque existing callers cannot assume TRUE.
-pub(crate) fn editing_enabled(_b: &Brep) -> Result<bool> {
-    // UNPORTED(topology.brep_p1): SmBrep::m_bEditingEnabled
-    missing("SmBrep::m_bEditingEnabled", "topology.brep_p1")
-}
-
 /// The position, tolerance and temporary-edge length threshold calculated before
 /// `CombineCoincidentVertices` modifies topology (`SM_USE_OLDTOL`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -345,11 +338,11 @@ pub fn combine_with_notifications(
             ) {
                 end = start + Vec3::new(target.tolerance, target.tolerance, target.tolerance);
             }
-            // Preserve failures from the temporary line before the missing edit
-            // metadata is consulted. The owned temporary drops on deferral.
+            // Preserve failures from the temporary line before the edit metadata is
+            // consulted.
             let line = BSplineCurve::create_line_segment(3, start, end)?;
             let interval = line.natural_interval();
-            let editing = editing_enabled(b)?;
+            let editing = b.editing_enabled();
             let mut output = EdgeInFace::default();
             make_edge_in_face(
                 b,
@@ -490,7 +483,9 @@ pub fn create_wire_edge_from_curve(
 ) -> Result<EdgeId> {
     let start = curve.evaluate_point(interval.min())?;
     let end = curve.evaluate_point(interval.max())?;
-    let region = infinite_region(b)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let region = b
+        .infinite_region()
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
     let (_, first) = make_shell_vertex(b, region, start)?;
     let (edge, last) =
         make_wire_edge_vertex(b, region, first, curve, interval, OrientType::Same, end)?;
@@ -498,11 +493,6 @@ pub fn create_wire_edge_from_curve(
         crate::error::ignore_status(glue_vertices(k, b, Some(first), Some(last), None))?;
     }
     Ok(edge)
-}
-
-fn infinite_region(_b: &Brep) -> Result<Option<RegionId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetInfiniteRegion
-    missing("SmBrep::GetInfiniteRegion", "topology.brep_p1")
 }
 
 fn make_shell_vertex(_b: &mut Brep, _r: RegionId, _point: Point3) -> Result<(ShellId, VertexId)> {
@@ -1410,13 +1400,13 @@ pub fn make_manifold(
     if regions_to_keep.is_some_and(<[RegionId]>::is_empty) {
         return Err(SolidError::sm_err(OP));
     }
-    let previous = set_editing_enabled(b, true)?;
+    let previous = set_editing_enabled(b, true);
     let result = (|| {
         let mut regions = if let Some(given) = regions_to_keep {
             given.to_vec()
         } else {
             let mut all = brep_regions(b)?;
-            let infinite = infinite_region(b)?;
+            let infinite = b.infinite_region();
             if let Some(index) = all.iter().position(|r| Some(*r) == infinite) {
                 all.remove(index);
             }
@@ -1454,36 +1444,34 @@ pub fn make_manifold(
         }
         regions = brep_regions(b)?;
         for region in regions {
-            let is_infinite = Some(region) == infinite_region(b)?;
+            let is_infinite = Some(region) == b.infinite_region();
             set_region_is_void(b, region, is_infinite)?;
         }
         Ok(())
     })();
-    // Upstream restores in a destructor; a restore failure never hides `result`.
-    let restored = set_editing_enabled(b, previous);
-    result.and(restored.map(|_| ()))
+    // Upstream restores in a destructor.
+    set_editing_enabled(b, previous);
+    result
 }
 
-fn set_editing_enabled(_b: &mut Brep, _enabled: bool) -> Result<bool> {
-    // UNPORTED(topology.brep_p1): SmBrep::m_bEditingEnabled
-    missing("SmBrep::m_bEditingEnabled", "topology.brep_p1")
+/// Sets `m_bEditingEnabled`, returning the previous value.
+fn set_editing_enabled(b: &mut Brep, enabled: bool) -> bool {
+    let previous = b.editing_enabled();
+    b.set_editing_enabled(enabled);
+    previous
 }
 
-fn brep_regions(_b: &Brep) -> Result<Vec<RegionId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetRegions
-    missing("SmBrep::GetRegions", "topology.brep_p1")
+fn brep_regions(b: &Brep) -> Result<Vec<RegionId>> {
+    crate::topology::brep::p1::regions(b, None)
 }
-fn brep_faces(_b: &Brep) -> Result<Vec<FaceId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetFaces
-    missing("SmBrep::GetFaces", "topology.brep_p1")
+fn brep_faces(b: &Brep) -> Result<Vec<FaceId>> {
+    crate::topology::brep::p1::faces(b, None)
 }
-fn brep_edges(_b: &Brep) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetEdges
-    missing("SmBrep::GetEdges", "topology.brep_p1")
+fn brep_edges(b: &Brep) -> Result<Vec<EdgeId>> {
+    crate::topology::brep::p1::edges(b, None)
 }
-fn brep_vertices(_b: &Brep) -> Result<Vec<VertexId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetVertices
-    missing("SmBrep::GetVertices", "topology.brep_p1")
+fn brep_vertices(b: &Brep) -> Result<Vec<VertexId>> {
+    crate::topology::brep::p1::vertices(b, None)
 }
 fn face_shells(b: &Brep, face: FaceId) -> Result<(ShellId, ShellId)> {
     let (a, z) = crate::topology::face::p2::faceuses(b, face)?;
@@ -1536,7 +1524,7 @@ pub fn remove_topological_with_notifications(
     keep_vertices: Option<&[VertexId]>,
     mut notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
-    let previous = set_editing_enabled(b, true)?;
+    let previous = set_editing_enabled(b, true);
     let result = (|| {
         for edge in brep_edges(b)? {
             // IsTopological can expand a surface even when this edge is on the
@@ -1606,9 +1594,9 @@ pub fn remove_topological_with_notifications(
         }
         Ok(())
     })();
-    // Upstream restores in a destructor; a restore failure never hides `result`.
-    let restored = set_editing_enabled(b, previous);
-    result.and(restored.map(|_| ()))
+    // Upstream restores in a destructor.
+    set_editing_enabled(b, previous);
+    result
 }
 
 fn delete_edge_keep_surface(_b: &mut Brep, _edge: EdgeId, _surface_face: FaceId) -> Result<FaceId> {
@@ -2224,13 +2212,11 @@ fn replace_surface(
     }
     Ok(())
 }
-fn reverse_reflection_edgeuses(_b: &mut Brep, _edge: EdgeId) -> Result<()> {
-    // UNPORTED(topology.brep_p1): sm_ReverseReflectionEdgeuses
-    missing("sm_ReverseReflectionEdgeuses", "topology.brep_p1")
+fn reverse_reflection_edgeuses(b: &mut Brep, edge: EdgeId) -> Result<()> {
+    crate::topology::brep::p1::reverse_reflection_edgeuses(b, edge)
 }
-fn swap_reflection_shells(_b: &mut Brep, _face: FaceId) -> Result<()> {
-    // UNPORTED(topology.brep_p1): sm_SwapReflectionShells
-    missing("sm_SwapReflectionShells", "topology.brep_p1")
+fn swap_reflection_shells(b: &mut Brep, face: FaceId) -> Result<()> {
+    crate::topology::brep::p1::swap_reflection_shells(b, face)
 }
 fn set_brep_model_size(_b: &mut Brep, _size: f64) -> Result<f64> {
     // SmTol::SetModelSizeEstimate's arithmetic belongs to geom.tol; the

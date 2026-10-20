@@ -395,16 +395,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetPoint",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "gen0014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354333",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -706,16 +702,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetPoint",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "gen0050",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10620584185765354369",
-      "values_compared": 0
+      "values_compared": 19
     },
     {
       "max_rel_err": 0.0,
@@ -3685,16 +3677,15 @@
     }
   ],
   "cases_both_errored": 50,
-  "cases_deferred": 40,
+  "cases_deferred": 38,
   "cases_failed": 0,
-  "cases_passed": 394,
+  "cases_passed": 396,
   "cases_total": 434,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 1,
     "surface.surface_p2": 3,
     "topology.edge": 27,
-    "topology.face_p4": 7,
-    "topology.vertex": 2
+    "topology.face_p4": 7
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -159,8 +159,11 @@ impl CurveIn {
     fn rust(&self) -> HResult<Curve> {
         match self {
             Self::Line { start, end, domain } => {
-                let mut line = Line::from_points(v3(*start), v3(*end), 3);
-                line.edit_parameterization(&ivl(*domain)).map_err(setup)?;
+                // As the shim: SmLine::CreateLineSegment (Unitize, then the bounded
+                // constructor re-unitizes), not the two-point constructor.
+                let line =
+                    Line::create_line_segment(3, v3(*start), v3(*end), Some(&ivl(*domain)))
+                        .map_err(setup)?;
                 Ok(Curve::from(line))
             }
             Self::Bspline {

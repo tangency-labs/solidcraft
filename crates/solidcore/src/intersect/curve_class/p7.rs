@@ -55,8 +55,11 @@
 //!   whose curve is not a B-spline (`SM_CAST_PTR` gives `NULL`).
 //! - **Debug-only work** (`SM_DEBUG_CODE`, `SM_DBG_WARN`, `bReportProb` messages, the
 //!   unused `AreCoincidentMaybe` angle check) is dropped; the angle is still computed.
+//! - **`SmEdge::GetCurve`** reaches the edge's B-rep through
+//!   [`ClassGeometry::topology_entity`]; a handle the adapter cannot resolve (no
+//!   B-rep) stays [`SolidError::Unported`].
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]: the topology
-//!   members (`SmEdge`, `SmVertex`: `GetCurve`, `GetInterval`, `IsConnectedTo`,
+//!   members (`SmEdge`, `SmVertex`: `GetInterval`, `IsConnectedTo`,
 //!   `GetPoint`, `SetPoint`, `SetCurve`, `GetTolerance` through `SmTol`), the face
 //!   classifiers `SmFace::FindVertexSector` (`topology.face_p4`),
 //!   `EdgeCurveOnClassify` / `Point3DClassify` (`query.face_p1`) and `PointClassify`
@@ -68,7 +71,7 @@ use std::borrow::Cow;
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
@@ -83,6 +86,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::edge as topo_edge;
 
 use super::p1::{
     get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
@@ -1618,11 +1622,19 @@ fn crv_on_surf(k: &Kernel, uv_curve: &Curve, surface: Option<&Surface>) -> Resul
 
 // ---- callees in units not ported yet ---------------------------------------------------
 
-/// `SmEdge::GetCurve`.
+/// `SmEdge::GetCurve`, on the edge [`ClassGeometry::topology_entity`] resolves `edge` to;
+/// a handle that is not an edge and an edge without a curve (which every caller
+/// dereferences) are [`SolidError::InvalidInput`]; a handle the adapter cannot resolve
+/// (no B-rep) stays [`SolidError::Unported`].
 fn edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<&Curve> {
-    let _ = (geometry, edge);
-    // UNPORTED(topology.edge): SmEdge::GetCurve
-    Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
+    match geometry.topology_entity(edge) {
+        Some((b, EntityRef::Edge(e))) => topo_edge::curve(b, e)?
+            .ok_or(SolidError::invalid_input(OP_GEOM, "edge without a curve")),
+        Some(_) => Err(SolidError::invalid_input(OP_GEOM, "handle is not an edge")),
+        // an opaque handle (the adapter has no B-rep): still a deferral
+        // UNPORTED(topology.edge): SmEdge::GetCurve (unresolved handle)
+        None => Err(SolidError::unported("SmEdge::GetCurve", "topology.edge")),
+    }
 }
 
 /// `SmEdge::GetInterval` (of the edge object of a classification).

@@ -715,9 +715,7 @@ fn face_notify_call(
     operation: NotifyOperation,
     data: [Option<crate::geom::object::ObjectRef>; 3],
 ) -> Result<()> {
-    let _ = (b, face, env, operation, data);
-    // UNPORTED(topology.face_p3): SmFace::Notify
-    Err(SolidError::unported("SmFace::Notify", "topology.face_p3"))
+    crate::topology::face::p3::notify(b, face, env, None, operation, data)
 }
 
 fn required<T>(v: Option<T>, reason: &'static str) -> Result<T> {

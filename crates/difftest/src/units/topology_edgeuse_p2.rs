@@ -248,6 +248,22 @@ pub(super) fn inexact_geometry(s: &Setup) -> Option<Output> {
     None
 }
 
+/// The deferral of a case whose face surface overrides the NURB-parameter evaluators
+/// (`SmCone`, `SmCylinder`, `SmSphere`): the Rust `Surface` has no kind for it.
+fn analytic_evaluators(s: &Setup) -> Option<Output> {
+    let surface_type = eu1::face(&s.brep, s.eu)
+        .ok()
+        .flatten()
+        .and_then(|f| s.types.face_surface_types.get(f.index() as usize).copied())?;
+    let symbol = match surface_type {
+        15012 => "SurfaceKind::Cone (SmCone dispatch)",
+        15013 => "SurfaceKind::Cone (SmCylinder dispatch)",
+        15014 => "SurfaceKind::Sphere (SmSphere dispatch)",
+        _ => return None,
+    };
+    Some(Output::deferred("surface.surface_p2", symbol))
+}
+
 // ---- C++ side ---------------------------------------------------------------------------
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -551,6 +567,15 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             return Ok(Output::err("no_uv_curve"));
         }
         if let Some(o) = inexact_geometry(&s) {
+            return Ok(o);
+        }
+    }
+    // the step-off point, binormal and face normal come from the face surface's
+    // NURB-parameter evaluators, which `SmCone` (`Evaluate`, `EvaluatePoint`; inherited
+    // by `SmCylinder`) and `SmSphere` (`EvaluateNormal`) override analytically: their
+    // B-spline part, all the import holds, differs by ulps
+    if let OpIn::StepOff { .. } = &i.op {
+        if let Some(o) = analytic_evaluators(&s) {
             return Ok(o);
         }
     }

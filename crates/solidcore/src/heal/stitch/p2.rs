@@ -39,8 +39,7 @@
 //!   (`query.brep`), `DeleteFace`, `SqueezeEdge` (`topology.brep_p3`), `GlueVertices`,
 //!   `FindAndSetInfiniteRegion` (`topology.brep_p5`), `GlueEdgesGeneral`
 //!   (`topology.brep_p7`), `MakeVertexSplitEdge` (`topology.brep_p9`, through
-//!   [`test_and_split_edge`]) and `SmFace::IsLamina`, `IsDegenerate`, `Notify`
-//!   (`topology.face_p3`) return [`SolidError::Unported`].
+//!   [`test_and_split_edge`]) return [`SolidError::Unported`] where still unported.
 
 use super::p1::{
     brep_notify_pre_edit, glue_edges_general, glue_vertices, set_point, sort_by_param,
@@ -621,7 +620,6 @@ impl Stitch<'_> {
                     f,
                     NotifyOperation::PreEdit,
                     Some(EntityRef::Face(f)),
-                    false, // SM_NO_GET_BREP(pF)
                     None,
                 ))?;
             }
@@ -1516,19 +1514,16 @@ fn face_is_degenerate(
 }
 
 /// `SmFace::Notify(eNotifyOperation, pData1, pData2, pData3)` (unit
-/// `topology.face_p3`); `data2_is_brep` stands for `pData2` being the face's B-rep,
-/// else null (`SM_NO_GET_BREP(pF)` is null).
+/// `topology.face_p3`) with `pData2 = SM_NO_GET_BREP(pF)` (null), the only form used
+/// here.
 fn face_notify(
     b: &mut Brep,
     f: FaceId,
     operation: NotifyOperation,
     data1: Option<EntityRef>,
-    data2_is_brep: bool,
     data3: Option<EntityRef>,
 ) -> Result<()> {
-    let _ = (b, f, operation, data1, data2_is_brep, data3);
-    // UNPORTED(topology.face_p3): SmFace::Notify
-    Err(SolidError::unported("SmFace::Notify", "topology.face_p3"))
+    crate::topology::loopuse::face_notify_data(b, f, operation, [data1, None, data3])
 }
 
 #[cfg(test)]

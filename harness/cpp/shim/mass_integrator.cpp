@@ -142,7 +142,7 @@ SC_EXPORT int32_t sc_mass_integrator_edge(int32_t op,int32_t kind,const double* 
 // p: plane origin[3], UV scales[2], UV domain[4], computation origin[3], accuracy,
 // thickness, orientation (0 SAME, 1 OPPOSITE), property flags.
 // kind 0 rectangle, 1 disk, 2 annulus, 3 quadratic B-spline patch, 4 rotated plane.
-// op 0 properties, 1 export input UV domain/bbox scale/oriented trims, 2 API area, 3 API centroid,
+// op 0 properties, 1 export input UV domain/bbox scale/oriented trims (NURB, then 1 + SmLine members or 0), 2 API area, 3 API centroid,
 // 4 API Brep area, 5 API Brep volume, 6 API Brep mass properties (sheet rejection), 7 Surface::Area.
 SC_EXPORT int32_t sc_mass_integrator_face(int32_t op,int32_t kind,const double* p,double* out,int64_t cap,int64_t* len){
     if(op<0||op>7||kind<0||kind>4)return SC_ERR_ARG;
@@ -193,7 +193,14 @@ SC_EXPORT int32_t sc_mass_integrator_face(int32_t op,int32_t kind,const double* 
             result.push_back(domain.GetMax().x);result.push_back(domain.GetMax().y);
             result.push_back(curves.GetSize());for(ULONG i=0;i<curves.GetSize();++i){gw_CURVE* c=curves[i]->GetGwNurbPointer();result.push_back(c->pol->n);result.push_back(c->p);result.push_back(c->knt->m);
             for(gw_INDEX j=0;j<=c->pol->n;++j){result.push_back(c->pol->Pw[j].x);result.push_back(c->pol->Pw[j].y);result.push_back(c->pol->Pw[j].z);result.push_back(c->pol->Pw[j].w);}
-            for(gw_INDEX j=0;j<=c->knt->m;++j)result.push_back(c->knt->U[j]);}}
+            for(gw_INDEX j=0;j<=c->knt->m;++j)result.push_back(c->knt->U[j]);
+            // Trims are often analytic SmLines, whose Evaluate differs from the NURB's.
+            if(curves[i]->GetType()==SmLine_TYPE){const SmLine* l=(const SmLine*)curves[i];
+                const SmPoint3d& lp=l->GetLinePoint();const SmVector3d& lv=l->GetLineVector();SmExtent1d ad=l->GetSTEPInterval();
+                result.push_back(1.0);result.push_back(lp.x);result.push_back(lp.y);result.push_back(lp.z);
+                result.push_back(lv.x);result.push_back(lv.y);result.push_back(lv.z);result.push_back(ad.GetMin());result.push_back(ad.GetMax());
+                result.push_back(l->GetLineScale());result.push_back(l->GetInsideOut()?1.0:0.0);}
+            else result.push_back(0.0);}}
         for(ULONG i=0;i<curves.GetSize();++i)delete curves[i];
     }else{
         double area=0,volume=0,mass=0;SmPoint3d centroid;SmVector3d inertia,products;SmTArray<SmVector3d> moments;

@@ -327,8 +327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_vertex_loop_False",
@@ -339,8 +339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_vertex_loop_True",
@@ -351,8 +351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmFace::GetUpwardEdgeuses",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "plane_insert_0",
@@ -403,8 +403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_split_face_edge_interior",
@@ -451,8 +451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "bspline_face_vertex_loop_False",
@@ -463,8 +463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "bspline_face_vertex_loop_True",
@@ -527,8 +527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "bspline_face_split_face_edge_interior",
@@ -787,8 +787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e0_t0.5",
@@ -807,8 +807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e0_t1",
@@ -819,8 +819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e0_t3.14159",
@@ -839,8 +839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e1_t0.5",
@@ -851,8 +851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e1_t1",
@@ -863,8 +863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e1_t3.14159",
@@ -883,8 +883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e2_t0.5",
@@ -895,8 +895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e2_t1",
@@ -907,8 +907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e2_t3.14159",
@@ -927,8 +927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e3_t0.5",
@@ -939,8 +939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e3_t1",
@@ -951,8 +951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e3_t3.14159",
@@ -971,8 +971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e4_t0.5",
@@ -983,8 +983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e4_t1",
@@ -995,8 +995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e4_t3.14159",
@@ -1015,8 +1015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e5_t0.5",
@@ -1027,8 +1027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e5_t1",
@@ -1039,8 +1039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_cone_split_e5_t3.14159",
@@ -1075,8 +1075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e0_t1",
@@ -1087,8 +1087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e0_t3.14159",
@@ -1115,8 +1115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e1_t1",
@@ -1127,8 +1127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e1_t3.14159",
@@ -1147,8 +1147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e2_t0.5",
@@ -1159,8 +1159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e2_t1",
@@ -1171,8 +1171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e2_t3.14159",
@@ -1191,8 +1191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e3_t0.5",
@@ -1235,8 +1235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e4_t1",
@@ -1247,8 +1247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e4_t3.14159",
@@ -1267,8 +1267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "real_mouse_split_e5_t0.5",
@@ -1471,8 +1471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_op3_point_NaN",
@@ -1507,8 +1507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_op3_point_inf",
@@ -1543,8 +1543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::Notify",
-        "unit": "topology.face_p3"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_op3_point_-inf",
@@ -5667,8 +5667,8 @@
     "intersect.surface_drop_curve": 1,
     "intersect.surface_drop_lib_p3": 1,
     "query.brep": 1,
-    "topology.face_p3": 39,
-    "topology.face_p4": 4
+    "topology.brep_p2": 141,
+    "topology.face_p4": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

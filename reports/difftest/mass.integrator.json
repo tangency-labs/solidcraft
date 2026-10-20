@@ -274,7 +274,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_02",
       "outcome": "pass",
       "pass": true,
@@ -282,7 +282,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_03",
       "outcome": "pass",
       "pass": true,
@@ -290,7 +290,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_04",
       "outcome": "pass",
       "pass": true,
@@ -298,7 +298,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_05",
       "outcome": "pass",
       "pass": true,
@@ -306,7 +306,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_06",
       "outcome": "pass",
       "pass": true,
@@ -314,7 +314,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_07",
       "outcome": "pass",
       "pass": true,
@@ -338,7 +338,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_10",
       "outcome": "pass",
       "pass": true,
@@ -346,7 +346,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_11",
       "outcome": "pass",
       "pass": true,
@@ -354,7 +354,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_12",
       "outcome": "pass",
       "pass": true,
@@ -362,7 +362,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_13",
       "outcome": "pass",
       "pass": true,
@@ -370,7 +370,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_14",
       "outcome": "pass",
       "pass": true,
@@ -378,7 +378,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_15",
       "outcome": "pass",
       "pass": true,
@@ -386,7 +386,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_16",
       "outcome": "pass",
       "pass": true,
@@ -394,7 +394,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_17",
       "outcome": "pass",
       "pass": true,
@@ -402,7 +402,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_18",
       "outcome": "pass",
       "pass": true,
@@ -410,7 +410,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_19",
       "outcome": "pass",
       "pass": true,
@@ -418,7 +418,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_20",
       "outcome": "pass",
       "pass": true,
@@ -426,7 +426,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_21",
       "outcome": "pass",
       "pass": true,
@@ -434,7 +434,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_22",
       "outcome": "pass",
       "pass": true,
@@ -442,7 +442,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_23",
       "outcome": "pass",
       "pass": true,
@@ -450,7 +450,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_24",
       "outcome": "pass",
       "pass": true,
@@ -458,7 +458,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_25",
       "outcome": "pass",
       "pass": true,
@@ -466,7 +466,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_26",
       "outcome": "pass",
       "pass": true,
@@ -474,7 +474,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_27",
       "outcome": "pass",
       "pass": true,
@@ -482,7 +482,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_28",
       "outcome": "pass",
       "pass": true,
@@ -490,7 +490,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_29",
       "outcome": "pass",
       "pass": true,
@@ -498,7 +498,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_30",
       "outcome": "pass",
       "pass": true,
@@ -506,7 +506,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_31",
       "outcome": "pass",
       "pass": true,
@@ -514,7 +514,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_32",
       "outcome": "pass",
       "pass": true,
@@ -522,7 +522,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_33",
       "outcome": "pass",
       "pass": true,
@@ -530,7 +530,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_34",
       "outcome": "pass",
       "pass": true,
@@ -538,7 +538,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_35",
       "outcome": "pass",
       "pass": true,
@@ -546,7 +546,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_36",
       "outcome": "pass",
       "pass": true,
@@ -554,7 +554,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_37",
       "outcome": "pass",
       "pass": true,
@@ -562,7 +562,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_38",
       "outcome": "pass",
       "pass": true,
@@ -570,7 +570,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_39",
       "outcome": "pass",
       "pass": true,
@@ -578,7 +578,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_40",
       "outcome": "pass",
       "pass": true,
@@ -586,7 +586,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_41",
       "outcome": "pass",
       "pass": true,
@@ -594,7 +594,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_42",
       "outcome": "pass",
       "pass": true,
@@ -602,7 +602,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_43",
       "outcome": "pass",
       "pass": true,
@@ -610,7 +610,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_44",
       "outcome": "pass",
       "pass": true,
@@ -618,7 +618,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_45",
       "outcome": "pass",
       "pass": true,
@@ -626,7 +626,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_46",
       "outcome": "pass",
       "pass": true,
@@ -634,7 +634,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_47",
       "outcome": "pass",
       "pass": true,
@@ -642,7 +642,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_48",
       "outcome": "pass",
       "pass": true,
@@ -650,7 +650,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_49",
       "outcome": "pass",
       "pass": true,
@@ -658,7 +658,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_50",
       "outcome": "pass",
       "pass": true,
@@ -666,7 +666,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_51",
       "outcome": "pass",
       "pass": true,
@@ -674,7 +674,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_52",
       "outcome": "pass",
       "pass": true,
@@ -682,7 +682,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_53",
       "outcome": "pass",
       "pass": true,
@@ -690,7 +690,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_54",
       "outcome": "pass",
       "pass": true,
@@ -698,7 +698,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_55",
       "outcome": "pass",
       "pass": true,
@@ -706,7 +706,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_56",
       "outcome": "pass",
       "pass": true,
@@ -714,7 +714,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_57",
       "outcome": "pass",
       "pass": true,
@@ -722,7 +722,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_58",
       "outcome": "pass",
       "pass": true,
@@ -730,7 +730,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_59",
       "outcome": "pass",
       "pass": true,
@@ -738,7 +738,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_60",
       "outcome": "pass",
       "pass": true,
@@ -746,7 +746,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_61",
       "outcome": "pass",
       "pass": true,
@@ -754,7 +754,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_62",
       "outcome": "pass",
       "pass": true,
@@ -762,7 +762,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_0_63",
       "outcome": "pass",
       "pass": true,
@@ -778,7 +778,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_02",
       "outcome": "pass",
       "pass": true,
@@ -786,7 +786,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_03",
       "outcome": "pass",
       "pass": true,
@@ -794,7 +794,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_04",
       "outcome": "pass",
       "pass": true,
@@ -802,7 +802,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_05",
       "outcome": "pass",
       "pass": true,
@@ -810,7 +810,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_06",
       "outcome": "pass",
       "pass": true,
@@ -818,7 +818,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_07",
       "outcome": "pass",
       "pass": true,
@@ -842,7 +842,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_10",
       "outcome": "pass",
       "pass": true,
@@ -850,7 +850,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.2761184191093745e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_11",
       "outcome": "pass",
       "pass": true,
@@ -858,7 +858,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_12",
       "outcome": "pass",
       "pass": true,
@@ -866,7 +866,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_13",
       "outcome": "pass",
       "pass": true,
@@ -874,7 +874,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_14",
       "outcome": "pass",
       "pass": true,
@@ -882,7 +882,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_15",
       "outcome": "pass",
       "pass": true,
@@ -890,7 +890,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_16",
       "outcome": "pass",
       "pass": true,
@@ -898,7 +898,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_17",
       "outcome": "pass",
       "pass": true,
@@ -906,7 +906,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_18",
       "outcome": "pass",
       "pass": true,
@@ -914,7 +914,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_19",
       "outcome": "pass",
       "pass": true,
@@ -922,7 +922,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_20",
       "outcome": "pass",
       "pass": true,
@@ -930,7 +930,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_21",
       "outcome": "pass",
       "pass": true,
@@ -938,7 +938,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_22",
       "outcome": "pass",
       "pass": true,
@@ -946,7 +946,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_23",
       "outcome": "pass",
       "pass": true,
@@ -954,7 +954,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_24",
       "outcome": "pass",
       "pass": true,
@@ -962,7 +962,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_25",
       "outcome": "pass",
       "pass": true,
@@ -970,7 +970,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_26",
       "outcome": "pass",
       "pass": true,
@@ -978,7 +978,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.556241974523627e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_27",
       "outcome": "pass",
       "pass": true,
@@ -986,7 +986,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_28",
       "outcome": "pass",
       "pass": true,
@@ -994,7 +994,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_29",
       "outcome": "pass",
       "pass": true,
@@ -1002,7 +1002,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_30",
       "outcome": "pass",
       "pass": true,
@@ -1010,7 +1010,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7747240932344743e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_31",
       "outcome": "pass",
       "pass": true,
@@ -1018,7 +1018,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_32",
       "outcome": "pass",
       "pass": true,
@@ -1026,7 +1026,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_33",
       "outcome": "pass",
       "pass": true,
@@ -1034,7 +1034,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_34",
       "outcome": "pass",
       "pass": true,
@@ -1042,7 +1042,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_35",
       "outcome": "pass",
       "pass": true,
@@ -1050,7 +1050,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_36",
       "outcome": "pass",
       "pass": true,
@@ -1058,7 +1058,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_37",
       "outcome": "pass",
       "pass": true,
@@ -1066,7 +1066,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_38",
       "outcome": "pass",
       "pass": true,
@@ -1074,7 +1074,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_39",
       "outcome": "pass",
       "pass": true,
@@ -1082,7 +1082,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_40",
       "outcome": "pass",
       "pass": true,
@@ -1090,7 +1090,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_41",
       "outcome": "pass",
       "pass": true,
@@ -1098,7 +1098,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_42",
       "outcome": "pass",
       "pass": true,
@@ -1106,7 +1106,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_43",
       "outcome": "pass",
       "pass": true,
@@ -1114,7 +1114,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_44",
       "outcome": "pass",
       "pass": true,
@@ -1122,7 +1122,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_45",
       "outcome": "pass",
       "pass": true,
@@ -1130,7 +1130,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_46",
       "outcome": "pass",
       "pass": true,
@@ -1138,7 +1138,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_47",
       "outcome": "pass",
       "pass": true,
@@ -1146,7 +1146,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_48",
       "outcome": "pass",
       "pass": true,
@@ -1154,7 +1154,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_49",
       "outcome": "pass",
       "pass": true,
@@ -1162,7 +1162,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_50",
       "outcome": "pass",
       "pass": true,
@@ -1170,7 +1170,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_51",
       "outcome": "pass",
       "pass": true,
@@ -1178,7 +1178,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_52",
       "outcome": "pass",
       "pass": true,
@@ -1186,7 +1186,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_53",
       "outcome": "pass",
       "pass": true,
@@ -1194,7 +1194,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_54",
       "outcome": "pass",
       "pass": true,
@@ -1202,7 +1202,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_55",
       "outcome": "pass",
       "pass": true,
@@ -1210,7 +1210,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_56",
       "outcome": "pass",
       "pass": true,
@@ -1218,7 +1218,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_57",
       "outcome": "pass",
       "pass": true,
@@ -1226,7 +1226,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_58",
       "outcome": "pass",
       "pass": true,
@@ -1234,7 +1234,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_59",
       "outcome": "pass",
       "pass": true,
@@ -1242,7 +1242,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_60",
       "outcome": "pass",
       "pass": true,
@@ -1250,7 +1250,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_61",
       "outcome": "pass",
       "pass": true,
@@ -1258,7 +1258,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_62",
       "outcome": "pass",
       "pass": true,
@@ -1266,7 +1266,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8978560664922273e-16,
+      "max_rel_err": 0.0,
       "name": "face_selected_1_63",
       "outcome": "pass",
       "pass": true,
@@ -1342,7 +1342,7 @@
       "values_compared": 0
     },
     {
-      "max_rel_err": 2.1147105230955357e-16,
+      "max_rel_err": 0.0,
       "name": "face_thickness_dependency",
       "outcome": "pass",
       "pass": true,
@@ -1830,7 +1830,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps0.001_orientation0_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1846,7 +1846,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps0.001_orientation1_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1862,7 +1862,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps0.0001_orientation0_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1878,7 +1878,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps0.0001_orientation1_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1894,7 +1894,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps1e-06_orientation0_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1910,7 +1910,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps1e-06_orientation1_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1926,7 +1926,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps1e-08_orientation0_flags63",
       "outcome": "pass",
       "pass": true,
@@ -1942,7 +1942,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3539305178355562e-16,
+      "max_rel_err": 0.0,
       "name": "review_face_kind4_eps1e-08_orientation1_flags63",
       "outcome": "pass",
       "pass": true,
@@ -2678,7 +2678,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 3.901131739780176e-16,
+      "max_rel_err": 0.0,
       "name": "gen0003",
       "outcome": "pass",
       "pass": true,
@@ -2742,7 +2742,7 @@
       "values_compared": 9
     },
     {
-      "max_rel_err": 2.1353670905186388e-16,
+      "max_rel_err": 0.0,
       "name": "gen0011",
       "outcome": "pass",
       "pass": true,
@@ -2990,7 +2990,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 2.0068990970329172e-16,
+      "max_rel_err": 0.0,
       "name": "gen0042",
       "outcome": "pass",
       "pass": true,
@@ -3214,7 +3214,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 2.1142985320896285e-16,
+      "max_rel_err": 0.0,
       "name": "gen0070",
       "outcome": "pass",
       "pass": true,
@@ -3390,7 +3390,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 2.91579519943765e-16,
+      "max_rel_err": 0.0,
       "name": "gen0092",
       "outcome": "pass",
       "pass": true,
@@ -3430,7 +3430,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.3932085164849908e-16,
+      "max_rel_err": 0.0,
       "name": "gen0097",
       "outcome": "pass",
       "pass": true,
@@ -3702,7 +3702,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 1.3146250679139717e-16,
+      "max_rel_err": 0.0,
       "name": "gen0131",
       "outcome": "pass",
       "pass": true,
@@ -4102,7 +4102,7 @@
       "values_compared": 4
     },
     {
-      "max_rel_err": 2.010661883239235e-16,
+      "max_rel_err": 0.0,
       "name": "gen0181",
       "outcome": "pass",
       "pass": true,
@@ -4190,7 +4190,7 @@
       "values_compared": 4
     },
     {
-      "max_rel_err": 6.380686138263058e-16,
+      "max_rel_err": 0.0,
       "name": "gen0192",
       "outcome": "pass",
       "pass": true,
@@ -4326,7 +4326,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 3.3164315275709847e-16,
+      "max_rel_err": 0.0,
       "name": "gen0209",
       "outcome": "pass",
       "pass": true,
@@ -4470,7 +4470,7 @@
       "values_compared": 3
     },
     {
-      "max_rel_err": 1.4119545130858418e-15,
+      "max_rel_err": 0.0,
       "name": "gen0227",
       "outcome": "pass",
       "pass": true,
@@ -4774,7 +4774,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 4.979280456316938e-14,
+      "max_rel_err": 0.0,
       "name": "gen0265",
       "outcome": "pass",
       "pass": true,
@@ -4974,7 +4974,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 2.3715101593009835e-16,
+      "max_rel_err": 0.0,
       "name": "gen0290",
       "outcome": "pass",
       "pass": true,
@@ -5446,7 +5446,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 1.1145757758316799e-16,
+      "max_rel_err": 0.0,
       "name": "gen0349",
       "outcome": "pass",
       "pass": true,
@@ -5486,7 +5486,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.9853865713233946e-16,
+      "max_rel_err": 0.0,
       "name": "gen0354",
       "outcome": "pass",
       "pass": true,
@@ -5742,7 +5742,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 2.1293931452253172e-16,
+      "max_rel_err": 0.0,
       "name": "gen0386",
       "outcome": "pass",
       "pass": true,
@@ -5838,7 +5838,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 3.128998445786218e-16,
+      "max_rel_err": 0.0,
       "name": "gen0398",
       "outcome": "pass",
       "pass": true,
@@ -5894,7 +5894,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 2.7518032236307505e-16,
+      "max_rel_err": 0.0,
       "name": "gen0405",
       "outcome": "pass",
       "pass": true,
@@ -5982,7 +5982,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 2.7787203794707286e-16,
+      "max_rel_err": 0.0,
       "name": "gen0416",
       "outcome": "pass",
       "pass": true,
@@ -5998,7 +5998,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 1.575234088501688e-16,
+      "max_rel_err": 0.0,
       "name": "gen0418",
       "outcome": "pass",
       "pass": true,
@@ -6022,7 +6022,7 @@
       "values_compared": 13
     },
     {
-      "max_rel_err": 3.6623897480152915e-16,
+      "max_rel_err": 0.0,
       "name": "gen0421",
       "outcome": "pass",
       "pass": true,
@@ -6118,7 +6118,7 @@
       "values_compared": 4
     },
     {
-      "max_rel_err": 1.861286991804074e-16,
+      "max_rel_err": 0.0,
       "name": "gen0433",
       "outcome": "pass",
       "pass": true,
@@ -6214,7 +6214,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 2.602331001419067e-16,
+      "max_rel_err": 0.0,
       "name": "gen0445",
       "outcome": "pass",
       "pass": true,
@@ -6230,7 +6230,7 @@
       "values_compared": 6
     },
     {
-      "max_rel_err": 2.1835923776448053e-16,
+      "max_rel_err": 0.0,
       "name": "gen0447",
       "outcome": "pass",
       "pass": true,
@@ -6622,7 +6622,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 2.1730034996727217e-16,
+      "max_rel_err": 0.0,
       "name": "gen0496",
       "outcome": "pass",
       "pass": true,
@@ -6654,7 +6654,7 @@
       "values_compared": 13
     },
     {
-      "max_rel_err": 1.9267277710155526e-16,
+      "max_rel_err": 0.0,
       "name": "gen0500",
       "outcome": "pass",
       "pass": true,
@@ -6686,7 +6686,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 2.6584118044652286e-16,
+      "max_rel_err": 0.0,
       "name": "gen0504",
       "outcome": "pass",
       "pass": true,
@@ -6870,7 +6870,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 2.415935203850696e-16,
+      "max_rel_err": 0.0,
       "name": "gen0527",
       "outcome": "pass",
       "pass": true,
@@ -7278,7 +7278,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 1.2632598423169852e-16,
+      "max_rel_err": 0.0,
       "name": "gen0578",
       "outcome": "pass",
       "pass": true,
@@ -7454,7 +7454,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 5.972642583522657e-16,
+      "max_rel_err": 0.0,
       "name": "gen0600",
       "outcome": "pass",
       "pass": true,
@@ -7662,7 +7662,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 1.2925961524554935e-16,
+      "max_rel_err": 0.0,
       "name": "gen0626",
       "outcome": "pass",
       "pass": true,
@@ -7702,7 +7702,7 @@
       "values_compared": 0
     },
     {
-      "max_rel_err": 4.296526950982956e-16,
+      "max_rel_err": 0.0,
       "name": "gen0631",
       "outcome": "pass",
       "pass": true,
@@ -7790,7 +7790,7 @@
       "values_compared": 6
     },
     {
-      "max_rel_err": 4.2787060750294203e-16,
+      "max_rel_err": 0.0,
       "name": "gen0642",
       "outcome": "pass",
       "pass": true,
@@ -8382,7 +8382,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 1.382674808397522e-16,
+      "max_rel_err": 0.0,
       "name": "gen0716",
       "outcome": "pass",
       "pass": true,
@@ -8406,7 +8406,7 @@
       "values_compared": 3
     },
     {
-      "max_rel_err": 3.3132917830812346e-16,
+      "max_rel_err": 0.0,
       "name": "gen0719",
       "outcome": "pass",
       "pass": true,
@@ -8462,7 +8462,7 @@
       "values_compared": 9
     },
     {
-      "max_rel_err": 5.484778775747117e-16,
+      "max_rel_err": 0.0,
       "name": "gen0726",
       "outcome": "pass",
       "pass": true,
@@ -8502,7 +8502,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7142804438016621e-16,
+      "max_rel_err": 0.0,
       "name": "gen0731",
       "outcome": "pass",
       "pass": true,
@@ -8510,7 +8510,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.7736735570377786e-16,
+      "max_rel_err": 0.0,
       "name": "gen0732",
       "outcome": "pass",
       "pass": true,
@@ -8526,7 +8526,7 @@
       "values_compared": 3
     },
     {
-      "max_rel_err": 3.2206736147625143e-16,
+      "max_rel_err": 0.0,
       "name": "gen0734",
       "outcome": "pass",
       "pass": true,
@@ -8734,7 +8734,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 3.044656452950751e-16,
+      "max_rel_err": 0.0,
       "name": "gen0760",
       "outcome": "pass",
       "pass": true,
@@ -9182,7 +9182,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 1.1464561627863782e-16,
+      "max_rel_err": 0.0,
       "name": "gen0816",
       "outcome": "pass",
       "pass": true,
@@ -9286,7 +9286,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 1.980112370738443e-16,
+      "max_rel_err": 0.0,
       "name": "gen0829",
       "outcome": "pass",
       "pass": true,
@@ -9358,7 +9358,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 1.3548528010657678e-16,
+      "max_rel_err": 0.0,
       "name": "gen0838",
       "outcome": "pass",
       "pass": true,
@@ -9390,7 +9390,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 4.871462463674967e-16,
+      "max_rel_err": 0.0,
       "name": "gen0842",
       "outcome": "pass",
       "pass": true,
@@ -9446,7 +9446,7 @@
       "values_compared": 3
     },
     {
-      "max_rel_err": 1.455090597622005e-16,
+      "max_rel_err": 0.0,
       "name": "gen0849",
       "outcome": "pass",
       "pass": true,
@@ -9662,7 +9662,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 1.335176938250126e-16,
+      "max_rel_err": 0.0,
       "name": "gen0876",
       "outcome": "pass",
       "pass": true,
@@ -9694,7 +9694,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.5189644260999976e-16,
+      "max_rel_err": 0.0,
       "name": "gen0880",
       "outcome": "pass",
       "pass": true,
@@ -9774,7 +9774,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 2.883636947452842e-16,
+      "max_rel_err": 0.0,
       "name": "gen0890",
       "outcome": "pass",
       "pass": true,
@@ -9878,7 +9878,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 1.7451721497686306e-16,
+      "max_rel_err": 0.0,
       "name": "gen0903",
       "outcome": "pass",
       "pass": true,
@@ -10198,7 +10198,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 2.326904764323231e-16,
+      "max_rel_err": 0.0,
       "name": "gen0943",
       "outcome": "pass",
       "pass": true,
@@ -10214,7 +10214,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 5.955833812315886e-16,
+      "max_rel_err": 0.0,
       "name": "gen0945",
       "outcome": "pass",
       "pass": true,
@@ -10390,7 +10390,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.1963718268255168e-16,
+      "max_rel_err": 0.0,
       "name": "gen0967",
       "outcome": "pass",
       "pass": true,
@@ -10462,7 +10462,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 3.5770300676555213e-16,
+      "max_rel_err": 0.0,
       "name": "gen0976",
       "outcome": "pass",
       "pass": true,
@@ -10670,7 +10670,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 2.1507619866352803e-16,
+      "max_rel_err": 0.0,
       "name": "gen1002",
       "outcome": "pass",
       "pass": true,
@@ -10750,7 +10750,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 3.2002759587581284e-16,
+      "max_rel_err": 0.0,
       "name": "gen1012",
       "outcome": "pass",
       "pass": true,
@@ -10918,7 +10918,7 @@
       "values_compared": 5
     },
     {
-      "max_rel_err": 2.1497166059206138e-16,
+      "max_rel_err": 0.0,
       "name": "gen1033",
       "outcome": "pass",
       "pass": true,
@@ -11070,7 +11070,7 @@
       "values_compared": 3
     },
     {
-      "max_rel_err": 1.504020634309502e-16,
+      "max_rel_err": 0.0,
       "name": "gen1052",
       "outcome": "pass",
       "pass": true,
@@ -11182,7 +11182,7 @@
       "values_compared": 13
     },
     {
-      "max_rel_err": 5.793037572934935e-16,
+      "max_rel_err": 0.0,
       "name": "gen1066",
       "outcome": "pass",
       "pass": true,
@@ -11222,7 +11222,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 1.930850115983509e-16,
+      "max_rel_err": 0.0,
       "name": "gen1071",
       "outcome": "pass",
       "pass": true,
@@ -11374,7 +11374,7 @@
       "values_compared": 6
     },
     {
-      "max_rel_err": 1.9193974700979434e-15,
+      "max_rel_err": 0.0,
       "name": "gen1090",
       "outcome": "pass",
       "pass": true,
@@ -11518,7 +11518,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 1.6201301656120382e-16,
+      "max_rel_err": 0.0,
       "name": "gen1108",
       "outcome": "pass",
       "pass": true,
@@ -11534,7 +11534,7 @@
       "values_compared": 1
     },
     {
-      "max_rel_err": 2.5934599537144166e-16,
+      "max_rel_err": 0.0,
       "name": "gen1110",
       "outcome": "pass",
       "pass": true,
@@ -11542,7 +11542,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 1.8571967264511076e-16,
+      "max_rel_err": 0.0,
       "name": "gen1111",
       "outcome": "pass",
       "pass": true,
@@ -11790,7 +11790,7 @@
       "values_compared": 11
     },
     {
-      "max_rel_err": 3.3741845541452456e-16,
+      "max_rel_err": 0.0,
       "name": "gen1142",
       "outcome": "pass",
       "pass": true,
@@ -11846,7 +11846,7 @@
       "values_compared": 27
     },
     {
-      "max_rel_err": 1.2176084854723494e-16,
+      "max_rel_err": 0.0,
       "name": "gen1149",
       "outcome": "pass",
       "pass": true,
@@ -11894,7 +11894,7 @@
       "values_compared": 6
     },
     {
-      "max_rel_err": 2.703990473363872e-16,
+      "max_rel_err": 0.0,
       "name": "gen1155",
       "outcome": "pass",
       "pass": true,
@@ -11990,7 +11990,7 @@
       "values_compared": 7
     },
     {
-      "max_rel_err": 2.376457415175537e-16,
+      "max_rel_err": 0.0,
       "name": "gen1167",
       "outcome": "pass",
       "pass": true,
@@ -12022,7 +12022,7 @@
       "values_compared": 4
     },
     {
-      "max_rel_err": 1.493250739076904e-15,
+      "max_rel_err": 0.0,
       "name": "gen1171",
       "outcome": "pass",
       "pass": true,
@@ -12264,7 +12264,7 @@
     "query.brep": 3,
     "topology.brep_p8": 2
   },
-  "max_rel_err": 4.979280456316938e-14,
+  "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,

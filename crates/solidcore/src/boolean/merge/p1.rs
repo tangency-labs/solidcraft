@@ -459,7 +459,7 @@ pub fn boolean_post_process(
             continue;
         }
         if vertex::is_topological_vertex(k, brep, v)? {
-            let editing = crate::topology::brep::p5::editing_enabled(brep)?;
+            let editing = brep.editing_enabled();
             ignore_failure(crate::topology::brep::p5::delete_topological_vertex(
                 k,
                 brep,

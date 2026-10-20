@@ -80,7 +80,9 @@
 //!   a topology handle's B-rep entity through its defaulted hooks
 //!   [`ClassGeometry::topology_entity`] / [`ClassGeometry::topology_handle`]
 //!   (CO-PORTED by `intersect.curve_class_p4`, which calls the topology members
-//!   through them). `SM_PC_POINT` stores an `SmPoint3d*` cast to `SmObject*`; here it is a handle of
+//!   through them). `SmEdge::GetCurve` and `SmVertex::GetPoint` go through them (the
+//!   vertex point first through [`ClassGeometry::classification_vertex_point`]); a
+//!   handle the adapter cannot resolve to a B-rep stays an `Unported` deferral. `SM_PC_POINT` stores an `SmPoint3d*` cast to `SmObject*`; here it is a handle of
 //!   kind [`ClassObjectKind::Point`]. Upstream calls virtual `SmObject` methods on that
 //!   pointer in `ComputePointParameters` (`SmTol::GetZoneTol3d`), `IsConnectedTo` and
 //!   `MergeIntoObject` (`GetType`), which is undefined behaviour; the port treats a
@@ -135,6 +137,8 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::Surface;
 use crate::surface::volume::Volume;
+use crate::topology::edge as topo_edge;
+use crate::topology::vertex as topo_vertex;
 use crate::topology::{Brep, BrepId};
 
 /// Mutable topology and handle mapping for [`PointClassification::merge_into_brep`].
@@ -596,17 +600,18 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for edges and edgeuses (the topology units);
-    /// [`SolidError::InvalidInput`] when `geometry` cannot resolve a curve handle.
+    /// [`SolidError::Unported`] for edgeuses (`SmEdgeuse::GetEdge`) and edge handles
+    /// `geometry` cannot resolve to its B-rep; [`SolidError::InvalidInput`] when
+    /// `geometry` cannot resolve a curve handle.
     pub fn curve_object<'g>(
         &self,
         geometry: &'g impl ClassGeometry<O>,
     ) -> Result<Option<&'g Curve>> {
         match self.point_class {
-            PointClassType::Edge if self.object.is_some() => {
-                // UNPORTED(topology.edge): SmEdge::GetCurve
-                Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
-            }
+            PointClassType::Edge => match self.object {
+                Some(o) => edge_curve(geometry, o, OP_GEOMETRY),
+                None => Ok(None),
+            },
             PointClassType::Curve => match self.object {
                 Some(o) => geometry
                     .curve(o)
@@ -1160,7 +1165,8 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// `SM_ERR` when the parameters are not set or the classification has no point
     /// (unknown, nothing, region); the errors of the evaluations;
-    /// [`SolidError::Unported`] for topology objects.
+    /// [`SolidError::Unported`] for edge uses, faces and vertex or edge handles
+    /// `geometry` cannot resolve to its B-rep.
     pub fn find_obj_point_3d(&self, geometry: &impl ClassGeometry<O>) -> Result<Point3> {
         if !self.are_parameters_set() {
             return Err(SolidError::sm_err(OP_FIND));
@@ -1189,17 +1195,14 @@ impl<O: ClassObject> PointClassification<O> {
                 volume_evaluate_point(volume, self.uvw_param)
             }
             PointClassType::Vertex => {
-                self.cast(ClassObjectKind::Vertex)?;
-                // UNPORTED(topology.vertex): SmVertex::GetPoint
-                Err(SolidError::unported(
-                    "SmVertex::GetPoint",
-                    "topology.vertex",
-                ))
+                let o = self.cast(ClassObjectKind::Vertex)?;
+                resolve_vertex_point(geometry, o, OP_FIND)
             }
             PointClassType::Edge => {
-                self.cast(ClassObjectKind::Edge)?;
-                // UNPORTED(topology.edge): SmEdge::GetCurve
-                Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
+                let o = self.cast(ClassObjectKind::Edge)?;
+                let curve =
+                    edge_curve(geometry, o, OP_FIND)?.ok_or_else(|| null_object(OP_FIND))?;
+                curve.evaluate_point(self.t_param)
             }
             PointClassType::Edgeuse => {
                 self.cast(ClassObjectKind::Edgeuse)?;
@@ -1798,6 +1801,47 @@ fn unresolved(op: &'static str) -> SolidError {
 
 fn null_object(op: &'static str) -> SolidError {
     SolidError::null_pointer(op)
+}
+
+/// `SmEdge::GetCurve` of edge handle `edge`, through [`ClassGeometry::topology_entity`];
+/// a handle resolved to another entity is [`SolidError::InvalidInput`], one the adapter
+/// cannot resolve (no B-rep) stays [`SolidError::Unported`].
+fn edge_curve<'g, O>(
+    geometry: &'g impl ClassGeometry<O>,
+    edge: O,
+    op: &'static str,
+) -> Result<Option<&'g Curve>> {
+    match geometry.topology_entity(edge) {
+        Some((b, EntityRef::Edge(e))) => topo_edge::curve(b, e),
+        Some(_) => Err(unresolved(op)),
+        // an opaque handle (the adapter has no B-rep): still a deferral
+        // UNPORTED(topology.edge): SmEdge::GetCurve (unresolved handle)
+        None => Err(SolidError::unported("SmEdge::GetCurve", "topology.edge")),
+    }
+}
+
+/// `SmVertex::GetPoint` of vertex handle `vertex`, through
+/// [`ClassGeometry::classification_vertex_point`] or else
+/// [`ClassGeometry::topology_entity`]; a handle resolved to another entity is
+/// [`SolidError::InvalidInput`], one neither resolves stays [`SolidError::Unported`].
+fn resolve_vertex_point<O: Copy>(
+    geometry: &impl ClassGeometry<O>,
+    vertex: O,
+    op: &'static str,
+) -> Result<Point3> {
+    if let Some(p) = geometry.classification_vertex_point(vertex) {
+        return Ok(p);
+    }
+    match geometry.topology_entity(vertex) {
+        Some((b, EntityRef::Vertex(v))) => topo_vertex::point(b, v),
+        Some(_) => Err(unresolved(op)),
+        // an opaque handle (the adapter has no B-rep): still a deferral
+        // UNPORTED(topology.vertex): SmVertex::GetPoint (unresolved handle)
+        None => Err(SolidError::unported(
+            "SmVertex::GetPoint",
+            "topology.vertex",
+        )),
+    }
 }
 
 fn param_index(offset: usize, i: usize) -> Result<usize> {
