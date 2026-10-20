@@ -87,7 +87,16 @@
 //!   surface generators drop the solver (they read only its tolerance and type) and
 //!   their unused centre line, surface and UV curve arguments; the rails and centre line
 //!   are plain B-spline curves changed in place as upstream (knot insertion and
-//!   synchronisation).
+//!   synchronisation). So `CreateSurfaceFromCurves` of the circular generator runs
+//!   `GetDegree` / `IsLine` / `IsArc` on the centre line's B-spline data, where upstream
+//!   dispatches them virtually on `rCenterLine`: for an `SmLine` centre line
+//!   (`SmOffsetGeometryCreation.cpp:2717-2751`) `SmLine::IsLine` (`SmLine.cpp:1167-1183`)
+//!   answers without testing and rounds its vector as `length * m_dScale *
+//!   m_vLineVector`, which the sampled B-spline test may round differently (see
+//!   `plan/findings.md`).
+//!   `BlendCurveCrossSectionFsg::continuity` is `u32` where `m_lContinuity` is `ULONG`
+//!   (64 bits in the reference build); the FFI guard bounds it to 32 bits, so no compared
+//!   value differs.
 //! - **Indexing.** `rF`, the Jacobian, `crX`, `rGuessT`, `rIntervals` and the cross
 //!   section array of `CreateSurfaceFromCurves` are indexed with checks: an index
 //!   upstream would read or write out of bounds is [`SolidError::InvalidInput`]

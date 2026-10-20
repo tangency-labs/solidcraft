@@ -105,6 +105,12 @@
 //! - `MSG` / `SM_ASSERT` only report; the `SM_DEBUG_CODE` and `#if 0` blocks and the
 //!   empty `bShelling` branch are not ported. `SM_VALIDATE_INTERSECTORS` is not
 //!   defined in the reference build.
+//! - **Centre line of the circular FSG.** `CreateSurfaceFromCurves` receives the centre
+//!   line as its B-spline data, so `GetDegree` / `IsLine` / `IsArc` are not dispatched on
+//!   an `SmLine` centre line as upstream does (`SmFilletStandardSolver.cpp:3353-3384`;
+//!   `SmLine::IsLine` answers without testing); the vector may round differently. Taking
+//!   the curve as `&mut Curve` is a signature change of
+//!   `blend.fillet_standard_solver_p1`, left to a follow-up (`plan/findings.md`).
 //! - **Recursion.** None.
 
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
