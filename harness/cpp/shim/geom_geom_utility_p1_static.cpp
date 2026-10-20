@@ -22,8 +22,14 @@
 
 namespace sc_gu_p1_tu
 {
-// SmGeomUtility.h forward-declares `class SmMatrix;`; make that name the global class.
-using ::SmMatrix;
+// SmGeomUtility.h forward-declares `class SmMatrix;`. Define that name here as a complete
+// class with the global one's interface, so the forward declaration redeclares it. (A
+// `using ::SmMatrix;` conflicts with the forward declaration, and clang rejects it.)
+class SmMatrix : public ::SmMatrix
+{
+  public:
+    using ::SmMatrix::SmMatrix;
+};
 #include "../../../upstream/source/SMLib/src/SmGeomUtility.cpp"
 } // namespace sc_gu_p1_tu
 

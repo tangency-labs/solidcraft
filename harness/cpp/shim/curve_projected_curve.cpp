@@ -76,13 +76,14 @@ struct PcOwns
     typedef SmBoolean SmProjectedCurve::*type;
     friend type get(PcOwns);
 };
-} // namespace
+// Explicit instantiations must be in the template's namespace (clang enforces this).
 template struct Rob<PcCurve, &SmProjectedCurve::m_cpCurve>;
 template struct Rob<PcPoint, &SmProjectedCurve::m_sProjPoint>;
 template struct Rob<PcVec, &SmProjectedCurve::m_sProjVec>;
 template struct Rob<PcAux, &SmProjectedCurve::m_sAuxData>;
 template struct Rob<PcType, &SmProjectedCurve::m_eProjType>;
 template struct Rob<PcOwns, &SmProjectedCurve::m_bOwnsCurve>;
+} // namespace
 
 namespace
 {
