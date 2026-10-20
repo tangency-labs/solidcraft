@@ -544,8 +544,8 @@ def graph_body(g):
     return f"""
 <h1>Dependency graph</h1>
 <p class="muted">{len(nodes)} units and their {fmt_int(g['edges'])} <code>depends_on</code> edges from
-<code>plan/modules.toml</code> (soft dependencies are not drawn). Columns are the unit's layer, rows group
-units by module. Data: <a href="assets/graph.json"><code>assets/graph.json</code></a>.</p>
+<code>plan/modules.toml</code> (soft dependencies are not drawn). Units cluster by module, and dependency
+edges pull related modules together. Data: <a href="assets/graph.json"><code>assets/graph.json</code></a>.</p>
 <section class="kpis">{tiles}</section>
 <div class="graphui" hidden>
 <div class="filters">

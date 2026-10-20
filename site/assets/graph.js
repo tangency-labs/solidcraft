@@ -1,5 +1,5 @@
 // solidcore dependency graph (graph.html): lays out assets/graph.json with d3-force
-// (vendor/d3-force.bundle.min.js) into an SVG with pan/zoom, hover, search, module filter
+// (vendor/d3-force.bundle.min.js) as one cluster per module, into an SVG with pan/zoom, hover, search, module filter
 // and click-to-highlight. Without JS the page keeps its server-rendered lists.
 (function () {
   "use strict";
@@ -7,7 +7,6 @@
   var svg = document.getElementById("graph");
   if (!ui || !svg || typeof d3 === "undefined" || !window.fetch) return;
   var NS = "http://www.w3.org/2000/svg";
-  var COL = 36, ROW = 20, PAD = 24, LABEL = 150;
 
   function el(name, attrs, parent) {
     var e = document.createElementNS(NS, name);
@@ -32,47 +31,81 @@
       });
     });
 
-    // Rows: one band per module, tall enough for its busiest layer.
-    var bands = [], y = PAD;
-    data.areas.forEach(function (a) {
-      var per = {};
-      nodes.forEach(function (n) { if (n.area === a) per[n.layer] = (per[n.layer] || 0) + 1; });
-      var most = Math.max.apply(null, Object.keys(per).map(function (k) { return per[k]; }).concat([1]));
-      var h = Math.max(2, most) * ROW + ROW;
-      bands.push({ area: a, y0: y, y1: y + h, c: y + h / 2 });
-      y += h;
-    });
-    var bandOf = {};
-    bands.forEach(function (b) { bandOf[b.area] = b; });
-    var maxLayer = Math.max.apply(null, nodes.map(function (n) { return n.layer; }));
-    var W = LABEL + PAD * 2 + COL * maxLayer, H = y + PAD;
-    function lx(layer) { return LABEL + PAD + COL * layer; }
     function rad(n) { return 3.5 + Math.sqrt(n.lines) / 9; }
 
-    nodes.forEach(function (n, k) {
-      var b = bandOf[n.area];
-      n.x = lx(n.layer);
-      n.y = b ? b.c + ((k % 5) - 2) * 4 : H / 2;
+    // Stage 1: one meta-node per module. Modules repel each other and are pulled
+    // together by the number of dependency edges between them. Starting positions sit on
+    // a circle in the plan's module order, and d3-force's own jiggle uses a fixed-seed
+    // generator, so the layout is the same on every load.
+    var areas = data.areas.map(function (a, k) {
+      var members = nodes.filter(function (n) { return n.area === a; });
+      var mass = members.reduce(function (t, n) { return t + Math.pow(rad(n) + 3, 2); }, 0);
+      return { id: a, k: k, members: members, r: Math.sqrt(mass) * 1.25 + 14 };
     });
-    var sim = d3.forceSimulation(nodes)
-      .force("x", d3.forceX(function (n) { return lx(n.layer); }).strength(1))
-      .force("y", d3.forceY(function (n) { return bandOf[n.area] ? bandOf[n.area].c : H / 2; }).strength(0.35))
-      .force("link", d3.forceLink(edges).strength(0.0005))
-      .force("collide", d3.forceCollide(function (n) { return rad(n) + 2; }).iterations(2))
-      .stop();
-    for (var t = 0; t < 300; t++) sim.tick();
-    nodes.forEach(function (n) {
-      var b = bandOf[n.area];
-      if (b) n.y = Math.min(b.y1 - rad(n), Math.max(b.y0 + rad(n), n.y));
+    var areaOf = {};
+    areas.forEach(function (c) { areaOf[c.id] = c; });
+    var ring = areas.reduce(function (t, c) { return t + c.r; }, 0) * 1.1 / Math.PI;
+    areas.forEach(function (c) {
+      var ang = 2 * Math.PI * c.k / areas.length - Math.PI / 2;
+      c.x = ring * Math.cos(ang); c.y = ring * Math.sin(ang);
     });
+    var pair = {};
+    edges.forEach(function (e) {
+      var s = e.source.area, t = e.target.area;
+      if (s === t || !areaOf[s] || !areaOf[t]) return;
+      var key = s < t ? s + "|" + t : t + "|" + s;
+      pair[key] = (pair[key] || 0) + 1;
+    });
+    var metaLinks = Object.keys(pair).sort().map(function (key) {
+      var ab = key.split("|");
+      return { source: areaOf[ab[0]], target: areaOf[ab[1]], n: pair[key] };
+    });
+    d3.forceSimulation(areas)
+      .force("charge", d3.forceManyBody().strength(function (c) { return -40 * c.r; }))
+      .force("link", d3.forceLink(metaLinks)
+        .distance(function (l) { return l.source.r + l.target.r + 50; })
+        .strength(function (l) { return Math.min(1, l.n / 60); }))
+      .force("collide", d3.forceCollide(function (c) { return c.r + 40; }).iterations(3))
+      .force("x", d3.forceX(0).strength(0.03))
+      .force("y", d3.forceY(0).strength(0.03))
+      .stop()
+      .tick(400);
+
+    // Stage 2: units, pulled towards their module's centre; links inside a module pull
+    // tight, links across modules only gently.
+    areas.forEach(function (c) {
+      c.members.forEach(function (n, j) {  // phyllotaxis start, deterministic
+        var rr = 6 * Math.sqrt(j + 0.5), th = j * 2.399963;
+        n.x = c.x + rr * Math.cos(th); n.y = c.y + rr * Math.sin(th);
+      });
+    });
+    function same(e) { return e.source.area === e.target.area; }
+    d3.forceSimulation(nodes)
+      .force("x", d3.forceX(function (n) { return areaOf[n.area] ? areaOf[n.area].x : 0; }).strength(0.12))
+      .force("y", d3.forceY(function (n) { return areaOf[n.area] ? areaOf[n.area].y : 0; }).strength(0.12))
+      .force("link", d3.forceLink(edges)
+        .distance(function (e) { return same(e) ? 16 : 80; })
+        .strength(function (e) { return same(e) ? 0.08 : 0.004; }))
+      .force("charge", d3.forceManyBody().strength(-14).distanceMax(90))
+      .force("collide", d3.forceCollide(function (n) { return rad(n) + 1.5; }).iterations(2))
+      .stop()
+      .tick(400);
+
+    function bbox(list, pad) {
+      var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      list.forEach(function (n) {
+        var r = rad(n) + 4;
+        b.x0 = Math.min(b.x0, n.x - r); b.x1 = Math.max(b.x1, n.x + r);
+        b.y0 = Math.min(b.y0, n.y - r); b.y1 = Math.max(b.y1, n.y + r);
+      });
+      b.x0 -= pad; b.y0 -= pad; b.x1 += pad; b.y1 += pad;
+      return b;
+    }
+    var all = bbox(nodes, 30);
+    var W = all.x1 - all.x0;
 
     // ---- drawing
     var vp = el("g", { "class": "vp" }, svg);
-    var gb = el("g", { "class": "bands" }, vp);
-    bands.forEach(function (b, k) {
-      el("rect", { x: 0, y: b.y0, width: W, height: b.y1 - b.y0, "class": k % 2 ? "band odd" : "band" }, gb);
-      el("text", { x: 8, y: b.c + 4, "class": "blabel" }, gb).textContent = b.area;
-    });
     var ge = el("g", { "class": "edges" }, vp);
     edges.forEach(function (e) {
       e.el = el("line", { x1: e.source.x.toFixed(1), y1: e.source.y.toFixed(1),
@@ -86,24 +119,33 @@
       el("circle", { r: rad(n), "class": "dot" }, g);
       n.el = g;
     });
+    var gl = el("g", { "class": "labels" }, vp);
+    areas.forEach(function (c) {
+      if (!c.members.length) return;
+      var cx = 0, cy = 0;
+      c.members.forEach(function (n) { cx += n.x; cy += n.y; });
+      cx /= c.members.length; cy /= c.members.length;
+      el("text", { x: cx.toFixed(1), y: (cy + 5).toFixed(1), "class": "clabel", "text-anchor": "middle" }, gl).textContent = c.id;
+    });
 
     // ---- view box: pan and zoom
-    var view = { x: 0, y: 0, w: W, h: H };
+    var view = { x: all.x0, y: all.y0, w: W, h: all.y1 - all.y0 };
     function apply() { svg.setAttribute("viewBox", view.x + " " + view.y + " " + view.w + " " + view.h); }
-    function fit() {
+    function show(b) {
       var box = svg.getBoundingClientRect();
       var aspect = box.width / Math.max(1, box.height);
-      view.w = Math.max(W, H * aspect); view.h = view.w / aspect;
-      view.x = (W - view.w) / 2; view.y = (H - view.h) / 2;
+      view.w = Math.max(b.x1 - b.x0, (b.y1 - b.y0) * aspect); view.h = view.w / aspect;
+      view.x = (b.x0 + b.x1 - view.w) / 2; view.y = (b.y0 + b.y1 - view.h) / 2;
       apply();
     }
+    function fit() { show(all); }
     function toView(cx, cy) {
       var box = svg.getBoundingClientRect();
       return { x: view.x + (cx - box.left) * view.w / box.width, y: view.y + (cy - box.top) * view.h / box.height };
     }
     function zoom(f, cx, cy) {
       var p = toView(cx, cy);
-      var nw = Math.min(W * 4, Math.max(120, view.w * f));
+      var nw = Math.min(W * 4, Math.max(60, view.w * f));
       f = nw / view.w;
       view.x = p.x - (p.x - view.x) * f; view.y = p.y - (p.y - view.y) * f;
       view.w *= f; view.h *= f;
@@ -201,7 +243,7 @@
       if (n && selected === n) n = null;
       selected = n;
       nodes.forEach(function (m) { m.el.classList.remove("sel", "up", "down"); });
-      edges.forEach(function (e) { e.el.classList.remove("up", "down"); });
+      edges.forEach(function (e) { e.el.classList.remove("up", "down", "direct"); });
       svg.classList.toggle("focus", !!n);
       info.textContent = "";
       if (!n) {
@@ -217,6 +259,7 @@
       edges.forEach(function (e) {
         if ((ups[e.target.id] || e.target === n) && ups[e.source.id]) e.el.classList.add("up");
         if ((downs[e.source.id] || e.source === n) && downs[e.target.id]) e.el.classList.add("down");
+        if (e.source === n || e.target === n) e.el.classList.add("direct");
       });
       var h = document.createElement("p");
       h.appendChild(link(n.id));
@@ -253,16 +296,9 @@
     q.addEventListener("input", filter);
     area.addEventListener("change", function () {
       filter();
-      var b = bandOf[area.value];
-      if (b) {
-        // fit the module's band, from its first to its last unit's column
-        var xs = nodes.filter(function (n) { return n.area === area.value; }).map(function (n) { return n.x; });
-        var x0 = Math.min.apply(null, xs) - COL, x1 = Math.max.apply(null, xs) + COL;
-        var y0 = b.y0 - ROW, y1 = b.y1 + ROW;
-        var box = svg.getBoundingClientRect(), aspect = box.width / Math.max(1, box.height);
-        view.w = Math.max(x1 - x0, (y1 - y0) * aspect); view.h = view.w / aspect;
-        view.x = (x0 + x1 - view.w) / 2; view.y = (y0 + y1 - view.h) / 2;
-        apply();
+      var c = areaOf[area.value];
+      if (c && c.members.length) {
+        show(bbox(c.members, 24));
       } else fit();
     });
     q.addEventListener("keydown", function (ev) {

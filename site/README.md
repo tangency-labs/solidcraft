@@ -17,7 +17,7 @@ commit date of `HEAD`.
 | Module pages (`areas/<module>.html`) | `plan/modules.toml` and its history: the same chart as the overview, over that module's units only |
 | Units (`units/index.html`) | `plan/modules.toml`, `harness/callgraph/units.json`, `reports/difftest/*.json` (`cases_*`, `deferred_by_unit`) |
 | Unit pages (`units/<id>.html`) | the above, plus the `//! | Rust | Upstream |` table in the module's file header and the unit's status history from the timeline |
-| Dependency graph (`graph.html`, `assets/graph.json`) | `plan/modules.toml` (`depends_on`, `layer`, status) and claims; lists of ready and most-blocking units are rendered server-side, the graph by `site/assets/graph.js` |
+| Dependency graph (`graph.html`, `assets/graph.json`) | `plan/modules.toml` (`depends_on`, module, status) and claims, laid out as one force-directed cluster per module; lists of ready and most-blocking units are rendered server-side, the graph by `site/assets/graph.js` |
 | Upstream issues (`issues.html`) | `plan/upstream-issues.md`, split at `#### <SERIES>-<n>.` headings |
 | SSI corpus (`ssi.html`) | `reports/ssi-corpus.json` |
 
