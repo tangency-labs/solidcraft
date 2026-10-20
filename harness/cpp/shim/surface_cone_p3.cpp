@@ -112,6 +112,200 @@ SmExtent2d domain(const SmSurface& s, const double* f) {
     double u=n.GetUMin(),v=n.GetVMin(),du=n.GetUMax()-u,dv=n.GetVMax()-v;
     return SmExtent2d(u+du*f[0],v+dv*f[1],u+du*f[2],v+dv*f[3]);
 }
+// UB-154 (plan/upstream-issues.md): the file-static sm_GetEllipseTrimIntervals
+// (SmCone.cpp:5282) ignores the statuses of the smgu_LinePlaneIntersect calls on the
+// trimmed cone's two seam lines and then compares and uses the uninitialised dParam[0..1]
+// (:5399-5405, :5463-5477). It is reached only from inside IntersectWithCone and
+// IntersectWithPlane, with an ellipse they compute, so the shim replays the same calls in
+// the same order up to that point (seam_lines_defined: the head of
+// sm_GetEllipseTrimIntervals; the *_ellipse_seams_undefined functions: the paths of the two
+// callers that reach it). Status-checked steps that make upstream return before the call
+// return false here too.
+struct PeekCone : SmCone {
+    static double SmCone::*semi() { return &PeekCone::m_dSemiAngleDeg; }
+};
+
+// The head of sm_GetEllipseTrimIntervals up to its two smgu_LinePlaneIntersect calls
+// (statuses of the domain conversion and the corner evaluations ignored, as upstream):
+// false when either call fails.
+bool seam_lines_defined(const SmCone& crCone, const SmExtent2d& crUVDomain,
+                        const SmPoint3d& rEllipseOrigin, const SmVector3d& rEllipseXAxis,
+                        const SmVector3d& rEllipseYAxis)
+{
+    SmVector3d sEllipseZ = rEllipseXAxis * rEllipseYAxis;
+    SmExtent2d sAnalUVDomain;
+    crCone.ConvertDomainFromNURBSToSTEP(crUVDomain, sAnalUVDomain);
+    SmPoint3d sCorners[4];
+    crCone.EvaluateSTEPPoint(sAnalUVDomain.Evaluate(0.0, 0.0), sCorners[0]);
+    crCone.EvaluateSTEPPoint(sAnalUVDomain.Evaluate(0.0, 1.0), sCorners[1]);
+    crCone.EvaluateSTEPPoint(sAnalUVDomain.Evaluate(1.0, 0.0), sCorners[2]);
+    crCone.EvaluateSTEPPoint(sAnalUVDomain.Evaluate(1.0, 1.0), sCorners[3]);
+    SmVector3d sStartLineVec = sCorners[1] - sCorners[0];
+    SmVector3d sEndLineVec = sCorners[3] - sCorners[2];
+    double dParam[2];
+    return smgu_LinePlaneIntersect(sCorners[0], sStartLineVec, rEllipseOrigin, sEllipseZ,
+                                   dParam[0]) == SM_SUCCESS &&
+           smgu_LinePlaneIntersect(sCorners[2], sEndLineVec, rEllipseOrigin, sEllipseZ,
+                                   dParam[1]) == SM_SUCCESS;
+}
+
+// SmCone::IntersectWithCone (SmCone.cpp:2604) up to its elliptical branch for two
+// cylinders of the same radius whose axes intersect (:3010-3137): four
+// sm_AddEllipseIntervalsTrimmedToTwoCones calls, each trimming one ellipse to this cone
+// and then to the other one. True when one of those eight trims reads dParam.
+bool cone_ellipse_seams_undefined(const SmCone& crThis, const SmExtent2d& crUVDomain,
+                                  const SmCone& crOtherCone, const SmExtent2d& crOtherUVDomain,
+                                  const SmApproxTol3d* pdOptApproxTol3d)
+{
+    if (&crThis == &crOtherCone)
+        return false;
+    SmExtent3d sBBox1, sBBox2;
+    if (crThis.CalculateBoundingBox(crUVDomain, &sBBox1) != SM_SUCCESS ||
+        crOtherCone.CalculateBoundingBox(crOtherUVDomain, &sBBox2) != SM_SUCCESS)
+        return false;
+    SmVector3d sSize = sBBox2.GetSize();
+    double dTol = pdOptApproxTol3d ? (double)*pdOptApproxTol3d
+                                   : SM_EFF_ZERO_SQRT * (1.0 + sSize.Length());
+    sBBox2.ExpandAbsolute(dTol);
+    if (sBBox1.AreDisjoint(sBBox2))
+        return false;
+    SmVector3d sConeAxis = crThis.GetPosition().GetZAxis();
+    const SmPoint3d& rBasePt = crThis.GetPosition().GetOriginRef();
+    SmExtent2d sAnal = crThis.GetSTEPUVDomain();
+    SmPoint3d sCenterBot = rBasePt + sAnal.GetVMin() * sConeAxis;
+    SmPoint3d sCenterTop = rBasePt + sAnal.GetVMax() * sConeAxis;
+    SmVector3d sOConeAxis = crOtherCone.GetPosition().GetZAxis();
+    const SmPoint3d& rOBasePt = crOtherCone.GetPosition().GetOriginRef();
+    SmExtent2d sOAnal = crOtherCone.GetSTEPUVDomain();
+    SmPoint3d sOCenterBot = rOBasePt + sOAnal.GetVMin() * sOConeAxis;
+    SmPoint3d sOCenterTop = rOBasePt + sOAnal.GetVMax() * sOConeAxis;
+    double dAngle;
+    if (sConeAxis.AngleBetween(sOConeAxis, dAngle) != SM_SUCCESS)
+        return false;
+    if (dAngle > SM_PI / 2.0)
+        dAngle = SM_PI - dAngle;
+    if (dAngle < SM_EFF_ZERO_SQRT) // parallel axes branch: no ellipse
+        return false;
+    if (!crThis.IsCylinder() || !crOtherCone.IsCylinder() ||
+        smos_Fabs(crThis.GetTopRadius() - crOtherCone.GetTopRadius()) > dTol)
+        return false;
+    ULONG lNumInt;
+    SmPoint3d aPoints[2];
+    if (smgu_SegmentSegmentIntersect(sCenterBot, sCenterTop, sOCenterBot, sOCenterTop, dTol,
+                                     lNumInt, aPoints) != SM_SUCCESS ||
+        lNumInt != 1)
+        return false;
+    SmVector3d sVecToInt1, sVecToInt2;
+    if (smgu_ParallelogramCrossVectors(sConeAxis, sOConeAxis, crThis.GetTopRadius(),
+                                       crOtherCone.GetTopRadius(), sVecToInt1,
+                                       sVecToInt2) != SM_SUCCESS)
+        return false;
+    SmVector3d sXAxis = sConeAxis * sOConeAxis;
+    if (sXAxis.Unitize() != SM_SUCCESS)
+        return false;
+    SmVector3d sYAxis = sVecToInt1;
+    if (sYAxis.Unitize() != SM_SUCCESS)
+        return false;
+    SmAxis2Placement sFrame;
+    auto trims_undefined = [&]() {
+        return !seam_lines_defined(crThis, crUVDomain, sFrame.GetOriginRef(),
+                                   sFrame.GetXAxisRef(), sFrame.GetYAxisRef()) ||
+               !seam_lines_defined(crOtherCone, crOtherUVDomain, sFrame.GetOriginRef(),
+                                   sFrame.GetXAxisRef(), sFrame.GetYAxisRef());
+    };
+    if (sFrame.SetCanonical(aPoints[0], sXAxis, sYAxis) != SM_SUCCESS)
+        return false;
+    if (trims_undefined())
+        return true;
+    if (sFrame.SetCanonical(aPoints[0], sXAxis, -sYAxis) != SM_SUCCESS)
+        return false;
+    if (trims_undefined())
+        return true;
+    sYAxis = sVecToInt2;
+    sYAxis.Unitize(); // status ignored upstream
+    if (sFrame.SetCanonical(aPoints[0], sXAxis, sYAxis) != SM_SUCCESS)
+        return false;
+    if (trims_undefined())
+        return true;
+    if (sFrame.SetCanonical(aPoints[0], sXAxis, -sYAxis) != SM_SUCCESS)
+        return false;
+    return trims_undefined();
+}
+
+// SmCone::IntersectWithPlane (SmCone.cpp:3219) up to its elliptical branch (:3664-3834),
+// which trims the ellipse to the cone's natural domain. True when that trim reads dParam.
+// No known input reaches it: the generator lines tested at :3716 and :3735 are as long
+// as the seams and one of them is the least steep to the plane, so (up to rounding) they
+// fail first and return. Kept so the guard follows every path into
+// sm_GetEllipseTrimIntervals.
+bool plane_ellipse_seams_undefined(const SmCone& crThis, const SmExtent2d& crUVDomain,
+                                   const SmPlane& crPlane, const SmExtent2d& crOtherUVDomain,
+                                   const SmApproxTol3d* pdOptApproxTol3d)
+{
+    double dTol = pdOptApproxTol3d ? (double)*pdOptApproxTol3d : SM_EFF_ZERO_SQRT;
+    SmExtent3d sBBox1, sBBox2;
+    if (crThis.CalculateBoundingBox(crUVDomain, &sBBox1) != SM_SUCCESS ||
+        crPlane.CalculateBoundingBox(crOtherUVDomain, &sBBox2) != SM_SUCCESS)
+        return false;
+    sBBox2.ExpandAbsolute(dTol);
+    if (sBBox1.AreDisjoint(sBBox2))
+        return false;
+    SmVector3d sConeAxis = crThis.GetPosition().GetZAxis();
+    SmExtent2d sAnal = crThis.GetSTEPUVDomain();
+    SmPoint3d rCenterBot = crThis.GetPosition().GetOriginRef() + sAnal.GetVMin() * sConeAxis;
+    SmPoint3d sCenterTop = crThis.GetPosition().GetOriginRef() + sAnal.GetVMax() * sConeAxis;
+    SmVector3d sPlaneNormal = crPlane.GetPosition().GetZAxis();
+    const SmPoint3d& rPlaneOrigin = crPlane.GetPosition().GetOriginRef();
+    double dAngTol = SM_EFF_ZERO * 100.0 * 360.0;
+    double dConeAxisPlaneNormalAngle;
+    if (sConeAxis.AngleBetween(sPlaneNormal, dConeAxisPlaneNormalAngle) != SM_SUCCESS)
+        return false;
+    if (dConeAxisPlaneNormalAngle > SM_PI / 2.0)
+    {
+        dConeAxisPlaneNormalAngle = SM_PI - dConeAxisPlaneNormalAngle;
+        sPlaneNormal = -sPlaneNormal;
+    }
+    double dBotRadius = crThis.GetBotRadius();
+    if (SM_PI / 2.0 - dConeAxisPlaneNormalAngle < dAngTol) // plane parallel to the axis
+        return false;
+    if (dConeAxisPlaneNormalAngle < dAngTol) // plane perpendicular to the axis
+        return false;
+    double dAngleCone = smos_Fabs(SM_DEG2RAD(crThis.*PeekCone::semi()));
+    double dAnglePlane = SM_PI / 2.0 - smos_Fabs(dConeAxisPlaneNormalAngle);
+    if (!crThis.IsCylinder() && dAnglePlane < dAngleCone + dAngTol)
+        return false;
+    SmVector3d sVec = sConeAxis * (sConeAxis * sPlaneNormal);
+    sVec.Unitize();
+    SmPoint3d sPt1 = rCenterBot - dBotRadius * sVec;
+    SmPoint3d sPt2 = sCenterTop - crThis.GetTopRadius() * sVec;
+    SmVector3d sLineVec = sPt2 - sPt1;
+    double sLineLength1 = sLineVec.Length();
+    double dTParam1, dTParam2;
+    if (smgu_LinePlaneIntersect(sPt1, sLineVec, rPlaneOrigin, sPlaneNormal, dTParam1) !=
+        SM_SUCCESS)
+        return false;
+    SmPoint3d sEnd1 = sPt1 + dTParam1 * sLineVec;
+    sPt1 = rCenterBot + dBotRadius * sVec;
+    sPt2 = sCenterTop + crThis.GetTopRadius() * sVec;
+    sLineVec = sPt2 - sPt1;
+    double sLineLength2 = sLineVec.Length();
+    if (smgu_LinePlaneIntersect(sPt1, sLineVec, rPlaneOrigin, sPlaneNormal, dTParam2) !=
+        SM_SUCCESS)
+        return false;
+    if ((dTParam1 < 0.0 - sLineLength1 && dTParam2 < 0.0 - sLineLength2) ||
+        (dTParam1 > 1.0 + sLineLength1 && dTParam2 > 1.0 + sLineLength2))
+        return false;
+    SmPoint3d sEnd2 = sPt1 + dTParam2 * sLineVec;
+    SmVector3d sXAxis = (sEnd2 - sEnd1) / 2.0;
+    SmPoint3d sCenter = sEnd1 + sXAxis;
+    double dMajRad = sXAxis.Length();
+    if (SM_IS_ZERO(dMajRad)) // degenerate point output
+        return false;
+    sXAxis.Unitize();
+    SmVector3d sYAxis = sPlaneNormal * sXAxis;
+    sYAxis.Unitize();
+    return !seam_lines_defined(crThis, crThis.GetNaturalUVDomain(), sCenter, sXAxis, sYAxis);
+}
 struct Curves {
     SmTArray<SmCurve*> xyz,uv1,uv2;
     SmTArray<SmTsectCurveType> types;
@@ -180,6 +374,14 @@ SC_EXPORT int32_t sc_surface_cone_p3_intersect(int32_t op,const double* cone,con
             }
         }
     }
+    // UB-154: refuse exactly the inputs on which a seam-line intersection inside
+    // sm_GetEllipseTrimIntervals fails and upstream reads the uninitialised parameter.
+    if((op==0 || (op==3 && target->GetType()==SmCone_TYPE))
+       && cone_ellipse_seams_undefined(*a,da,*(SmCone*)target,db,has_tolerance?&tol:NULL))
+        return SC_ERR_ARG;
+    if((op==1 || op==2)
+       && plane_ellipse_seams_undefined(*a,da,*(SmPlane*)target,db,has_tolerance?&tol:NULL))
+        return SC_ERR_ARG;
     if(op==0) status=a->IntersectWithCone(ctx,da,*(SmCone*)target,db,edges,has_tolerance?&tol:NULL,NULL,
         more,&curves.xyz,&curves.uv1,&curves.uv2,&curves.types,&curves.deviations);
     else if(op==1) status=a->IntersectWithPlane(ctx,da,*(SmPlane*)target,db,edges,has_tolerance?&tol:NULL,NULL,

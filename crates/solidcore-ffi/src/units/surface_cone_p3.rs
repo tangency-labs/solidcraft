@@ -82,6 +82,9 @@ pub fn intersect(
     // rejecting all calls without a tolerance here.
     // The shim also rejects a STEP-to-NURBS conversion whose cone has no polar
     // curve after MakeNurb, at the virtual call that would dereference it.
+    // It also replays IntersectWithCone/IntersectWithPlane up to the seam-line
+    // intersections of sm_GetEllipseTrimIntervals and rejects the inputs on which
+    // either fails, because upstream then reads an uninitialised parameter (UB-154).
     call_with_buffer(4096, |out, len| {
         // SAFETY: fixed record lengths and values checked above; output and length
         // are writable, and native-owned curves are destroyed before returning.
@@ -352,5 +355,37 @@ mod tests {
         assert!(intersect(0, &a, &b, &domains, Some(1e-7), true).is_ok());
         b[1] = 10.0;
         assert!(intersect(0, &a, &b, &domains, Some(1e-7), false).is_ok());
+    }
+
+    #[test]
+    fn guards_ub154_only_when_a_seam_line_intersection_fails() {
+        let a = vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.335_032_448_789_221_8,
+            1.335_032_448_789_221_8, 1.414_096_494_588_000_1, 0.0, 360.0, 1.0, 1.0, 0.0,
+        ];
+        let b = vec![
+            0.0, 0.707_048_247_294_000_1, 0.707_048_247_294_000_1, 1.0, 0.0, 0.0, 0.0, 0.0,
+            1.0, 1.335_032_448_789_221_8, 1.335_032_448_789_221_8, 1.414_096_494_588_000_1,
+            0.0, 360.0, 0.0, 0.0, 0.0,
+        ];
+        let rejected = Err(FfiError::Status(crate::SC_ERR_ARG));
+        // issue #276 fuzz00656: a reversed trim domain gives zero-length seams.
+        let fuzz = [0.0, 0.0, -1e300, 1.0, 0.0, 0.0, 1.0, 1.0];
+        for op in [0, 3] {
+            assert_eq!(intersect(op, &a, &b, &fuzz, Some(1e-7), false), rejected);
+        }
+        // Seam length 1.414 * d against ZERO_VEC_ER's 1e-12: rejected just below,
+        // compared just above, on either cone.
+        for (d, ok) in [(7e-13, false), (8e-13, true), (1e-9, true)] {
+            for domains in [
+                [0.5, 0.0, 0.5 + d, 1.0, 0.0, 0.0, 1.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0, 0.0, 0.5, 1.0, 0.5 + d],
+            ] {
+                let r = intersect(0, &a, &b, &domains, Some(1e-7), false);
+                assert_eq!(r.is_ok(), ok, "d={d} domains={domains:?} {r:?}");
+            }
+        }
+        // Identity returns before the elliptical branch.
+        assert!(intersect(0, &a, &a, &fuzz, Some(1e-7), true).is_ok());
     }
 }
