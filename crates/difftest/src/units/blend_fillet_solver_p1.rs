@@ -67,7 +67,7 @@ use solidcore::intersect::point_class::{
 use solidcore::intersect::surface_intersector::p1::TsectPnt;
 use solidcore::kernel::Kernel;
 use solidcore::math::Point3;
-use solidcore::nurbs::b_spline_surface::SurfParamType;
+use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::nurbs::math::NOW;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::offset_surface::SS_UNKNOWN;
@@ -196,6 +196,10 @@ enum Inputs {
     Fsg {
         kind: u8,
         args: [f64; 4],
+        /// Kind 1 (linear) only: the two rail curves `CreateSurface` is given (empty:
+        /// no `CreateSurface` call).
+        #[serde(default)]
+        rails: Vec<CrvIn>,
     },
     TolAng {
         has: bool,
@@ -579,9 +583,16 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             o.push(b(has[1]));
             o.push(*off);
         }
-        Inputs::Fsg { kind, args } => {
+        Inputs::Fsg { kind, args, rails } => {
             o.push(f64::from(*kind));
             o.extend_from_slice(args);
+            if *kind == 1 {
+                // (the shim reads the rail count of the linear kind, then the rails)
+                o.push(rails.len() as f64);
+                for r in rails {
+                    push_curve(&mut o, r)?;
+                }
+            }
         }
         Inputs::TolAng { has, ang } => o.extend([0.0, b(*has), *ang]),
         Inputs::InitialValues { do2, rail, idx2 } => {
@@ -823,8 +834,26 @@ fn shim_with(s: &Surfs, load: bool, found: bool, setup: bool) -> Result<ShimSolv
     Ok(fs)
 }
 
-/// `put_crv` of the static shim: `1 t0 t1 P(t0) P(mid) P(t1)`, `-1` for none.
-fn put_crv(k: &Kernel, o: &mut Vec<f64>, c: Option<&Curve>) {
+/// The shim's `put_bss`: `has_nurb [n m p q r s cpts(x y z w) knots_u knots_v]`.
+fn put_bss(o: &mut Vec<f64>, s: &BSplineSurface) {
+    let Some(sur) = s.gw_nurb() else {
+        o.push(0.0);
+        return;
+    };
+    o.push(1.0);
+    let ix = sur.indices();
+    o.extend([ix.n, ix.m, ix.p, ix.q, ix.r, ix.s].map(|x| x as f64));
+    for row in sur.rows() {
+        for p in row {
+            o.extend([p.x, p.y, p.z, p.w]);
+        }
+    }
+    o.extend_from_slice(sur.u_knots());
+    o.extend_from_slice(sur.v_knots());
+}
+
+/// `put_crv` of the static shim:`1 t0 t1 P(t0) P(mid) P(t1)`, `-1` for none.
+fn put_crv(o: &mut Vec<f64>, c: Option<&Curve>) {
     let Some(c) = c else {
         o.push(-1.0);
         return;
@@ -1455,7 +1484,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             }
             r
         }
-        Inputs::Fsg { kind, args } => {
+        Inputs::Fsg { kind, args, rails } => {
             let [a, bb, c, d] = *args;
             let g = match kind {
                 0 => FilletSurfaceGenerator::Base,
@@ -1486,6 +1515,22 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                     Ok(_) => 0.0,
                     Err(e) => status(&e),
                 });
+            } else if let (1, [c1, c2]) = (*kind, rails.as_slice()) {
+                // the linear one: the ruled surface of two real rails, `status` then the
+                // surface block (as the shim's `put_bss`)
+                let k = Kernel::default();
+                let mut r1 = bspline_of(c1)?;
+                let mut r2 = bspline_of(c2)?;
+                match g.create_surface(&k, 1.0e-6, &mut r1, &mut r2, &[]) {
+                    Ok(s) => {
+                        o.push(0.0);
+                        put_bss(&mut o, &s);
+                    }
+                    Err(e) => {
+                        o.push(status(&e));
+                        o.push(0.0);
+                    }
+                }
             } else {
                 o.push(-1.0);
             }
@@ -1896,6 +1941,34 @@ fn gen_sphere(rng: &mut Rng) -> Inputs {
         surfs,
         arrays,
     }
+}
+
+/// The two rails of a linear `fsg` case (`SmLinearCrossSectionFSG::CreateSurface`):
+/// real 3D B-spline curves, either a rail and a copy of it moved by an offset (same
+/// degree, knots and domain: the ruled surface needs no reparametrisation), or two
+/// independent curves (different degrees, knot vectors, domains, rational or not:
+/// `CreateRuledSurface` makes them compatible, or fails).
+fn gen_fsg_rails(rng: &mut Rng) -> Vec<CrvIn> {
+    let scale = *rng.choose(&[1e-3, 1.0, 1.0, 1e3]).unwrap_or(&1.0);
+    let first = gen_curve(rng, 3, scale);
+    let second = if rng.chance(0.5) {
+        let d = [
+            rng.uniform(-1.0, 1.0) * scale,
+            rng.uniform(-1.0, 1.0) * scale,
+            rng.uniform(0.5, 2.0) * scale,
+        ];
+        let mut c = first.clone();
+        for p in &mut c.cpts {
+            let w = if p[3] == NOW { 1.0 } else { p[3] };
+            p[0] += d[0] * w;
+            p[1] += d[1] * w;
+            p[2] += d[2] * w;
+        }
+        c
+    } else {
+        gen_curve(rng, 3, scale)
+    };
+    vec![first, second]
 }
 
 fn gen_rail_uv(rng: &mut Rng) -> Inputs {
@@ -2376,7 +2449,12 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             off: rng.uniform(-1.0, 1.0),
         },
         20 => {
-            let kind = rng.below(6) as u8;
+            // half the cases are the linear kind (the one with a real `CreateSurface`)
+            let kind = if rng.chance(0.5) {
+                1
+            } else {
+                rng.below(6) as u8
+            };
             let args = if kind == 5 {
                 [rng.uniform(0.1, 3.0), rng.below(4) as f64, 0.0, 0.0]
             } else {
@@ -2387,7 +2465,13 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                     b(rng.chance(0.5)),
                 ]
             };
-            Inputs::Fsg { kind, args }
+            // the linear kind (1) is given two rails for `CreateSurface` in 3 of 4 cases
+            let rails = if kind == 1 && rng.chance(0.75) {
+                gen_fsg_rails(rng)
+            } else {
+                Vec::new()
+            };
+            Inputs::Fsg { kind, args, rails }
         }
         21 => {
             if rng.chance(0.5) {

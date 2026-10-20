@@ -211,6 +211,38 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "fsg_linear_two_line_rails",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#26",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fsg_linear_quadratic_and_line_rails",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#27",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fsg_linear_rational_quarter_arc_rails",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#28",
+      "values_compared": 49
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fsg_linear_without_rails",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#29",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -887,7 +919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2561849588495854298",
-      "values_compared": 8
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -1359,7 +1391,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2561849588495854357",
-      "values_compared": 8
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -1407,7 +1439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2561849588495854363",
-      "values_compared": 8
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -1839,7 +1871,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2561849588495854417",
-      "values_compared": 8
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -2295,7 +2327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2561849588495854474",
-      "values_compared": 8
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -2439,7 +2471,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=2561849588495854492",
-      "values_compared": 8
+      "values_compared": 86
     },
     {
       "max_rel_err": 0.0,
@@ -2773,9 +2805,11 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 346,
-  "cases_total": 346,
-  "deferred_by_unit": {},
+  "cases_passed": 343,
+  "cases_total": 350,
+  "deferred_by_unit": {
+    "blend.fillet_geom_p1": 7
+  },
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,

@@ -1789,6 +1789,17 @@ pub struct FilletSphereSolveEnfo<'a> {
 }
 
 impl<'a> FilletSphereSolveEnfo<'a> {
+    /// `m_crFilletSolver`.
+    #[must_use]
+    pub fn solver(&self) -> &dyn FilletSolverOps {
+        &*self.solver
+    }
+
+    /// `m_crFilletSolver`, for the virtuals that write to the solver.
+    pub fn solver_mut(&mut self) -> &mut dyn FilletSolverOps {
+        &mut *self.solver
+    }
+
     /// `SmFilletSphereSolveENFO(crSphereCenter, dSphereRadius, crFilletSolver)`: the
     /// plane starts as `(centre, radius)`, not adjusting.
     pub fn new(

@@ -10404,6 +10404,33 @@ rejected: nothing runs on either side.
   `CreateUVTrimCurves` must still return this clipped domain (callers in
   `boolean.topology_intersector_p1` keep it on success).
 
+## blend.fillet_geom_p2: sm_SplitRail's fillet vertex
+
+`sm_SplitRail` (`blend.fillet_solver_p1`) builds `SmFilletVertex(pFG->..->GetFilletCorner())`
+for the vertex it splits the rail at. The constructor is ported (`FilletVertex::new` with
+`FilletBrep::insert_fillet_vertex`, `blend.fillet_geom_p2`, unit `blend.fillet_geom_p1`
+owns the class), but `split_rail` works on the bare pseudo `Brep` and has no `FilletBrep`
+to insert into. The call site stays an `UNPORTED(blend.fillet_geom_p1)` stub (tag
+retargeted from the stale `blend.fillet_geom_p2`, which does not own the symbol); it
+is wired together with the other `blend.fillet_geom_p1` stubs once `&mut FilletBrep` is
+threaded through the solver (see "blend.fillet_solver_p1: stubs naming
+blend.fillet_geom_p1"). The `split_rail` body is unchanged.
+
+## blend.fillet_solver_p1: FilletSolverOps::load_initial_values takes the surface by value of reference
+
+`FilletSolverOps::load_initial_values` (`fillet_solver/p1.rs`) takes `crSurface1` as
+`&mut OffsetSurface`. Upstream's callers pass `*GetSurface(lRailIndex)`, the solver's own
+rail surface, so a derived `LoadInitialValues` that changes it (`SetOffsets`, as
+`SmConstantDistanceFS::LoadInitialValues` does) changes the solver's. A caller that owns
+the solver (`blend.fillet_standard_solver_p2`) can only pass a clone and write it back,
+which overwrites such a change. `#168`'s `ConstantDistanceFs::load_initial_values` already
+models this with `InitialSurface::{Rail(i), Other(&mut)}`. The fix is to make the trait
+method take `InitialSurface` and give `ConstantDistanceFs` a `FilletSolverOps` impl; it
+touches the trait, `EiffelTowerFs`, `SecantConstantRadiusFs` (they read `surface1` only
+through `&self.base`, so `Rail(i)` resolves there), the three runners and the
+shims' callers, so it is deferred to a follow-up rather than done in this round. Until
+then a caller must write the clone back only when the callee did not call `SetOffsets`.
+
 ## blend.fillet_solver_p1: pseudo-B-rep mutations
 
 `SplitFilletGeomAtSideEdge`, `sm_SplitRail` and `sm_ComputeSupportEdge` (PR #192) move

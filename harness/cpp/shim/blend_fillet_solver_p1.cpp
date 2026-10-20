@@ -485,6 +485,14 @@ int32_t run_fsg(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     int64_t kind = rd.idx();
     double a = rd.num(), b = rd.num(), c = rd.num(), d = rd.num();
     double v[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    // the linear kind: `n_rails` (0 or 2) then the rails its CreateSurface is given
+    SmBSplineCurve* rail1 = NULL;
+    SmBSplineCurve* rail2 = NULL;
+    if (kind == 1 && rd.idx() == 2)
+    {
+        rail1 = read_curve(rd, ctx);
+        rail2 = read_curve(rd, ctx);
+    }
     SmFilletSurfaceGenerator* g = NULL;
     switch (kind)
     {
@@ -523,8 +531,49 @@ int32_t run_fsg(Rd& rd, const SmContext& ctx, std::vector<double>& o)
         SmBSplineSurface* out = NULL;
         o.push_back(st(g->CreateSurface(fs, NULL, NULL, NULL, pts, NULL, NULL, NULL, NULL, out)));
     }
+    else if (rail1 != NULL)
+    {
+        // SmLinearCrossSectionFSG::CreateSurface: the ruled surface of the two rails
+        // (the solver, centre line, points and UV curves are not used): `status` then
+        // `has_nurb [n m p q r s cpts knots_u knots_v]`
+        ShimFS fs(ctx, 1.0e-6, 0.1, 0.01);
+        SmTArray<SmTsectPnt*> pts;
+        SmBSplineSurface* out = NULL;
+        SmStatus s = g->CreateSurface(fs, NULL, rail1, rail2, pts, NULL, NULL, NULL, NULL, out);
+        o.push_back(st(s));
+        const gw_SURFACE* sur = (s == SM_SUCCESS && out != NULL) ? out->GetGwNurbPointer() : NULL;
+        o.push_back(flg(sur != NULL));
+        if (sur != NULL)
+        {
+            gw_INDEX n = sur->net->n;
+            gw_INDEX m = sur->net->m;
+            gw_INDEX r = sur->knu->m;
+            gw_INDEX ss = sur->knv->m;
+            o.push_back((double)n);
+            o.push_back((double)m);
+            o.push_back((double)sur->p);
+            o.push_back((double)sur->q);
+            o.push_back((double)r);
+            o.push_back((double)ss);
+            for (gw_INDEX i = 0; i <= n; i++)
+                for (gw_INDEX j = 0; j <= m; j++)
+                {
+                    o.push_back(sur->net->Pw[i][j].x);
+                    o.push_back(sur->net->Pw[i][j].y);
+                    o.push_back(sur->net->Pw[i][j].z);
+                    o.push_back(sur->net->Pw[i][j].w);
+                }
+            for (gw_INDEX i = 0; i <= r; i++)
+                o.push_back(sur->knu->U[i]);
+            for (gw_INDEX i = 0; i <= ss; i++)
+                o.push_back(sur->knv->U[i]);
+        }
+        delete out;
+    }
     else
         o.push_back(-1.0);
+    delete rail1;
+    delete rail2;
     delete g;
     return 0;
 }

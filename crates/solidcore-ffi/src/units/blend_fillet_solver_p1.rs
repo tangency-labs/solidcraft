@@ -38,7 +38,9 @@
 //! and the domain; `Sphere`, `RailUv` `status found f[nf]` and the Jacobian; others the
 //! status (`Split` plus the geometry count, `UvVectors` plus both UV derivatives); `Fsg`
 //! `type approximate tolerance% mirror complement scale continuity create_status` (`-1`
-//! without a `CreateSurface` call); `Misc` the tolerance, or `status do2 idx2
+//! without a `CreateSurface` call; the linear kind given two rails (kind `1` is followed
+//! by `n_rails`, 0 or 2, and the rails as for `RailUv`) calls the virtual `CreateSurface`
+//! and appends the ruled surface `has_nurb [n m p q r s cpts knots_u knots_v]`); `Misc` the tolerance, or `status do2 idx2
 //! surface2_null n_periodic n_guess`.
 //!
 //! [`eval_static`] runs [`StaticOp`]s on the copy of `SmFilletSolver.cpp` compiled by
@@ -279,6 +281,18 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
                 rd.finite()?;
             }
             rd.finites(2)?;
+            if kind == 1 {
+                // the linear kind: no rails, or the two rails of its CreateSurface
+                // (`CreateRuledSurface` reads their poles and knots, so well-formed
+                // curve blocks as for `RailUv`)
+                let rails = rd.index(2)?;
+                if rails == 1 {
+                    return Err(bad("fsg: the linear kind takes 0 or 2 rails"));
+                }
+                for _ in 0..rails {
+                    curve(&mut rd)?;
+                }
+            }
         }
         Op::Misc => {
             if rd.index(1)? == 0 {
