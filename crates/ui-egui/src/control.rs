@@ -44,6 +44,9 @@
 //!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
 //!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
+//!
+//! `control.pending` and `control.cancel` belong to the connection: its host answers them
+//! (`solidcraft_control::server`) through each request's [`ControlRequest::ticket`].
 
 use solidcraft_engine::geom::prelude::*;
 
