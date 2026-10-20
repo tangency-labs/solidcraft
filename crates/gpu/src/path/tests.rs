@@ -15,7 +15,7 @@ fn executor() -> Option<Executor> {
         }
     };
     eprintln!("gpu-path tests on {} ({:?}, {:?})", adapter.get_info().name, adapter.get_info().device_type, adapter.get_info().backend);
-    Some(Executor::new(device, queue).unwrap())
+    Some(Executor::new(device, queue, &adapter.get_info()).unwrap())
 }
 fn request(size: u32) -> ImageRequest {
     let mut camera = Camera { distance: 4.0, ..Default::default() };

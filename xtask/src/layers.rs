@@ -12,6 +12,9 @@ use serde_json::Value;
 pub enum Class {
     /// Regular layered crate.
     Layer(u8),
+    /// A layered crate for native targets only: same rules as `Layer`, but not in the wasm
+    /// check (`cargo xtask wasm`).
+    Native(u8),
     /// Layer 0, and additionally may depend on no workspace crate at all.
     Standalone,
     /// Test tooling: may depend on anything up to L5 (it sits at L6 for rule
@@ -24,7 +27,7 @@ pub enum Class {
 impl Class {
     fn layer(self) -> Option<u8> {
         match self {
-            Class::Layer(l) => Some(l),
+            Class::Layer(l) | Class::Native(l) => Some(l),
             Class::Standalone => Some(0),
             Class::Testkit => Some(6),
             Class::Exempt => None,
@@ -42,6 +45,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("derive", Class::Standalone),
     // the 3Dconnexion driver's client API on macOS (no workspace dependencies)
     ("3dx-client", Class::Standalone),
+    // native-only wgpu calls that need `unsafe` (#3236), for the GPU crate; not built for wasm
+    ("gpu-native", Class::Native(5)),
     ("sketch", Class::Layer(1)),
     ("kernel", Class::Layer(1)),
     ("render", Class::Layer(1)),
@@ -61,8 +66,9 @@ pub const TABLE: &[(&str, Class)] = &[
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
-/// server's tests draw screenshots with them.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"]];
+/// server's tests draw screenshots with them; the GPU crate keeps its pipeline cache through
+/// `gpu-native`.
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["gpu-native", "gpu"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));
@@ -226,6 +232,7 @@ pub fn from_metadata(meta: &Value) -> Result<Vec<Crate>, String> {
 pub fn describe(class: Option<Class>) -> String {
     match class {
         Some(Class::Layer(l)) => format!("L{l}"),
+        Some(Class::Native(l)) => format!("L{l} native"),
         Some(Class::Standalone) => "L0 standalone".into(),
         Some(Class::Testkit) => "testkit".into(),
         Some(Class::Exempt) => "exempt".into(),
