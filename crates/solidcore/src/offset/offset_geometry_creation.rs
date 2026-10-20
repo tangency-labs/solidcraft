@@ -53,8 +53,10 @@
 //!   reports the `rbDelete*` flags).
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`:
-//!   `SmCircularCrossSectionFSG` (`blend.fillet_solver_p1`,
-//!   `blend.fillet_standard_solver_p1`). The code after a stub is ported in full;
+//!   `SmBrep::MateLaminaEdgeToSurface` / `ReplaceSurface` (`topology.brep_p2`).
+//!   `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` is
+//!   `blend.fillet_standard_solver_p1`'s, on the centre line's `SmBSplineCurve` part.
+//!   The code after a stub is ported in full;
 //!   `SmEdgeuse::NormalizedEvaluate` / `CreateUVTrimCurve` (`topology.edgeuse_p3`,
 //!   through [`OffsetBrep`]), `SmBrep::MateLaminaEdgeToSurface` / `ReplaceSurface`
 //!   (`topology.brep_p2`, through [`OffsetBrep`]), `SmSurface::GlobalCurveIntersect` (`surface.surface_p8`) and
@@ -106,6 +108,7 @@
 //!   defined in the reference build.
 //! - **Recursion.** None.
 
+use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p8::CurveIntersectOptions;
@@ -720,47 +723,24 @@ struct ApproximateCurveFlags {
     just_copy_b_splines: bool,
 }
 
-/// The constructor arguments of `SmCircularCrossSectionFSG`.
-#[derive(Debug, Clone, Copy)]
-struct CircularCrossSectionFsg {
-    /// `bApproximateArcs`.
-    approximate_arcs: bool,
-    /// `dTolPercentRadius`.
-    tol_percent_radius: f64,
-    /// `bMirror`.
-    mirror: bool,
-    /// `bComplement`.
-    complement: bool,
-}
-
 /// `SmCircularCrossSectionFSG sFSG(bApproximateArcs = FALSE, dTolPercentRadius = 0.05,
 /// bMirror = FALSE, bComplement = FALSE)` then `sFSG.CreateSurfaceFromCurves(ctx,
 /// *pCenterLine, *pRail1, *pRail2, tol, bNeedG1Continuity = FALSE, NULL, NULL, NULL, NULL,
 /// pNewSurface)`; the four NULLs are the optional surfaces and UV curves of the rails
-/// (`with_rail_surfaces`). The curves are non-const upstream, so they are `&mut`.
+/// (`blend.fillet_standard_solver_p1`'s generator takes none). The curves are non-const
+/// upstream, so they are `&mut`; the centre line is passed as its `SmBSplineCurve` part
+/// (the reference type of `rCenterLine`).
 fn circular_cross_section_surface(
-    _k: &Kernel,
+    k: &Kernel,
     fsg: CircularCrossSectionFsg,
-    _center_line: &mut Curve,
-    _rail1: &mut BSplineCurve,
-    _rail2: &mut BSplineCurve,
-    _tol: f64,
-    _need_g1_continuity: bool,
-    _with_rail_surfaces: bool,
+    center_line: &mut Curve,
+    rail1: &mut BSplineCurve,
+    rail2: &mut BSplineCurve,
+    tol: f64,
+    need_g1_continuity: bool,
 ) -> Result<BSplineSurface> {
-    // (the arguments the wired call will pass on)
-    let _ = (
-        fsg.approximate_arcs,
-        fsg.tol_percent_radius,
-        fsg.mirror,
-        fsg.complement,
-    );
-    // UNPORTED(blend.fillet_standard_solver_p1): SmCircularCrossSectionFSG::CreateSurfaceFromCurves
-    // (the constructor is UNPORTED(blend.fillet_solver_p1): SmCircularCrossSectionFSG::SmCircularCrossSectionFSG)
-    Err(SolidError::unported(
-        "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "blend.fillet_standard_solver_p1",
-    ))
+    let cl = b_spline_part_mut(center_line)?.ok_or(dangling("centre line kind"))?;
+    fsg.create_surface_from_curves(k, cl, rail1, rail2, tol, need_g1_continuity)
 }
 
 // ---- helpers over handles -------------------------------------------------------------------
@@ -3399,17 +3379,15 @@ impl OffsetGeometryCreation {
             Some(s) => s,
             None => circular_cross_section_surface(
                 k,
+                // SmCircularCrossSectionFSG sFSG(FALSE): the other arguments' defaults
                 CircularCrossSectionFsg {
                     approximate_arcs: false,
-                    tol_percent_radius: 0.05,
-                    mirror: false,
-                    complement: false,
+                    ..CircularCrossSectionFsg::default()
                 },
                 &mut center_line,
                 &mut rail1,
                 &mut rail2,
                 self.this_approx_tol_3d,
-                false,
                 false,
             )?,
         };

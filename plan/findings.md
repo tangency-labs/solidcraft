@@ -10374,6 +10374,112 @@ rejected: nothing runs on either side.
   `CreateUVTrimCurves` must still return this clipped domain (callers in
   `boolean.topology_intersector_p1` keep it on success).
 
+## blend.fillet_solver_p1: pseudo-B-rep mutations
+
+`SplitFilletGeomAtSideEdge`, `sm_SplitRail` and `sm_ComputeSupportEdge` (PR #192) move
+vertices, replace edge curves and relink vertex uses of the fillet pseudo-B-rep
+(`SmFilletBrep`, units `blend.fillet_geom_*`): `SmVertex::SetPoint` (`topology.vertex`),
+`SmEdge::SetCurve` (`topology.edge`) and `SmOwningTopology::Remove` / `PostInsert` of a
+vertex use (`topology.proto_topology_p1`). The Rust counterparts need the B-rep's
+notification records (`vertex::set_point` and `edge::set_curve` take the record map,
+attribute store and context of the B-rep being notified; `OwningTopology::remove` /
+`post_insert` work on a proto-topology record map, not on a `topology::Brep`). This crate
+has no pseudo-B-rep model yet (PR #147 adds `FilletBrep`), so these calls are
+`UNPORTED(...)` stubs marked `justified:` with this section. Every one of them comes after
+an unported `SmFilletGeom` / `SmFilletVertex` call in the same function, so no difftest
+case reaches them; wire them to the pseudo-B-rep's records when `blend.fillet_geom_p1`
+lands. No disagreement.
+
+## blend.fillet_solver_p1: probe notes (`--fuzz 2000`, PR #192, 2026-10-18; both outside the committed cases)
+
+Both are fuzz "differs" notes (no crash, no panic); the unit's cases and `--perturb` pass.
+
+1. **`trim_rail` after `ReadFromFile(.., rebuild = TRUE)`** (fuzz00617: `Mouse.smb`, edge 7 or 1, `t = [0.286464711202138, 1.0]`, `rebuild = true`).
+   The first control point of the trimmed 3D curve and of both UV trim curves differs: `values.flat[8]` cpp `6.134203293918636e-1`,
+   rust `6.137686398848857e-1` (rel 5.7e-4); the untrimmed curve (`t = [0, 1]`), `t = [0.2, 0.9]`, edges 0-6, 8, 9 and the same B-rep read without
+   `rebuild` all agree bit for bit. Both sides run `SmBSplineCurve::Trim` (unit `nurbs.b_spline_curve_n_lib`) on the same imported curve, so the
+   difference is in that trim for this interval, or in per-curve data the record-by-record import does not carry (zone tolerance of a rebuilt
+   curve, which the trim uses to remove knots near the cut).
+   **Resolved (round 3, 2026-10-19): not an import bug; the owner is this unit's `sm_TrimRail` call into the trim.** The import carries the
+   curve and the edge tolerance faithfully: `trim_rail` cases now also compare, before the trim, the 3D curve's unique knots and
+   multiplicities and the zone tolerance each of the three trims reads (C++ `SmTol::GetZoneTol3d(curve)`), and those agree on every case
+   including this one. The cause is the tolerance: upstream `Trim` reads `SmTol::GetZoneTol3d(this)`, which for a curve owned by an edge
+   (the rail's 3D curve) or by an edge use of it (both UV trim curves) is the edge's `GetTolerance()` (`SM_USE_OLDTOL`, `SmTol.cpp`), and
+   uses it for the degenerate end-segment test after `sm_CrvTrim` (`N_CrvRemoveDegenSegs`). The Rust `BSplineCurve::trim` documents that
+   it serves owner-less curves and reads the system zone tolerance (`1e-5`) from its kernel. The rebuilt `Mouse.smb` edge 7 carries a
+   different tolerance (giving the trims the rail's tolerance is the only change that makes the case agree), so at the cut
+   `t = 0.2865` the two sides took different branches of the short end-segment test. `trim_rail` now trims with a
+   kernel whose zone tolerance is the rail's tolerance (`blend/fillet_solver/p1.rs`, "Rail trims" in the module notes), and the committed
+   fixture `trim_rail_mouse_rebuild_edge7` agrees bit for bit. Other callers that trim an edge-owned curve through `Curve::trim` should
+   pass such a kernel too (the trim unit's owner-less assumption is documented in `nurbs/b_spline_curve_n_lib.rs`).
+2. **`rollover` on `sphere.smb` with a tolerance at the rounding floor** (`tol = +-1e-300`, edges 0 and 4): `|binormal . normal|` is compared
+   against `cos(pi/2 - tol) = 6.1e-17`; the C++ result is "tangent", the Rust one is not. Both dot products are below `1e-12` (the
+   committed fixture `rollover_sphere_tight`, `tol = 1e-12`, passes), so the flag flips only on rounding noise around zero (presumably the
+   sphere's evaluation of the normal or binormal); not investigated further.
+
+## blend.fillet_solver_p1: SmoothOutIntersection (back-edge stub of #179, PR #192 round 4)
+
+`blend.fillet_intersector` (#179) listed ten back-edge stubs tagged `blend.fillet_solver_p1`; this PR wires them in
+`impl FilletSolverOps for ConstantRadiusAssistedFs` (`blend/fillet_intersector.rs`) except the one below.
+
+- **`SmSelfIntersectionHandler::SmoothOutIntersection` (`FlushCurve` step 9, `SmFilletIntersector.cpp:1569`) cannot be wired by
+  this unit and is owned by no unit.** The call is virtual on the handler object `GetSelfIntersectionHandler()` returns; the
+  only override that exists is `SmMakeCurveBlendSIH::SmoothOutIntersection` (`SmFilletSolver.cpp:8157-8669`, 513 lines), which
+  `harness/callgraph/units.json` does not assign to any unit (it appears in `unused_functions.txt`: the call graph cannot resolve
+  the virtual call, and nothing calls it directly). This unit owns only the handlers' constructors/destructors (no data).
+  The handler is the member `SmFilletExecutive::m_pSelfIntersectionHandler`: a solver outside an executive has none (upstream
+  dereferences the NULL `m_pExecutive`), and `FilletSolver::self_intersection_handler` already reports the executive's data as
+  `Unported` (`blend.fillet_executive_p1`), so `SmoothOutIntersection` is unreachable from the Rust solver before that unit lands.
+  It is therefore an explicit `Unported` override tagged with the unit that must create the handler
+  (`blend.fillet_executive_p1`); whoever ports the executive should also port the `SmMakeCurveBlendSIH` class
+  (`SmoothOutIntersection`, 513 lines; the `CreateBlends` / `SmMakeSurfaceBlendSIH` overrides are dummies or unused).
+- **`m_pFSG->CreateSurface`** is wired through `FilletSurfaceGenerator::create_surface`: the base class gives `SM_ERR`, the Eiffel tower
+  generator its surface, the linear/circular/blend-curve generators stay `Unported` in `blend.fillet_standard_solver_p1/_p2`. The
+  generators read only the rails, the fillet points and the approximation tolerance, so the centre line, the UV curves and the two
+  surfaces the C++ call also passes are not needed.
+- **`ComputeSurfaceValues` on `ConstantRadiusAssistedFs`** is wired to `FilletSolver::compute_surface_values`, which calls the virtual
+  `SetupOffsetValues`; the `SmConstantRadiusFS` override belongs to `blend.fillet_standard_solver_p1`, so the call ends in that
+  unit's `Unported` until it lands (deferred, as before, in the intersector's difftest).
+
+## blend.fillet_solver_p1: stubs naming blend.fillet_geom_p1 (merged main after #259/#269)
+
+`blend.fillet_geom_p1` is `partial` on main, so the audit lists this unit's 48 `UNPORTED(blend.fillet_geom_p1)` sites as CHECK
+(`SmFilletGeom::Get/SetOffsetSurface`, `GetRail`, `SetFilletGeomType`, `SmFilletEdge::Get/SetOriginalFace`, `SmFilletVertex`
+accessors, `SmFilletEdgeuse::SetUVCurve/Get/SetFilletGeom`, ...). They are not wired here: the ported `FilletGeom` / `FilletEdge` /
+`FilletVertex` live inside a `FilletBrep` and are addressed by `FilletGeomId` / `EdgeId` / `VertexId`, and a `FilletGeom` stores a
+`FilletSolverId`, while this unit's solver owns opaque `FilletGeomRef` handles and its `FilletSolverOps` methods take `&Brep` (not
+`&mut FilletBrep`). Wiring means replacing the handles by `FilletBrep` ids and threading `&mut FilletBrep` through `FilletSolverOps`,
+`blend.fillet_custom_solver`, `blend.fillet_intersector` and the three shims (the 7 deferred `FinishConstruction` cases of this unit's
+report, which stop at `SetOffsetSurface`, are the first to run). That signature change touches every downstream solver PR and is left
+to a follow-up. The two sites that were wireable are wired: `SmFilletSolver::FindIndexOfRailOnFace` (`blend/fillet_geom/p1.rs`, 
+`sm_CreateCubicRailRailInterpolant`) and the `SmCircularCrossSectionFSG` constructor (`offset/offset_geometry_creation.rs`).
+
+## blend.fillet_solver_p1: one type per class after #168 (merged main after #168/#263, 2026-10-20)
+
+#168 (`blend.fillet_standard_solver_p1`) co-ported `SmFilletSolver` members (`FilletSolverData`), `SmFilletSolverType`,
+`SmFilletSurfaceGeneratorType`, `SmFilletSolver::IsKindOf` and the `SmFilletSphereSolveENFO` members, all owned by this unit, and
+ported the generator classes `SmLinear/Circular/BlendCurveCrossSectionFSG` whose constructors this unit owns. After the merge there is
+one Rust type per C++ class: the constant-distance, curve-based and variable-radius solvers hold this unit's `FilletSolver` (their
+`GetSurface` goes through `FilletSolver::surface`, a private `SolverRails` helper dereferences it); `FilletSolverType`,
+`FilletSurfaceGeneratorType` are re-exported from here; `FilletSolver::is_kind_of` is `SmFilletSolver::IsKindOf`;
+`GuessSphereSolve` wraps `FilletSphereSolveEnfo` (it now takes the solver, as upstream's constructor does); and
+`FilletSurfaceGenerator::Circular` / `BlendCurve` hold #168's `CircularCrossSectionFsg` / `BlendCurveCrossSectionFsg` (continuity is
+`u32`, as #168 chose). `ConstantRadiusAssistedFs` (custom solver) stays #168's `ConstantRadiusFs` as before. `SmFilStatus`
+had three copies (`blend.fillet_geom_p1`, this unit, `blend.fillet_intersector`); the owner's (`fillet_geom::p1::FilStatus`) is
+re-exported by the other two, so the intersector's `SetStatus` no longer maps between enums. Not merged: the intersector's
+`FilletSolverOps` trait (the `SmFilletSolver` virtuals and members `SmFilletIntersector` calls, from #179) and this unit's
+`FilletSolverOps` are still two traits; `ConstantRadiusAssistedFs` implements both, the intersector's by delegating to the base.
+
+Wired with it: the `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides of `ConstantRadiusAssistedFs`, `EiffelTowerFs` and
+`SecantConstantRadiusFs` (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType`, and `LoadJacobian` of
+`ConstantRadiusAssistedFs` itself); `IsKindOf` and `LoadInitialValues` stay explicit `Unported` overrides (`_p2`).
+`SmLinearCrossSectionFSG::CreateSurface` in `FilletSurfaceGenerator::create_surface`; `SmFilletSolver::SetExtensionFlags` in
+`VariableRadiusFs::set_extension_flags` (which now takes the B-rep and stops at the corner lookup, `blend.fillet_executive_p1`); and
+`SmCircularCrossSectionFSG::CreateSurfaceFromCurves` in `offset/offset_geometry_creation.rs`. Dispatch note for the last one:
+upstream's `rCenterLine` is an `SmBSplineCurve&` whose virtuals (`IsLine`, `IsArc`) dispatch on the real kind (an `SmLine` or
+`SmEllipse` centre line); #168's `create_surface_from_curves` takes the NURB part as a plain `BSplineCurve`, so an analytic centre line is
+tested with the B-spline versions. Not hit by a compared case yet.
+
 ## query.face_p1 (face/shell/region boxes, `Point3DClassify`, `EdgeCurveOnClassify`, `SmApiEvaluateCurve`; takeover of #105, 2026-10-18; partial, no disagreements)
 
 - **Face-owned surfaces in imported B-reps.** Upstream face surfaces are owned by their
@@ -10527,49 +10633,6 @@ rejected: nothing runs on either side.
   `topology.brep_p10 SmBrep::MakeTopologyFromData` (harness deferrals, not code stubs);
   they could now read the file through `p7::read_from_file`. (4) topology.brep_p7's
   `cpp-guard:unvalidated-topology` read guard (UB-164) is still in place.
-
-## blend.fillet_solver_p1: pseudo-B-rep mutations
-
-`SplitFilletGeomAtSideEdge`, `sm_SplitRail` and `sm_ComputeSupportEdge` (PR #192) move
-vertices, replace edge curves and relink vertex uses of the fillet pseudo-B-rep
-(`SmFilletBrep`, units `blend.fillet_geom_*`): `SmVertex::SetPoint` (`topology.vertex`),
-`SmEdge::SetCurve` (`topology.edge`) and `SmOwningTopology::Remove` / `PostInsert` of a
-vertex use (`topology.proto_topology_p1`). The Rust counterparts need the B-rep's
-notification records (`vertex::set_point` and `edge::set_curve` take the record map,
-attribute store and context of the B-rep being notified; `OwningTopology::remove` /
-`post_insert` work on a proto-topology record map, not on a `topology::Brep`). This crate
-has no pseudo-B-rep model yet (PR #147 adds `FilletBrep`), so these calls are
-`UNPORTED(...)` stubs marked `justified:` with this section. Every one of them comes after
-an unported `SmFilletGeom` / `SmFilletVertex` call in the same function, so no difftest
-case reaches them; wire them to the pseudo-B-rep's records when `blend.fillet_geom_p1`
-lands. No disagreement.
-
-## blend.fillet_solver_p1: probe notes (`--fuzz 2000`, PR #192, 2026-10-18; both outside the committed cases)
-
-Both are fuzz "differs" notes (no crash, no panic); the unit's cases and `--perturb` pass.
-
-1. **`trim_rail` after `ReadFromFile(.., rebuild = TRUE)`** (fuzz00617: `Mouse.smb`, edge 7 or 1, `t = [0.286464711202138, 1.0]`, `rebuild = true`).
-   The first control point of the trimmed 3D curve and of both UV trim curves differs: `values.flat[8]` cpp `6.134203293918636e-1`,
-   rust `6.137686398848857e-1` (rel 5.7e-4); the untrimmed curve (`t = [0, 1]`), `t = [0.2, 0.9]`, edges 0-6, 8, 9 and the same B-rep read without
-   `rebuild` all agree bit for bit. Both sides run `SmBSplineCurve::Trim` (unit `nurbs.b_spline_curve_n_lib`) on the same imported curve, so the
-   difference is in that trim for this interval, or in per-curve data the record-by-record import does not carry (zone tolerance of a rebuilt
-   curve, which the trim uses to remove knots near the cut).
-   **Resolved (round 3, 2026-10-19): not an import bug; the owner is this unit's `sm_TrimRail` call into the trim.** The import carries the
-   curve and the edge tolerance faithfully: `trim_rail` cases now also compare, before the trim, the 3D curve's unique knots and
-   multiplicities and the zone tolerance each of the three trims reads (C++ `SmTol::GetZoneTol3d(curve)`), and those agree on every case
-   including this one. The cause is the tolerance: upstream `Trim` reads `SmTol::GetZoneTol3d(this)`, which for a curve owned by an edge
-   (the rail's 3D curve) or by an edge use of it (both UV trim curves) is the edge's `GetTolerance()` (`SM_USE_OLDTOL`, `SmTol.cpp`), and
-   uses it for the degenerate end-segment test after `sm_CrvTrim` (`N_CrvRemoveDegenSegs`). The Rust `BSplineCurve::trim` documents that
-   it serves owner-less curves and reads the system zone tolerance (`1e-5`) from its kernel. The rebuilt `Mouse.smb` edge 7 carries a
-   different tolerance (giving the trims the rail's tolerance is the only change that makes the case agree), so at the cut
-   `t = 0.2865` the two sides took different branches of the short end-segment test. `trim_rail` now trims with a
-   kernel whose zone tolerance is the rail's tolerance (`blend/fillet_solver/p1.rs`, "Rail trims" in the module notes), and the committed
-   fixture `trim_rail_mouse_rebuild_edge7` agrees bit for bit. Other callers that trim an edge-owned curve through `Curve::trim` should
-   pass such a kernel too (the trim unit's owner-less assumption is documented in `nurbs/b_spline_curve_n_lib.rs`).
-2. **`rollover` on `sphere.smb` with a tolerance at the rounding floor** (`tol = +-1e-300`, edges 0 and 4): `|binormal . normal|` is compared
-   against `cos(pi/2 - tol) = 6.1e-17`; the C++ result is "tangent", the Rust one is not. Both dot products are below `1e-12` (the
-   committed fixture `rollover_sphere_tight`, `tol = 1e-12`, passes), so the flag flips only on rounding noise around zero (presumably the
-   sphere's evaluation of the normal or binormal); not investigated further.
 
 ## topology.brep_p9: per-call continuations and coverage limits (PR #183)
 

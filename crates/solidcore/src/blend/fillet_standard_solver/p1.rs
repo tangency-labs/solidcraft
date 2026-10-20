@@ -46,21 +46,19 @@
 //! | [`CircularCrossSectionFsg`], [`CircularCrossSectionFsg::create_surface_from_curves`] | `SmCircularCrossSectionFSG`, `CreateSurfaceFromCurves` |
 //! | [`BlendCurveCrossSectionFsg`], [`BlendCurveCrossSectionFsg::create_surface_from_curves`] | `SmBlendCurveCrossSectionFSG`, `CreateSurfaceFromCurves` |
 //! | [`GuessSphereSolve::new`]                                | `SmGuessSphereSolveENFO::SmGuessSphereSolveENFO` (file-local class) |
-//! | [`FilletSolverData`] (CO-PORTED)                         | the `SmFilletSolver` members these solvers read       |
-//! | [`fillet_solver_is_kind_of`] (CO-PORTED)                 | `SmFilletSolver::IsKindOf`                            |
-//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`], [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
-//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read; `Evaluate` is unit `blend.fillet_executive_p1`'s, the constructors `blend.fillet_executive_p2`'s) |
+//! | [`FilletSolver`] (re-exported from `blend.fillet_solver_p1`) | the `SmFilletSolver` base of the solvers (`FilletSolver::is_kind_of` is `SmFilletSolver::IsKindOf`) |
+//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`] (re-exported from `blend.fillet_solver_p1`), [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
+//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read) |
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
 //! - **Object model.** `SmConstantRadiusFS` is the co-ported [`ConstantRadiusAssistedFs`]
 //!   of `blend.fillet_custom_solver` (the members of `SmFilletSolver`,
 //!   `SmConstantRadiusFS` and `SmConstantRadiusAssistedFS` are the same), aliased as
-//!   [`ConstantRadiusFs`]. The other solvers hold a co-ported [`FilletSolverData`]
-//!   (`SmFilletSolver`, unit `blend.fillet_solver_p1`). `m_pFGForSurfaces` and the
-//!   fillet geometry list are not modelled: `GetSurface` returns the solver's own
-//!   offset surface and `FinishConstruction` (which copies the offset surfaces into the
-//!   fillet geometries) has nothing to do. A missing surface, an out-of-range rail index
+//!   [`ConstantRadiusFs`]. The other solvers hold the [`FilletSolver`] base of unit
+//!   `blend.fillet_solver_p1`. `GetSurface` is [`FilletSolver::surface`] (the fillet
+//!   geometry for the surfaces, `m_pFGForSurfaces`, is never set by these solvers). A
+//!   missing surface, an out-of-range rail index
 //!   or a missing original curve (upstream dereferences `NULL` or indexes past its
 //!   arrays) is [`SolidError::InvalidInput`]. The solver type and run-time type queries
 //!   are plain functions and constants.
@@ -96,15 +94,19 @@
 //!   (`SmCircularCrossSectionFSG::CreateSurfaceFromCurves` reads past its cross sections
 //!   when a ruled or revolved surface needs a second, knot-equalising pass,
 //!   `plan/upstream-issues.md`).
-//! - **Unported callees.** The fillet law evaluation (`blend.fillet_executive_p1`) and
-//!   `SmFilletSolver::SetExtensionFlags` (`blend.fillet_solver_p1`) return
-//!   [`SolidError::Unported`].
+//! - **Unported callees.** The fillet law evaluation (`blend.fillet_executive_p1`)
+//!   returns [`SolidError::Unported`]; `SmFilletSolver::SetExtensionFlags`
+//!   ([`FilletSolver::set_extension_flags`]) takes the B-rep and stops at its corner
+//!   lookup (`blend.fillet_executive_p1`).
 //! - No recursion.
 
 use crate::blend::fillet_custom_solver::{
     offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_2nd, offset_evaluate_point,
     offset_local_point_solve, offset_natural_uv_domain, surface_global_point_solve,
     ConstantRadiusAssistedFs, OffsetSurface, SurfaceId,
+};
+use crate::blend::fillet_solver::p1::{
+    FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
 };
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p4::is_closed_base;
@@ -117,7 +119,6 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::matrix::Matrix;
-use crate::geom::object;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::kernel::Kernel;
@@ -163,8 +164,8 @@ const ANALYTIC_SAMPLES: u64 = 11;
 /// `TOPO_BASE_TYPE`.
 const TOPO_BASE_TYPE: i64 = 16000;
 
-/// `SmFilletSolver_TYPE` (`TOPO_BASE_TYPE + 37`).
-pub const FILLET_SOLVER_TYPE: i64 = TOPO_BASE_TYPE + 37;
+/// `SmFilletSolver_TYPE` (`TOPO_BASE_TYPE + 37`, [`FilletSolver::TYPE`]).
+pub const FILLET_SOLVER_TYPE: i64 = FilletSolver::TYPE;
 /// `SmVariableRadiusFS_TYPE` (`TOPO_BASE_TYPE + 38`).
 pub const VARIABLE_RADIUS_FS_TYPE: i64 = TOPO_BASE_TYPE + 38;
 /// `SmConstantRadiusFS_TYPE` (`TOPO_BASE_TYPE + 42`).
@@ -183,146 +184,69 @@ pub const CONSTANT_RADIUS_FS_TYPE_STRING: &str = "SmConstantRadiusFS_TYPE";
 /// `SmConstantRadiusAssistedFS::GetTypeString`.
 pub const CONSTANT_RADIUS_ASSISTED_FS_TYPE_STRING: &str = "SmConstantRadiusAssistedFS_TYPE";
 
-/// `SmFilletSolver::IsKindOf` (CO-PORTED from unit `blend.fillet_solver_p1`):
-/// `SmFilletSolver_TYPE` or a type an `SmObject` is.
-#[must_use]
-pub const fn fillet_solver_is_kind_of(t: i64) -> bool {
-    t == FILLET_SOLVER_TYPE || object::is_kind_of(t)
-}
-
 /// `SmConstantRadiusFS::IsKindOf`: `SmConstantRadiusFS_TYPE` or a type a fillet solver
-/// is.
+/// is ([`FilletSolver::is_kind_of`]).
 #[must_use]
 pub const fn constant_radius_is_kind_of(t: i64) -> bool {
-    t == CONSTANT_RADIUS_FS_TYPE || fillet_solver_is_kind_of(t)
+    t == CONSTANT_RADIUS_FS_TYPE || FilletSolver::is_kind_of(t)
 }
 
-/// The kind of a fillet solver (`SmFilletSolverType`, CO-PORTED from unit
-/// `blend.fillet_solver_p1`); discriminants are the upstream values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FilletSolverType {
-    /// `SM_FS_UNKNOWN`.
-    Unknown = 0,
-    /// `SM_FS_SURF_SURF`.
-    SurfSurf = 1,
-    /// `SM_FS_CONST_RADIUS`.
-    ConstRadius = 2,
-    /// `SM_FS_VARIABLE_RADIUS`.
-    VariableRadius = 3,
-    /// `SM_FS_CONST_DIST`.
-    ConstDist = 4,
-    /// `SM_FS_CURVE_BASED`.
-    CurveBased = 5,
-    /// `SM_FS_CONST_RADIUS_ASSISTED`.
-    ConstRadiusAssisted = 6,
-}
-
-/// The kind of a fillet surface generator (`SmFilletSurfaceGeneratorType`, CO-PORTED
-/// from unit `blend.fillet_solver_p1`); discriminants are the upstream values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FilletSurfaceGeneratorType {
-    /// `SM_FSG_UNKNOWN`.
-    Unknown = 0,
-    /// `SM_FSG_LINEAR`.
-    Linear = 1,
-    /// `SM_FSG_CIRCULAR`.
-    Circular = 2,
-    /// `SM_FSG_BLEND_CURVE`.
-    BlendCurve = 3,
-}
+/// The fillet solver base (`SmFilletSolver`), the solver kind (`SmFilletSolverType`)
+/// and the surface generator kind (`SmFilletSurfaceGeneratorType`) of unit
+/// `blend.fillet_solver_p1`, re-exported here.
+pub use crate::blend::fillet_solver::p1::{
+    FilletSolver, FilletSolverType, FilletSurfaceGeneratorType,
+};
 
 /// How a fillet surface is trimmed (`SmBoundaryTrimmingType`): the enum co-ported by
 /// `blend.fillet_geom_p1` (PR #147), re-exported here.
 pub use crate::blend::fillet_geom::p1::BoundaryTrimmingType;
 
-// ---- co-ported solver data ----------------------------------------------------------------
+// ---- the SmFilletSolver base --------------------------------------------------------------
 
-/// The members of `SmFilletSolver` the constant-distance, curve-based and
-/// variable-radius solvers read (CO-PORTED from unit `blend.fillet_solver_p1`).
-#[derive(Debug, Clone)]
-pub struct FilletSolverData {
-    /// `m_pEdgeuses`: the radial edge uses of the filleted edge.
-    pub edgeuses: [Option<EdgeuseId>; 2],
-    /// `m_dThisApproxTol3d`.
-    pub approx_tol_3d: f64,
-    /// `m_dThisAngTolRad`.
-    pub ang_tol_rad: f64,
-    /// `m_dTangencyTolerance`.
-    pub tangency_tolerance: f64,
-    /// `m_dEdgeBlendFactor` (`1.0`).
-    pub edge_blend_factor: f64,
-    /// `m_pSurfaces`: the offset surfaces of the two rails.
-    pub surfaces: [Option<OffsetSurface>; 2],
-    /// `m_dOrientations`: offset direction of each surface, `1.0` or `-1.0`.
-    pub orientations: [f64; 2],
-    /// `m_dSurfaceExtensionFactor` (`0.5`).
-    pub surface_extension_factor: f64,
-    /// `m_dConversionTol` (`SM_EFF_ZERO / 10`).
-    pub conversion_tol: f64,
-    /// `m_bReverseTrim` (`FALSE`).
-    pub reverse_trim: bool,
-    /// `m_bExtendBefore` (not initialised upstream; `false` here).
-    pub extend_before: bool,
-    /// `m_bExtendAfter` (not initialised upstream; `false` here).
-    pub extend_after: bool,
-    /// `m_pFSG->GetFilletSurfaceGeneratorType()`: `None` for a `NULL` `m_pFSG`.
-    pub fsg: Option<FilletSurfaceGeneratorType>,
-}
-
-impl FilletSolverData {
-    /// `SmFilletSolver(crContext, dThisApproxTol3d, dThisAngTolRad,
-    /// dTangencyTolerance)`: no edge uses or surfaces, orientations `1.0`, extension
-    /// factor `0.5`, conversion tolerance `SM_EFF_ZERO / 10`.
-    #[must_use]
-    pub fn new(approx_tol_3d: f64, ang_tol_rad: f64, tangency_tolerance: f64) -> Self {
-        Self {
-            edgeuses: [None, None],
-            approx_tol_3d,
-            ang_tol_rad,
-            tangency_tolerance,
-            edge_blend_factor: 1.0,
-            surfaces: [None, None],
-            orientations: [1.0, 1.0],
-            surface_extension_factor: 0.5,
-            conversion_tol: EFF_ZERO / 10.0,
-            reverse_trim: false,
-            extend_before: false,
-            extend_after: false,
-            fsg: None,
-        }
-    }
-
-    /// `GetSurface(lRailIndex)`.
+/// `GetSurface(lRailIndex)` of the [`FilletSolver`] base as these solvers dereference
+/// it: the rail's offset surface, which must be set.
+pub(crate) trait SolverRails {
+    /// `*GetSurface(rail)`.
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for a rail index above 1 or a missing surface.
-    pub fn surface(&self, rail: usize) -> Result<&OffsetSurface> {
-        self.surfaces
-            .get(rail)
-            .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))
-    }
+    /// [`SolidError::InvalidInput`] for a rail index above 1 or a missing surface
+    /// (upstream dereferences `NULL`); those of [`FilletSolver::surface`].
+    fn rail(&self, rail: usize) -> Result<&OffsetSurface>;
 
-    fn surface_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
-        self.surfaces
-            .get_mut(rail)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))
-    }
-
-    fn orientation(&self, rail: usize) -> Result<f64> {
-        self.orientations
-            .get(rail)
-            .copied()
-            .ok_or_else(|| SolidError::invalid_input(OP, "rail index out of range"))
-    }
+    /// `*GetSurface(rail)`, mutable.
+    ///
+    /// # Errors
+    ///
+    /// As [`SolverRails::rail`].
+    fn rail_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface>;
 
     /// `GetSurface(0)->SetOffsetDistance(r * m_dOrientations[0])`, then rail 1.
+    ///
+    /// # Errors
+    ///
+    /// As [`SolverRails::rail`].
+    fn set_offsets(&mut self, radius: f64) -> Result<()>;
+}
+
+impl SolverRails for FilletSolver {
+    fn rail(&self, rail: usize) -> Result<&OffsetSurface> {
+        self.surface(rail)?
+            .map(|slot| &slot.surface)
+            .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))
+    }
+
+    fn rail_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
+        self.surface_mut(rail)?
+            .map(|slot| &mut slot.surface)
+            .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))
+    }
+
     fn set_offsets(&mut self, radius: f64) -> Result<()> {
         for rail in 0..2 {
             let d = radius * self.orientation(rail)?;
-            self.surface_mut(rail)?.set_offset_distance(d);
+            self.rail_mut(rail)?.set_offset_distance(d);
         }
         Ok(())
     }
@@ -866,7 +790,7 @@ impl SurfaceSurfaceFs {
 #[derive(Debug, Clone)]
 pub struct ConstantDistanceFs {
     /// The `SmFilletSolver` base.
-    pub solver: FilletSolverData,
+    pub solver: FilletSolver,
     /// `m_dDistance`: the distance between corresponding rail points.
     pub distance: f64,
 }
@@ -897,11 +821,11 @@ pub enum InitialSurface<'a> {
 
 /// The offset surface `surface1` denotes.
 fn initial_surface<'b>(
-    solver: &'b mut FilletSolverData,
+    solver: &'b mut FilletSolver,
     surface1: &'b mut InitialSurface<'_>,
 ) -> Result<&'b mut OffsetSurface> {
     match surface1 {
-        InitialSurface::Rail(i) => solver.surface_mut(*i),
+        InitialSurface::Rail(i) => solver.rail_mut(*i),
         InitialSurface::Other(s) => Ok(&mut **s),
     }
 }
@@ -949,7 +873,7 @@ impl ConstantDistanceFs {
     /// `SmConstantDistanceFS::IsKindOf`: its own type or a type a fillet solver is.
     #[must_use]
     pub const fn is_kind_of(&self, t: i64) -> bool {
-        t == Self::TYPE || fillet_solver_is_kind_of(t)
+        t == Self::TYPE || FilletSolver::is_kind_of(t)
     }
 
     /// `SmConstantDistanceFS::SetupOffsetValues`: the fillet radius stored in the
@@ -1004,8 +928,8 @@ impl ConstantDistanceFs {
         // init output
         let mut found = false;
         let [surface1, surface2] = surfaces;
-        let base0 = self.solver.surface(0)?.base_id;
-        let base1 = self.solver.surface(1)?.base_id;
+        let base0 = self.solver.rail(0)?.base_id;
+        let base1 = self.solver.rail(1)?.base_id;
 
         // get lSurf1Off index into crX array for lSurf1 parameters
         let mut surf1_off = *num_parameters;
@@ -1029,15 +953,15 @@ impl ConstantDistanceFs {
 
         // get baseSurface1 F point values for given crX values
         let uv = uv_at(x, surf1_off, OP)?;
-        self.solver.surface_mut(0)?.set_offset_distance(0.0);
+        self.solver.rail_mut(0)?.set_offset_distance(0.0);
         let [p_f, du_f, dv_f, duv_f, duu_f, dvv_f] =
-            offset_evaluate_2nd(k, self.solver.surface_mut(0)?, uv)?;
+            offset_evaluate_2nd(self.solver.rail_mut(0)?, uv)?;
 
         // get baseSurface2 G point values for given crX values
         let uv2 = uv_at(x, surf2_off, OP)?;
-        self.solver.surface_mut(1)?.set_offset_distance(0.0);
+        self.solver.rail_mut(1)?.set_offset_distance(0.0);
         let [p_g, du_g, dv_g, duv_g, duu_g, dvv_g] =
-            offset_evaluate_2nd(k, self.solver.surface_mut(1)?, uv2)?;
+            offset_evaluate_2nd(self.solver.rail_mut(1)?, uv2)?;
 
         // get current radius value
         let radius = x_at(x, *num_parameters, OP)?;
@@ -1208,7 +1132,7 @@ impl ConstantDistanceFs {
 
             let domain = self
                 .solver
-                .surface(other_rail)?
+                .rail(other_rail)?
                 .base_surface()
                 .natural_uv_domain();
             let size: Vec2 = self.solver.surface_extension_factor * domain.size();
@@ -1256,12 +1180,12 @@ impl ConstantDistanceFs {
         uv: Point2,
         pnt: Point3,
     ) -> Result<Point2> {
-        let base2_id = self.solver.surface(other_rail)?.base_id;
+        let base2_id = self.solver.rail(other_rail)?.base_id;
         // (`rpSurface2` itself: its base is the one changed)
         let aliased = matches!(surface1, InitialSurface::Rail(i) if *i == other_rail);
         let same_base =
             !aliased && initial_surface(&mut self.solver, surface1)?.base_id == base2_id;
-        let saved2 = enable_out_of_bounds(self.solver.surface_mut(other_rail)?);
+        let saved2 = enable_out_of_bounds(self.solver.rail_mut(other_rail)?);
         let saved1 = if same_base {
             enable_out_of_bounds(initial_surface(&mut self.solver, surface1)?)
         } else {
@@ -1278,10 +1202,7 @@ impl ConstantDistanceFs {
         }
         if let Some(old) = saved2 {
             set_out_of_bounds_enabled(
-                self.solver
-                    .surface_mut(other_rail)?
-                    .surface
-                    .base_surface_mut(),
+                self.solver.rail_mut(other_rail)?.surface.base_surface_mut(),
                 old,
             );
         }
@@ -1299,7 +1220,7 @@ impl ConstantDistanceFs {
         pnt: Point3,
     ) -> Result<Point2> {
         const OP: &str = OP_CD_INIT;
-        let base2_id = self.solver.surface(other_rail)?.base_id;
+        let base2_id = self.solver.rail(other_rail)?.base_id;
         let approx_tol_3d = self.solver.approx_tol_3d;
 
         // If we have edgeuses then use them to compute a point on the other surfaces
@@ -1388,7 +1309,7 @@ impl ConstantDistanceFs {
             let p2d = uv_curve.evaluate_point(k, t)?;
             uv2 = Point2::new(p2d.x, p2d.y);
             found_uv = true;
-            let surface2 = self.solver.surface(other_rail)?;
+            let surface2 = self.solver.rail(other_rail)?;
             let domain2 = offset_natural_uv_domain(surface2);
             if let Some((sol_uv, dist)) = offset_local_point_solve(k, surface2, &domain2, pnt, uv2)?
             {
@@ -1405,8 +1326,8 @@ impl ConstantDistanceFs {
                 only_upper_half: true,
                 non_zero_tangents: true,
             };
-            let base2 = self.solver.surface(other_rail)?.base_surface();
-            let mat = base2.evaluate(k, uv2, 1, 1, flags)?;
+            let base2 = self.solver.rail(other_rail)?.base_surface();
+            let mat = base2.evaluate(uv2, 1, 1, flags)?;
             let du = mat
                 .get(1)
                 .and_then(|r| r.first())
@@ -1433,7 +1354,7 @@ impl ConstantDistanceFs {
         }
 
         if !found_uv {
-            let surface2 = self.solver.surface(other_rail)?;
+            let surface2 = self.solver.rail(other_rail)?;
             let domain2 = offset_natural_uv_domain(surface2);
             let sols = surface_global_point_solve(
                 k,
@@ -1472,7 +1393,7 @@ fn enable_out_of_bounds(s: &mut OffsetSurface) -> Option<bool> {
 #[derive(Debug, Clone)]
 pub struct CurveBasedFs {
     /// The `SmFilletSolver` base.
-    pub solver: FilletSolverData,
+    pub solver: FilletSolver,
     /// `m_pOriginal`: the curve of the edge being filleted.
     pub original: Option<Curve>,
     /// `m_pExtended`: the extended edge curve, when one was made.
@@ -1502,7 +1423,7 @@ impl CurveBasedFs {
     #[must_use]
     pub fn new(approx_tol_3d: f64, ang_tol_rad: f64, tangency_tolerance: f64) -> Self {
         Self {
-            solver: FilletSolverData::new(approx_tol_3d, ang_tol_rad, tangency_tolerance),
+            solver: FilletSolver::new(approx_tol_3d, ang_tol_rad, tangency_tolerance),
             original: None,
             extended: None,
         }
@@ -1540,7 +1461,7 @@ impl CurveBasedFs {
     /// `SmCurveBasedFS::IsKindOf`: its own type or a type a fillet solver is.
     #[must_use]
     pub const fn is_kind_of(&self, t: i64) -> bool {
-        t == Self::TYPE || fillet_solver_is_kind_of(t)
+        t == Self::TYPE || FilletSolver::is_kind_of(t)
     }
 
     /// `SmCurveBasedFS::EvaluateBaseCurve`: the point and derivatives
@@ -1822,7 +1743,8 @@ impl VariableRadiusFs {
         let fsg = self
             .curve_based
             .solver
-            .fsg
+            .fillet_surface_generator()
+            .map(FilletSurfaceGenerator::fillet_surface_generator_type)
             .ok_or_else(|| SolidError::invalid_input(OP_VR, "no fillet surface generator"))?;
         if fsg == FilletSurfaceGeneratorType::Circular && self.law.is_linear_law()? {
             if let FilletLawKind::Linear {
@@ -1845,19 +1767,12 @@ impl VariableRadiusFs {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] (`SmFilletSolver::SetExtensionFlags`,
-    /// `blend.fillet_solver_p1`); [`SolidError::InvalidInput`] without original curve or
-    /// when the first extension fails (upstream then dereferences `NULL`).
-    pub fn set_extension_flags(&mut self, k: &Kernel) -> Result<()> {
-        let _ = k;
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::SetExtensionFlags
-        return Err(SolidError::unported(
-            "SmFilletSolver::SetExtensionFlags",
-            "blend.fillet_solver_p1",
-        ));
-
-        #[allow(unreachable_code)]
-        self.extend_edge_curve(k)
+    /// Those of `SmFilletSolver::SetExtensionFlags` ([`FilletSolver::set_extension_flags`]
+    /// on `b`, the B-rep of the edge uses); [`SolidError::InvalidInput`] without original
+    /// curve or when the first extension fails (upstream then dereferences `NULL`).
+    pub fn set_extension_flags(&mut self, b: &Brep) -> Result<()> {
+        self.curve_based.solver.set_extension_flags(b)?;
+        self.extend_edge_curve()
     }
 
     /// The `SmVariableRadiusFS` part of `SetExtensionFlags`.
@@ -1932,33 +1847,24 @@ impl VariableRadiusFs {
 // ---- SmGuessSphereSolveENFO ---------------------------------------------------------------
 
 /// The sphere/plane solve of a fillet point at a given distance from a known point
-/// (`SmGuessSphereSolveENFO`, file-local; its `SmFilletSphereSolveENFO` members are
-/// CO-PORTED from unit `blend.fillet_solver_p1`). The solver it reads is passed to its
-/// evaluation (unit `blend.fillet_standard_solver_p2`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GuessSphereSolve {
-    /// `m_vSphereCenter`.
-    pub sphere_center: Point3,
-    /// `m_dSphereRadius`.
-    pub sphere_radius: f64,
-    /// `m_vPlaneABC` (the centre).
-    pub plane_abc: Point3,
-    /// `m_dPlaneD` (the radius).
-    pub plane_d: f64,
-    /// `m_bPlaneAdjusts` (`FALSE`).
-    pub plane_adjusts: bool,
+/// (`SmGuessSphereSolveENFO`, file-local): its `SmFilletSphereSolveENFO` base is
+/// [`FilletSphereSolveEnfo`] of unit `blend.fillet_solver_p1`, which holds the solver.
+/// Its `Evaluate` belongs to unit `blend.fillet_standard_solver_p2`.
+pub struct GuessSphereSolve<'a> {
+    /// The `SmFilletSphereSolveENFO` base.
+    pub base: FilletSphereSolveEnfo<'a>,
 }
 
-impl GuessSphereSolve {
-    /// `SmGuessSphereSolveENFO(crSphereCenter, dSphereRadius, crFilletSolver)`.
-    #[must_use]
-    pub const fn new(sphere_center: Point3, sphere_radius: f64) -> Self {
+impl<'a> GuessSphereSolve<'a> {
+    /// `SmGuessSphereSolveENFO(crSphereCenter, dSphereRadius, crFilletSolver)`: the
+    /// base constructor (the plane starts as the sphere, not adjusting).
+    pub fn new(
+        sphere_center: Point3,
+        sphere_radius: f64,
+        solver: &'a mut dyn FilletSolverOps,
+    ) -> Self {
         Self {
-            sphere_center,
-            sphere_radius,
-            plane_abc: sphere_center,
-            plane_d: sphere_radius,
-            plane_adjusts: false,
+            base: FilletSphereSolveEnfo::new(sphere_center, sphere_radius, solver),
         }
     }
 }
@@ -3160,6 +3066,7 @@ impl BlendCurveCrossSectionFsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blend::fillet_solver::p1::OffsetSurfaceSlot;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
 
@@ -3256,16 +3163,30 @@ mod tests {
 
     fn cd() -> ConstantDistanceFs {
         let k = Kernel::default();
-        let mut solver = FilletSolverData::new(1e-6, 0.5, 0.03);
+        let mut solver = FilletSolver::new(1e-6, 0.5, 0.03);
         solver.surfaces = [
-            Some(
-                OffsetSurface::new(&k, 0.0, plane_surface(0.0), SurfaceId::Free(0), SS_UNKNOWN)
-                    .expect("offset"),
-            ),
-            Some(
-                OffsetSurface::new(&k, 0.0, plane_surface(1.0), SurfaceId::Free(1), SS_UNKNOWN)
-                    .expect("offset"),
-            ),
+            Some(OffsetSurfaceSlot {
+                key: 0,
+                surface: OffsetSurface::new(
+                    &k,
+                    0.0,
+                    plane_surface(0.0),
+                    SurfaceId::Free(0),
+                    SS_UNKNOWN,
+                )
+                .expect("offset"),
+            }),
+            Some(OffsetSurfaceSlot {
+                key: 1,
+                surface: OffsetSurface::new(
+                    &k,
+                    0.0,
+                    plane_surface(1.0),
+                    SurfaceId::Free(1),
+                    SS_UNKNOWN,
+                )
+                .expect("offset"),
+            }),
         ];
         solver.orientations = [1.0, -1.0];
         ConstantDistanceFs {
@@ -3280,10 +3201,10 @@ mod tests {
         let mut t = TsectPnt::new();
         t.user_doubles[0] = 0.75;
         assert_eq!(fs.setup_offset_values(&t).expect("setup"), 0.75);
-        assert_eq!(fs.solver.surface(1).expect("s1").offset_distance(), -0.75);
+        assert_eq!(fs.solver.rail(1).expect("s1").offset_distance(), -0.75);
 
         let k = Kernel::default();
-        let mut s1 = fs.solver.surface(0).expect("s0").clone();
+        let mut s1 = fs.solver.rail(0).expect("s0").clone();
         let mut ivls = ExtentNd::new(4);
         let mut per = vec![true];
         let mut guess = vec![0.1, 0.2];
@@ -3308,7 +3229,7 @@ mod tests {
         assert_eq!(per, vec![true, false]);
         let r = 2.0 * 2.0_f64.sqrt() / 2.0;
         assert_eq!(guess, vec![0.1, 0.2, r]);
-        assert_eq!(fs.solver.surface(0).expect("s0").offset_distance(), r);
+        assert_eq!(fs.solver.rail(0).expect("s0").offset_distance(), r);
 
         // out of range interval index: upstream writes past rIntervals
         let r = fs.load_initial_values(
@@ -3350,9 +3271,12 @@ mod tests {
         assert!((guess[2] - 0.1).abs() < 1e-9 && (guess[3] - 0.2).abs() < 1e-9);
         assert_eq!(per, vec![false, false, false]);
         // the temporary out-of-bounds change is undone
-        let base2 = fs.solver.surface(1).expect("s1").base_surface();
+        let base2 = fs.solver.rail(1).expect("s1").base_surface();
         assert_eq!(out_of_bounds_enabled(base2), Some(false));
-        assert!(fs.is_kind_of(CONSTANT_DISTANCE_FS_TYPE) && fs.is_kind_of(object::OBJECT_TYPE));
+        assert!(
+            fs.is_kind_of(CONSTANT_DISTANCE_FS_TYPE)
+                && fs.is_kind_of(crate::geom::object::OBJECT_TYPE)
+        );
         assert!(fs.can_make_analytic());
         assert_eq!(fs.jacobian_size(), 5);
     }
@@ -3415,7 +3339,10 @@ mod tests {
     fn variable_radius_queries() {
         let k = &Kernel::default();
         let mut cb = CurveBasedFs::new(1e-6, 0.5, 0.03);
-        cb.solver.fsg = Some(FilletSurfaceGeneratorType::Circular);
+        cb.solver
+            .set_fillet_surface_generator(Some(FilletSurfaceGenerator::Circular(
+                CircularCrossSectionFsg::default(),
+            )));
         let mut fs = VariableRadiusFs {
             curve_based: cb,
             law: FilletLaw::new(FilletLawKind::Linear {
@@ -3431,12 +3358,13 @@ mod tests {
             end_radius: 2.0,
         };
         assert!(fs.offset_radii_can_change().expect("can change"));
-        fs.curve_based.solver.fsg = None;
+        fs.curve_based.solver.set_fillet_surface_generator(None);
         assert!(fs.offset_radii_can_change().is_err());
-        assert!(fs
-            .set_extension_flags(k)
-            .expect_err("unported")
-            .is_unported());
+        // the base SetExtensionFlags dereferences the missing edge uses
+        assert!(matches!(
+            fs.set_extension_flags(&Brep::new()),
+            Err(SolidError::InvalidInput { .. })
+        ));
         assert!(fs
             .setup_offset_values(&TsectPnt::new())
             .expect_err("unported")
@@ -3497,9 +3425,10 @@ mod tests {
 
     #[test]
     fn guess_sphere_solve_starts_from_the_sphere() {
-        let g = GuessSphereSolve::new(p(1.0, 2.0, 3.0), 0.5);
-        assert_eq!(g.plane_abc, p(1.0, 2.0, 3.0));
-        assert_eq!(g.plane_d, 0.5);
-        assert!(!g.plane_adjusts);
+        let mut fs = cr();
+        let g = GuessSphereSolve::new(p(1.0, 2.0, 3.0), 0.5, &mut fs);
+        assert_eq!(g.base.plane_abc, p(1.0, 2.0, 3.0));
+        assert_eq!(g.base.plane_d, 0.5);
+        assert!(!g.base.plane_adjusts);
     }
 }

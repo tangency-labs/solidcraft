@@ -17,7 +17,8 @@
 //! | [`SecantConstantRadiusFs::load_initial_values`]   | `SmSecantConstantRadiusFS::LoadInitialValues`     |
 //! | [`SecantConstantRadiusFs::load_jacobian`]         | `SmSecantConstantRadiusFS::LoadJacobian`          |
 //! | [`ConstantRadiusAssistedFs`] (CO-PORTED)          | `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` over the `SmFilletSolver` base ([`FilletSolver`]) |
-//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType`); `IsKindOf` returns [`SolidError::Unported`] (unit `blend.fillet_standard_solver_p2`) |
+//! | `impl FilletSolverOps for ConstantRadiusAssistedFs` | the same inherited overrides plus `SmConstantRadiusFS::LoadJacobian` (`blend.fillet_standard_solver_p1`'s methods); `IsKindOf` and `LoadInitialValues` (`_p2`) return [`SolidError::Unported`] (the class `blend.fillet_intersector` runs `ComputeSurfaceValues` on) |
+//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides `GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType` call `blend.fillet_standard_solver_p1`'s; `IsKindOf` (`_p2`) returns [`SolidError::Unported`] |
 //! | [`OffsetSurface`], [`SurfaceId`]                  | an `SmOffsetSurface*` rail surface (unit `surface.offset_surface`) and the identity of its base pointer |
 //! | [`JacobianLoad`], [`InitialValues`]               | the in/out arguments of `LoadJacobian`, `LoadInitialValues` |
 //!
@@ -70,6 +71,7 @@
 //!   construction propagate the errors of their surface dispatchers.
 
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
+use crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
 use crate::curve::curve::Curve;
@@ -300,9 +302,6 @@ pub struct ConstantRadiusAssistedFs {
     pub solver: FilletSolver,
     /// `m_dFilletRadii`: the offset radius of each surface.
     pub fillet_radii: [f64; 2],
-    /// `m_dSavedOffsets`: the offsets `SetSurfacesToZeroOffset` saved (uninitialised
-    /// upstream until then; `0` here). CO-PORTED in `blend.fillet_intersector`.
-    pub saved_offsets: [f64; 2],
 }
 
 impl ConstantRadiusAssistedFs {
@@ -331,7 +330,6 @@ impl ConstantRadiusAssistedFs {
         Self {
             solver,
             fillet_radii,
-            saved_offsets: [0.0; 2],
         }
     }
 
@@ -1610,33 +1608,30 @@ macro_rules! fillet_solver_ops {
                 &mut self.base.solver
             }
 
-            /// `SmConstantRadiusFS::GetJacobianSize`.
+            /// `SmConstantRadiusFS::GetJacobianSize` (inherited).
             fn jacobian_size(&self) -> Result<usize> {
-                Ok(self.base.jacobian_size())
+                Ok(ConstantRadiusAssistedFs::jacobian_size(&self.base))
             }
 
-            /// `SmConstantRadiusFS::SetupOffsetValues`.
+            /// `SmConstantRadiusFS::SetupOffsetValues` (inherited).
             fn setup_offset_values(
                 &mut self,
                 tsect: &TsectPnt,
                 offset_dist: Option<&mut f64>,
             ) -> Result<()> {
-                let d = self.base.setup_offset_values(tsect)?;
-                if let Some(o) = offset_dist {
-                    *o = d;
-                }
-                Ok(())
+                constant_radius_setup_offset_values(&mut self.base, tsect, offset_dist)
             }
 
-            /// `SmConstantRadiusFS::OffsetRadiiCanChange`.
+            /// `SmConstantRadiusFS::OffsetRadiiCanChange` (inherited).
             fn offset_radii_can_change(&self) -> Result<bool> {
-                Ok(self.base.offset_radii_can_change())
+                Ok(ConstantRadiusAssistedFs::offset_radii_can_change(
+                    &self.base,
+                ))
             }
 
-            /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`: the derived solvers
-            /// declare none of their own).
+            /// `SmConstantRadiusAssistedFS::GetType` (inherited, `SM_COMMON`).
             fn type_code(&self) -> Result<i64> {
-                Ok(crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+                Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
             }
 
             /// `SmConstantRadiusAssistedFS::IsKindOf` (unit
@@ -1692,6 +1687,116 @@ macro_rules! fillet_solver_ops {
 
 fillet_solver_ops!(EiffelTowerFs);
 fillet_solver_ops!(SecantConstantRadiusFs);
+
+/// `SmConstantRadiusFS::SetupOffsetValues` with the optional `pOffsetDist` out-param
+/// (`blend.fillet_standard_solver_p1`'s
+/// [`ConstantRadiusAssistedFs::setup_offset_values`] returns it).
+fn constant_radius_setup_offset_values(
+    fs: &mut ConstantRadiusAssistedFs,
+    tsect: &TsectPnt,
+    offset_dist: Option<&mut f64>,
+) -> Result<()> {
+    let d = ConstantRadiusAssistedFs::setup_offset_values(fs, tsect)?;
+    if let Some(out) = offset_dist {
+        *out = d;
+    }
+    Ok(())
+}
+
+/// The virtuals of `SmConstantRadiusAssistedFS` itself (the class `blend.fillet_intersector`
+/// runs `SmFilletSolver::ComputeSurfaceValues` on): the `SmConstantRadiusFS` overrides
+/// are `blend.fillet_standard_solver_p1`'s; those owned by `_p2` are explicit
+/// [`SolidError::Unported`] overrides, so none falls through to the base.
+impl FilletSolverOps for ConstantRadiusAssistedFs {
+    fn solver(&self) -> &FilletSolver {
+        &self.solver
+    }
+
+    fn solver_mut(&mut self) -> &mut FilletSolver {
+        &mut self.solver
+    }
+
+    /// `SmConstantRadiusFS::GetJacobianSize`.
+    fn jacobian_size(&self) -> Result<usize> {
+        Ok(ConstantRadiusAssistedFs::jacobian_size(self))
+    }
+
+    /// `SmConstantRadiusFS::SetupOffsetValues`.
+    fn setup_offset_values(
+        &mut self,
+        tsect: &TsectPnt,
+        offset_dist: Option<&mut f64>,
+    ) -> Result<()> {
+        constant_radius_setup_offset_values(self, tsect, offset_dist)
+    }
+
+    /// `SmConstantRadiusFS::OffsetRadiiCanChange`.
+    fn offset_radii_can_change(&self) -> Result<bool> {
+        Ok(ConstantRadiusAssistedFs::offset_radii_can_change(self))
+    }
+
+    /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`).
+    fn type_code(&self) -> Result<i64> {
+        Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+    }
+
+    /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`,
+    /// not ported).
+    fn is_kind_of(&self, _t: i64) -> Result<bool> {
+        // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusAssistedFS::IsKindOf
+        Err(SolidError::unported(
+            "SmConstantRadiusAssistedFS::IsKindOf",
+            "blend.fillet_standard_solver_p2",
+        ))
+    }
+
+    /// `SmConstantRadiusFS::LoadJacobian` ([`ConstantRadiusAssistedFs::load_jacobian`]);
+    /// the in/out `rlSurf1Offset`, `rlSurf2Offset` are written back into `load`.
+    fn load_jacobian(
+        &mut self,
+        num_equations: &mut usize,
+        num_parameters: &mut usize,
+        load: &mut JacobianLoad<'_>,
+        f: &mut [f64],
+        jacobian: Option<&mut Matrix>,
+    ) -> Result<bool> {
+        let mut offsets = [load.surf1_offset, load.surf2_offset];
+        let found = ConstantRadiusAssistedFs::load_jacobian(
+            self,
+            num_equations,
+            num_parameters,
+            load.rail_index,
+            [load.surface1, load.surface2],
+            &mut offsets,
+            load.x,
+            f,
+            jacobian,
+        );
+        [load.surf1_offset, load.surf2_offset] = offsets;
+        found
+    }
+
+    /// `SmConstantRadiusFS::LoadInitialValues` (unit `blend.fillet_standard_solver_p2`,
+    /// not ported).
+    fn load_initial_values(
+        &mut self,
+        _k: &Kernel,
+        _brep: Option<&Brep>,
+        _do_surf2_calcs: bool,
+        _rail_index: usize,
+        _surface1: &mut OffsetSurface,
+        _surface1_index: usize,
+        _intervals: &mut ExtentNd,
+        _periodicities: &mut Vec<bool>,
+        _guess_t: &mut Vec<f64>,
+    ) -> Result<Option<InitialValues>> {
+        // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusFS::LoadInitialValues
+        Err(SolidError::unported(
+            "SmConstantRadiusFS::LoadInitialValues",
+            "blend.fillet_standard_solver_p2",
+        ))
+    }
+}
 
 #[cfg(test)]
 mod tests {

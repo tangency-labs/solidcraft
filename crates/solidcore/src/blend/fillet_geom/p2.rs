@@ -171,7 +171,6 @@ fn as_assisted(fs: &FilletSolver) -> ConstantRadiusAssistedFs {
     ConstantRadiusAssistedFs {
         solver: fs.clone(),
         fillet_radii: [0.0; 2],
-        saved_offsets: [0.0; 2],
     }
 }
 

@@ -21,6 +21,7 @@
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmFilletSolver.h>
+#include <SmLine.h>
 #include <SmMatrix.h>
 #include <SmOffsetSurface.h>
 #include <SmPlane.h>
@@ -405,7 +406,21 @@ int32_t run_rail_uv(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     ULONG rail = (ULONG)rd.idx();
     bool load = rd.flag();
     bool found = rd.flag();
+    // an SmLine UV curve (virtual Evaluate is analytic) replaces the B-spline when given
+    SmLine* line = NULL;
+    if (rd.flag())
+    {
+        SmPoint3d ls = rd.vec();
+        SmPoint3d le = rd.vec();
+        ULONG ldim = (ULONG)rd.idx();
+        line = new (ctx) SmLine(ls, le, ldim, &ctx);
+    }
     SmBSplineCurve* crv = read_curve(rd, ctx);
+    if (line != NULL)
+    {
+        delete crv;
+        crv = line;
+    }
     double t0 = rd.num();
     double t1 = rd.num();
     Arrays a;

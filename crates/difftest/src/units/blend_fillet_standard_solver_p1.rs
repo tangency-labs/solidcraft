@@ -34,12 +34,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
-use solidcore::blend::fillet_solver::p1::OffsetSurfaceSlot;
+use solidcore::blend::fillet_solver::p1::{FilletSurfaceGenerator, OffsetSurfaceSlot};
 use solidcore::blend::fillet_standard_solver::p1::{
-    constant_radius_from_edgeuse, constant_radius_is_kind_of, BlendCurveCrossSectionFsg, CircularCrossSectionFsg,
-    ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs, FilletLaw, FilletLawKind,
-    FilletSolverData, FilletSurfaceGeneratorType, InitialSurface, LinearCrossSectionFsg, RailSurface,
-    SurfaceSurfaceFs, VariableRadiusFs, BoundaryTrimmingType, CONSTANT_RADIUS_FS_TYPE,
+    constant_radius_from_edgeuse, constant_radius_is_kind_of, BlendCurveCrossSectionFsg,
+    BoundaryTrimmingType, CircularCrossSectionFsg, ConstantDistanceFs, ConstantRadiusFs,
+    CurveBasedFs, FilletLaw, FilletLawKind, FilletSolver, InitialSurface, LinearCrossSectionFsg,
+    RailSurface, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_FS_TYPE,
     CONSTANT_RADIUS_FS_TYPE_STRING,
 };
 use solidcore::curve::curve::Curve;
@@ -58,12 +58,12 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
-use solidcore::surface::plane::Plane;
 use solidcore::surface::offset_surface::SS_UNKNOWN;
+use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
-use solidcore::SolidError;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeuseId};
+use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_standard_solver_p1::{self as ffi, Op};
 use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
@@ -326,7 +326,8 @@ impl Inputs {
     /// A label of the op for tallies.
     #[cfg(test)]
     fn label(&self) -> String {
-        self.ffi().map_or_else(|| "CrEu".to_string(), |op| format!("{op:?}"))
+        self.ffi()
+            .map_or_else(|| "CrEu".to_string(), |op| format!("{op:?}"))
     }
 }
 
@@ -366,9 +367,14 @@ fn push_curve(o: &mut Vec<f64>, c: &CurveIn) {
 }
 
 fn shape(net: &[Vec<[f64; 4]>]) -> Result<(usize, usize), HarnessError> {
-    let n = net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -381,8 +387,15 @@ fn push_srf(o: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
             let (n, m) = shape(net)?;
             o.push(0.0);
             o.extend(
-                [n, m, *p, *q, u.len().saturating_sub(1), v.len().saturating_sub(1)]
-                    .map(|x| x as f64),
+                [
+                    n,
+                    m,
+                    *p,
+                    *q,
+                    u.len().saturating_sub(1),
+                    v.len().saturating_sub(1),
+                ]
+                .map(|x| x as f64),
             );
             for row in net {
                 for pt in row {
@@ -627,7 +640,9 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 /// Splits a flat record into `status` and `out`.
 fn to_output(flat: &[f64]) -> Output {
-    let (status, rest) = flat.split_first().map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
+    let (status, rest) = flat
+        .split_first()
+        .map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
     Output::new()
         .values("status", vec![status])
         .values("out", rest.to_vec())
@@ -669,7 +684,11 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
         SrfIn::Bspline { net, p, q, u, v } => {
             let net = net
                 .iter()
-                .map(|r| r.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect())
+                .map(|r| {
+                    r.iter()
+                        .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                        .collect()
+                })
                 .collect();
             let nurb = NurbSurface::new(net, *p, *q, u.clone(), v.clone())
                 .map_err(|e| harness(format!("surface input: {e}")))?;
@@ -736,7 +755,13 @@ fn dump_surface(o: &mut Vec<f64>, s: &BSplineSurface) {
 }
 
 /// `GetType`, `len chars` of `GetTypeString` and `IsKindOf` per code.
-fn dump_types(o: &mut Vec<f64>, code: i64, string: &str, is_kind_of: impl Fn(i64) -> bool, kinds: &[i64]) {
+fn dump_types(
+    o: &mut Vec<f64>,
+    code: i64,
+    string: &str,
+    is_kind_of: impl Fn(i64) -> bool,
+    kinds: &[i64],
+) {
     o.push(code as f64);
     o.push(string.len() as f64);
     o.extend(string.bytes().map(f64::from));
@@ -828,9 +853,8 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
                     },
                 ),
             };
-            let res = fsg.create_surface_from_curves(
-                &k, &mut c, &mut r1, &mut r2, *tol, *g1, side1, side2,
-            );
+            let res = fsg
+                .create_surface_from_curves(&k, &mut c, &mut r1, &mut r2, *tol, *g1, side1, side2);
             (res, [c, r1, r2])
         }
         _ => return Err(harness("not a generator op")),
@@ -923,8 +947,8 @@ fn cd_of(k: &Kernel, s: &CdIn) -> Result<ConstantDistanceFs, HarnessError> {
     let mut s1 = offset_of(k, s.d[1], b, b_id)?;
     s0.set_allow_extension(true);
     s1.set_allow_extension(true);
-    let mut solver = FilletSolverData::new(1.0e-6, 30.0 * DEG, 2.0 * DEG);
-    solver.surfaces = [Some(s0), Some(s1)];
+    let mut solver = FilletSolver::new(1.0e-6, 30.0 * DEG, 2.0 * DEG);
+    solver.surfaces = slots(s0, s1);
     solver.orientations = s.o;
     solver.surface_extension_factor = s.ext;
     Ok(ConstantDistanceFs {
@@ -943,13 +967,15 @@ fn vr_of(k: &Kernel, s: &VrIn) -> Result<VariableRadiusFs, HarnessError> {
     let mut s1 = offset_of(k, 0.0, b, SurfaceId::Free(1))?;
     s0.set_allow_extension(true);
     s1.set_allow_extension(true);
-    curve_based.solver.surfaces = [Some(s0), Some(s1)];
+    curve_based.solver.surfaces = slots(s0, s1);
     curve_based.solver.orientations = s.o;
-    curve_based.solver.fsg = Some(match s.fsg {
-        1 => FilletSurfaceGeneratorType::Linear,
-        2 => FilletSurfaceGeneratorType::Circular,
-        _ => FilletSurfaceGeneratorType::BlendCurve,
-    });
+    curve_based
+        .solver
+        .set_fillet_surface_generator(Some(match s.fsg {
+            1 => FilletSurfaceGenerator::Linear,
+            2 => FilletSurfaceGenerator::circular_default(),
+            _ => FilletSurfaceGenerator::blend_curve_default(),
+        }));
     curve_based.original = Some(center);
     let law = match &s.law {
         LawIn::Linear { r0, r1 } => FilletLaw::new(FilletLawKind::Linear {
@@ -983,15 +1009,26 @@ fn tsect(user: f64) -> TsectPnt {
     t
 }
 
-fn offsets(s: &[Option<OffsetSurface>; 2]) -> [f64; 2] {
-    [0, 1].map(|i| {
-        s.get(i)
-            .and_then(Option::as_ref)
-            .map_or(f64::NAN, OffsetSurface::offset_distance)
-    })
+/// The two rail surfaces of an `SmFilletSolver` base (distinct objects: keys 0 and 1).
+fn slots(s0: OffsetSurface, s1: OffsetSurface) -> [Option<OffsetSurfaceSlot>; 2] {
+    [
+        Some(OffsetSurfaceSlot {
+            key: 0,
+            surface: s0,
+        }),
+        Some(OffsetSurfaceSlot {
+            key: 1,
+            surface: s1,
+        }),
+    ]
 }
 
-/// [`offsets`] for the `SmFilletSolver` base of a `ConstantRadiusAssistedFs`.
+/// The offset distances of the rail surfaces of an `SmFilletSolver` base.
+fn offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
+    slot_offsets(s)
+}
+
+/// The offset distances of the rail surfaces of an `SmFilletSolver` base.
 fn slot_offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
     [0, 1].map(|i| {
         s.get(i)
@@ -1049,7 +1086,13 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             }
             dump_curve(&mut o, fs.extended.as_ref());
             o.push(f64::from(fs.solver_type() as i32));
-            dump_types(&mut o, fs.type_code(), fs.type_string(), |t| fs.is_kind_of(t), kinds);
+            dump_types(
+                &mut o,
+                fs.type_code(),
+                fs.type_string(),
+                |t| fs.is_kind_of(t),
+                kinds,
+            );
         }
         Inputs::SsExt {
             ext,
@@ -1171,7 +1214,13 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                     Err(out) => return Ok(Err(out)),
                 },
             };
-            o.extend([ne as f64, np as f64, offs[0] as f64, offs[1] as f64, flag(found)]);
+            o.extend([
+                ne as f64,
+                np as f64,
+                offs[0] as f64,
+                offs[1] as f64,
+                flag(found),
+            ]);
             o.extend_from_slice(&f);
             if let (Some(m), Some([rows, cols])) = (&m, jac.jac) {
                 for r in 0..rows {
@@ -1201,7 +1250,13 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             o.push(flag(fs.can_make_analytic()));
             o.push(fs.jacobian_size() as f64);
             o.push(f64::from(fs.solver_type() as i32));
-            dump_types(&mut o, fs.type_code(), fs.type_string(), |t| fs.is_kind_of(t), kinds);
+            dump_types(
+                &mut o,
+                fs.type_code(),
+                fs.type_string(),
+                |t| fs.is_kind_of(t),
+                kinds,
+            );
         }
         Inputs::CdJac { solver, jac } => {
             let mut fs = cd_of(&k, solver)?;
@@ -1292,15 +1347,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             let mut per = per.clone();
             let mut guess = guess.clone();
             let res = fs.load_initial_values(
-                &k,
-                None,
-                *do2,
-                *rail,
-                surface1,
-                *s1_index,
-                *s2_index,
-                &mut ivls,
-                &mut per,
+                &k, None, *do2, *rail, surface1, *s1_index, *s2_index, &mut ivls, &mut per,
                 &mut guess,
             );
             match &res {
@@ -1522,7 +1569,11 @@ fn rust_edgeuse_body(
     fv: f64,
 ) -> Result<Vec<f64>, SolidError> {
     let k = Kernel::default();
-    let radial = if has_prim(b, eu)? { eu1::radial(b, eu)? } else { None };
+    let radial = if has_prim(b, eu)? {
+        eu1::radial(b, eu)?
+    } else {
+        None
+    };
     if !eu_safe(b, Some(eu))? || !eu_safe(b, radial)? {
         return Ok(vec![-2.0]);
     }
@@ -1825,8 +1876,7 @@ fn gen_rails(rng: &mut Rng, blend: bool) -> (InlineCrv, InlineCrv, InlineCrv) {
 }
 
 fn gen_scale(rng: &mut Rng) -> f64 {
-    *rng
-        .choose(&[1.0, 1.0, 1.0, 1.0, 1e-3, 1e3, 1e-6, 1e6])
+    *rng.choose(&[1.0, 1.0, 1.0, 1.0, 1e-3, 1e3, 1e-6, 1e6])
         .unwrap_or(&1.0)
 }
 
@@ -1848,7 +1898,9 @@ fn gen_circ(rng: &mut Rng) -> Inputs {
     }
     Inputs::Circ {
         approx: rng.chance(0.7),
-        tolpct: *rng.choose(&[0.05, 0.05, 0.01, 0.2, 1e-7, 2.0]).unwrap_or(&0.05),
+        tolpct: *rng
+            .choose(&[0.05, 0.05, 0.01, 0.2, 1e-7, 2.0])
+            .unwrap_or(&0.05),
         mirror: rng.chance(0.2),
         complement: rng.chance(0.15),
         tol: gen_tol(rng) * s,
@@ -2404,7 +2456,12 @@ mod tests {
                     .get("status")
                     .and_then(|v| v.first())
                     .copied()
-                    .or_else(|| out.ints.get("status").and_then(|v| v.first()).map(|&s| s as f64));
+                    .or_else(|| {
+                        out.ints
+                            .get("status")
+                            .and_then(|v| v.first())
+                            .map(|&s| s as f64)
+                    });
                 format!("status:{}", st.unwrap_or(f64::NAN))
             };
             *tally.entry((op, kind)).or_default() += 1;
@@ -2484,4 +2541,3 @@ mod tests {
         assert!(cpp(&cr_jac_planes([0.0, 0.0, 1.0, 1e10], Some([4, 12]))).is_ok());
     }
 }
-

@@ -187,6 +187,30 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "rail_uv_smline_plain",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#23",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rail_uv_smline_loading_converged",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#24",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rail_uv_smline_degenerate_no_jacobian",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_solver_p1/cases.json#25",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -2777,8 +2801,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 7,
   "cases_failed": 0,
-  "cases_passed": 336,
-  "cases_total": 343,
+  "cases_passed": 339,
+  "cases_total": 346,
   "deferred_by_unit": {
     "blend.fillet_geom_p1": 7
   },

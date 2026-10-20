@@ -23,8 +23,8 @@
 //! | [`FilletIntersector::set_self_intersect`]               | `SetSelfIntersect`                              |
 //! | [`FilletIntersector::is_kind_of`], [`TYPE`]             | `IsKindOf`, `SmFilletIntersector_TYPE`          |
 //! | [`FilletSolverOps`], [`StepSolve`] (CO-PORTED interface) | the `SmFilletSolver` virtuals and members these methods call |
-//! | `FilletSolverOps for ConstantRadiusAssistedFs` (CO-PORTED) | `SmFilletSolver::SetSurfacesToZeroOffset`, `ReloadSurfaceOffsets` |
-//! | [`FilStatus`] (CO-PORTED)                               | `SmFilStatus`                                   |
+//! | `FilletSolverOps for ConstantRadiusAssistedFs`          | delegates to the `SmFilletSolver` base of unit `blend.fillet_solver_p1`: `ComputeSurfaceValues`, `ComputeUVVectors`, `SetSurfacesToZeroOffset`, `ReloadSurfaceOffsets`, `SetStatus`, `GetLastFilletGeom`, `GetSelfIntersectionHandler`, `GetFilletSurfaceGenerator`, `m_pFSG->CreateSurface` |
+//! | [`FilStatus`] (re-export of `blend.fillet_geom_p1`'s)   | `SmFilStatus`                                   |
 //! | [`HandlingAlgorithmType`] (CO-PORTED)                   | `SmHandlingAlgorithmType`                       |
 //!
 //! Deviations:
@@ -33,14 +33,16 @@
 //!   own the surfaces it hands the intersector. `GetFilletSolver` is dropped. The
 //!   solver is any [`FilletSolverOps`]: the trait gathers the `SmFilletSolver`
 //!   virtuals and members (and the `SmFilletGeom` and self-intersection handler calls
-//!   reached through it) that this file calls. Its default methods return
-//!   [`SolidError::Unported`], tagged with the unit owning each upstream symbol, so
-//!   the solver units implement them as they are ported. Its implementation for the
-//!   co-ported [`ConstantRadiusAssistedFs`] co-ports `SetSurfacesToZeroOffset` and
-//!   `ReloadSurfaceOffsets` (they only copy offset distances; `m_dSavedOffsets`,
-//!   uninitialised upstream, starts at `0`). The fillet geometry pointer
-//!   (`SmFilletGeom*`, unit `blend.fillet_geom_p1`) is the solver's handle type
-//!   [`FilletSolverOps::FilletGeom`]; `m_pCurrFilletGeom` is an `Option` of it.
+//!   reached through it) that this file calls. The methods of the base
+//!   `SmFilletSolver` (unit `blend.fillet_solver_p1`) are required; the defaults of
+//!   the others return [`SolidError::Unported`], tagged with the unit owning each
+//!   upstream symbol, so the solver units implement them as they are ported. The
+//!   implementation for the co-ported [`ConstantRadiusAssistedFs`] delegates to the
+//!   base [`FilletSolver`] (`m_dSavedOffsets` is the base's, uninitialised upstream,
+//!   starts at `0`). The fillet geometry pointer (`SmFilletGeom*`, unit
+//!   `blend.fillet_geom_p1`) is the solver's handle type
+//!   [`FilletSolverOps::FilletGeom`] (the base's [`FilletGeomRef`] for that
+//!   solver); `m_pCurrFilletGeom` is an `Option` of it.
 //! - **Virtual overrides (DISPATCH GAP).** `ComputeNextPoint`, `FlushCurve`,
 //!   `ComputePointValues` and `TestSpanAccuracy` are inherent methods here, not
 //!   overrides: the base intersector's drivers (`TraceCurve`, `DoPointIntersection`,
@@ -85,7 +87,7 @@
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::blend::fillet_custom_solver::{offset_evaluate_1st, ConstantRadiusAssistedFs};
-use crate::blend::fillet_solver::p1::OffsetSurfaceSlot;
+use crate::blend::fillet_solver::p1::{compute_uv_vectors, FilletGeomRef, FilletSolver};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
@@ -134,37 +136,9 @@ const SRFS: [SrfIndex; 2] = [SrfIndex::First, SrfIndex::Second];
 
 // ---- co-ported enums ------------------------------------------------------------------------
 
-/// The filleting status (`SmFilStatus`, CO-PORTED from unit `blend.fillet_geom_p1`);
-/// discriminants are the upstream values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FilStatus {
-    /// `SM_FIL_UNPROCESSED`.
-    Unprocessed = 0,
-    /// `SM_FIL_PROCESSED`.
-    Processed = 1,
-    /// `SM_FIL_FAILURE`.
-    Failure = 2,
-    /// `SM_FIL_SURF_INT_FAILURE`.
-    SurfIntFailure = 3,
-    /// `SM_FE_END_PNT_DROP_FAILURE`.
-    EndPntDropFailure = 4,
-    /// `SM_FE_TO_BE_SQUEEZED`.
-    ToBeSqueezed = 5,
-    /// `SM_FE_CUBIC_RAIL_RAIL_INTERPOLATE`.
-    CubicRailRailInterpolate = 6,
-    /// `SM_FV_NO_INT_RAIL_EU`: unable to intersect a fillet rail curve with a side edge.
-    NoIntRailEu = 7,
-    /// `SM_FV_SOLVER_NOT_CONVERGE`.
-    SolverNotConverge = 8,
-    /// `SM_FV_TO_BE_DELETED`.
-    ToBeDeleted = 9,
-    /// `SM_FS_SURF_TRACING_FAILURE`.
-    SurfTracingFailure = 10,
-    /// `SM_FS_SELF_INT_HANDLING_FAILURE`.
-    SelfIntHandlingFailure = 11,
-    /// `SM_FS_SURF_SKINNING_FAILURE`.
-    SurfSkinningFailure = 12,
-}
+/// The filleting status `SmFilStatus` is unit `blend.fillet_geom_p1`'s
+/// [`FilStatus`](crate::blend::fillet_geom::p1::FilStatus) (one type per class).
+pub use crate::blend::fillet_geom::p1::FilStatus;
 
 /// What a self-intersection handler does with self-intersecting fillets
 /// (`SmHandlingAlgorithmType`, CO-PORTED from unit `blend.fillet_solver_p1`);
@@ -231,32 +205,20 @@ pub trait FilletSolverOps {
     ///
     /// # Errors
     ///
-    /// The solver's failure; [`SolidError::Unported`] until ported.
+    /// The solver's failure.
     fn compute_surface_values(
         &mut self,
-        _k: &Kernel,
-        _uv_values: [Point2; 2],
-        _point: &mut TsectPnt,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::ComputeSurfaceValues
-        Err(SolidError::unported(
-            "SmFilletSolver::ComputeSurfaceValues",
-            "blend.fillet_solver_p1",
-        ))
-    }
+        k: &Kernel,
+        uv_values: [Point2; 2],
+        point: &mut TsectPnt,
+    ) -> Result<()>;
 
     /// `ComputeUVVectors(rTsectPnt)`: the UV tangents of the point.
     ///
     /// # Errors
     ///
-    /// The solver's failure; [`SolidError::Unported`] until ported.
-    fn compute_uv_vectors(&mut self, _k: &Kernel, _point: &mut TsectPnt) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::ComputeUVVectors
-        Err(SolidError::unported(
-            "SmFilletSolver::ComputeUVVectors",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure.
+    fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()>;
 
     /// `StepSolve(rTsectPnt, rdStep, crUVDomain1, crUVDomain2, rbFoundAnswer,
     /// rbClipped, rbBoundaryHit, rNextTSP)`: the UV points of the next point, written
@@ -316,27 +278,15 @@ pub trait FilletSolverOps {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] until ported.
-    fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::SetSurfacesToZeroOffset
-        Err(SolidError::unported(
-            "SmFilletSolver::SetSurfacesToZeroOffset",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure.
+    fn set_surfaces_to_zero_offset(&mut self) -> Result<()>;
 
     /// `ReloadSurfaceOffsets()`: restores the saved offsets (`void` upstream).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] until ported.
-    fn reload_surface_offsets(&mut self) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::ReloadSurfaceOffsets
-        Err(SolidError::unported(
-            "SmFilletSolver::ReloadSurfaceOffsets",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure.
+    fn reload_surface_offsets(&mut self) -> Result<()>;
 
     /// `GetSurface(rail)->Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: the point and
     /// first partials of the rail's offset surface.
@@ -355,41 +305,24 @@ pub trait FilletSolverOps {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] until ported.
-    fn set_status(&mut self, _status: FilStatus) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::SetStatus
-        Err(SolidError::unported(
-            "SmFilletSolver::SetStatus",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure.
+    fn set_status(&mut self, status: FilStatus) -> Result<()>;
 
     /// `GetLastFilletGeom()`.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] until ported.
-    fn last_fillet_geom(&self) -> Result<Self::FilletGeom> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::GetLastFilletGeom
-        Err(SolidError::unported(
-            "SmFilletSolver::GetLastFilletGeom",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure (no fillet geometry).
+    fn last_fillet_geom(&self) -> Result<Self::FilletGeom>;
 
     /// `GetSelfIntersectionHandler()` and its `GetAlgorithmType()`: `None` without a
     /// handler.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] until ported.
-    fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::GetSelfIntersectionHandler
-        Err(SolidError::unported(
-            "SmFilletSolver::GetSelfIntersectionHandler",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure (no executive to hold a handler);
+    /// [`SolidError::Unported`] until the executive is ported.
+    fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>>;
 
     /// The handler's `SmoothOutIntersection(pFilletGeom, r3DCurves, rUVCurves1,
     /// rUVCurves2)`: joins the new curves to the fillet geometry's previous section.
@@ -399,30 +332,18 @@ pub trait FilletSolverOps {
     /// The handler's failure; [`SolidError::Unported`] until ported.
     fn smooth_out_intersection(
         &mut self,
-        _geom: &Self::FilletGeom,
-        _curves_3d: &mut Vec<BSplineCurve>,
-        _uv_curves1: &mut Vec<BSplineCurve>,
-        _uv_curves2: &mut Vec<BSplineCurve>,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p1): SmSelfIntersectionHandler::SmoothOutIntersection
-        Err(SolidError::unported(
-            "SmSelfIntersectionHandler::SmoothOutIntersection",
-            "blend.fillet_solver_p1",
-        ))
-    }
+        geom: &Self::FilletGeom,
+        curves_3d: &mut Vec<BSplineCurve>,
+        uv_curves1: &mut Vec<BSplineCurve>,
+        uv_curves2: &mut Vec<BSplineCurve>,
+    ) -> Result<()>;
 
     /// Whether the solver has a fillet surface generator (`m_pFSG != NULL`).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] until ported.
-    fn has_surface_generator(&self) -> Result<bool> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::GetFilletSurfaceGenerator
-        Err(SolidError::unported(
-            "SmFilletSolver::GetFilletSurfaceGenerator",
-            "blend.fillet_solver_p1",
-        ))
-    }
+    /// The solver's failure.
+    fn has_surface_generator(&self) -> Result<bool>;
 
     /// `m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2, sPnts, pSur[0],
     /// pUV1, pSur[1], pUV2, pFilletSurface)`: the fillet surface (the generator may
@@ -430,24 +351,19 @@ pub trait FilletSolverOps {
     ///
     /// # Errors
     ///
-    /// The generator's failure; [`SolidError::Unported`] until ported.
+    /// The generator's failure; [`SolidError::Unported`] for a generator of an
+    /// unported unit.
     #[allow(clippy::too_many_arguments)]
     fn create_fillet_surface(
         &mut self,
-        _k: &Kernel,
-        _center_line: &mut BSplineCurve,
-        _curve1: &mut BSplineCurve,
-        _curve2: &mut BSplineCurve,
-        _points: &[TsectPnt],
-        _uv1: &mut BSplineCurve,
-        _uv2: &mut BSplineCurve,
-    ) -> Result<Option<BSplineSurface>> {
-        // UNPORTED(blend.fillet_solver_p1): SmFilletSurfaceGenerator::CreateSurface
-        Err(SolidError::unported(
-            "SmFilletSurfaceGenerator::CreateSurface",
-            "blend.fillet_solver_p1",
-        ))
-    }
+        k: &Kernel,
+        center_line: &mut BSplineCurve,
+        curve1: &mut BSplineCurve,
+        curve2: &mut BSplineCurve,
+        points: &[TsectPnt],
+        uv1: &mut BSplineCurve,
+        uv2: &mut BSplineCurve,
+    ) -> Result<Option<BSplineSurface>>;
 
     /// `pFilletGeom->SetFilletSurface(pFilletSurface)` (after deleting the old one).
     ///
@@ -522,39 +438,98 @@ pub trait FilletSolverOps {
     }
 }
 
-/// The co-ported constant-radius solver data: `SetSurfacesToZeroOffset` and
-/// `ReloadSurfaceOffsets` are ported (CO-PORTED from unit `blend.fillet_solver_p1`);
-/// the solver has no fillet geometries yet (handle `()`).
+/// The `SmFilletSolver` members `SmFilletIntersector` reaches through the
+/// co-ported constant-radius solver, delegated to the base ([`FilletSolver`], unit
+/// `blend.fillet_solver_p1`). The fillet geometry handle is the base's
+/// [`FilletGeomRef`] (the geometry's data belongs to `blend.fillet_geom_*`).
 impl FilletSolverOps for ConstantRadiusAssistedFs {
-    type FilletGeom = ();
+    type FilletGeom = FilletGeomRef;
+
+    fn compute_surface_values(
+        &mut self,
+        _k: &Kernel,
+        uv_values: [Point2; 2],
+        point: &mut TsectPnt,
+    ) -> Result<()> {
+        // non-virtual in the base; it calls the virtual SetupOffsetValues, which
+        // SmConstantRadiusFS overrides (blend.fillet_standard_solver_p1)
+        FilletSolver::compute_surface_values(self, uv_values, point)
+    }
 
     fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
-        for (slot, saved) in self
-            .solver
-            .surfaces
-            .iter_mut()
-            .zip(self.saved_offsets.iter_mut())
-        {
-            if let Some(OffsetSurfaceSlot { surface: s, .. }) = slot {
-                *saved = s.offset_distance();
-                s.set_offset_distance(0.0);
-            }
-        }
-        Ok(())
+        self.solver.set_surfaces_to_zero_offset()
     }
 
     fn reload_surface_offsets(&mut self) -> Result<()> {
-        for (slot, saved) in self
-            .solver
-            .surfaces
-            .iter_mut()
-            .zip(self.saved_offsets.iter())
-        {
-            if let Some(OffsetSurfaceSlot { surface: s, .. }) = slot {
-                s.set_offset_distance(*saved);
-            }
-        }
+        self.solver.reload_surface_offsets()
+    }
+
+    fn compute_uv_vectors(&mut self, _k: &Kernel, point: &mut TsectPnt) -> Result<()> {
+        // SmFilletSolver::ComputeUVVectors reads only the intersection point
+        compute_uv_vectors(point)
+    }
+
+    fn set_status(&mut self, status: FilStatus) -> Result<()> {
+        self.solver.set_status(status);
         Ok(())
+    }
+
+    fn last_fillet_geom(&self) -> Result<FilletGeomRef> {
+        self.solver.last_fillet_geom()
+    }
+
+    fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
+        // the handler is the executive's member: the base reports the missing
+        // executive (a NULL dereference upstream) or the unported executive data
+        self.solver.self_intersection_handler().map(|()| None)
+    }
+
+    fn smooth_out_intersection(
+        &mut self,
+        _geom: &FilletGeomRef,
+        _curves_3d: &mut Vec<BSplineCurve>,
+        _uv_curves1: &mut Vec<BSplineCurve>,
+        _uv_curves2: &mut Vec<BSplineCurve>,
+    ) -> Result<()> {
+        // No handler can be held until the executive is ported
+        // (`self_intersection_handler` above fails first), and the handler's
+        // override `SmMakeCurveBlendSIH::SmoothOutIntersection` has no owning
+        // unit (plan/findings.md "fillet_solver_p1: SmoothOutIntersection").
+        // UNPORTED(blend.fillet_executive_p1): SmSelfIntersectionHandler::SmoothOutIntersection (justified: findings.md "fillet_solver_p1: SmoothOutIntersection")
+        Err(SolidError::unported(
+            "SmSelfIntersectionHandler::SmoothOutIntersection",
+            "blend.fillet_executive_p1",
+        ))
+    }
+
+    fn has_surface_generator(&self) -> Result<bool> {
+        // GetFilletSurfaceGenerator() != NULL
+        Ok(self.solver.fillet_surface_generator().is_some())
+    }
+
+    fn create_fillet_surface(
+        &mut self,
+        k: &Kernel,
+        _center_line: &mut BSplineCurve,
+        curve1: &mut BSplineCurve,
+        curve2: &mut BSplineCurve,
+        points: &[TsectPnt],
+        _uv1: &mut BSplineCurve,
+        _uv2: &mut BSplineCurve,
+    ) -> Result<Option<BSplineSurface>> {
+        // the virtual m_pFSG->CreateSurface: the base's generator (SM_ERR for the
+        // base class, the Eiffel tower surface, Unported for the standard
+        // generators); the generators read only the rails and the fillet points
+        let approx_tol_3d = self.solver.this_approx_tol_3d();
+        let generator = self
+            .solver
+            .fillet_surface_generator()
+            .ok_or(SolidError::null_pointer(
+                "blend::fillet_intersector::create_fillet_surface",
+            ))?;
+        generator
+            .create_surface(k, approx_tol_3d, curve1, curve2, points)
+            .map(Some)
     }
 
     fn rail_surface_evaluate_1st_derivatives(
@@ -1874,8 +1849,8 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
+            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
             .base
@@ -1900,14 +1875,7 @@ mod tests {
         assert!(fi
             .test_span_accuracy(&mut s, &Kernel::default(), p, z, None)
             .is_err());
-        assert_eq!(
-            s.solver.surfaces[0]
-                .as_ref()
-                .unwrap()
-                .surface
-                .offset_distance(),
-            1.0
-        );
+        assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
     }
 
     #[test]
@@ -1916,8 +1884,8 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
+            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
             .base
@@ -1936,23 +1904,9 @@ mod tests {
         assert!(r.found_good_point);
         assert!(r.deviation_found.is_none());
         // offsets restored
-        assert_eq!(
-            s.solver.surfaces[0]
-                .as_ref()
-                .unwrap()
-                .surface
-                .offset_distance(),
-            1.0
-        );
-        assert_eq!(
-            s.solver.surfaces[1]
-                .as_ref()
-                .unwrap()
-                .surface
-                .offset_distance(),
-            -2.0
-        );
-        assert_eq!(s.saved_offsets, [1.0, -2.0]);
+        assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
+        assert_eq!(s.surface(1).unwrap().offset_distance(), -2.0);
+        assert_eq!(s.solver.saved_offsets, [1.0, -2.0]);
     }
 
     #[test]
@@ -1961,8 +1915,8 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
+            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
         let mut t = pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0);
         t.point_type = IntersectionPointType::TangentCurve;
         let p = fi.base.base.alloc_point(t);
@@ -2040,6 +1994,19 @@ mod tests {
             Ok(())
         }
 
+        fn compute_surface_values(
+            &mut self,
+            _k: &Kernel,
+            _uv_values: [Point2; 2],
+            _point: &mut TsectPnt,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn compute_uv_vectors(&mut self, _k: &Kernel, _point: &mut TsectPnt) -> Result<()> {
+            Ok(())
+        }
+
         fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
             Ok(())
         }
@@ -2055,6 +2022,45 @@ mod tests {
             _uv: Point2,
         ) -> Result<(Point3, Vec3, Vec3)> {
             Ok((Vec3::ZERO, Vec3::ZERO, Vec3::ZERO))
+        }
+
+        fn set_status(&mut self, _status: FilStatus) -> Result<()> {
+            Ok(())
+        }
+
+        fn last_fillet_geom(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
+            Ok(None)
+        }
+
+        fn smooth_out_intersection(
+            &mut self,
+            _geom: &(),
+            _curves_3d: &mut Vec<BSplineCurve>,
+            _uv_curves1: &mut Vec<BSplineCurve>,
+            _uv_curves2: &mut Vec<BSplineCurve>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn has_surface_generator(&self) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn create_fillet_surface(
+            &mut self,
+            _k: &Kernel,
+            _center_line: &mut BSplineCurve,
+            _curve1: &mut BSplineCurve,
+            _curve2: &mut BSplineCurve,
+            _points: &[TsectPnt],
+            _uv1: &mut BSplineCurve,
+            _uv2: &mut BSplineCurve,
+        ) -> Result<Option<BSplineSurface>> {
+            Ok(None)
         }
     }
 
@@ -2126,8 +2132,8 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
+            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
         let mut out = TsectCurves::default();
         // no points: SM_ERR_NULL_POINTER
         assert!(fi
@@ -2145,7 +2151,8 @@ mod tests {
         assert!(fi.base.base.curve_points().is_empty());
         assert!(out.curve_types.is_empty());
         // two points evaluate the offset rails, then reach the solver's
-        // self-intersection handler (blend.fillet_solver_p1)
+        // self-intersection handler, which is the missing executive's member
+        // (a NULL dereference upstream)
         let p = fi
             .base
             .base
@@ -2159,17 +2166,51 @@ mod tests {
         let e = fi
             .flush_curve(&mut s, &Kernel::default(), &mut out)
             .unwrap_err();
-        assert!(
-            matches!(
-                e,
-                SolidError::Unported {
-                    unit: "blend.fillet_solver_p1",
-                    ..
-                }
-            ),
-            "{e:?}"
-        );
+        assert!(matches!(e, SolidError::InvalidInput { .. }), "{e:?}");
         assert!(!fi.curr_fillet_touch_boundary());
+    }
+
+    #[test]
+    fn base_members_delegate_to_the_solver_base() {
+        use crate::blend::fillet_solver::p1::FilletExecutiveRef;
+        let (a, b) = surfaces();
+        let mut s = solver(&a, &b);
+        let k = Kernel::default();
+
+        s.set_status(FilStatus::SurfSkinningFailure).unwrap();
+        assert_eq!(s.solver.status(), FilStatus::SurfSkinningFailure);
+        s.set_status(FilStatus::Processed).unwrap();
+        assert_eq!(s.solver.status(), FilStatus::Processed);
+
+        assert!(!s.has_surface_generator().unwrap());
+        assert_eq!(s.last_fillet_geom().unwrap(), FilletGeomRef { index: 0 });
+
+        // the handler is the executive's member
+        assert!(matches!(
+            s.self_intersection_handler().unwrap_err(),
+            SolidError::InvalidInput { .. }
+        ));
+        s.solver.set_fillet_executive(Some(FilletExecutiveRef));
+        assert!(matches!(
+            s.self_intersection_handler().unwrap_err(),
+            SolidError::Unported {
+                unit: "blend.fillet_executive_p1",
+                ..
+            }
+        ));
+
+        // ComputeSurfaceValues runs the SmConstantRadiusFS::SetupOffsetValues override
+        // (blend.fillet_standard_solver_p1): radius times orientation on both rails
+        s.solver.surfaces[1]
+            .as_mut()
+            .unwrap()
+            .surface
+            .set_offset_distance(0.0);
+        let mut p = TsectPnt::new();
+        s.compute_surface_values(&k, [Point2::new(0.5, 0.5); 2], &mut p)
+            .unwrap();
+        assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
+        assert_eq!(s.surface(1).unwrap().offset_distance(), -2.0);
     }
 
     #[test]

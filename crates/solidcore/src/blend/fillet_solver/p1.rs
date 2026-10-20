@@ -29,9 +29,9 @@
 //! | [`FilletSolver::trim_rails`]                           | `TrimRails`                                           |
 //! | [`FilletSolver::TYPE`], [`FilletSolver::type_string`], [`FilletSolver::is_kind_of`] | `GetType`, `GetTypeString` (`SM_COMMON`), `IsKindOf` |
 //! | [`FilletSolverOps`] (trait, base methods)              | the virtuals `GetJacobianSize`, `SetupOffsetValues`, `CanMakeAnalytic`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues` |
-//! | [`FilStatus`] (CO-PORTED from `blend.fillet_geom_p1`), [`FilletSolverType`], [`FilletSurfaceGeneratorType`] | `SmFilStatus`, `SmFilletSolverType`, `SmFilletSurfaceGeneratorType` |
-//! | [`FilletSurfaceGenerator`]                             | `SmFilletSurfaceGenerator`, `SmLinearCrossSectionFSG`, `SmCircularCrossSectionFSG`, `SmBlendCurveCrossSectionFSG` (constructors, `GetFilletSurfaceGeneratorType`, `GetBlendScale`, `GetContinuity`; `Drop` is each destructor) |
-//! | [`FilletSurfaceGenerator::create_surface`]             | `SmFilletSurfaceGenerator::CreateSurface` (base)      |
+//! | [`FilStatus`] (re-export of `blend.fillet_geom_p1`'s), [`FilletSolverType`], [`FilletSurfaceGeneratorType`] | `SmFilStatus`, `SmFilletSolverType`, `SmFilletSurfaceGeneratorType` |
+//! | [`FilletSurfaceGenerator`]                             | `SmFilletSurfaceGenerator`, `SmLinearCrossSectionFSG`, `SmCircularCrossSectionFSG`, `SmBlendCurveCrossSectionFSG` (constructors, `GetFilletSurfaceGeneratorType`, `GetBlendScale`, `GetContinuity`; `Drop` is each destructor); the circular and blend-curve variants hold `blend.fillet_standard_solver_p1`'s [`CircularCrossSectionFsg`] / [`BlendCurveCrossSectionFsg`] (one type per class) |
+//! | [`FilletSurfaceGenerator::create_surface`]             | `SmFilletSurfaceGenerator::CreateSurface` (base; the linear one dispatches to [`LinearCrossSectionFsg::create_surface`]) |
 //! | [`FilletSphereSolveEnfo`]                              | `SmFilletSphereSolveENFO` (constructor, `SetPlaneAdjusts`, `Evaluate`) |
 //! | [`RailUvCurveIntersectEnfo`]                           | `SmRailUVCurveIntersectENFO` (constructor, `Evaluate`) |
 //! | [`RailRailIntersectEnfo`]                              | `SmRailRailIntersectENFO` (constructor, `Evaluate`)   |
@@ -97,6 +97,9 @@
 //!   is no recursion.
 
 use crate::blend::fillet_custom_solver::{InitialValues, JacobianLoad, OffsetSurface, SurfaceId};
+use crate::blend::fillet_standard_solver::p1::{
+    BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg,
+};
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::error::{ignore_status, ignored, Result, SolidError};
@@ -123,7 +126,7 @@ use crate::surface::cone::Cone;
 use crate::surface::offset_surface::SS_UNKNOWN;
 use crate::surface::sphere::Sphere;
 use crate::surface::surface::p1::evaluate_1st_derivatives;
-use crate::surface::surface::p2::drop_vectors;
+use crate::surface::surface::p2::{drop_vectors, SurfaceKind};
 use crate::surface::surface::Surface;
 use crate::surface::torus::Torus;
 use crate::topology::edgeuse::p1 as eu;
@@ -173,39 +176,10 @@ const FILLET_EDGE_RAIL: i64 = 9;
 
 // ---- small types ----------------------------------------------------------------------
 
-/// `SmFilStatus`: the processing status of a solver (and of fillet geometries,
-/// vertices and edges). CO-PORTED from unit `blend.fillet_geom_p1` (`SmFilletGeom.h`;
-/// PR #147 defines it identically): whichever lands second re-exports the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FilStatus {
-    /// `SM_FIL_UNPROCESSED`.
-    #[default]
-    Unprocessed = 0,
-    /// `SM_FIL_PROCESSED`.
-    Processed = 1,
-    /// `SM_FIL_FAILURE`.
-    Failure = 2,
-    /// `SM_FIL_SURF_INT_FAILURE`.
-    SurfIntFailure = 3,
-    /// `SM_FE_END_PNT_DROP_FAILURE`.
-    EndPntDropFailure = 4,
-    /// `SM_FE_TO_BE_SQUEEZED`.
-    ToBeSqueezed = 5,
-    /// `SM_FE_CUBIC_RAIL_RAIL_INTERPOLATE`.
-    CubicRailRailInterpolate = 6,
-    /// `SM_FV_NO_INT_RAIL_EU`.
-    NoIntRailEu = 7,
-    /// `SM_FV_SOLVER_NOT_CONVERGE`.
-    SolverNotConverge = 8,
-    /// `SM_FV_TO_BE_DELETED`.
-    ToBeDeleted = 9,
-    /// `SM_FS_SURF_TRACING_FAILURE`.
-    SurfTracingFailure = 10,
-    /// `SM_FS_SELF_INT_HANDLING_FAILURE`.
-    SelfIntHandlingFailure = 11,
-    /// `SM_FS_SURF_SKINNING_FAILURE`.
-    SurfSkinningFailure = 12,
-}
+/// `SmFilStatus` (`SmFilletGeom.h`) is unit `blend.fillet_geom_p1`'s
+/// [`FilStatus`](crate::blend::fillet_geom::p1::FilStatus) (one type per class): the
+/// processing status of a solver and of fillet geometries, vertices and edges.
+pub use crate::blend::fillet_geom::p1::FilStatus;
 
 /// The kind of a fillet solver (`SmFilletSolverType`, `SmFilletSolver.h`; the
 /// `GetSolverType` overrides belong to the derived solvers' units); discriminants are
@@ -247,50 +221,57 @@ pub enum FilletSurfaceGeneratorType {
 pub enum FilletSurfaceGenerator {
     /// `SmFilletSurfaceGenerator` itself.
     Base,
-    /// `SmLinearCrossSectionFSG`: a ruled surface.
+    /// `SmLinearCrossSectionFSG`: a ruled surface (the generator has no members:
+    /// [`LinearCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
     Linear,
-    /// `SmCircularCrossSectionFSG`.
-    Circular {
-        /// `m_bApproximateArcs`.
-        approximate_arcs: bool,
-        /// `m_dTolPercentRadius`.
-        tol_percent_radius: f64,
-        /// `m_bMirror`.
-        mirror: bool,
-        /// `m_bComplement`.
-        complement: bool,
-    },
+    /// `SmCircularCrossSectionFSG` (its members and `CreateSurfaceFromCurves`:
+    /// [`CircularCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
+    Circular(CircularCrossSectionFsg),
     /// `SmEiffelTowerCrossSectionFSG` (unit `blend.fillet_custom_solver`).
     EiffelTower,
-    /// `SmBlendCurveCrossSectionFSG`.
-    BlendCurve {
-        /// `m_lContinuity`: 1, 2 or 3 for G1, G2 or G3.
-        continuity: u64,
-        /// `m_dBlendScale`.
-        blend_scale: f64,
-    },
+    /// `SmBlendCurveCrossSectionFSG` (its members and `CreateSurfaceFromCurves`:
+    /// [`BlendCurveCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
+    BlendCurve(BlendCurveCrossSectionFsg),
 }
 
 impl FilletSurfaceGenerator {
+    /// `SmCircularCrossSectionFSG(bApproximateArcs, dTolPercentRadius, bMirror,
+    /// bComplement)`.
+    #[must_use]
+    pub const fn circular(
+        approximate_arcs: bool,
+        tol_percent_radius: f64,
+        mirror: bool,
+        complement: bool,
+    ) -> Self {
+        Self::Circular(CircularCrossSectionFsg {
+            approximate_arcs,
+            tol_percent_radius,
+            mirror,
+            complement,
+        })
+    }
+
     /// `SmCircularCrossSectionFSG()` with its default arguments (`TRUE, 0.05, FALSE,
     /// FALSE`).
     #[must_use]
     pub const fn circular_default() -> Self {
-        Self::Circular {
-            approximate_arcs: true,
-            tol_percent_radius: 0.05,
-            mirror: false,
-            complement: false,
-        }
+        Self::circular(true, 0.05, false, false)
+    }
+
+    /// `SmBlendCurveCrossSectionFSG(dBlendScale, lContinuity)`.
+    #[must_use]
+    pub const fn blend_curve(blend_scale: f64, continuity: u32) -> Self {
+        Self::BlendCurve(BlendCurveCrossSectionFsg {
+            continuity,
+            blend_scale,
+        })
     }
 
     /// `SmBlendCurveCrossSectionFSG()` with its default arguments (`1.5, 1`).
     #[must_use]
     pub const fn blend_curve_default() -> Self {
-        Self::BlendCurve {
-            continuity: 1,
-            blend_scale: 1.5,
-        }
+        Self::blend_curve(1.5, 1)
     }
 
     /// `GetFilletSurfaceGeneratorType` (virtual).
@@ -299,8 +280,8 @@ impl FilletSurfaceGenerator {
         match self {
             Self::Base | Self::EiffelTower => FilletSurfaceGeneratorType::Unknown,
             Self::Linear => FilletSurfaceGeneratorType::Linear,
-            Self::Circular { .. } => FilletSurfaceGeneratorType::Circular,
-            Self::BlendCurve { .. } => FilletSurfaceGeneratorType::BlendCurve,
+            Self::Circular(_) => FilletSurfaceGeneratorType::Circular,
+            Self::BlendCurve(_) => FilletSurfaceGeneratorType::BlendCurve,
         }
     }
 
@@ -308,16 +289,16 @@ impl FilletSurfaceGenerator {
     #[must_use]
     pub const fn blend_scale(&self) -> Option<f64> {
         match self {
-            Self::BlendCurve { blend_scale, .. } => Some(*blend_scale),
+            Self::BlendCurve(g) => Some(g.blend_scale),
             _ => None,
         }
     }
 
     /// `SmBlendCurveCrossSectionFSG::GetContinuity` (`None` for the other kinds).
     #[must_use]
-    pub const fn continuity(&self) -> Option<u64> {
+    pub const fn continuity(&self) -> Option<u32> {
         match self {
-            Self::BlendCurve { continuity, .. } => Some(*continuity),
+            Self::BlendCurve(g) => Some(g.continuity),
             _ => None,
         }
     }
@@ -330,8 +311,8 @@ impl FilletSurfaceGenerator {
     ///
     /// `SM_ERR` for [`FilletSurfaceGenerator::Base`]; those of
     /// `SmEiffelTowerCrossSectionFSG::CreateSurface` and
-    /// `SmLinearCrossSectionFSG::CreateSurface`; [`SolidError::Unported`] for the
-    /// circular and blend-curve generators.
+    /// `SmLinearCrossSectionFSG::CreateSurface` ([`LinearCrossSectionFsg::create_surface`]);
+    /// [`SolidError::Unported`] for the circular and blend-curve generators.
     pub fn create_surface(
         &self,
         k: &Kernel,
@@ -346,15 +327,15 @@ impl FilletSurfaceGenerator {
                 crate::blend::fillet_custom_solver::EiffelTowerCrossSectionFsg::new()
                     .create_surface(k, approx_tol_3d, rail1, rail2, points)
             }
-            Self::Linear => crate::blend::fillet_standard_solver::p1::LinearCrossSectionFsg
-                .create_surface(rail1, rail2),
+            // the ruled surface between the rails (SER)
+            Self::Linear => LinearCrossSectionFsg.create_surface(rail1, rail2),
             // UNPORTED(blend.fillet_standard_solver_p2): SmCircularCrossSectionFSG::CreateSurface
-            Self::Circular { .. } => Err(SolidError::unported(
+            Self::Circular(_) => Err(SolidError::unported(
                 "SmCircularCrossSectionFSG::CreateSurface",
                 "blend.fillet_standard_solver_p2",
             )),
             // UNPORTED(blend.fillet_standard_solver_p2): SmBlendCurveCrossSectionFSG::CreateSurface
-            Self::BlendCurve { .. } => Err(SolidError::unported(
+            Self::BlendCurve(_) => Err(SolidError::unported(
                 "SmBlendCurveCrossSectionFSG::CreateSurface",
                 "blend.fillet_standard_solver_p2",
             )),
@@ -1966,8 +1947,9 @@ impl<'a> FilletSphereSolveEnfo<'a> {
 /// surfaces; `crX = [t u v ...]` with `t` on the UV curve and `(u, v)` the rail's UV
 /// point.
 pub struct RailUvCurveIntersectEnfo<'a> {
-    /// `m_crUVCurve`.
-    pub uv_curve: &'a BSplineCurve,
+    /// `m_crUVCurve` (an `SmBSplineCurve&`; `Evaluate` is virtual, so any
+    /// `SmBSplineCurve`-derived kind such as an `SmLine` dispatches on its own kind).
+    pub uv_curve: &'a Curve,
     /// `m_vInterval`.
     pub interval: Extent1d,
     /// `m_lRailIndex`.
@@ -1979,7 +1961,7 @@ impl<'a> RailUvCurveIntersectEnfo<'a> {
     /// `SmRailUVCurveIntersectENFO(crUVCurve, crInterval, crSurfaceOfCurve, lRailIndex,
     /// crFilletSolver)` (the surface of the curve is only drawn upstream).
     pub fn new(
-        uv_curve: &'a BSplineCurve,
+        uv_curve: &'a Curve,
         interval: Extent1d,
         rail_index: usize,
         solver: &'a mut dyn FilletSolverOps,
@@ -2578,9 +2560,10 @@ pub enum AnalyticTestSurface<'a> {
 ///
 /// # Errors
 ///
-/// Those of `IsPlanar` and `SmCone::IsNurbSurfaceCone`;
-/// [`SolidError::InvalidInput`] for a surface kind that is not an `SmBSplineSurface`
-/// (a plane is accepted by type before).
+/// Those of `IsPlanar` and of the cone test (`SmCone::IsNurbSurfaceCone`), except a
+/// failing iso curve status, which upstream returns as the `SmBoolean` and which
+/// reads as `true`; `InvalidInput` for a surface kind that is not an
+/// `SmBSplineSurface`.
 pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Result<bool> {
     use crate::surface::surface::p2::{CONE_TYPE, PLANE_TYPE};
     use crate::surface::surface::SurfaceKind;
@@ -2607,25 +2590,32 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
     if planar.is_planar {
         return Ok(true);
     }
-    // test NurbSurface to see if its a canonical cone (the SmBSplineSurface data of
-    // the tested surface; pSurface is an SmBSplineSurface*)
-    let nurb = match surface {
+    // test NurbSurface to see if its a canonical cone (the SmBSplineSurface part of the
+    // surface, default dToleranceScale = 1)
+    let bss = match surface {
         AnalyticTestSurface::Surface(s) => match s.kind() {
             SurfaceKind::BSpline(b) => b,
+            SurfaceKind::Plane(p) => p.base(),
             SurfaceKind::SurfOfRevolution(r) => r.base(),
-            SurfaceKind::Cone(c) => c.rev().base(),
+            // not an SmBSplineSurface: upstream's parameter type excludes these
             _ => {
-                return Err(SolidError::invalid_input(
-                    "blend::fillet_solver::test_analytic_surface",
-                    "not an SmBSplineSurface",
-                ))
+                return Err(SolidError::InvalidInput {
+                    operation: "blend::fillet_solver::test_analytic_surface",
+                    reason: "surface is not an SmBSplineSurface",
+                })
             }
         },
         AnalyticTestSurface::Cone(c) => c.rev().base(),
         AnalyticTestSurface::Sphere(s) => s.base().base(),
-        AnalyticTestSurface::Torus(t) => t.base().base(),
+        AnalyticTestSurface::Torus(t) => t.base.base(),
     };
-    Ok(Cone::is_nurb_surface_cone(k, nurb, 1.0)?.is_some())
+    match Cone::is_nurb_surface_cone(k, bss, 1.0) {
+        Ok(None) => Ok(false),
+        // upstream returns the iso curve status as the SmBoolean: a failing (non-zero)
+        // status reads as TRUE
+        Ok(Some(_)) | Err(SolidError::Upstream { .. }) => Ok(true),
+        Err(e) => Err(e),
+    }
 }
 
 /// `SE(pEU->EvaluateBinormal(dParameter, FALSE, rPnt, rBinVec, NULL, &rFaceuseNormal))`
@@ -2796,13 +2786,17 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     // tolerance (`SM_USE_OLDTOL`), not the system zone tolerance the owner-less
     // `Curve::trim` reads from its kernel. All three curves belong to the rail, so
     // they trim with a kernel whose zone tolerance is the rail's tolerance.
-    let tk = Kernel::new(&crate::kernel::KernelOptions {
+    let mut tk = Kernel::new(&crate::kernel::KernelOptions {
         tolerances: crate::kernel::Tolerances {
             zone_tol_3d: edge::tolerance(b, rail)?,
             ..k.tolerances
         },
         ..crate::kernel::KernelOptions::default()
     });
+    // the caller's random state carries over; the caller's `context` (marks, notify
+    // callbacks owned by boxed trait objects) cannot be cloned and nothing on the trim
+    // path reads it
+    tk.rng = k.rng.clone();
     b.edge_mut(rail)?
         .curve
         .as_mut()

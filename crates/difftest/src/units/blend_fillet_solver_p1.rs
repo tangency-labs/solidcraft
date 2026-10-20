@@ -15,7 +15,7 @@
 //! `ComputeSurfaceValues` (fails in the base `SetupOffsetValues`, else evaluates the
 //! offset surfaces), `ComputeUVVectors` (including zero and parallel tangents),
 //! `SplitFilletGeom` with empty intervals, `FinishConstruction` (deferred with an offset
-//! surface to copy: `SmOffsetSurface::Copy`, unit `surface.offset_surface`), the fillet
+//! surface to copy: `SetOffsetSurface`, unit `blend.fillet_geom_p1`), the fillet
 //! surface generators (`fsg`), `SmTol::GetAngTolRad(const SmFilletSolver*)` (`tol_ang`)
 //! and the base `LoadInitialValues` (`initial_values`).
 //!
@@ -52,6 +52,7 @@ use solidcore::blend::fillet_solver::p1::{
     RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
 };
 use solidcore::curve::curve::Curve;
+use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::{Extent1d, ExtentNd};
 use solidcore::geom::extent2d::Extent2d;
@@ -167,6 +168,10 @@ enum Inputs {
         #[serde(default)]
         found: bool,
         curve: CrvIn,
+        /// An `SmLine` UV curve (start, end, dimension 2 or 3) used instead of `curve`:
+        /// the shim builds the real `SmLine`, whose virtual `Evaluate` is analytic.
+        #[serde(default)]
+        line: Option<[f64; 7]>,
         ivl: [f64; 2],
         arrays: Arrays,
     },
@@ -540,12 +545,17 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             load,
             found,
             curve,
+            line,
             ivl,
             arrays,
         } => {
             o.push(*rail as f64);
             o.push(b(*load));
             o.push(b(*found));
+            o.push(b(line.is_some()));
+            if let Some(l) = line {
+                o.extend_from_slice(l);
+            }
             push_curve(&mut o, curve)?;
             o.extend_from_slice(ivl);
             push_arrays(&mut o, arrays);
@@ -1272,10 +1282,18 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             load,
             found,
             curve,
+            line,
             ivl,
             arrays,
         } => {
-            let crv = bspline_of(curve)?;
+            let crv = match line {
+                Some(l) => Curve::from(Line::from_points(
+                    Point3::new(l[0], l[1], l[2]),
+                    Point3::new(l[3], l[4], l[5]),
+                    l[6] as u64,
+                )),
+                None => Curve::from(bspline_of(curve)?),
+            };
             let mut fs = ShimSolver {
                 base: FilletSolver::new(1.0e-6, 0.1, 0.01),
                 load: *load,
@@ -1405,35 +1423,23 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 0 => FilletSurfaceGenerator::Base,
                 1 => FilletSurfaceGenerator::Linear,
                 2 => FilletSurfaceGenerator::circular_default(),
-                3 => FilletSurfaceGenerator::Circular {
-                    approximate_arcs: a != 0.0,
-                    tol_percent_radius: bb,
-                    mirror: c != 0.0,
-                    complement: d != 0.0,
-                },
+                3 => FilletSurfaceGenerator::circular(a != 0.0, bb, c != 0.0, d != 0.0),
                 4 => FilletSurfaceGenerator::blend_curve_default(),
-                _ => FilletSurfaceGenerator::BlendCurve {
-                    continuity: bb as u64,
-                    blend_scale: a,
-                },
+                // (the shim's `(ULONG)b`)
+                _ => FilletSurfaceGenerator::blend_curve(a, bb as u32),
             };
             o.push(f64::from(g.fillet_surface_generator_type() as i32));
             match g {
-                FilletSurfaceGenerator::Circular {
-                    approximate_arcs,
-                    tol_percent_radius,
-                    mirror,
-                    complement,
-                } => o.extend([
-                    b(approximate_arcs),
-                    tol_percent_radius,
-                    b(mirror),
-                    b(complement),
+                FilletSurfaceGenerator::Circular(c) => o.extend([
+                    b(c.approximate_arcs),
+                    c.tol_percent_radius,
+                    b(c.mirror),
+                    b(c.complement),
                 ]),
                 _ => o.extend([0.0; 4]),
             }
             o.push(g.blend_scale().unwrap_or(0.0));
-            o.push(g.continuity().map_or(0.0, |v| v as f64));
+            o.push(g.continuity().map_or(0.0, f64::from));
             if *kind == 0 {
                 let k = Kernel::default();
                 let mut r1 = bspline_of(&line_curve())?;
@@ -1876,12 +1882,31 @@ fn gen_rail_uv(rng: &mut Rng) -> Inputs {
             }
         }
     }
+    // a third of the cases use an SmLine UV curve (natural interval [0, 1], including
+    // degenerate zero-length lines), whose virtual Evaluate is analytic
+    let line = rng.chance(0.35).then(|| {
+        let mut p = [0.0; 7];
+        for v in p.iter_mut().take(6) {
+            *v = scale * rng.uniform(-2.0, 2.0);
+        }
+        if rng.chance(0.1) {
+            p.copy_within(0..3, 3);
+        }
+        p[6] = dim as f64;
+        p
+    });
+    if line.is_some() {
+        if let Some(x0) = arrays.x.first_mut() {
+            *x0 = rng.uniform(-0.2, 1.2);
+        }
+    }
     Inputs::RailUv {
         load,
         found: rng.chance(0.6),
         rail: rng.below(2) as usize,
         curve,
-        ivl: [a, z],
+        line,
+        ivl: if line.is_some() { [0.0, 1.0] } else { [a, z] },
         arrays,
     }
 }

@@ -15,7 +15,7 @@
 //! | `State`      | constructor, getters, `SetSurface`, `SetSurfacesToZeroOffset`, `ReloadSurfaceOffsets`, `GetOffsetsData`, `SetOffsetsData`, `SetExtensionFactor`, `SetReverseTrim`, `SetStatus` | `tol ang tang surfA surfB has0 off0 has1 off1 o0 o1 k`, then `k` x `cmd a b` |
 //! | `Extension`  | `SetupOffsetExtension` | `ext surf u0 v0 u1 v1` |
 //! | `Sphere`     | `SmFilletSphereSolveENFO::Evaluate` | `c[3] r adjusts load found surfs arrays` |
-//! | `RailUv`     | `SmRailUVCurveIntersectENFO::Evaluate` | `rail load found curve t0 t1 arrays` (`load`: the shim solver's deterministic `LoadJacobian`, answering `found`) |
+//! | `RailUv`     | `SmRailUVCurveIntersectENFO::Evaluate` | `rail load found has_line [start end dim] curve t0 t1 arrays` (`has_line`: an `SmLine` UV curve replaces `curve`; `load`:the shim solver's deterministic `LoadJacobian`, answering `found`) |
 //! | `SurfValues` | `ComputeSurfaceValues` | `setup surfs uv0[2] uv1[2]` (`setup`: the shim solver's `SetupOffsetValues` succeeds) |
 //! | `UvVectors`  | `ComputeUVVectors` | `du0 dv0 du1 dv1 crv_deriv` (each `[3]`), `uvd0[2] uvd1[2]` |
 //! | `Split`      | `SplitFilletGeom` with empty interval arrays | `index` |
@@ -229,6 +229,13 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             rd.index(1)?;
             rd.flag()?;
             rd.flag()?;
+            // an SmLine UV curve: start, end (finite) and its dimension, 2 or 3
+            if rd.flag()? {
+                rd.finites(6)?;
+                if rd.index(3)? < 2 {
+                    return Err(bad("rail-uv: line dimension must be 2 or 3"));
+                }
+            }
             curve(&mut rd)?;
             rd.finites(2)?;
             let (nx, nf, j) = arrays(&mut rd)?;
