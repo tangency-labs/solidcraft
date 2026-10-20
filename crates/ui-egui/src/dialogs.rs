@@ -2729,7 +2729,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
-                if chip.on_hover_text(tooltip).clicked() {
+                if chip.on_hover_text(tooltip).clicked() && !tab_order {
                     activate = Some(i);
                 }
                 if !inp.items.is_empty() || stored_reference.is_some() {
@@ -3413,14 +3413,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Keyboard: Enter applies from a value field, a Pattern/Mirror selection, or with no focus; Esc cancels.
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
-    let selection_enter = selection_tab_order(&d.kind) && !d.collapsed && d.tab_through.enter_pressed(ctx);
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
     let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
         && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
     let report_active = app.issue_report.draft.is_some();
-    if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || selection_enter || (enter_free && nothing_focused)) {
+    if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled && escape_routed_here {
