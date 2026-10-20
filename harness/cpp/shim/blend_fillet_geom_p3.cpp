@@ -32,6 +32,7 @@
 #include <nurbs.h>
 
 #include <cstdint>
+#include <new>
 #include <set>
 #include <vector>
 
@@ -102,6 +103,21 @@ struct ShimCorner : SmFilletCorner
 };
 
 alignas(SmFilletExecutive) unsigned char g_exec_storage[sizeof(SmFilletExecutive)] = {};
+
+// The executive storage with a constructed error info: a failed fillet x fillet intersection
+// records its error through the corner (RecordFilletError -> NoteFilletError ->
+// GetFilletErrorInfo()->NoteError, which adds to the info's surface array).
+SmFilletExecutive* shim_executive()
+{
+    static bool made = false;
+    SmFilletExecutive* exec = (SmFilletExecutive*)(void*)g_exec_storage;
+    if (!made)
+    {
+        ::new ((void*)exec->GetFilletErrorInfo()) SmFilletErrorInfo(exec);
+        made = true;
+    }
+    return exec;
+}
 
 struct GeomPeek : SmFilletGeom
 {
@@ -200,7 +216,7 @@ struct Model
         while ((int64_t)corners.size() <= i)
             corners.push_back(NULL);
         if (corners[(size_t)i] == NULL)
-            corners[(size_t)i] = new (ctx) ShimCorner(ctx, (SmFilletExecutive*)(void*)g_exec_storage);
+            corners[(size_t)i] = new (ctx) ShimCorner(ctx, shim_executive());
         return corners[(size_t)i];
     }
 
@@ -397,15 +413,19 @@ struct Model
         return true;
     }
 
-    // The vertex calculators of other units (parts 2, 4, 5): they read corner and executive
-    // data the shim does not build.
-    static bool other_unit_vertex(SmFilletVertexType t)
+    // The vertex calculator of an unported unit (part 5): it reads corner and executive data
+    // the shim does not build.
+    static bool other_unit_vertex(SmFilletVertexType t) { return t == SM_FV_FILLET_X_FILLET; }
+
+    // The vertex calculators of parts 2 and 4 (ported, called by the dispatcher). Each asks
+    // the vertex's corner for its filleted vertex, which the shim's corners do not have, so
+    // they run only on vertices without a corner, as in the shims of those units.
+    static bool ported_unit_vertex(SmFilletVertexType t)
     {
         switch (t)
         {
         case SM_FV_RAIL_X_RAIL:
         case SM_FV_RAIL_X_EDGEUSE:
-        case SM_FV_FILLET_X_FILLET:
         case SM_FV_RAIL_X_EXTENDED_EDGEUSE:
         case SM_FV_FILLET_X2_FILLETS:
         case SM_FV_ON_CROSS_SECTION:
@@ -414,14 +434,15 @@ struct Model
         }
     }
 
-    // The edge calculators of other units (parts 2, 5, 6), likewise.
+    // The edge calculators of unported units (parts 5, 6), likewise. CalcRailRailInterpolation
+    // (part 2) runs: the shim's corners have no fillet edges, so its corner branch returns
+    // SM_ERR before it reads anything else of them.
     static bool other_unit_edge(SmFilletEdgeType t)
     {
         switch (t)
         {
         case SM_FE_CROSS_SECTION:
         case SM_FE_FILLET_X_SIDE_FACE:
-        case SM_FE_RAIL_RAIL_INTERPOLATION:
         case SM_FE_ON_EDGE:
         case SM_FE_ON_EXTEND_EDGE:
         case SM_FE_FILLET_END:
@@ -443,6 +464,8 @@ struct Model
             SmObject* o = v->GetPointClassObject();
             return o != NULL && o->IsKindOf(SmVertex_TYPE);
         }
+        if (!as_mate && ported_unit_vertex(t))
+            return v->GetFilletCorner() == NULL;
         if (!as_mate && t != SM_FV_MATE)
             return !other_unit_vertex(t);
         if (seen.count(v) != 0)
@@ -496,7 +519,7 @@ struct Model
         if (g1->GetFilletSurface() == NULL || g2->GetFilletSurface() == NULL)
             return true;
         // without a B-spline 3D curve the surface/surface intersection is called with
-        // m_cpCorner->GetContext() (UB-200)
+        // m_cpCorner->GetContext() (UB-210)
         if (e->GetCurve() == NULL || !e->GetCurve()->IsKindOf(SmBSplineCurve_TYPE))
             return e->GetFilletCorner() != NULL;
         return p->GetUVTrimCurvePointer() != NULL && m->GetUVTrimCurvePointer() != NULL;
@@ -701,7 +724,7 @@ int32_t run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         // upstream dereferences the solver, its offset surfaces and (but for a corner
         // fillet) its first edge use; the analytic fillets (CalcConeFilletGeom, unit
         // blend.fillet_solver_p2) read solver data this shim does not build; without a
-        // march direction it may read the first of no sorted points (UB-199)
+        // march direction it may read the first of no sorted points (UB-208)
         SmFilletSolver* fs = geom == NULL ? NULL : geom->GetFilletSolver();
         if (fs == NULL || fs->GetSurface(0) == NULL || fs->GetSurface(1) == NULL ||
             (geom->GetFilletGeomType() != SM_FG_CORNER_FILLET && fs->GetEdgeuse(0) == NULL) ||

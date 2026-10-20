@@ -1069,7 +1069,7 @@
       "outcome": "rejected",
       "pass": false,
       "rejected": "shim_rejected_model",
-      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#15 (upstream source/SMLib/src/SmFilletGeom.cpp (ReCalcFilletGeom reads sTsectPnts[0] of an empty array without a march direction: UB-199))",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#15 (upstream source/SMLib/src/SmFilletGeom.cpp (ReCalcFilletGeom reads sTsectPnts[0] of an empty array without a march direction: UB-208))",
       "values_compared": 0
     },
     {
@@ -1321,7 +1321,7 @@
       "outcome": "rejected",
       "pass": false,
       "rejected": "shim_rejected_model",
-      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#16 (upstream source/SMLib/src/SmFilletGeom.cpp (ReCalcFilletGeom reads sTsectPnts[0] of an empty array without a march direction: UB-199))",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#16 (upstream source/SMLib/src/SmFilletGeom.cpp (ReCalcFilletGeom reads sTsectPnts[0] of an empty array without a march direction: UB-208))",
       "values_compared": 0
     },
     {
@@ -1577,20 +1577,32 @@
       "outcome": "rejected",
       "pass": false,
       "rejected": "shim_rejected_model",
-      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#22 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcFilletIntFillet without a 3D curve calls sm_SrfSrfIntersection with m_cpCorner->GetContext() of an edge without corner: UB-200; generated seed 748 of the 2000-seed sweep))",
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#22 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcFilletIntFillet without a 3D curve calls sm_SrfSrfIntersection with m_cpCorner->GetContext() of an edge without corner: UB-210; generated seed 748 of the 2000-seed sweep))",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "unit": "intersect.surface_intersector_p4"
-      },
+      "max_rel_err": 0.0,
+      "name": "fif_no_curve_crossing_planes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#23 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcFilletIntFillet without a 3D curve: sm_SrfSrfIntersection of two crossing planes makes the edge curve and its UV curves))",
+      "values_compared": 108
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "corner_edge_fif_no_curve_tilted_planes_reversed",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p3/cases.json#24 (upstream source/SMLib/src/SmFilletGeom.cpp (CalcCornerEdgeGeom -> CalcFilletIntFillet: crossing planes, tilted second plane, end vertices swapped))",
+      "values_compared": 108
+    },
+    {
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587805",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1598,19 +1610,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587806",
-      "values_compared": 145
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587807",
-      "values_compared": 0
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -1618,7 +1626,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587808",
-      "values_compared": 46
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1626,19 +1634,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587809",
-      "values_compared": 98
+      "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "sm_SrfSrfIntersection",
-        "unit": "blend.fillet_geom_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587810",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1646,19 +1650,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587811",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587812",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -1669,28 +1669,20 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "unit": "intersect.surface_intersector_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587814",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587815",
-      "values_compared": 0
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -1698,7 +1690,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587816",
-      "values_compared": 143
+      "values_compared": 124
     },
     {
       "max_rel_err": 0.0,
@@ -1714,7 +1706,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587818",
-      "values_compared": 131
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1722,7 +1714,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587819",
-      "values_compared": 98
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -1738,7 +1730,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587821",
-      "values_compared": 46
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -1746,7 +1738,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587822",
-      "values_compared": 146
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -1754,7 +1746,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587823",
-      "values_compared": 129
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -1762,7 +1754,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587824",
-      "values_compared": 143
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -1773,12 +1765,16 @@
       "values_compared": 143
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0021",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587826",
-      "values_compared": 46
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -1794,7 +1790,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587828",
-      "values_compared": 158
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -1802,7 +1798,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587829",
-      "values_compared": 135
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1810,15 +1806,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587830",
-      "values_compared": 135
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0026",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587831",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -1826,7 +1826,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587832",
-      "values_compared": 149
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -1842,15 +1842,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587834",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0030",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587835",
-      "values_compared": 46
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -1874,7 +1878,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587838",
-      "values_compared": 136
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -1882,7 +1886,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587839",
-      "values_compared": 98
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -1890,19 +1894,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587840",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0036",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587841",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1918,7 +1918,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587843",
-      "values_compared": 126
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -1929,16 +1929,12 @@
       "values_compared": 120
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "unit": "intersect.surface_intersector_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0040",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587845",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -1962,15 +1958,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587848",
-      "values_compared": 119
+      "values_compared": 12
     },
     {
-      "max_rel_err": 5.05690623323892e-16,
+      "max_rel_err": 0.0,
       "name": "gen0044",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587849",
-      "values_compared": 98
+      "values_compared": 125
     },
     {
       "max_rel_err": 0.0,
@@ -1978,7 +1974,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587850",
-      "values_compared": 131
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -1994,7 +1990,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587852",
-      "values_compared": 139
+      "values_compared": 144
     },
     {
       "max_rel_err": 0.0,
@@ -2005,12 +2001,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0049",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587854",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2018,10 +2018,10 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587855",
-      "values_compared": 153
+      "values_compared": 98
     },
     {
-      "max_rel_err": 0.0,
+      "max_rel_err": 8.228103901917169e-16,
       "name": "gen0051",
       "outcome": "pass",
       "pass": true,
@@ -2029,7 +2029,7 @@
       "values_compared": 98
     },
     {
-      "max_rel_err": 1.7116064157139003e-15,
+      "max_rel_err": 0.0,
       "name": "gen0052",
       "outcome": "pass",
       "pass": true,
@@ -2050,15 +2050,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587859",
-      "values_compared": 119
+      "values_compared": 12
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0055",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587860",
-      "values_compared": 143
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2074,7 +2078,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587862",
-      "values_compared": 132
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2082,7 +2086,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587863",
-      "values_compared": 130
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2098,7 +2102,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587865",
-      "values_compared": 120
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2106,15 +2110,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587866",
-      "values_compared": 46
+      "values_compared": 143
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0062",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587867",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2130,15 +2138,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587869",
-      "values_compared": 137
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0065",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587870",
-      "values_compared": 142
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2162,7 +2174,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587873",
-      "values_compared": 142
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2178,7 +2190,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587875",
-      "values_compared": 46
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -2186,15 +2198,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587876",
-      "values_compared": 98
+      "values_compared": 46
     },
     {
+      "deferred": {
+        "symbol": "SmFilletCorner::RecordFilletError",
+        "unit": "blend.fillet_corner_p2"
+      },
       "max_rel_err": 0.0,
       "name": "gen0072",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587877",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2202,10 +2218,10 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587878",
-      "values_compared": 153
+      "values_compared": 98
     },
     {
-      "max_rel_err": 0.0,
+      "max_rel_err": 4.828377312541922e-16,
       "name": "gen0074",
       "outcome": "pass",
       "pass": true,
@@ -2213,12 +2229,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0075",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587880",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2234,7 +2254,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587882",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2242,7 +2262,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587883",
-      "values_compared": 98
+      "values_compared": 142
     },
     {
       "max_rel_err": 0.0,
@@ -2250,7 +2270,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587884",
-      "values_compared": 118
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2266,7 +2286,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587886",
-      "values_compared": 142
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2285,12 +2305,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0084",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587889",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2321,12 +2345,16 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0088",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587893",
-      "values_compared": 136
+      "values_compared": 0
     },
     {
       "deferred": {
@@ -2354,7 +2382,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587896",
-      "values_compared": 132
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2362,19 +2390,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587897",
-      "values_compared": 46
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "sm_SrfSrfIntersection",
-        "unit": "blend.fillet_geom_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0093",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587898",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "deferred": {
@@ -2402,7 +2426,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587901",
-      "values_compared": 98
+      "values_compared": 132
     },
     {
       "max_rel_err": 0.0,
@@ -2410,7 +2434,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587902",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2418,7 +2442,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587903",
-      "values_compared": 125
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2429,16 +2453,12 @@
       "values_compared": 164
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "unit": "intersect.surface_intersector_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0100",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587905",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -2450,8 +2470,8 @@
     },
     {
       "deferred": {
-        "symbol": "sm_SrfSrfIntersection",
-        "unit": "blend.fillet_geom_p2"
+        "symbol": "SmFilletCorner::RecordFilletError",
+        "unit": "blend.fillet_corner_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0102",
@@ -2466,15 +2486,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587908",
-      "values_compared": 137
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0104",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587909",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2482,7 +2506,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587910",
-      "values_compared": 98
+      "values_compared": 152
     },
     {
       "max_rel_err": 0.0,
@@ -2498,7 +2522,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587912",
-      "values_compared": 98
+      "values_compared": 132
     },
     {
       "max_rel_err": 0.0,
@@ -2506,7 +2530,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587913",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2514,7 +2538,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587914",
-      "values_compared": 12
+      "values_compared": 126
     },
     {
       "max_rel_err": 0.0,
@@ -2538,7 +2562,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587917",
-      "values_compared": 94
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2554,7 +2578,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587919",
-      "values_compared": 120
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2578,15 +2602,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587922",
-      "values_compared": 141
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
       "max_rel_err": 0.0,
       "name": "gen0118",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587923",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2602,7 +2630,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587925",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2610,10 +2638,10 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587926",
-      "values_compared": 12
+      "values_compared": 136
     },
     {
-      "max_rel_err": 3.663446558865142e-14,
+      "max_rel_err": 0.0,
       "name": "gen0122",
       "outcome": "pass",
       "pass": true,
@@ -2629,12 +2657,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0124",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587929",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2658,7 +2690,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587932",
-      "values_compared": 46
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -2722,27 +2754,23 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587940",
-      "values_compared": 148
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "unit": "intersect.surface_intersector_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0136",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587941",
-      "values_compared": 0
+      "values_compared": 153
     },
     {
-      "max_rel_err": 2.6353324174235425e-15,
+      "max_rel_err": 0.0,
       "name": "gen0137",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587942",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2750,15 +2778,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587943",
-      "values_compared": 98
+      "values_compared": 120
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0139",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587944",
-      "values_compared": 46
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2766,7 +2798,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587945",
-      "values_compared": 98
+      "values_compared": 146
     },
     {
       "max_rel_err": 0.0,
@@ -2774,15 +2806,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587946",
-      "values_compared": 137
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0142",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587947",
-      "values_compared": 129
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2790,7 +2826,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587948",
-      "values_compared": 94
+      "values_compared": 131
     },
     {
       "max_rel_err": 0.0,
@@ -2798,7 +2834,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587949",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2814,7 +2850,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587951",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2822,7 +2858,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587952",
-      "values_compared": 46
+      "values_compared": 125
     },
     {
       "max_rel_err": 0.0,
@@ -2830,15 +2866,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587953",
-      "values_compared": 12
+      "values_compared": 152
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0149",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587954",
-      "values_compared": 137
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2849,12 +2889,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
       "max_rel_err": 0.0,
       "name": "gen0151",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587956",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2862,7 +2906,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587957",
-      "values_compared": 98
+      "values_compared": 130
     },
     {
       "max_rel_err": 0.0,
@@ -2870,7 +2914,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587958",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2878,15 +2922,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587959",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
-      "max_rel_err": 1.3630745899780924e-15,
+      "max_rel_err": 0.0,
       "name": "gen0155",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587960",
-      "values_compared": 98
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -2894,20 +2938,24 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587961",
-      "values_compared": 125
-    },
-    {
-      "max_rel_err": 0.0,
-      "name": "gen0157",
-      "outcome": "pass",
-      "pass": true,
-      "source": "generated:seed=9207379614715587962",
-      "values_compared": 137
+      "values_compared": 143
     },
     {
       "deferred": {
         "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
         "unit": "intersect.surface_intersector_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=9207379614715587962",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0158",
@@ -2930,15 +2978,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587965",
-      "values_compared": 98
+      "values_compared": 114
     },
     {
+      "deferred": {
+        "symbol": "SmFilletCorner::GetFilletEdges",
+        "unit": "blend.fillet_corner_p1"
+      },
       "max_rel_err": 0.0,
       "name": "gen0161",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587966",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -2946,7 +2998,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587967",
-      "values_compared": 137
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2962,7 +3014,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587969",
-      "values_compared": 129
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2970,7 +3022,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587970",
-      "values_compared": 158
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2978,7 +3030,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587971",
-      "values_compared": 94
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -2986,7 +3038,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587972",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
       "deferred": {
@@ -3006,7 +3058,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587974",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3022,7 +3074,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587976",
-      "values_compared": 146
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3038,7 +3090,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587978",
-      "values_compared": 158
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3046,7 +3098,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587979",
-      "values_compared": 98
+      "values_compared": 125
     },
     {
       "max_rel_err": 0.0,
@@ -3054,27 +3106,27 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587980",
-      "values_compared": 98
-    },
-    {
-      "max_rel_err": 0.0,
-      "name": "gen0176",
-      "outcome": "pass",
-      "pass": true,
-      "source": "generated:seed=9207379614715587981",
-      "values_compared": 142
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
         "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
-      "name": "gen0177",
+      "name": "gen0176",
       "outcome": "deferred",
       "pass": false,
-      "source": "generated:seed=9207379614715587982",
+      "source": "generated:seed=9207379614715587981",
       "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715587982",
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3085,12 +3137,16 @@
       "values_compared": 143
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0179",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587984",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3114,7 +3170,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587987",
-      "values_compared": 46
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3122,7 +3178,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587988",
-      "values_compared": 131
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3130,7 +3186,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587989",
-      "values_compared": 98
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -3138,7 +3194,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587990",
-      "values_compared": 131
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -3146,7 +3202,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587991",
-      "values_compared": 126
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3154,7 +3210,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587992",
-      "values_compared": 98
+      "values_compared": 147
     },
     {
       "max_rel_err": 0.0,
@@ -3162,15 +3218,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587993",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0189",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715587994",
-      "values_compared": 137
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3178,19 +3238,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587995",
-      "values_compared": 12
+      "values_compared": 138
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0191",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587996",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3198,7 +3254,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587997",
-      "values_compared": 46
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -3206,10 +3262,10 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715587998",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
-      "max_rel_err": 1.80811704665081e-16,
+      "max_rel_err": 0.0,
       "name": "gen0194",
       "outcome": "pass",
       "pass": true,
@@ -3222,7 +3278,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588000",
-      "values_compared": 131
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3230,7 +3286,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588001",
-      "values_compared": 94
+      "values_compared": 141
     },
     {
       "max_rel_err": 0.0,
@@ -3238,7 +3294,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588002",
-      "values_compared": 125
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -3254,7 +3310,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588004",
-      "values_compared": 143
+      "values_compared": 141
     },
     {
       "max_rel_err": 0.0,
@@ -3262,7 +3318,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588005",
-      "values_compared": 142
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3270,7 +3326,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588006",
-      "values_compared": 46
+      "values_compared": 151
     },
     {
       "max_rel_err": 0.0,
@@ -3278,7 +3334,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588007",
-      "values_compared": 139
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3286,7 +3342,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588008",
-      "values_compared": 98
+      "values_compared": 123
     },
     {
       "max_rel_err": 0.0,
@@ -3294,7 +3350,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588009",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3302,7 +3358,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588010",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3310,7 +3366,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588011",
-      "values_compared": 143
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -3318,7 +3374,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588012",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3334,7 +3390,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588014",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3342,7 +3398,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588015",
-      "values_compared": 143
+      "values_compared": 130
     },
     {
       "max_rel_err": 0.0,
@@ -3366,7 +3422,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588018",
-      "values_compared": 130
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3382,7 +3438,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588020",
-      "values_compared": 142
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3390,7 +3446,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588021",
-      "values_compared": 142
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3398,7 +3454,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588022",
-      "values_compared": 130
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3406,11 +3462,11 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588023",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
         "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
@@ -3442,15 +3498,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588027",
-      "values_compared": 98
+      "values_compared": 132
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0223",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588028",
-      "values_compared": 123
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3458,7 +3518,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588029",
-      "values_compared": 120
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3474,15 +3534,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588031",
-      "values_compared": 130
+      "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
       "max_rel_err": 0.0,
       "name": "gen0227",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588032",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3490,7 +3554,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588033",
-      "values_compared": 135
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3501,24 +3565,24 @@
       "values_compared": 98
     },
     {
-      "max_rel_err": 0.0,
-      "name": "gen0230",
-      "outcome": "pass",
-      "pass": true,
-      "source": "generated:seed=9207379614715588035",
-      "values_compared": 98
-    },
-    {
       "deferred": {
-        "symbol": "sm_SrfSrfIntersection",
-        "unit": "blend.fillet_geom_p2"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
-      "name": "gen0231",
+      "name": "gen0230",
       "outcome": "deferred",
       "pass": false,
-      "source": "generated:seed=9207379614715588036",
+      "source": "generated:seed=9207379614715588035",
       "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=9207379614715588036",
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3526,7 +3590,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588037",
-      "values_compared": 143
+      "values_compared": 152
     },
     {
       "max_rel_err": 0.0,
@@ -3537,28 +3601,20 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588039",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
-      "deferred": {
-        "symbol": "sm_SrfSrfIntersection",
-        "unit": "blend.fillet_geom_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0235",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588040",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3566,7 +3622,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588041",
-      "values_compared": 94
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3574,7 +3630,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588042",
-      "values_compared": 120
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -3582,7 +3638,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588043",
-      "values_compared": 136
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -3593,12 +3649,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0240",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588045",
-      "values_compared": 152
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3606,7 +3666,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588046",
-      "values_compared": 119
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3625,12 +3685,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0244",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588049",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3638,7 +3702,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588050",
-      "values_compared": 125
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3646,7 +3710,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588051",
-      "values_compared": 143
+      "values_compared": 148
     },
     {
       "max_rel_err": 0.0,
@@ -3654,12 +3718,12 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588052",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0248",
@@ -3682,11 +3746,11 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588055",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
         "unit": "intersect.surface_intersector_p4"
       },
       "max_rel_err": 0.0,
@@ -3702,7 +3766,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588057",
-      "values_compared": 143
+      "values_compared": 125
     },
     {
       "max_rel_err": 0.0,
@@ -3710,7 +3774,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588058",
-      "values_compared": 131
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3718,7 +3782,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588059",
-      "values_compared": 146
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3729,20 +3793,28 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0256",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588061",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0257",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588062",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3750,7 +3822,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588063",
-      "values_compared": 119
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3758,7 +3830,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588064",
-      "values_compared": 143
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3766,7 +3838,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588065",
-      "values_compared": 157
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3777,12 +3849,12 @@
       "values_compared": 143
     },
     {
-      "max_rel_err": 3.8579792777919006e-16,
+      "max_rel_err": 0.0,
       "name": "gen0262",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588067",
-      "values_compared": 98
+      "values_compared": 12
     },
     {
       "deferred": {
@@ -3810,15 +3882,19 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588070",
-      "values_compared": 98
+      "values_compared": 141
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
+        "unit": "intersect.surface_intersector_p4"
+      },
       "max_rel_err": 0.0,
       "name": "gen0266",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588071",
-      "values_compared": 12
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3826,7 +3902,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588072",
-      "values_compared": 98
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3842,7 +3918,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588074",
-      "values_compared": 114
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -3861,12 +3937,12 @@
       "values_compared": 98
     },
     {
-      "max_rel_err": 0.0,
+      "max_rel_err": 1.736858082717341e-16,
       "name": "gen0272",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588077",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3877,16 +3953,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0274",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588079",
-      "values_compared": 0
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -3894,7 +3966,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588080",
-      "values_compared": 46
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3902,7 +3974,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588081",
-      "values_compared": 130
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3929,12 +4001,16 @@
       "values_compared": 98
     },
     {
+      "deferred": {
+        "symbol": "SmFilletCorner::GetFilletEdges",
+        "unit": "blend.fillet_corner_p1"
+      },
       "max_rel_err": 0.0,
       "name": "gen0280",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588085",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3945,12 +4021,16 @@
       "values_compared": 98
     },
     {
-      "max_rel_err": 2.3391020088847994e-16,
+      "deferred": {
+        "symbol": "SmFilletVertex::CalcFilletIntFillet",
+        "unit": "blend.fillet_geom_p5"
+      },
+      "max_rel_err": 0.0,
       "name": "gen0282",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=9207379614715588087",
-      "values_compared": 98
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -3966,7 +4046,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588089",
-      "values_compared": 143
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3977,12 +4057,12 @@
       "values_compared": 98
     },
     {
-      "max_rel_err": 0.0,
+      "max_rel_err": 4.610460808594103e-15,
       "name": "gen0286",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588091",
-      "values_compared": 12
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -3990,7 +4070,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588092",
-      "values_compared": 124
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -4006,7 +4086,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588094",
-      "values_compared": 46
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -4014,15 +4094,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588095",
-      "values_compared": 98
+      "values_compared": 142
     },
     {
-      "max_rel_err": 0.0,
+      "max_rel_err": 1.4639695593544728e-15,
       "name": "gen0291",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588096",
-      "values_compared": 131
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -4030,7 +4110,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588097",
-      "values_compared": 98
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -4038,7 +4118,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588098",
-      "values_compared": 152
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -4046,7 +4126,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588099",
-      "values_compared": 98
+      "values_compared": 131
     },
     {
       "max_rel_err": 0.0,
@@ -4062,7 +4142,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588101",
-      "values_compared": 12
+      "values_compared": 131
     },
     {
       "max_rel_err": 0.0,
@@ -4070,19 +4150,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588102",
-      "values_compared": 154
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "unit": "intersect.surface_intersector_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0298",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588103",
-      "values_compared": 0
+      "values_compared": 132
     },
     {
       "max_rel_err": 0.0,
@@ -4090,21 +4166,22 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=9207379614715588104",
-      "values_compared": 94
+      "values_compared": 12
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 28,
+  "cases_deferred": 43,
   "cases_failed": 0,
-  "cases_passed": 288,
+  "cases_passed": 275,
   "cases_rejected": 7,
-  "cases_total": 323,
+  "cases_total": 325,
   "deferred_by_unit": {
-    "blend.fillet_geom_p2": 5,
-    "blend.fillet_geom_p5": 11,
-    "intersect.surface_intersector_p4": 12
+    "blend.fillet_corner_p1": 2,
+    "blend.fillet_corner_p2": 2,
+    "blend.fillet_geom_p5": 8,
+    "intersect.surface_intersector_p4": 31
   },
-  "max_rel_err": 3.663446558865142e-14,
+  "max_rel_err": 4.610460808594103e-15,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,

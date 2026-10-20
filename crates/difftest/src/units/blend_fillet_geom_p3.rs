@@ -913,11 +913,21 @@ impl RustModel {
     }
 }
 
-fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
-    let bs = match c.map(Curve::kind) {
-        Some(CurveKind::BSpline(bs)) => Some(bs),
+/// The B-spline part of a curve of a kind derived from `SmBSplineCurve` (the shim's
+/// `IsKindOf(SmBSplineCurve_TYPE)`).
+const fn b_spline_part(c: &Curve) -> Option<&BSplineCurve> {
+    match c.kind() {
+        CurveKind::BSpline(b) => Some(b),
+        CurveKind::Line(l) => Some(l.base()),
+        CurveKind::Ellipse(e) => Some(e.base()),
+        CurveKind::Hyperbola(h) => Some(h.base()),
+        CurveKind::Parabola(p) => Some(p.base()),
         _ => None,
-    };
+    }
+}
+
+fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
+    let bs = c.and_then(b_spline_part);
     let Some(cur) = bs.and_then(BSplineCurve::gw_nurb) else {
         o.push(0.0);
         return;
@@ -945,32 +955,31 @@ fn status(e: &SolidError) -> f64 {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let tg = match target(&i.brep)? {
+    let mut tg = match target(&i.brep)? {
         Ok(t) => t,
         Err(out) => return Ok(out),
     };
     let mut m = RustModel::build(i, &tg)?;
     let k = std::mem::take(&mut m.k);
-    let bases: Vec<FilletSolver> = m.solvers.iter().map(|s| s.base.clone()).collect();
+    let mut bases: Vec<FilletSolver> = m.solvers.iter().map(|s| s.base.clone()).collect();
     let res = match &i.op {
         OpIn::Export => Ok(()),
         OpIn::CornerVert { v } => {
             let v = *m.vertices.get(*v).ok_or_else(|| harness("vertex"))?;
-            m.fb.calc_corner_vert_geom(&k, v, &tg.brep, &bases)
+            m.fb.calc_corner_vert_geom(&k, v, &mut tg.brep, &mut bases)
         }
         OpIn::Mate { v } => {
             let v = *m.vertices.get(*v).ok_or_else(|| harness("vertex"))?;
-            m.fb.calc_mate_geom(&k, v, &tg.brep, &bases)
+            m.fb.calc_mate_geom(&k, v, &mut tg.brep, &mut bases)
         }
         OpIn::CornerEdge { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
-            // the shim refuses the part 6 calculators (its corners carry no data)
-            m.fb.calc_corner_edge_geom(&k, e, &tg.brep, &[], &bases)
+            m.fb.calc_corner_edge_geom(&k, e, &bases, &mut tg.brep)
         }
         OpIn::FilletIntFillet { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
             let corner = m.fb.fillet_edge(e).map_err(h)?.fillet_corner();
-            m.fb.calc_fillet_int_fillet(&k, e, corner, &bases)
+            m.fb.calc_edge_fillet_int_fillet(&k, e, corner, &bases)
         }
         OpIn::ReCalc {
             g,
@@ -1372,7 +1381,7 @@ fn gen_fif(rng: &mut Rng) -> Inputs {
         ve: 1,
         etype: FilletEdgeType::FilletXFillet as i64,
         status: 0,
-        // without a curve upstream reads the corner's context (UB-200; the shim refuses that)
+        // without a curve upstream reads the corner's context (UB-210; the shim refuses that)
         corner: if !has_curve || rng.chance(0.9) { 0 } else { -1 },
         curve: has_curve.then(|| curve.clone()),
         interval: Some([a, bb]),
@@ -1431,6 +1440,9 @@ fn gen_corner_edge(rng: &mut Rng) -> Inputs {
             FilletEdgeType::CliffRail,
             FilletEdgeType::SplitFace,
             FilletEdgeType::Unknown,
+            // CalcRailRailInterpolation (blend.fillet_geom_p2) on the edge's corner
+            FilletEdgeType::RailRailInterpolation,
+            FilletEdgeType::RailRailInterpolation,
         ])
         .unwrap_or(&FilletEdgeType::Rail);
     let edge = EdgeIn {
@@ -1572,7 +1584,7 @@ fn gen_recalc(rng: &mut Rng) -> Inputs {
         .then(|| gen_curve_on(rng, 3, 1.0, 0.0, 1.0));
     let mut dir = rng.chance(0.5).then(|| rng.point3(-1.0, 1.0));
     // Without a march direction, when rail 0 has no curve (never here) and both rails
-    // are there, upstream reads the first sorted point even when there is none (UB-199;
+    // are there, upstream reads the first sorted point even when there is none (UB-208;
     // the shim refuses that model): give such a model a direction.
     if dir.is_none() && rails[1] >= 0 && !recalc_sorts_a_point(gtype, &vertices, &edges) {
         dir = Some(rng.point3(-1.0, 1.0));
@@ -1605,13 +1617,158 @@ fn gen_recalc(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// The vertex calculators of parts 2 and 4 through `CalcCornerVertGeom`, on a vertex
+/// without a corner (the shim's corners are opaque to them), directly or as the main
+/// vertex of a mate.
+fn gen_dispatch(rng: &mut Rng) -> Inputs {
+    let mut i = gen_recalc(rng);
+    let t = *rng
+        .choose(&[
+            FilletVertexType::RailXRail,
+            FilletVertexType::RailXEdgeuse,
+            FilletVertexType::RailXExtendedEdgeuse,
+            FilletVertexType::FilletX2Fillets,
+            FilletVertexType::OnCrossSection,
+            FilletVertexType::Setback,
+        ])
+        .unwrap_or(&FilletVertexType::RailXRail);
+    let n = i.model.vertices.len();
+    let v = rng.below(n as u64) as usize;
+    if let Some(fv) = i.model.vertices.get_mut(v) {
+        fv.vtype = t as i64;
+        fv.status = FilStatus::Unprocessed as i64;
+    }
+    i.op = OpIn::CornerVert { v };
+    if rng.chance(0.3) {
+        // a mate whose main vertex is computed first
+        let m = (v + 1 + rng.below(n as u64 - 1) as usize) % n;
+        if let Some(fv) = i.model.vertices.get_mut(m) {
+            fv.vtype = FilletVertexType::Mate as i64;
+            fv.status = FilStatus::Unprocessed as i64;
+            fv.mates = [v as i64, -1];
+        }
+        i.op = OpIn::Mate { v: m };
+    }
+    i
+}
+
+/// A bilinear B-spline patch through the four corners `[p00, p10, p01, p11]`.
+fn bilinear(c: [[f64; 3]; 4]) -> SrfIn {
+    let [p00, p10, p01, p11] = c;
+    let pt = |p: [f64; 3]| [p[0], p[1], p[2], NOW];
+    SrfIn::Bspline(BssIn {
+        oob: false,
+        form: 0,
+        net: vec![vec![pt(p00), pt(p01)], vec![pt(p10), pt(p11)]],
+        p: 1,
+        q: 1,
+        u: vec![0.0, 0.0, 1.0, 1.0],
+        v: vec![0.0, 0.0, 1.0, 1.0],
+    })
+}
+
+/// A fillet x fillet edge without a 3D curve whose two fillet surfaces cross along the
+/// line `y = s/2, z = 0` through both (processed) end vertices: the surface/surface
+/// intersection makes the curve and its UV curves.
+fn gen_fif_crossing(rng: &mut Rng) -> Inputs {
+    let s = *rng.choose(&[1e-3, 1.0, 1.0, 1e3]).unwrap_or(&1.0);
+    let h = s / 2.0;
+    // the second surface tilts about the line
+    let tilt = rng.uniform(-0.8, 0.8);
+    // planes go to the analytic plane intersector, B-spline patches to the point-based one
+    let surf1 = if rng.chance(0.6) {
+        SrfIn::Plane {
+            o: [0.0, 0.0, 0.0],
+            n: [0.0, 0.0, 1.0],
+        }
+    } else {
+        bilinear([[0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, s, 0.0], [s, s, 0.0]])
+    };
+    let surf2 = if rng.chance(0.6) {
+        SrfIn::Plane {
+            o: [0.0, h, 0.0],
+            n: [0.0, 1.0, -tilt],
+        }
+    } else {
+        bilinear([
+            [0.0, h - tilt * h, -h],
+            [s, h - tilt * h, -h],
+            [0.0, h + tilt * h, h],
+            [s, h + tilt * h, h],
+        ])
+    };
+    let (xa, xb) = (s * rng.uniform(0.05, 0.4), s * rng.uniform(0.6, 0.95));
+    let mut vs = vertex(FilletVertexType::FilletXFillet, FilStatus::Processed);
+    vs.point = [xa, h, 0.0];
+    let mut ve = vertex(FilletVertexType::FilletXFillet, FilStatus::Processed);
+    ve.point = [xb, h, 0.0];
+    if rng.chance(0.2) {
+        std::mem::swap(&mut vs.point, &mut ve.point);
+    }
+    let solver = |rng: &mut Rng| SolverIn {
+        tol: *rng.choose(&[1e-7, 1e-6, 1e-4]).unwrap_or(&1e-6) * s,
+        ang: rng.uniform(0.001, 0.1),
+        tang: 0.01,
+        eus: [-1, -1],
+        surfs: [None, None],
+        extend: [false, false],
+        setup: false,
+    };
+    let geom = |solver: i64, surface: SrfIn| GeomIn {
+        gtype: 0,
+        status: 0,
+        solver,
+        surface: Some(surface),
+        rails: [-1, -1],
+        other1: vec![],
+        other2: vec![],
+        sides: vec![],
+    };
+    let edge = EdgeIn {
+        vs: 0,
+        ve: 1,
+        etype: FilletEdgeType::FilletXFillet as i64,
+        status: 0,
+        corner: 0,
+        curve: None,
+        interval: None,
+        eus: [
+            EuIn {
+                geom: 0,
+                ..EuIn::default()
+            },
+            EuIn {
+                geom: 1,
+                ..EuIn::default()
+            },
+        ],
+    };
+    Inputs {
+        brep: BrepIn::Network,
+        model: ModelIn {
+            solvers: vec![solver(rng), solver(rng)],
+            vertices: vec![vs, ve],
+            geoms: vec![geom(0, surf1), geom(1, surf2)],
+            edges: vec![edge],
+        },
+        op: if rng.chance(0.5) {
+            OpIn::FilletIntFillet { e: 0 }
+        } else {
+            OpIn::CornerEdge { e: 0 }
+        },
+        expected_rejection: false,
+    }
+}
+
 fn gen_case(rng: &mut Rng) -> Inputs {
-    match rng.below(20) {
+    match rng.below(24) {
         0..=6 => gen_mate(rng),
         7..=8 => gen_on_vertex(rng),
         9..=14 => gen_fif(rng),
         15 => gen_corner_edge(rng),
-        _ => gen_recalc(rng),
+        16..=19 => gen_recalc(rng),
+        20..=21 => gen_dispatch(rng),
+        _ => gen_fif_crossing(rng),
     }
 }
 
