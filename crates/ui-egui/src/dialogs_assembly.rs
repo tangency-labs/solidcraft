@@ -1033,7 +1033,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
             for (side, origin) in [&a, &b].into_iter().enumerate() {
-                if alignment[side].is_some() {
+                if alignment.iter().any(Option::is_some) {
                     let picked = sel_items(inputs, side).first().ok_or("select the primary face origin first")?;
                     if alignment_pick(s, picked)?["occurrence"] != origin.param["occurrence"] {
                         return Err("this primary origin aliases another instance; select an unambiguous occurrence before adding alignment".into());

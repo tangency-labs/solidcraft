@@ -69,6 +69,19 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
         f.offset[0] = "2 mm".into();
     }
     assert!(apply_commands(&app, &d).unwrap_err().contains("Offset X"));
+    // One optional alignment still has to validate BOTH primary occurrences. Picking B:2
+    // must not silently preview or create a joint on B:1 while only A has an alignment.
+    app.dialog = None;
+    let component = app.session.doc.find_component("B").unwrap();
+    app.run("occurrence.copy", json!({"component": component, "translate": [70, 0, 0]})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(110.0, 10.0, 0.0)).unwrap());
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    assert!(d.inputs[3].items.is_empty(), "only the first alignment is supplied");
+    assert!(apply_commands(&app, &d).unwrap_err().contains("aliases another instance"));
 }
 
 #[test]
