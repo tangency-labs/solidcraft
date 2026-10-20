@@ -2957,3 +2957,49 @@ fn construction_points_fill_three_point_plane_dialog() {
     assert!((planes[0].2.origin.z - 10.0).abs() < 1e-9);
     assert!(planes[0].2.normal().dot(Vec3::Z).abs() > 1.0 - 1e-9);
 }
+
+/// A plate with slanted sides and an L-shaped wall on it, the wall's ends flush with the plate's
+/// sides, its corner rounded 5 and the plate's corners 10 (the user's bracket).
+fn bracket() -> SolveApp {
+    app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.line", "params": {"points": [[0, 0], [90, 0], [90, -100], [100, -100], [140, -20], [140, 50], [60, 50], [0, 10]], "closed": true}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 10}},
+        {"command": "sketch.create", "params": {"plane": "XY", "offset": 10}},
+        {"command": "sketch.line", "params": {"points": [[0, 0], [90, 0], [90, -100], [100, -100], [100, 10], [0, 10]], "closed": true}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 20, "operation": "join", "targets": ["Body1"]}},
+        {"command": "solid.fillet", "params": {"edges": [[100, 10, 20]], "radius": 5}},
+        {"command": "solid.fillet", "params": {"edges": [[60, 50, 5], [140, 50, 5], [140, -20, 5]], "radius": 10}},
+    ]))
+}
+
+#[test]
+fn fillet_tangent_chain_stops_at_an_earlier_rounds_end() {
+    // The plate's top edge picked with its tangent chain: its seven edges from one wall end to
+    // the other. Once the wall's foot is rounded, the same seven, not on over the foot round's
+    // ends and up the wall's end (the fillet's own chain, not the mesh's), and the fillet builds.
+    let (top_edge, foot) = (Vec3::new(30.0, 30.0, 10.0), Vec3::new(50.0, 10.0, 10.0));
+    let mut app = bracket();
+    let pick = edge(&app, top_edge);
+    let d = start(&mut app, vec![pick], "solid.fillet");
+    assert_eq!(d.inputs[0].items.len(), 7, "the plate's top edge, wall end to wall end");
+    let pick = edge(&app, foot);
+    let d = start(&mut app, vec![pick], "solid.fillet");
+    assert_eq!(d.inputs[0].items.len(), 3, "the wall's foot: line, the corner's round, line");
+    for (first, then, n) in [(foot, top_edge, 7), (top_edge, foot, 3)] {
+        let mut app = bracket();
+        let pick = edge(&app, first);
+        let d = start(&mut app, vec![pick], "solid.fillet");
+        for (id, params) in apply_commands(&app, &d).unwrap() {
+            app.run(&id, params).unwrap();
+        }
+        let pick = edge(&app, then);
+        let d = start(&mut app, vec![pick], "solid.fillet");
+        assert_eq!(d.inputs[0].items.len(), n, "after the first round: its own chain only");
+        for (id, params) in apply_commands(&app, &d).unwrap() {
+            app.run(&id, params).unwrap_or_else(|e| panic!("the second round: {e}"));
+        }
+    }
+}

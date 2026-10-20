@@ -1753,7 +1753,8 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
         && let Some(b) = s.world_state().body(body)
     {
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        // The chain the fillet itself takes (not over an earlier round's end).
+        for i in b.fillet_chain(*index).unwrap_or_else(|| m.tangent_chain(*index, 2f64.to_radians())) {
             if !picked.iter().any(|x| matches!(x, Sel::Edge { index: j, .. } if *j == i))
                 && let Some(e) = m.edges.get(i)
             {
