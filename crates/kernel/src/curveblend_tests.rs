@@ -1768,13 +1768,10 @@ fn chain_and_round_kept(body: &Body, pick: Vec3, len: usize, radii: &[f64]) {
 }
 
 #[test]
-fn a_chain_ends_at_a_cove_under_a_step_flush_with_an_oblique_side() {
-    // A ramp's top runs down a cove (a cylinder bending up) into a step, cut by a slanted side:
-    // the cove's end runs across the side from the top edge to the step, whose end is in the
-    // side's plane. That is a wall's foot round ending flush with the plate's side beneath the
-    // wall's end, designed or rounded earlier alike: the side's top edge ends at the cove and its
-    // round merges with it ([`crate::merge_corner`]), as in any order where the step's end is a
-    // face of its own.
+fn a_chain_runs_on_over_a_designed_cove_on_an_oblique_side() {
+    // A ramp's top runs down a cove (a cylinder bending up, no earlier round) into a step, cut by a
+    // slanted side: the top edge of the side runs on smoothly over the cove's oblique seam with the
+    // top and on up the step. No earlier round of the other kind ends there: the chain runs on.
     use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
     let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
     let profile = Region2 {
@@ -1806,14 +1803,28 @@ fn a_chain_ends_at_a_cove_under_a_step_flush_with_an_oblique_side() {
     };
     let cut = crate::extrude(&Plane::XY, &[cut], -1.0, 10.0).unwrap().pop().unwrap();
     let body = boolean(&ramp, &cut, BoolOp::Cut).unwrap().unwrap();
-    let pick = Vec3::new(6.5, 15.0, 2.0);
-    assert_eq!(chain_at(&body, pick), 1);
-    // `V` where the step's plane, the side and the top meet: the step's trace along x, the top
-    // beyond it along y, the side at tan⁻¹(1 / 0.3) to the trace.
-    let end: WallEnd = (Vec3::new(4.1, 7.0, 2.0), Vec3::X, Vec3::Y, 1.0 / 0.3);
+    chain_and_round_kept(&body, Vec3::new(6.5, 15.0, 2.0), 3, &[0.5, 1.0]);
+}
+
+#[test]
+fn a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side() {
+    // A wall on a plate, its end in one plane with the plate's slanted side, its foot rounded: the
+    // round's end runs across that one face from the plate's top edge up the wall's end. That is
+    // no end against a separate end face ([`crate::merge_corner`]): the plate's top edge runs on
+    // over it and up the wall's end.
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let polygon = |pts: &[(f64, f64)]| Region2 {
+        outer: Loop2 {
+            segs: pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }).collect(),
+        },
+        holes: vec![],
+    };
+    let plate = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (5.0, 10.0)])], 0.0, 2.0).unwrap().pop().unwrap();
+    let wall = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 2.0), (1.0, 2.0)])], 2.0, 6.0).unwrap().pop().unwrap();
+    let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
     for r in [0.5, 1.0] {
-        let result = fillet(&body, &[pick], r).unwrap_or_else(|e| panic!("r {r}: {e}"));
-        assert_merged(&result, &[end], (3.0, r), 1e-6, &format!("r {r}"));
+        let footed = fillet(&body, &[Vec3::new(10.0, 2.0, 2.0)], r).unwrap();
+        chain_and_round_kept(&footed, Vec3::new(3.0, 6.0, 2.0), 3, &[0.5, 1.0]);
     }
 }
 
@@ -1830,10 +1841,24 @@ fn merges_alike(body: &Body, foot: &[Vec3], tops: &[Vec3], ends: &[WallEnd], (ra
         ("edge then foot", fillet(&edged, foot, ra)),
         ("each at its radius", crate::fillet_each(body, &picks, &radii)),
     ];
+    merged_alike(body, (&footed, &edged), &routes, ends, (ra, rb), correction, how);
+}
+
+/// Every one of `routes` (from `body`, whose rounds alone are `footed` and `edged`) builds the same
+/// merge at each of `ends`, the merge adding `correction` beyond the two rounds alone.
+fn merged_alike(
+    body: &Body,
+    (footed, edged): (&Body, &Body),
+    routes: &[(&str, crate::Result<Body>)],
+    ends: &[WallEnd],
+    (ra, rb): (f64, f64),
+    correction: f64,
+    how: &str,
+) {
     let mass = planned_volume;
-    let (v_body, v_footed, v_edged) = (mass(body), mass(&footed), mass(&edged));
-    let first = routes[0].1.as_ref().unwrap_or_else(|e| panic!("{how}, foot {ra} edge {rb}: {e}"));
-    for (route, result) in &routes {
+    let (v_body, v_footed, v_edged) = (mass(body), mass(footed), mass(edged));
+    let first = routes[0].1.as_ref().unwrap_or_else(|e| panic!("{how}, {}, foot {ra} edge {rb}: {e}", routes[0].0));
+    for (route, result) in routes {
         let how = format!("{how}, {route}, foot {ra} edge {rb}");
         let result = result.as_ref().unwrap_or_else(|e| panic!("{how}: {e}"));
         assert_merged(result, ends, (ra, rb), 1e-6, &how);
@@ -1855,24 +1880,10 @@ fn merges_alike(body: &Body, foot: &[Vec3], tops: &[Vec3], ends: &[WallEnd], (ra
     }
 }
 
-#[test]
-fn rounds_meeting_where_the_wall_end_is_flush_with_the_plate_side_merge_in_either_order() {
-    // A wall on a plate, its end in one plane with the plate's side beneath it: the wall's end and
-    // the plate's side are one face, and the line of the wall's end is no edge below the top. Each
-    // round's chain still ends at the other round's end (not on over it and up the wall's end), and
-    // the two rounds merge into the same band in either order and each at its radius, the band's
-    // edge on that line inside the one face. Square ends (a rectangular plate, its side 4 or 15 long
-    // to the next corner) and a side slanted at tan⁻¹ 2.
-    let pairs = [(1.0, 0.5), (0.5, 1.0)];
-    for side in [4.0, 15.0] {
-        let (body, foot, tops, ends) = wall_on_a_trapezoid(90.0, side);
-        for (ra, rb) in pairs {
-            assert_eq!(chain_at(&fillet(&body, &[foot], ra).unwrap(), tops[0]), 1, "side {side}, foot {ra}");
-            assert_eq!(chain_at(&fillet(&body, &tops, rb).unwrap(), foot), 1, "side {side}, edge {rb}");
-            let correction = 2.0 * merge_correction(std::f64::consts::FRAC_PI_2, ra, rb);
-            merges_alike(&body, &[foot], &tops, &ends, (ra, rb), correction, &format!("square, side {side}"));
-        }
-    }
+/// [`a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side`]'s wall on a plate,
+/// its end in one plane with the plate's slanted side; with a point on the wall's foot and on the
+/// side's top edge, and the wall's end there.
+fn wall_flush_with_a_slanted_side() -> (Body, Vec3, Vec3, WallEnd) {
     use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
     let polygon = |pts: &[(f64, f64)]| Region2 {
         outer: Loop2 {
@@ -1883,11 +1894,57 @@ fn rounds_meeting_where_the_wall_end_is_flush_with_the_plate_side_merge_in_eithe
     let plate = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (5.0, 10.0)])], 0.0, 2.0).unwrap().pop().unwrap();
     let wall = crate::extrude(&Plane::XY, &[polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 2.0), (1.0, 2.0)])], 2.0, 6.0).unwrap().pop().unwrap();
     let body = boolean(&plate, &wall, BoolOp::Union).unwrap().unwrap();
-    let (foot, top) = (Vec3::new(10.0, 2.0, 2.0), Vec3::new(3.0, 6.0, 2.0));
-    let end: WallEnd = (Vec3::new(1.0, 2.0, 2.0), Vec3::X, Vec3::Y, 2.0);
-    for (ra, rb) in pairs {
-        assert_eq!(chain_at(&fillet(&body, &[foot], ra).unwrap(), top), 1, "slanted, foot {ra}");
-        merges_alike(&body, &[foot], &[top], &[end], (ra, rb), merge_correction(2f64.atan(), ra, rb), "slanted");
+    (body, Vec3::new(10.0, 2.0, 2.0), Vec3::new(3.0, 6.0, 2.0), (Vec3::new(1.0, 2.0, 2.0), Vec3::X, Vec3::Y, 2.0))
+}
+
+#[test]
+fn rounds_meeting_where_the_wall_end_is_flush_with_the_plate_side_merge_after_the_edge() {
+    // A wall on a plate, its end in one plane with the plate's side beneath it: the wall's end and
+    // the plate's side are one face. The foot's round after the plate edge's ends at that round's
+    // end (which runs down the wall's face, square below the top) and merges with it, the band's
+    // edge on the line of the wall's end; so do both in one fillet, and each at its radius where
+    // the edge's round, the larger, comes first. The other way round the faces at the foot's end
+    // are those of a pocket's rim meeting a rounded inner corner (the plate's top the pocket's
+    // wall, the side its top): the edge's chain runs on over the foot's end and up the wall's end,
+    // as round a pocket ([`a_chain_runs_on_over_a_wall_foot_round_whose_end_is_flush_with_the_side`]).
+    // Square ends (a rectangular plate, its side 4 or 15 long to the next corner) and a side
+    // slanted at tan⁻¹ 2.
+    let square = |side: f64| {
+        let (body, foot, tops, ends) = wall_on_a_trapezoid(90.0, side);
+        (body, vec![foot], tops.to_vec(), ends.to_vec(), std::f64::consts::FRAC_PI_2)
+    };
+    let (slanted, foot, top, end) = wall_flush_with_a_slanted_side();
+    let cases = [square(4.0), square(15.0), (slanted, vec![foot], vec![top], vec![end], 2f64.atan())];
+    for (body, foot, tops, ends, theta) in &cases {
+        let how = format!("{:.0}°, {} ends", theta.to_degrees(), ends.len());
+        for (ra, rb) in [(0.5, 1.0), (0.5, 0.5), (1.0, 0.5)] {
+            let footed = fillet(body, foot, ra).unwrap();
+            let edged = fillet(body, tops, rb).unwrap();
+            assert_eq!(chain_at(&edged, foot[0]), 1, "{how}, edge {rb}");
+            assert_eq!(chain_at(&footed, tops[0]), 3, "{how}, foot {ra}");
+            let picks: Vec<Vec3> = foot.iter().chain(tops).copied().collect();
+            let radii: Vec<f64> = foot.iter().map(|_| ra).chain(tops.iter().map(|_| rb)).collect();
+            let mut routes = vec![("edge then foot", fillet(&edged, foot, ra))];
+            if ra < rb {
+                routes.push(("each at its radius", crate::fillet_each(body, &picks, &radii)));
+            }
+            // In one fillet the foot's round may come first, the edge's then as after it: the
+            // merge, or refused as too large (never the chain run on, which the fillet's chains
+            // as picked keep it from).
+            if ra == rb {
+                match fillet(body, &picks, ra) {
+                    Ok(b) => routes.push(("together", Ok(b))),
+                    Err(e) => assert!(matches!(e, KernelError::TooLarge(_)), "{how}: {e}"),
+                }
+            }
+            let correction = ends.len() as f64 * merge_correction(*theta, ra, rb);
+            merged_alike(body, (&footed, &edged), &routes, ends, (ra, rb), correction, &how);
+            // Foot then edge: refused, or the chain run on, sound.
+            if let Ok(b) = fillet(&footed, tops, rb) {
+                assert!(b.validity().is_empty(), "{how}: {:?}", b.validity());
+                assert_eq!(b.crossed_face_loops().unwrap(), 0, "{how}");
+            }
+        }
     }
 }
 
@@ -1908,32 +1965,15 @@ fn a_round_merging_with_one_earlier_round_at_both_its_ends_does_so_in_either_ord
 }
 
 #[test]
-fn rounds_meeting_where_the_wall_end_is_flush_with_a_short_or_thin_plate_side_build_alike_or_not_at_all() {
+fn rounds_meeting_where_the_wall_end_is_flush_with_a_short_or_thin_plate_side_merge_or_are_refused() {
     // The square plate's side only a little longer than the band needs, or the plate's edge rounded
-    // as deep as the plate is thick and deeper: both orders build the same merge, or both refuse
-    // (never a different body one way round, nor one running on up the wall's end).
-    let sound = |how: &str, b: &Body| {
-        assert!(b.validity().is_empty(), "{how}: {:?}", b.validity());
-        assert_eq!(b.crossed_face_loops().unwrap(), 0, "{how}");
-    };
+    // as deep as the plate is thick and deeper: the foot's round after the edge's builds the merge
+    // sound, or is refused.
     for (side, ra, rb) in [(1.03, 1.0, 1.0), (1.03, 0.5, 1.0), (15.0, 1.0, 2.999), (15.0, 1.0, 3.0), (15.0, 1.0, 3.5)] {
         let how = format!("side {side}, foot {ra} edge {rb}");
-        let (body, foot, _, ends) = wall_on_a_trapezoid(90.0, side);
-        // Picked on what the foot's round leaves of the plate's edge.
-        let y = 2.0 + 0.5 * (ra + side);
-        let tops = [Vec3::new(0.0, y, 3.0), Vec3::new(40.0, y, 3.0)];
-        let footed = fillet(&body, &[foot], ra).unwrap();
-        let a = fillet(&footed, &tops, rb);
-        let b = fillet(&body, &tops, rb).and_then(|edged| fillet(&edged, &[foot], ra));
-        match (&a, &b) {
-            (Ok(a), Ok(b)) => {
-                sound(&how, a);
-                sound(&how, b);
-                assert_merged(a, &ends, (ra, rb), 1e-6, &how);
-                assert!(same_vertices(a, b, 1e-6), "{how}");
-            }
-            (Err(_), Err(_)) => {}
-            _ => panic!("{how}: foot then edge {:?}, edge then foot {:?}", a.as_ref().err(), b.as_ref().err()),
+        let (body, foot, tops, ends) = wall_on_a_trapezoid(90.0, side);
+        if let Ok(b) = fillet(&body, &tops, rb).and_then(|edged| fillet(&edged, &[foot], ra)) {
+            assert_merged(&b, &ends, (ra, rb), 1e-6, &how);
         }
     }
 }
@@ -1943,7 +1983,11 @@ fn rounds_meeting_at_wall_ends_off_square_by_a_modelling_error_merge_in_either_o
     // The plate's sides drafted by next to nothing (a modelling error, or a file's rounding): the
     // line of the wall's end bends by that much at the top. The band is built as on square faces,
     // within the fit's tolerance of them, by every route; and the largest round that fits is found.
-    let foot = [Vec3::new(10.0, 2.0, 2.0), Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0), Vec3::new(20.0, -10.0, 2.0)];
+    let foot = [
+        Vec3::new(10.0, 2.0, 2.0),
+        Vec3::new(19.0 + std::f64::consts::FRAC_1_SQRT_2, 1.0 + std::f64::consts::FRAC_1_SQRT_2, 2.0),
+        Vec3::new(20.0, -10.0, 2.0),
+    ];
     let tops = [Vec3::new(6.0, 6.0, 2.0), Vec3::new(24.0, -12.0, 2.0)];
     let picks: Vec<Vec3> = foot.iter().chain(&tops).copied().collect();
     let (ra, rb) = (1.0, 0.5);

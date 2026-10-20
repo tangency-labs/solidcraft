@@ -111,7 +111,20 @@ pub(crate) fn rebuild_face_dropping(
             };
             edges.push(ne);
         }
-        wires.push(mt::Wire::from(close_gaps(edges, connectors)?));
+        // Close gaps with connector edges.
+        let n = edges.len();
+        let mut out: Vec<mt::Edge> = Vec::new();
+        for i in 0..n {
+            let (Some(cur), Some(next)) = (edges.get(i), edges.get((i + 1) % n)) else { continue };
+            out.push(cur.clone());
+            if cur.back() != next.front() {
+                out.extend(
+                    connect(cur.back(), next.front(), connectors)
+                        .ok_or_else(|| KernelError::Failed("blend: could not close a face boundary".into()))?,
+                );
+            }
+        }
+        wires.push(mt::Wire::from(out));
     }
     // A face on a periodic surface running along its seam edge twice (as a STEP file gives it)
     // keeps doing so: such a wire isn't simple, which is valid there.
@@ -131,21 +144,6 @@ pub(crate) fn rebuild_face_dropping(
         return Ok(nf);
     }
     crate::heal::absolute_face(f, wires).ok_or_else(|| KernelError::Failed("blend: a face could not be rebuilt".into()))
-}
-
-/// The loop of `edges` with each gap between one edge's end and the next's start closed by a run
-/// of `connectors`.
-pub(crate) fn close_gaps(edges: Vec<mt::Edge>, connectors: &[mt::Edge]) -> Result<Vec<mt::Edge>> {
-    let n = edges.len();
-    let mut out: Vec<mt::Edge> = Vec::new();
-    for i in 0..n {
-        let (Some(cur), Some(next)) = (edges.get(i), edges.get((i + 1) % n)) else { continue };
-        out.push(cur.clone());
-        if cur.back() != next.front() {
-            out.extend(connect(cur.back(), next.front(), connectors).ok_or_else(|| KernelError::Failed("blend: could not close a face boundary".into()))?);
-        }
-    }
-    Ok(out)
 }
 
 /// A loop blend's refusal that is about its size: too large, or using up only some of the walls.
