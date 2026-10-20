@@ -15,6 +15,8 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
+const GROUND_SHADOW_CONTRACT: TypedContract<crate::schema::view_navigation::GroundShadowParams> = TypedContract::new();
+
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
 const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
@@ -76,8 +78,10 @@ CommandSpec::new("view.visual_style", "Visual Style", visual_style)
     .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
 CommandSpec::new("view.grid", "Grid", grid)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
-CommandSpec::new("view.ground_shadow", "Ground Shadow", ground_shadow)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+CommandSpec::new("view.ground_shadow", "Ground Shadow", crate::checked!("view.ground_shadow", ground_shadow))
+    .icon("style").noundo().doc_only()
+    .contract(&GROUND_SHADOW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::GroundShadowReply>)
+    .params("mode: off|ellipse|projected; or on?: bool (omitted: toggle) → mode? or on?; display only, independent of ambient occlusion"),
 CommandSpec::new("view.navigation_bar", "Navigation Bar", navigation_bar)
     .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
@@ -342,6 +346,13 @@ fn grid(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.grid", "on")
 }
 fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(mode) = p.get("mode") {
+        view_params(p, "view.ground_shadow", &["mode"])?;
+        return match mode.as_str() {
+            Some(mode @ ("off" | "ellipse" | "projected")) => Ok(json!({"mode":mode})),
+            _ => Err(bad("view.ground_shadow", "mode must be off, ellipse or projected")),
+        };
+    }
     view_toggle(p, "view.ground_shadow", "on")
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1124,6 +1135,19 @@ mod ambient_occlusion_tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none(), "a display setting leaves the view where it is");
+    }
+    #[test]
+    fn ground_shadow_modes_validate_without_editing_the_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for mode in ["off", "ellipse", "projected"] {
+            assert_eq!(s.execute("view.ground_shadow", &json!({"mode":mode})).unwrap(), json!({"mode":mode}));
+        }
+        for params in [json!({"mode":true}), json!({"mode":2}), json!({"mode":"height_bands"}), json!({"mode":null})] {
+            assert!(s.execute("view.ground_shadow", &params).is_err());
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
     }
     #[test]
     fn validates_display_setting_without_editing_design_or_history() {

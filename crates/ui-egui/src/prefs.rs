@@ -35,6 +35,20 @@ mod theme_picker;
 mod tools;
 
 use crate::SolveApp;
+
+/// The enabled shadow's style. The existing `UiState::ground_shadow` flag still controls
+/// visibility, preserving saved boolean settings and the control channel's `groundShadow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundShadowStyle {
+    #[default]
+    Ellipse,
+    Projected,
+}
+
+#[cfg(test)]
+#[path = "ground_shadow_settings_tests.rs"]
+mod ground_shadow_tests;
 use crate::theme::Tokens;
 use crate::tool_modifiers::ModifierCombo;
 use crate::ui_kit;
@@ -1166,6 +1180,7 @@ preference_settings! {
     /// A section hatches each cut body its own way (the default), or every one alike, in the cap
     /// colour at 45 degrees, as before.
     section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
+    ground_shadow_style: GroundShadowStyle = GroundShadowStyle::Ellipse, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
     grid_follows_view: bool = false => check_id("ui.grid_follows_view");
@@ -10787,6 +10802,44 @@ mod ui_scale_regression_tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.ui_scale, 1.0, "Cancel restores the original scale");
         assert_eq!(h.ctx.zoom_factor(), 1.0);
+    }
+}
+
+pub(crate) fn ground_shadow_mode(app: &SolveApp) -> &'static str {
+    if !app.ui.ground_shadow {
+        "off"
+    } else {
+        match app.preferences.ground_shadow_style {
+            GroundShadowStyle::Ellipse => "ellipse",
+            GroundShadowStyle::Projected => "projected",
+        }
+    }
+}
+
+pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before = ground_shadow_mode(app);
+    let label = |mode| match mode {
+        "off" => "ui.ground_shadow_off",
+        "projected" => "ui.ground_shadow_projected",
+        _ => "ui.ground_shadow_ellipse",
+    };
+    let mut mode = before;
+    let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
+        for value in ["off", "ellipse", "projected"] {
+            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
+            row.selected = mode == value;
+            let choice = row.show(ui);
+            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
+            if choice.clicked() {
+                mode = value;
+                ui.close();
+            }
+        }
+    });
+    crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
+    crate::scenario::publish_target("view:ground_shadow_selector", response.rect);
+    if mode != before {
+        let _ = app.run("view.ground_shadow", json!({"mode":mode}));
     }
 }
 

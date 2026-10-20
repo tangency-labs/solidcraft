@@ -1365,7 +1365,9 @@ impl SolveApp {
                 // The command and the preference are one setting.
                 "diagnostics.validation" => self.preferences.validation = self.session.validation(),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
-                "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
+                "view.ground_shadow" if v.get("mode").is_none() => {
+                    self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow);
+                }
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
@@ -1499,6 +1501,17 @@ impl SolveApp {
             }
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
+            if id == "view.ground_shadow" {
+                match v.get("mode").and_then(Value::as_str) {
+                    Some("off") => self.ui.ground_shadow = false,
+                    Some(mode) => {
+                        self.ui.ground_shadow = true;
+                        self.preferences.ground_shadow_style =
+                            if mode == "projected" { prefs::GroundShadowStyle::Projected } else { prefs::GroundShadowStyle::Ellipse };
+                    }
+                    None => {}
+                }
             }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);

@@ -224,6 +224,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let _ = app.run("view.visual_style", json!({"style":style}));
                     }
                 });
+                ui_kit::row(ui, app.tr("ui.ground_shadow_style"), |ui| super::ground_shadow_selector(app, ui));
                 ui.add_enabled_ui(app.ui.perspective || app.ui.auto_ortho_faces, |ui| field_of_view_row(app, ui));
             });
         });
