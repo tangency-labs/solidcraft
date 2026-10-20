@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
          is none, or a half turn where that turns b less, so faces that already meet stay as they are); name?; quiet?: bool (leave \
          out dof and fixed); \
-         a_alignment?, b_alignment?: {face: persistent planar face name, reverse?: bool, occurrence?: id|name} (secondary x direction on that side's occurrence, independent of Angle and Flip); \
+         a_alignment?, b_alignment?: {face: persistent planar face name | reference: typed edge/cylinder/construction/sketch_line/origin_axis/origin_plane identity, reverse?: bool, occurrence?: id|name} (secondary x direction on that side's occurrence, independent of Angle and Flip); \
          an expression (text) is kept with the joint and worked out again whenever the design changes, so the joint follows the parameters it names; a joint whose \
          expression no longer works out (a parameter deleted) is left out of the solve with the reason in its errors",
     ),
@@ -78,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.limits", "Joint Limits", limits).icon("joint").params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
     CommandSpec::new("joint.edit", "Edit Joint", edit)
         .icon("edit")
-        .params("joint; type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; a_alignment?, b_alignment?: {face: persistent planar face name, reverse?: bool, occurrence?: id|name}, null to clear while keeping the current turn; primary origins stay"),
+        .params("joint; type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; a_alignment?, b_alignment?: {face: persistent planar face name | reference: typed edge/cylinder/construction/sketch_line/origin_axis/origin_plane identity, reverse?: bool, occurrence?: id|name}, null to clear while keeping the current turn; primary origins stay"),
     CommandSpec::new("joint.delete", "Delete Joint", delete).icon("delete").params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).icon("list").noundo().params(
         "→ joints (type, occurrences, values, limits; expressions: {offset?, angle?, values?} when they were typed as expressions), origins, links, degrees of freedom, conflicts, floating: [{occurrences, joints}] \
@@ -702,11 +702,6 @@ fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: Option<&Valu
         if s.doc.occurrences.iter().any(|o| o.id == origin.occurrence && o.parent != 0) {
             return Err(bad(cmd, "secondary alignment on nested occurrence paths is not supported yet"));
         }
-        let name = v
-            .get("face")
-            .and_then(Value::as_str)
-            .filter(|n| !n.is_empty() && n.len() <= 512)
-            .ok_or_else(|| bad(cmd, "alignment takes {face: persistent face name, reverse?: bool, occurrence?: id|name}, or null to clear"))?;
         let reverse = match v.get("reverse") {
             None => false,
             Some(Value::Bool(b)) => *b,
@@ -717,7 +712,20 @@ fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: Option<&Valu
         {
             return Err(bad(cmd, "alignment must be picked on the origin's occurrence"));
         }
-        Some(XRef::Planar { planar_face: name.into(), reverse })
+        if let Some(reference) = v.get("reference") {
+            if v.get("face").is_some() {
+                return Err(bad(cmd, "select one alignment reference"));
+            }
+            let reference = serde_json::from_value::<joints::AlignmentRef>(reference.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+            Some(XRef::Reference { reference, reverse })
+        } else {
+            let name = v
+                .get("face")
+                .and_then(Value::as_str)
+                .filter(|n| !n.is_empty() && n.len() <= 512)
+                .ok_or_else(|| bad(cmd, "alignment takes a named face or typed persistent reference"))?;
+            Some(XRef::Planar { planar_face: name.into(), reverse })
+        }
     };
     match &mut origin.snap {
         Snap::FaceCenter { x: slot, .. } | Snap::CircleCenter { x: slot, .. } => *slot = x,
@@ -768,7 +776,11 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     let aligned = |origin: &JointOrigin| {
-        matches!(&origin.snap, Snap::FaceCenter { x: Some(XRef::Planar { .. }), .. } | Snap::CircleCenter { x: Some(XRef::Planar { .. }), .. })
+        matches!(
+            &origin.snap,
+            Snap::FaceCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+        )
     };
     if angle.is_none() && !j.kind.is_relation() && !aligned(&j.a) && !aligned(&j.b) {
         j.angle = joints::least_turn_angle(&s.doc, &s.model.state(), &j);

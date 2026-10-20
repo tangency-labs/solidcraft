@@ -65,6 +65,104 @@ fn alignment_boxes() -> (Session, String, String, Value) {
 }
 
 #[test]
+fn secondary_alignment_feedback_named_edges_save_reopen_and_reject_missing_identity() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    let state = s.model.state();
+    let body = state.body("Body1").unwrap();
+    let mesh = body.mesh();
+    let index = mesh.edges.iter().position(|e| e.len() >= 2 && (e.last().unwrap().x - e[0].x).abs() > 19.0).unwrap();
+    let name = solidcraft_doc::naming::edge_names(body)[index].clone();
+    p["a_alignment"] = json!({"reference":{"type":"edge","name":name},"reverse":true});
+    run(&mut s, "joint.create", p);
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
+    assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X).abs() > 0.999);
+    let path = std::env::temp_dir().join(format!("solidcraft-directional-alignment-{}.solidcraft", std::process::id()));
+    run(&mut s, "file.save", json!({"path":path}));
+    run(&mut s, "file.new", json!({}));
+    run(&mut s, "doc.open", json!({"path":path}));
+    let old = s.doc.assembly.joints[0].clone();
+    assert!(matches!(&old.a.snap, Snap::FaceCenter { x: Some(XRef::Reference { reverse: true, .. }), .. }));
+    assert!(s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":{"type":"edge","name":"missing"}}})).is_err());
+    assert_eq!(s.doc.assembly.joints[0], old);
+    run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":null}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.assembly.joints[0], old);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn secondary_alignment_feedback_construction_and_component_axes_keep_author_identity() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[20,0,0]},"name":"GuideAxis"}));
+    let axis = s.doc.features.iter().find(|f| f.name == "GuideAxis").unwrap().id;
+    run(&mut s, "construct.plane.three_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,10,0]},"c":{"point":[0,0,10]},"name":"GuidePlane"}));
+    let plane = s.doc.features.iter().find(|f| f.name == "GuidePlane").unwrap().id;
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    p["a_alignment"] = json!({"reference":{"type":"construction","feature":axis}});
+    run(&mut s, "joint.create", p);
+    for reference in
+        [json!({"type":"construction","feature":plane}), json!({"type":"origin_axis","axis":"X"}), json!({"type":"origin_plane","plane":"YZ"})]
+    {
+        run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"reference":reference}}));
+        let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
+        assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X) > 0.999);
+    }
+    let old = s.doc.assembly.joints[0].clone();
+    for reference in [json!({"type":"construction","feature":99999}), json!({"type":"origin_axis","axis":"Z"})] {
+        assert!(s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":reference}})).is_err());
+        assert_eq!(s.doc.assembly.joints[0], old);
+    }
+    assert!(s.execute("joint.edit", &json!({"joint":"Aligned","b_alignment":{"reference":{"type":"construction","feature":axis}}})).is_err());
+    assert_eq!(s.doc.assembly.joints[0], old);
+}
+
+#[test]
+fn secondary_alignment_feedback_sketch_line_is_saved_by_sketch_and_curve_identity() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"AlignmentSketch"}));
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[20,0]]}));
+    let curve = s.model.state().sketch(sketch).unwrap().sketch.curves[0].id.clone();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    p["a_alignment"] = json!({"reference":{"type":"sketch_line","sketch":sketch,"curve":curve}});
+    run(&mut s, "joint.create", p);
+    let old = s.doc.assembly.joints[0].clone();
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &old.a).unwrap();
+    assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X) > 0.999);
+    assert!(
+        s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":{"type":"sketch_line","sketch":sketch,"curve":"gone"}}}))
+            .is_err()
+    );
+    assert_eq!(s.doc.assembly.joints[0], old);
+}
+
+#[test]
+fn secondary_alignment_feedback_cylinder_and_circular_edge_follow_geometry_changes() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"5 mm"}));
+    run(&mut s, "solid.cylinder", json!({"base":[70,0,0],"axis":[1,0,0],"radius":"guideRadius","height":20,"body_name":"Guide"}));
+    let component = s.doc.find_component("A").unwrap();
+    let face = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), component, Vec3::new(80.0, 5.0, 0.0), true).unwrap();
+    p["a_alignment"] = json!({"reference":{"type":"cylinder","name":face}});
+    run(&mut s, "joint.create", p);
+    run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"7 mm"}));
+    let state = s.model.state();
+    let body = state.body("Guide").unwrap();
+    let mesh = body.mesh();
+    let index = mesh.edges.iter().position(|e| e.len() > 8 && e.iter().all(|p| (p.x - e[0].x).abs() < 1e-6)).unwrap();
+    let edge = solidcraft_doc::naming::edge_names(body)[index].clone();
+    run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"reference":{"type":"edge","name":edge}}}));
+    run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"9 mm"}));
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
+    assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X).abs() > 0.999);
+    assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
+}
+
+#[test]
 fn secondary_alignment_inverts_each_frame_without_changing_angle_or_anchor() {
     let (mut s, a, b, p) = alignment_boxes();
     run(&mut s, "joint.create", p);

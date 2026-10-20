@@ -12,6 +12,210 @@ fn two_boxes() -> SolveApp {
     SolveApp::new(s, Services::default())
 }
 
+fn settle_alignment_preview(h: &mut crate::scenario::Harness) {
+    h.frames(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while h.app.preview.busy {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        h.frame();
+    }
+}
+
+#[test]
+fn secondary_alignment_feedback_picks_the_solved_geometry() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    settle_alignment_preview(&mut h);
+    assert!(h.app.preview.active);
+    h.call("ui.view", json!({"view":"top"}));
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let at = proj.to_screen(Vec3::new(10.0, 10.0, 20.0)).unwrap();
+    let hits = crate::viewport::pick_all(&h.app, &proj, at);
+    assert!(
+        hits.iter().any(|hit| matches!(hit, crate::viewport::Hit::Face {body, ..} if body == "Body2")),
+        "the moved part must be pickable at its solved pose: {hits:?}"
+    );
+    assert!(h.app.session.doc.assembly.joints.is_empty());
+}
+
+#[test]
+fn secondary_alignment_feedback_invalid_first_pick_keeps_the_last_pose() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    settle_alignment_preview(&mut h);
+    let key = h.app.preview.key;
+    let invalid = face_sel(&h.app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, invalid);
+    settle_alignment_preview(&mut h);
+    assert!(h.app.preview.active, "an invalid/partial secondary pick must not return the part to its original pose");
+    assert_eq!(h.app.preview.key, key);
+    assert!(h.app.preview.error.is_some(), "invalid authored input must still prevent OK");
+    assert!(h.app.session.doc.assembly.joints.is_empty());
+}
+
+fn settle_alignment_update(app: &mut SolveApp, ctx: &egui::Context) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        crate::preview::update(app, ctx);
+        if !app.preview.busy {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn secondary_alignment_feedback_hover_is_temporary_and_invalid_hover_restores_authored_pose() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(20.0, 10.0, 5.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let candidate = face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap();
+    let Sel::Face { body, index, .. } = &candidate else { panic!() };
+    let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: Vec3::new(10.0, 20.0, 15.0) };
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    let authored = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    let doc = app.session.doc.clone();
+    app.viewport.hover = Some(hit.clone());
+    settle_alignment_update(&mut app, &ctx);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert!(app.dialog.as_ref().unwrap().inputs[3].items.is_empty());
+    assert_eq!(app.session.doc, doc);
+    let Sel::Face { index: parallel, .. } = face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap() else { panic!() };
+    app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: parallel, point: Vec3::new(10.0, 10.0, 10.0) });
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert!(app.preview.error.is_none(), "invalid hover cannot become an authored error");
+    app.viewport.hover = Some(hit.clone());
+    settle_alignment_update(&mut app, &ctx);
+    crate::viewport::dialog_pick(&mut app, &hit, candidate);
+    app.viewport.hover = None;
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.dialog.as_ref().unwrap().inputs[3].items.len(), 1);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert_eq!(app.session.doc, doc);
+    app.dialog = None;
+    settle_alignment_update(&mut app, &ctx);
+    assert!(!app.preview.active);
+    assert!(app.preview.interaction.is_none());
+}
+
+#[test]
+fn secondary_alignment_feedback_primary_repick_maps_from_preview_to_author_frame() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let old = d.inputs[1].items[0].clone();
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    let key = app.preview.key;
+    app.dialog.as_mut().unwrap().active = 3;
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.key, key, "arming an alignment input does not reset the pose");
+    app.dialog.as_mut().unwrap().active = 1;
+    let Sel::Face { body, index, .. } = old else { panic!() };
+    let point = Vec3::new(10.0, 10.0, 10.0);
+    let hit = crate::viewport::Hit::Face { body: body.clone(), index, point };
+    crate::viewport::dialog_pick(&mut app, &hit, Sel::Face { body, index, point });
+    let Sel::Face { point, .. } = &app.dialog.as_ref().unwrap().inputs[1].items[0] else { panic!() };
+    assert!(point.dist(Vec3::new(40.0, 10.0, 0.0)) < 1e-6);
+    settle_alignment_update(&mut app, &ctx);
+    assert!(app.preview.error.is_none());
+}
+
+#[test]
+fn secondary_alignment_feedback_stationary_hover_keeps_identity_until_pointer_moves() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    h.app.start("joint.create");
+    h.app.dialog.as_mut().unwrap().active = 2;
+    h.frames(2);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let at = egui::pos2(700.0, 400.0);
+    let first = Some((
+        crate::viewport::Hit::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO },
+        Some(Sel::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO }),
+    ));
+    let kept = crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at), first.clone());
+    assert_eq!(kept, first);
+    assert_eq!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at), None),
+        first,
+        "moving geometry must not erase a stationary candidate"
+    );
+    assert!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(2.0, 0.0)), None).is_none());
+    assert!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, None, None).is_none());
+}
+
+#[test]
+fn secondary_alignment_feedback_accepts_named_edge_and_tracks_sketch_namespace() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let state = app.session.model.state();
+    let body = state.body("Body1").unwrap();
+    let mesh = body.mesh();
+    let index = mesh.edges.iter().position(|e| e.len() >= 2 && (e.last().unwrap().x - e[0].x).abs() > 19.0).unwrap();
+    let hit = crate::viewport::Hit::Edge { body: "Body1".into(), index, mid: (mesh.edges[index][0] + *mesh.edges[index].last().unwrap()) / 2.0 };
+    let selection = d.candidate(&app.session, &hit).unwrap();
+    d.pick(&app.session, selection);
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].1["a_alignment"]["reference"]["type"], "edge");
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    d.active = 2;
+    let hit = crate::viewport::Hit::SketchCurve { sketch: 99, id: "l1".into(), straight: true };
+    assert!(matches!(d.candidate(&app.session,&hit),Some(Sel::ExternalSketchCurve{sketch:99,id}) if id=="l1"));
+}
+
+#[test]
+fn secondary_alignment_feedback_construction_picking_uses_the_preview_placement() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("construct.axis.two_points", json!({"a":{"point":[40,10,0]},"b":{"point":[40,20,0]},"name":"MovingAxis"})).unwrap();
+    app.run("construct.plane.three_points", json!({"a":{"point":[40,10,0]},"b":{"point":[40,20,0]},"c":{"point":[40,10,5]},"name":"MovingPlane"}))
+        .unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    app.dialog = Some(d);
+    settle_alignment_update(&mut app, &egui::Context::default());
+    let (_, a, b) = crate::viewport::construction_axis_segments(&app).into_iter().find(|(name, ..)| name == "MovingAxis").unwrap();
+    for point in [a, b] {
+        assert!((point.x - 10.0).abs() < 1e-6 && (point.z - 10.0).abs() < 1e-6, "{point:?}");
+    }
+    let (_, _, quad) = crate::viewport::construction_quads(&app).into_iter().find(|(name, ..)| name == "MovingPlane").unwrap();
+    let center = quad.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / 4.0;
+    assert!(center.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{center:?}");
+}
+
 #[test]
 fn secondary_alignment_dialog_preview_edit_clear_and_cancel_keep_references() {
     let mut app = two_boxes();
@@ -225,7 +429,7 @@ fn edit_joint_runs_edit_and_limits() {
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
     assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Alignment 1 (optional)", "Alignment 2 (optional)"]);
-    assert!(d.inputs.iter().all(|i| i.accept == PLANAR_FACES), "editing never asks to replace the primary origins");
+    assert!(d.inputs.iter().all(|i| i.accept == ALIGNMENTS), "editing never asks to replace the primary origins");
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         assert_eq!(TYPES[f.kind], "slider");
         f.limits[0] = (true, "0 mm".into(), "15 mm".into());

@@ -415,23 +415,36 @@ geometry, so it doesn't evaluate the model or re-seat joints again.
 ## Secondary joint alignment
 
 Joint creation and editing offer optional **Alignment 1** and **Alignment 2** inputs.
-Pick a planar face on the same occurrence as that side's face or cylindrical-face origin.
-Its outward normal, projected square to the joint axis, defines that side's x direction.
+Pick a planar face, a straight or circular edge, a cylindrical face's axis, a sketch line,
+or an axis/plane of construction geometry on the same occurrence as that side's primary
+face or cylindrical-face origin. Planes supply their normal, straight lines their direction,
+and circular edges/cylindrical faces their axis. The direction is projected square to the
+primary joint axis. The root origin widget can reference a root-side joint origin; it cannot silently stand for
+a different part's frame. Scripts may explicitly name an origin axis/plane in that side's
+component frame.
+
 Each **Invert alignment** checkbox reverses only its own direction. The authored **Angle**
 expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
-The placement previews before OK; Cancel discards it, and the accepted edit can be undone.
+After choosing the primary origins, picking and highlighting continue on the solved placement.
+An incomplete or invalid secondary input keeps the last valid pose while explaining the error.
+Hovering a valid reference previews that candidate temporarily; leaving it restores the authored
+pose, and only a click fills the selection. Cancel discards the operation; accepted edits can be undone.
 
-References keep the face's persistent name through save/reopen, geometry changes and independent
-component copies. Missing, ambiguous, nonplanar or parallel references are errors; they never
-silently attach to a nearby face. Clear removes the geometric reference and keeps the current
-turn as a direction, without following the cleared face. An invalid reference can also be cleared.
+References keep persistent geometry names or feature/curve identities through save/reopen,
+geometry changes and independent component copies. Missing, ambiguous, wrong-component,
+unsupported curve or parallel-axis references are errors. They never silently attach to nearby
+geometry. Clear removes the reference and keeps the current turn as a direction without following
+the cleared geometry. An invalid reference can also be cleared.
 
-Initial support requires face or cylindrical-face origins with zero Offset X and Offset Y.
-Point/edge origins, construction geometry and nested occurrence paths need a supported origin
-instead; no picked reference is converted to a static frame. Offset Z remains available.
+Primary point/edge origins, nonzero Offset X/Y and nested occurrence paths still need a supported
+origin; no picked reference is converted to a static frame. Offset Z remains available.
 Existing joints without secondary alignment keep their previous behavior.
 
 Scripts use `a_alignment` and `b_alignment` on `joint.create` or `joint.edit`:
-`{"face": "<persistent face name>", "occurrence": "<occurrence name>", "reverse": true}`.
+`{"face": "<persistent planar face name>", "occurrence": "<occurrence name>", "reverse": true}`,
+or a typed reference, for example
+`{"reference": {"type": "edge", "name": "<persistent edge name>"}, "occurrence": "<occurrence name>"}`.
+The other reference types are `cylinder` (`name`), `construction` (`feature` id), `sketch_line`
+(`sketch` id and `curve` id), `origin_axis` (`axis`: X/Y/Z), and `origin_plane` (`plane`: XY/XZ/YZ).
 Omit a field to leave that side unchanged; pass `null` to clear it. Supplying `occurrence`
 also checks the exact picked instance of a shared definition.

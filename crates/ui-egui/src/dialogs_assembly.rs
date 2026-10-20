@@ -18,10 +18,12 @@ use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
-use crate::selection::{BODIES, EDGES, FACES, PLANAR_FACES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
+use crate::selection::{AXES, BODIES, EDGES, FACES, PLANES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
 use crate::theme::Tokens;
 
 use crate::viewport::Proj;
+
+pub(crate) const ALIGNMENTS: crate::selection::Accept = FACES | EDGES | AXES | PLANES;
 
 #[path = "dialogs_trace.rs"]
 mod trace;
@@ -212,8 +214,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![
                 SelInput::new("Component 1", SNAPS, false),
                 SelInput::new("Component 2", SNAPS, false),
-                SelInput::new("Alignment 1 (optional)", PLANAR_FACES, false),
-                SelInput::new("Alignment 2 (optional)", PLANAR_FACES, false),
+                SelInput::new("Alignment 1 (optional)", ALIGNMENTS, false),
+                SelInput::new("Alignment 2 (optional)", ALIGNMENTS, false),
             ],
         ),
         "joint.as_built" => {
@@ -326,6 +328,11 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
         {
             f.alignment[i] = Some(json!({"face": planar_face, "occurrence": origin.occurrence}));
             f.reverse_alignment[i] = *reverse;
+        } else if let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse }), .. }
+        | Snap::CircleCenter { x: Some(XRef::Reference { reference, reverse }), .. } = &origin.snap
+        {
+            f.alignment[i] = Some(json!({"reference":reference,"occurrence":origin.occurrence}));
+            f.reverse_alignment[i] = *reverse;
         }
     }
     // An offset or angle typed as an expression shows (and is sent back) as that expression, so
@@ -341,7 +348,7 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     }
     Some(Dialog::new(
         Kind::Assembly(Asm::Joint(Box::new(f))),
-        vec![SelInput::new("Alignment 1 (optional)", PLANAR_FACES, false), SelInput::new("Alignment 2 (optional)", PLANAR_FACES, false)],
+        vec![SelInput::new("Alignment 1 (optional)", ALIGNMENTS, false), SelInput::new("Alignment 2 (optional)", ALIGNMENTS, false)],
     ))
 }
 
@@ -858,13 +865,26 @@ fn sel_items(inputs: &[SelInput], i: usize) -> &[Sel] {
     inputs.get(i).map(|x| x.items.as_slice()).unwrap_or(&[])
 }
 
-fn alignment_side(k: &Kind, input: usize) -> Option<usize> {
+pub(crate) fn alignment_side(k: &Kind, input: usize) -> Option<usize> {
     let Kind::Assembly(Asm::Joint(f)) = k else { return None };
     if f.as_built {
         return None;
     }
     let side = input.checked_sub(if f.editing.is_some() { 0 } else { 2 })?;
     (side < 2).then_some(side)
+}
+
+pub(crate) fn alignment_dialog(d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if !f.as_built)
+}
+
+pub(crate) fn alignment_hover_commands(app: &SolveApp, d: &Dialog) -> Option<Vec<(String, Value)>> {
+    alignment_side(&d.kind, d.active)?;
+    let hit = app.viewport.hover.as_ref()?;
+    let sel = d.candidate(&app.session, hit)?;
+    let mut candidate = d.clone();
+    candidate.inputs.get_mut(d.active)?.items = vec![sel];
+    crate::dialogs::apply_commands(app, &candidate).ok()
 }
 
 pub(crate) fn stored_alignment(k: &Kind, input: usize) -> Option<Value> {
@@ -884,20 +904,64 @@ pub(crate) fn clear_alignment(k: &mut Kind, input: usize) {
 /// Keep the picked occurrence explicit, including repeated definitions. Nested paths have no
 /// independent joint frames yet and are refused instead of aliasing to a primary instance.
 fn alignment_pick(s: &Session, sel: &Sel) -> Result<Value, String> {
-    let Sel::Face { body, index, .. } = sel else { return Err("select a planar alignment face".into()) };
     let model = s.model.state();
-    let frames = s.doc.body_frames_with_source(&model);
-    let (_, source, _, path, _) = frames.iter().find(|(name, ..)| name == body).ok_or("alignment occurrence no longer exists")?;
-    if path.len() > 1 {
-        return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+    let occurrence = |component| -> Result<u64, String> {
+        if component == 0 {
+            return Ok(0);
+        }
+        let occurrences: Vec<_> = s.doc.occurrences.iter().filter(|o| o.component == component).collect();
+        match occurrences.as_slice() {
+            [o] if o.parent == 0 => Ok(o.id),
+            _ => Err("alignment construction or sketch occurrence is ambiguous or nested".into()),
+        }
+    };
+    let feature_ref = |feature: u64, reference: Value| -> Result<Value, String> {
+        let owner = s.doc.feature(feature).ok_or("alignment feature no longer exists")?.component;
+        Ok(json!({"reference":reference,"occurrence":occurrence(owner)?}))
+    };
+    match sel {
+        Sel::Face { body, index, .. } | Sel::Edge { body, index, .. } => {
+            let frames = s.doc.body_frames_with_source(&model);
+            let (_, source, _, path, _) = frames.iter().find(|(name, ..)| name == body).ok_or("alignment occurrence no longer exists")?;
+            if path.len() > 1 {
+                return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+            }
+            let b = model.body(source).ok_or("alignment body no longer exists")?;
+            let names = if matches!(sel, Sel::Edge { .. }) {
+                solidcraft_engine::doc::naming::edge_names(b)
+            } else {
+                solidcraft_engine::doc::naming::face_names(b).to_vec()
+            };
+            let name = names.get(*index).cloned().filter(|n| !n.is_empty()).ok_or("alignment geometry has no persistent name")?;
+            let mut value = if matches!(sel, Sel::Edge { .. }) {
+                json!({"reference":{"type":"edge","name":name}})
+            } else {
+                let faces = b.body.faces((b.body.size() * 2e-3).max(1e-3)).map_err(|e| e.to_string())?;
+                if faces.get(*index).is_some_and(|f| f.plane_normal.is_some()) {
+                    json!({"face":name})
+                } else if solidcraft_engine::kernel::cylinder_face(&b.body, &b.mesh(), *index).is_some() {
+                    json!({"reference":{"type":"cylinder","name":name}})
+                } else {
+                    return Err("alignment face must be planar or cylindrical".into());
+                }
+            };
+            value["occurrence"] = json!(path.first().copied().unwrap_or(0));
+            Ok(value)
+        }
+        Sel::ExternalSketchCurve { sketch, id } => feature_ref(*sketch, json!({"type":"sketch_line","sketch":sketch,"curve":id})),
+        Sel::Axis { name } | Sel::Plane { name } => {
+            let axis = matches!(sel, Sel::Axis { .. });
+            let origin = if axis { matches!(name.as_str(), "X" | "Y" | "Z") } else { matches!(name.as_str(), "XY" | "XZ" | "YZ") };
+            if origin {
+                let reference = if axis { json!({"type":"origin_axis","axis":name}) } else { json!({"type":"origin_plane","plane":name}) };
+                // The viewport's origin widget is the root frame, even while a part is active.
+                return Ok(json!({"reference":reference,"occurrence":0}));
+            }
+            let construction = model.construct.iter().find(|c| c.name == *name).ok_or("alignment construction no longer exists")?;
+            feature_ref(construction.feature, json!({"type":"construction","feature":construction.feature}))
+        }
+        _ => Err("select a planar face, cylindrical axis, straight/circular edge, sketch line, axis or plane".into()),
     }
-    let b = model.body(source).ok_or("alignment body no longer exists")?;
-    let face = solidcraft_engine::doc::naming::face_names(b)
-        .get(*index as usize)
-        .cloned()
-        .filter(|n| !n.is_empty())
-        .ok_or("alignment face has no persistent name")?;
-    Ok(json!({"face": face, "occurrence": path.first().copied().unwrap_or(0)}))
 }
 
 fn alignment_params(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Result<[Option<Value>; 2], String> {
@@ -1004,7 +1068,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     if alignment[i].is_some()
                         || matches!(
                             &origin.snap,
-                            Snap::FaceCenter { x: Some(XRef::Planar { .. }), .. } | Snap::CircleCenter { x: Some(XRef::Planar { .. }), .. }
+                            Snap::FaceCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                                | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                         )
                     {
                         p[key] = alignment[i].clone().unwrap_or(Value::Null);
@@ -1168,6 +1233,19 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
     Some(match built {
         Ok(mut b) => {
+            if cmds.iter().any(|(id, _)| matches!(id.as_str(), "joint.create" | "joint.edit")) {
+                let raw = s.model.state();
+                let before_frames = s.doc.body_frames_with_source(&raw);
+                let mut to_document = std::collections::HashMap::new();
+                for (name, _, _, _, frame) in preview.document.body_frames_with_source(&raw) {
+                    if let Some((_, _, _, _, before)) = before_frames.iter().find(|(old, ..)| old == &name)
+                        && let Some(inverse) = solidcraft_engine::doc::mat_inverse(&frame)
+                    {
+                        to_document.insert(name, solidcraft_engine::doc::mat_mul(before, &inverse));
+                    }
+                }
+                b.interaction = Some(crate::preview::JointInteraction { document: preview.document.clone(), state: after.clone(), to_document });
+            }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
             b.stopped = stopped;
             Ok(b)
@@ -1254,7 +1332,9 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .iter()
         .enumerate()
         .filter(|(_, i)| i.accept == SNAPS)
-        .filter_map(|(n, i)| i.items.first().and_then(|x| snap_of(&app.session, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
+        .filter_map(|(n, i)| {
+            i.items.first().and_then(|x| snap_of(&app.session, x).map(|s| (placed_snap(app, x, s), if n == 0 { t.accent } else { t.warning })))
+        })
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
         let tag = format!("Component {}", n + 1);
@@ -1267,7 +1347,20 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);
             if fresh {
-                *hover = Some((sel.clone(), snap_of(&app.session, &sel)));
+                let mut source = sel.clone();
+                if app.preview.draw_active()
+                    && let Some(interaction) = &app.preview.interaction
+                {
+                    match &mut source {
+                        Sel::Face { body, point, .. } | Sel::Edge { body, point, .. } | Sel::Vertex { body, point } => {
+                            if let Some(frame) = interaction.to_document.get(body) {
+                                *point = solidcraft_engine::doc::apply_point(frame, *point);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                *hover = Some((sel.clone(), snap_of(&app.session, &source).map(|s| placed_snap(app, &source, s))));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
                 glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_name(s.kind)));
@@ -1275,6 +1368,18 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         }
         None => *hover = None,
     }
+}
+
+fn placed_snap(app: &SolveApp, sel: &Sel, mut snap: SnapPt) -> SnapPt {
+    if app.preview.draw_active()
+        && let Some(interaction) = &app.preview.interaction
+        && let Some(body) = body_of(sel)
+        && let Some(frame) = interaction.to_document.get(body).and_then(solidcraft_engine::doc::mat_inverse)
+    {
+        snap.at = solidcraft_engine::doc::apply_point(&frame, snap.at);
+        snap.z = solidcraft_engine::doc::apply_vector(&frame, snap.z);
+    }
+    snap
 }
 
 /// A snap: its kind's marker at the point and the z axis as an arrow.

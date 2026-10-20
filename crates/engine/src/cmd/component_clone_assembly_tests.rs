@@ -123,6 +123,20 @@ fn secondary_alignment_copy_remaps_face_names_and_keeps_independent_inversion() 
     assert_eq!(source.assembly.joints[0].a.snap.face_names(), [&"F1:top".to_string(), &"F10:side".to_string()]);
 }
 
+#[test]
+fn secondary_alignment_feedback_copy_remaps_construction_and_sketch_author_features() {
+    use solidcraft_doc::joints::AlignmentRef;
+    for reference in [AlignmentRef::Construction { feature: 10 }, AlignmentRef::SketchLine { sketch: 10, curve: "l1".into() }] {
+        let (mut source, mut destination) = documents();
+        source.assembly.joints[0].a.snap =
+            Snap::FaceCenter { pick: Vec3::ZERO, face: Some("F1:top".into()), x: Some(XRef::Reference { reference, reverse: true }) };
+        clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+            .unwrap();
+        let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse: true }), .. } = &destination.assembly.joints[4].a.snap else { panic!() };
+        assert!(matches!(reference, AlignmentRef::Construction { feature: 110 } | AlignmentRef::SketchLine { sketch: 110, .. }));
+    }
+}
+
 /// A gear's picked round face is on the copy's occurrence and face; one picked on geometry the
 /// copy doesn't have is reported, not pointed back at the original.
 #[test]

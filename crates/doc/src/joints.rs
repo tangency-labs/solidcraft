@@ -94,6 +94,11 @@ pub enum Snap {
 pub enum XRef {
     /// A direction (component coordinates); its part square to z is taken.
     Dir(Vec3),
+    Reference {
+        reference: AlignmentRef,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
     /// A secondary alignment face. Unlike legacy x references it must remain one planar
     /// face on the origin's component, with a nonzero projection square to its axis.
     Planar {
@@ -111,6 +116,39 @@ pub enum XRef {
     },
 }
 
+/// A directional identity, resolved in the origin component on every solve. There is no
+/// nearest-geometry or captured-vector fallback when one disappears or changes its kind.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AlignmentRef {
+    Edge { name: String },
+    Cylinder { name: String },
+    Construction { feature: u64 },
+    SketchLine { sketch: u64, curve: String },
+    OriginAxis { axis: String },
+    OriginPlane { plane: String },
+}
+
+impl XRef {
+    fn geometry_name(&self) -> Option<&String> {
+        match self {
+            Self::Face { face, .. }
+            | Self::Planar { planar_face: face, .. }
+            | Self::Reference { reference: AlignmentRef::Edge { name: face } | AlignmentRef::Cylinder { name: face }, .. } => Some(face),
+            _ => None,
+        }
+    }
+
+    fn geometry_name_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Face { face, .. }
+            | Self::Planar { planar_face: face, .. }
+            | Self::Reference { reference: AlignmentRef::Edge { name: face } | AlignmentRef::Cylinder { name: face }, .. } => Some(face),
+            _ => None,
+        }
+    }
+}
+
 impl Snap {
     /// The persistent face and edge names the snap refers to (its face, its end's, its x reference's;
     /// an edge origin's edge, face and corner edge).
@@ -118,7 +156,7 @@ impl Snap {
         let mut out = Vec::new();
         if let Snap::FaceCenter { face, x, .. } | Snap::CircleCenter { face, x, .. } = self {
             out.extend(face.iter());
-            if let Some(XRef::Face { face, .. } | XRef::Planar { planar_face: face, .. }) = x {
+            if let Some(face) = x.as_ref().and_then(XRef::geometry_name) {
                 out.push(face);
             }
         }
@@ -137,14 +175,14 @@ impl Snap {
         match self {
             Snap::FaceCenter { face, x, .. } => {
                 out.extend(face.iter_mut());
-                if let Some(XRef::Face { face, .. } | XRef::Planar { planar_face: face, .. }) = x {
+                if let Some(face) = x.as_mut().and_then(XRef::geometry_name_mut) {
                     out.push(face);
                 }
             }
             Snap::CircleCenter { face, end, x, .. } => {
                 out.extend(face.iter_mut());
                 out.extend(end.iter_mut());
-                if let Some(XRef::Face { face, .. } | XRef::Planar { planar_face: face, .. }) = x {
+                if let Some(face) = x.as_mut().and_then(XRef::geometry_name_mut) {
                     out.push(face);
                 }
             }
@@ -179,6 +217,13 @@ impl Snap {
     pub fn is_finite(&self) -> bool {
         let x_ok = |x: &Option<XRef>| match x {
             Some(XRef::Dir(d)) => d.is_finite(),
+            Some(XRef::Reference { reference, .. }) => match reference {
+                AlignmentRef::Edge { name } | AlignmentRef::Cylinder { name } => !name.is_empty() && name.len() <= 512,
+                AlignmentRef::SketchLine { curve, .. } => !curve.is_empty() && curve.len() <= 512,
+                AlignmentRef::OriginAxis { axis, .. } => matches!(axis.as_str(), "X" | "Y" | "Z"),
+                AlignmentRef::OriginPlane { plane, .. } => matches!(plane.as_str(), "XY" | "XZ" | "YZ"),
+                AlignmentRef::Construction { .. } => true,
+            },
             Some(XRef::Planar { planar_face, .. }) => !planar_face.is_empty() && planar_face.len() <= 512,
             Some(XRef::Face { pick, .. }) => pick.is_none_or(|p| p.is_finite()),
             None => true,
