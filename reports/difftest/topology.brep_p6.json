@@ -3331,8 +3331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-09_0",
@@ -3343,8 +3343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-09_1",
@@ -3355,8 +3355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-09_16",
@@ -3367,8 +3367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-06_0",
@@ -3379,8 +3379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-06_1",
@@ -3391,8 +3391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Notify",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-06_16",

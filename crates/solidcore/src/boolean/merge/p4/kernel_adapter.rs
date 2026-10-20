@@ -1156,7 +1156,8 @@ mod tests {
         let mut placement = Axis2Placement::default();
         placement.translate(Vec3::X);
         // SmBrep::Notify is topology.brep_p2's (#149) and now runs through the adapter's
-        // environment; the transform then stops at its vertex walk
+        // environment; the vertex walk is wired since #285, so the transform stops at
+        // its curve walk
         let r = adapter.transform_brep(
             &mut kernels,
             &mut b,
@@ -1171,7 +1172,7 @@ mod tests {
                 r,
                 Err(SolidError::Unported {
                     unit: "topology.brep_p1",
-                    upstream: "SmBrep::GetVertices"
+                    upstream: "SmBrep::GetCurves"
                 })
             ),
             "transform: {r:?}"
