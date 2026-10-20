@@ -460,8 +460,13 @@ unsupported curve or parallel-axis references are errors. They never silently at
 geometry. Clear removes the reference and keeps the current turn as a direction without following
 the cleared geometry. An invalid reference can also be cleared.
 
-Primary point/edge origins, nonzero Offset X/Y and nested occurrence paths still need a supported
-origin; no picked reference is converted to a static frame. Offset Z remains available.
+Picking a circular hole rim as a primary origin keeps the unique cylindrical face and rim-end
+names, just like picking its cylindrical wall. The displayed hole center therefore remains a
+round origin when the first secondary alignment is added. A generic primary point/edge or an
+ambiguous/unnamed rim can still define a basic joint, but the dialog explains the limitation and
+disables secondary picking until compatible primary origins are selected. Nonzero Offset X/Y
+and nested occurrence paths still need a supported origin; no secondary reference is converted
+to a static frame. Offset Z remains available.
 Existing joints without secondary alignment keep their previous behavior.
 
 Scripts use `a_alignment` and `b_alignment` on `joint.create` or `joint.edit`:

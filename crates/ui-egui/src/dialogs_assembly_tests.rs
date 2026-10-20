@@ -37,6 +37,64 @@ fn rim(s: &Session, body: &str, center: Vec3) -> (crate::viewport::Hit, Sel) {
 }
 
 #[test]
+fn secondary_alignment_primary_hole_rim_clicks_persist_round_origins_before_alignment() {
+    for reverse in [false, true] {
+        let mut app = round_plates();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        let (_, a) = rim(&app.session, "Body1", Vec3::new(20.0, 20.0, 10.0));
+        let (_, b) = rim(&app.session, "Body2", Vec3::new(170.0, 20.0, 0.0));
+        let picks = if reverse { [b, a] } else { [a, b] };
+        for pick in picks {
+            d.pick(&app.session, pick);
+        }
+        let commands = apply_commands(&app, &d).unwrap();
+        let mut base = app.session.scratch();
+        base.execute(&commands[0].0, &commands[0].1).unwrap();
+        let before = format!("{:?}", base.doc.assembly.joints[0]);
+        let primary_picks = [d.inputs[0].items.clone(), d.inputs[1].items.clone()];
+        let (_, moving) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+        d.pick(&app.session, moving);
+        assert_eq!([d.inputs[0].items.clone(), d.inputs[1].items.clone()], primary_picks, "a secondary click must not replace either primary pick");
+        let commands = apply_commands(&app, &d).unwrap();
+        let mut preview = app.session.scratch();
+        let result = preview.execute(&commands[0].0, &commands[0].1);
+        assert!(result.is_ok(), "primary rim origins: {before}; alignment: {result:?}");
+        let joint = &preview.doc.assembly.joints[0];
+        for origin in [&joint.a, &joint.b] {
+            assert!(matches!(&origin.snap, solidcraft_engine::doc::joints::Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{origin:?}");
+        }
+        let moving_side = usize::from(!reverse);
+        assert_eq!(alignment_side(&d.kind, 2), Some(moving_side));
+        assert!(commands[0].1[if reverse { "a" } else { "b" }]["circle"].is_string());
+    }
+}
+
+#[test]
+fn secondary_alignment_nonround_primary_edge_disables_alignment_before_secondary_picking() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    let st = app.session.world_state();
+    let mesh = st.body("Body1").unwrap().mesh();
+    let index = mesh.edges.iter().position(|e| circle_of(e).is_none()).unwrap();
+    let point = mesh.edges[index][0];
+    d.pick(&app.session, Sel::Edge { body: "Body1".into(), index, point });
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let base = apply_commands(&app, &d).unwrap();
+    app.session.scratch().execute(&base[0].0, &base[0].1).unwrap();
+    assert!(!alignment_input_available(&d, 2));
+    assert!(!alignment_input_available(&d, 3));
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!() };
+    assert!(f.alignment_origin_problem.is_some(), "explain the limitation before the first secondary pick");
+    d.active = 2;
+    let secondary = face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap();
+    assert!(!alignment_accepts(&app.session, &d, &secondary));
+    d.pick(&app.session, secondary);
+    assert!(d.inputs[2].items.is_empty());
+}
+
+#[test]
 fn secondary_alignment_round_origins_start_with_the_actual_moving_occurrence_in_either_pick_order() {
     for reverse in [false, true] {
         let mut app = round_plates();

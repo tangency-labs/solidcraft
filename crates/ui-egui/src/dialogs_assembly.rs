@@ -144,6 +144,7 @@ pub struct JointForm {
     /// UI row -> backend A/B side. References and inversion remain backend-indexed.
     pub alignment_order: [usize; 2],
     pub alignment_order_ready: bool,
+    pub alignment_origin_problem: Option<&'static str>,
     pub alignment_origins: Option<[u64; 2]>,
     pub alignment_revision: u64,
     /// Explicit semantics for circular picks; old saved axes retain Axis mode.
@@ -167,6 +168,7 @@ impl JointForm {
             reverse_alignment: [false; 2],
             alignment_order: [0, 1],
             alignment_order_ready: false,
+            alignment_origin_problem: None,
             alignment_origins: None,
             alignment_revision: 0,
             circle_center: [true; 2],
@@ -512,7 +514,22 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                     let faces = m.edge_faces.get(*index).cloned().unwrap_or_default();
                     let out = faces.iter().filter_map(|f| face_normal_near(&m, *f, *point)).fold(Vec3::ZERO, |a, x| a + x);
                     let z = if out.dot(n) < 0.0 { -n } else { n };
-                    (body, SnapPt { at: c, z, kind: SnapKind::CircleCenter, param: json!({"point": pt(c), "z": pt(z)}) })
+                    // The displayed center must also be a persistent round origin.
+                    // A unique cylinder and end face identify the picked rim without
+                    // depending on its edge-history name or a static point/vector.
+                    let param = alignment_pick(s, sel, true)
+                        .ok()
+                        .filter(|p| {
+                            let model = s.model.state();
+                            ["name", "end"].into_iter().all(|key| {
+                                p["reference"][key]
+                                    .as_str()
+                                    .is_some_and(|name| solidcraft_engine::doc::joints::named_face_spot(&s.doc, &model, None, name).is_ok())
+                            })
+                        })
+                        .map(|p| json!({"circle":p["reference"]["name"],"end":p["reference"]["end"]}))
+                        .unwrap_or_else(|| json!({"point": pt(c), "z": pt(z)}));
+                    (body, SnapPt { at: c, z, kind: SnapKind::CircleCenter, param })
                 }
                 None => {
                     let mid = polyline_mid(e);
@@ -953,6 +970,27 @@ fn alignment_occurrences(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Opt
 pub(crate) fn resolve_alignment_order(s: &Session, d: &mut Dialog, interaction: Option<&crate::preview::JointInteraction>) {
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
     if f.as_built {
+        return;
+    }
+    let supported = if let Some(id) = f.editing {
+        s.doc
+            .assembly
+            .joints
+            .iter()
+            .find(|j| j.id == id)
+            .is_none_or(|j| [&j.a.snap, &j.b.snap].into_iter().all(|snap| matches!(snap, Snap::FaceCenter { .. } | Snap::CircleCenter { .. })))
+    } else {
+        d.inputs
+            .iter()
+            .take(2)
+            .filter_map(|i| i.items.first())
+            .filter_map(|sel| snap_of(s, sel))
+            .all(|snap| snap.param.get("face").is_some() || snap.param.get("circle").is_some())
+    };
+    f.alignment_origin_problem = (!supported)
+        .then_some("Secondary alignment needs face origins or uniquely named cylindrical hole rims; repick the primary origins to use alignment");
+    if !supported {
+        f.alignment_order_ready = false;
         return;
     }
     let Some(origins) = alignment_occurrences(s, f, &d.inputs) else {
