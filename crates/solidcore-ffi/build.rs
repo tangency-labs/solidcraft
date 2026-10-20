@@ -13,7 +13,14 @@
 //!    runtime. Static libs are linked `-bundle` (not copied into the rlib; they
 //!    are huge) so the final link of `difftest` pulls them from `bin/cpp/lib`.
 //!
-//! `SOLIDCORE_CPP_DIR` overrides the `bin/cpp` location.
+//! `SOLIDCORE_CPP_DIR` overrides the `bin/cpp` location. `scripts/fetch-cpp.sh`
+//! downloads a prebuilt `bin/cpp` (or builds it with `harness/cpp/build.sh`).
+//!
+//! Shim compile caching: the `cc` crate (1.8) runs the C++ compiler through
+//! `RUSTC_WRAPPER` when that is `sccache` (or cachepot/buildcache/kache), so
+//! `RUSTC_WRAPPER=sccache` caches the shim objects as well as the Rust crates. To
+//! cache only the C++, set `CXX="sccache c++"` instead; `cc` recognises the wrapper.
+//! Nothing here needs to change for either.
 //!
 //! `ffi.env` format (one `KEY=VALUE` per line, `#` comments, values are
 //! whitespace separated lists; relative paths are relative to the repo root):

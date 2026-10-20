@@ -1,0 +1,106 @@
+name: C++ reference
+
+# Builds the upstream SMLib/SM_API reference libraries with harness/cpp/build.sh and
+# publishes them as the GitHub Release cpp-ref-<key> (asset
+# solidcore-cpp-ref-<key>-linux-x86_64.tar.zst plus .sha256), which scripts/fetch-cpp.sh
+# downloads in CI and on contributors' machines instead of compiling SMLib (about a
+# minute on a 16-vCPU runner plus tool installs, much longer on a laptop).
+# <key> comes from scripts/cpp-ref-key.sh: the pinned upstream commit plus a hash of
+# harness/cpp/{CMakeLists.txt,build.sh,stubs/**,patches/**}. Shims are compiled by
+# solidcore-ffi, so editing them never needs a new release. Until a new key is published,
+# CI falls back to building from source (and caches that build).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'harness/cpp/**'
+      - '!harness/cpp/shim/**'
+      - 'scripts/cpp-ref-key.sh'
+      - 'scripts/package-cpp-ref.sh'
+      - '.github/workflows/cpp-reference.yml'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and replace the asset even if the release already has it
+        type: boolean
+        default: false
+
+# Only this workflow may write: it creates the release and uploads its assets.
+permissions:
+  contents: write
+
+concurrency:
+  group: cpp-reference-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Must match ci.yml / ATTRIBUTION.md / scripts/cpp-ref-key.sh.
+  UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
+  UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
+
+jobs:
+  publish:
+    # Ubuntu 24.04 (glibc 2.39, GCC 13): the image every CI job runs on, and the
+    # compatibility floor scripts/fetch-cpp.sh documents and checks.
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute key
+        id: key
+        run: |
+          echo "SOLIDCORE_CPP_DIR=$RUNNER_TEMP/cpp" >> "$GITHUB_ENV"
+          key="$(scripts/cpp-ref-key.sh)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "tag=cpp-ref-$key" >> "$GITHUB_OUTPUT"
+          echo "name=solidcore-cpp-ref-$key-linux-x86_64.tar.zst" >> "$GITHUB_OUTPUT"
+          echo "key: $key"
+
+      - name: Skip when already published
+        id: have
+        run: |
+          url="https://github.com/${{ github.repository }}/releases/download/${{ steps.key.outputs.tag }}/${{ steps.key.outputs.name }}.sha256"
+          if [ "${{ inputs.force }}" != "true" ] && curl -fsSLI "$url" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Already published: $url"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Clone upstream at pinned commit
+        if: steps.have.outputs.skip != 'true'
+        run: |
+          git init upstream
+          git -C upstream remote add origin "$UPSTREAM_REPO"
+          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+            || git -C upstream fetch origin
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+
+      - name: Install C++ build tools
+        if: steps.have.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++ zstd
+
+      - name: Build C++ reference
+        if: steps.have.outputs.skip != 'true'
+        run: harness/cpp/build.sh --no-tests --jobs "$(nproc)"
+
+      - name: Package
+        if: steps.have.outputs.skip != 'true'
+        run: scripts/package-cpp-ref.sh "$SOLIDCORE_CPP_DIR" "$RUNNER_TEMP/dist"
+
+      - name: Publish release
+        if: steps.have.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.key.outputs.tag }}
+          NAME: ${{ steps.key.outputs.name }}
+        run: |
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --prerelease --title "C++ reference $TAG" \
+              --notes "Prebuilt SMLib/SM_API reference libraries (Apache-2.0, upstream commit $UPSTREAM_COMMIT) for solidcore's difftest, built by harness/cpp/build.sh on Ubuntu 24.04 x86_64 from $GITHUB_SHA. Download with scripts/fetch-cpp.sh."
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
+            "$RUNNER_TEMP/dist/$NAME" "$RUNNER_TEMP/dist/$NAME.sha256"
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

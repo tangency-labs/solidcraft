@@ -9,8 +9,9 @@ compares the results. A unit may be marked `status = "green"` in
 ## Quick start
 
 ```sh
-harness/cpp/build.sh                      # once: builds bin/cpp/lib/libSM_API.a, libSMLib.a (owner: agent A)
+scripts/fetch-cpp.sh                      # once: bin/cpp/lib/libSM_API.a, libSMLib.a (prebuilt; else runs harness/cpp/build.sh)
 export CARGO_BUILD_JOBS=2                 # shared machine
+export RUSTC_WRAPPER=sccache              # optional: also caches the ~200 shim objects
 # --profile difftest: optimised build with overflow checks; same results as debug, ~20x faster.
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --list
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest
@@ -200,7 +201,7 @@ is `harness.selftest` (`harness_selftest.*`).
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `foo.bar`. Wraps upstream <Fn> (source/SMLib/src/<File>.cpp).
 #include "sc_shim.h"
-#include <nurbs.h>            // or SmXxx.h / SmApi*.h — include dirs come from bin/cpp/compile_commands.json
+#include <nurbs.h>            // or SmXxx.h / SmApi*.h — include dirs come from bin/cpp/ffi.env
 
 SC_EXPORT int32_t sc_foo_bar_eval(const double* pts, int64_t n_pts, double t,
                                   double* out, int64_t cap, int64_t* out_len)
@@ -218,8 +219,8 @@ caller-owned flat arrays + lengths); return `int32_t` status (`0` ok, upstream
 error flag, or `SC_ERR_*`); never let exceptions or C++-allocated memory cross
 the boundary (free upstream objects inside the shim); flatten points as
 `[x0,y0,z0,x1,…]`. Shims are compiled with the same `-D`/`-I`/`-f` flags as the
-kernel (taken from `bin/cpp/compile_commands.json`, or `bin/cpp/ffi.env` if
-present — format in `crates/solidcore-ffi/build.rs`).
+kernel (taken from `bin/cpp/ffi.env`, or `bin/cpp/compile_commands.json` if
+it is missing — format in `crates/solidcore-ffi/build.rs`).
 
 Topology from C++: walk upstream lists in their native order and emit
 **traversal-order indices** (map each pointer to its first-seen index), never

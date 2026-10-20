@@ -105,29 +105,66 @@ jobs:
             || git -C upstream fetch origin
           git -C upstream checkout --detach "$UPSTREAM_COMMIT"
 
-      - name: Install C++ build tools
+      # sccache caches the ~200 shim objects solidcore-ffi compiles (the cc crate wraps the
+      # C++ compiler in RUSTC_WRAPPER when it is sccache) and the workspace crates, which
+      # rust-cache does not keep; both survive across runs in the GitHub Actions cache.
+      - name: Set up sccache
         if: steps.green.outputs.any == 'true'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
+        uses: mozilla-actions/sccache-action@v0.0.11
 
-      # The C++ build lives outside cargo's target dir (bin/): rust-cache's post-step
-      # cleans bin/ before this cache saves, which once cached an empty bin/cpp.
-      - name: Cache C++ reference build
+      - name: Enable sccache
         if: steps.green.outputs.any == 'true'
-        uses: actions/cache@v4
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          # The difftest run is idle for sccache for ~20 min; without this the server
+          # exits after 10 idle minutes and the stats printed at the end read zero.
+          echo "SCCACHE_IDLE_TIMEOUT=0" >> "$GITHUB_ENV"
+
+      # The C++ reference (bin/cpp/lib) comes prebuilt from the GitHub Release that
+      # .github/workflows/cpp-reference.yml publishes for scripts/cpp-ref-key.sh's key.
+      # When none matches (a PR that changes harness/cpp before it is published), build it
+      # from source and keep that build in actions/cache under the same key. It lives
+      # outside cargo's target dir (bin/): rust-cache's post-step cleans bin/.
+      - name: C++ reference key
+        if: steps.green.outputs.any == 'true'
+        id: cppkey
+        run: echo "key=$(scripts/cpp-ref-key.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore C++ reference built from source
+        if: steps.green.outputs.any == 'true'
+        id: cppcache
+        uses: actions/cache/restore@v4
         with:
           path: .cpp
-          # Shims are compiled by solidcore-ffi, not by build.sh, so they stay out of the key.
-          key: cpp-v2-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
+          key: cpp-v3-${{ runner.os }}-${{ steps.cppkey.outputs.key }}
 
-      - name: Build C++ reference (when the cache did not provide the libs)
+      - name: Fetch C++ reference (build it when no prebuilt matches)
         if: steps.green.outputs.any == 'true'
+        id: cpp
         run: |
           cpp=$SOLIDCORE_CPP_DIR
           if [ -f "$cpp/lib/libSMLib.a" ] && [ -f "$cpp/lib/libSM_API.a" ] && [ -f "$cpp/ffi.env" ]; then
             echo "C++ reference restored from cache"
-          else
-            harness/cpp/build.sh --jobs "$(nproc)"
+            exit 0
           fi
+          command -v zstd >/dev/null || sudo apt-get install -y zstd
+          rc=0
+          scripts/fetch-cpp.sh --no-build || rc=$?
+          if [ "$rc" = 3 ]; then
+            sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
+            harness/cpp/build.sh --no-tests --jobs "$(nproc)"
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" != 0 ]; then
+            exit "$rc"
+          fi
+
+      - name: Save C++ reference built from source
+        if: steps.green.outputs.any == 'true' && steps.cpp.outputs.built == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cpp
+          key: cpp-v3-${{ runner.os }}-${{ steps.cppkey.outputs.key }}
 
       - uses: Swatinem/rust-cache@v2
         if: steps.green.outputs.any == 'true'
@@ -148,3 +185,7 @@ jobs:
         # faster than the debug build that used to take ~35 min here. --jobs 0: one child
         # process per unit, one per vCPU (same output and reports as a serial run).
         run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0
+
+      - name: sccache stats
+        if: always() && steps.green.outputs.any == 'true'
+        run: sccache --show-stats || true

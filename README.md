@@ -77,7 +77,16 @@ rustflags = ["-C", "link-arg=-zstack-size=8388608"]   # 8 MiB, as a native main 
 
 ## Difftest (Rust vs C++)
 
-The C++ reference build requires Bash, CMake 3.20 or newer, and a C++17 toolchain.
+On Linux x86_64 with glibc 2.39 or newer and GCC 13 or newer (Ubuntu 24.04, the CI
+image, or a newer distribution), `scripts/fetch-cpp.sh` downloads the prebuilt C++
+reference libraries (about 50 MB) from this repository's
+[releases](https://github.com/tangency-labs/solidcore/releases) and checks their
+sha256; it needs only `curl`, `tar` and `zstd`. Elsewhere, or when no prebuilt matches
+the current `harness/cpp` (key from `scripts/cpp-ref-key.sh`), it says so and runs
+`harness/cpp/build.sh` instead. Either way you still clone `upstream/`: the shims
+include its headers and difftest reads its test files.
+
+Building from source requires Bash, CMake 3.20 or newer, and a C++17 toolchain.
 Ninja is optional: when absent, CMake uses its default generator (typically Unix
 Makefiles, which requires `make`). Linux with GNU C++ is the parity reference used
 in CI; shell compatibility on macOS does not establish Apple-Clang difftest parity.
@@ -86,13 +95,15 @@ Rust-only builds do not need these C++ build tools.
 ```sh
 git clone https://github.com/NVIDIA-Omniverse/usd-brep upstream
 git -C upstream checkout c9c5979
-harness/cpp/build.sh                                  # C++ reference -> bin/cpp
+scripts/fetch-cpp.sh                                  # C++ reference -> bin/cpp (prebuilt, or built)
 cargo run -p difftest --features cpp -- --green       # all units marked green
 cargo run -p difftest --features cpp -- --unit <unit id>   # one unit
 ```
 
 `solidcore-ffi` and `difftest` compile without the C++ build; only the `cpp` feature
-links it.
+links it. The `cpp` feature compiles about 200 FFI shims with the `cc` crate on every
+clean build; with `RUSTC_WRAPPER=sccache` the `cc` crate runs them through sccache too,
+so they are cached like the Rust crates.
 
 ## Contributing
 
