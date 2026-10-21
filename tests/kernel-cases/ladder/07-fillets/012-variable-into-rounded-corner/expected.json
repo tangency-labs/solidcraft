@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it",
+ "source": "invariants",
+ "method": "a variable round running into a constant one at a corner; one valid body",
+ "body_count": 1
+}

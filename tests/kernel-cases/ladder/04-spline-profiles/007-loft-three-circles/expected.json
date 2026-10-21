@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a smooth loft through circles r20, r10, r20 at z = 0, 20, 40",
+ "source": "invariants",
+ "method": "the interpolation between sections is the loft's own: no closed-form volume; one valid body bounded by two disks and one lofted face",
+ "body_count": 1,
+ "faces": 3
+}

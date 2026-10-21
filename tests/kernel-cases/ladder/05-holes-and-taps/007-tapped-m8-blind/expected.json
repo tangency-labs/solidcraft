@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an M8 tapped blind hole 12 deep with a 118 deg drill point",
+ "source": "analytic",
+ "method": "M8 coarse pitch 1.25: tap drill (major - pitch) 6.75; removed pi r^2 12 to the shoulder + the point cone pi r^2 (r/tan59)/3",
+ "body_count": 1,
+ "volume_mm3": 47546.394232462,
+ "faces": 8
+}

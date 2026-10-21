@@ -1,0 +1,29 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 20,
+    "height": 60,
+    "axis": "X",
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     0,
+     20
+    ],
+    "thread": "M5"
+   }
+  }
+ ]
+}

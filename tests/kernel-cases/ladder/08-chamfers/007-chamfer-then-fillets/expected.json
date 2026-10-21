@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a 3 mm chamfer on the top front edge, then r2 rounds on the front vertical edges that meet it",
+ "source": "invariants",
+ "method": "rounds running into a chamfer face; one valid body",
+ "body_count": 1
+}

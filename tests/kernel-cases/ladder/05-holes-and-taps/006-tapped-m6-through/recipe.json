@@ -1,0 +1,16 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     20,
+     20
+    ],
+    "thread": "M6"
+   }
+  }
+ ]
+}

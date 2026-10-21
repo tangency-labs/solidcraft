@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "a modelled M10 thread over 15 of the 30 mm: it stops square in the middle of the face",
+ "source": "invariants",
+ "method": "the square stop has no closed form; one valid body inside the stock's box",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -5,
+   -5,
+   0
+  ],
+  "max": [
+   5,
+   5,
+   30
+  ]
+ }
+}

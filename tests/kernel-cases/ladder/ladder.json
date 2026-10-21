@@ -1,0 +1,187 @@
+{
+  "tiers": [
+    {
+      "cases": [
+        "ladder/01-primitives/001-box",
+        "ladder/01-primitives/002-cylinder",
+        "ladder/01-primitives/004-frustum",
+        "ladder/01-primitives/003-cone",
+        "ladder/01-primitives/005-sphere",
+        "ladder/01-primitives/006-torus"
+      ],
+      "tier": "01-primitives",
+      "what": "primitives with closed-form volumes"
+    },
+    {
+      "cases": [
+        "ladder/02-booleans/004-edge-on-edge-no-overlap",
+        "ladder/02-booleans/003-pocket-flush-with-top",
+        "ladder/02-booleans/015-knife-edge-wedge-cut",
+        "ladder/02-booleans/002-coplanar-overlap-join",
+        "ladder/02-booleans/019-notch-flush-with-end-face",
+        "ladder/02-booleans/016-v-groove-pinches-bottom-to-line",
+        "ladder/02-booleans/013-cut-across-cylinder-seam",
+        "ladder/02-booleans/001-coincident-face-join",
+        "ladder/02-booleans/009-near-tangent-overlap-1e-3",
+        "ladder/02-booleans/020-part-back-wall",
+        "ladder/02-booleans/005-vertex-on-face-no-overlap",
+        "ladder/02-booleans/018-hole-tangent-to-side-face",
+        "ladder/02-booleans/010-near-tangent-overlap-1e-6",
+        "ladder/02-booleans/006-tangent-along-line-no-overlap",
+        "ladder/02-booleans/008-near-tangent-gap-1e-6",
+        "ladder/02-booleans/007-near-tangent-gap-1e-3",
+        "ladder/02-booleans/017-cylinder-tangent-top-and-bottom",
+        "ladder/02-booleans/011-tangent-along-circle-through-hole",
+        "ladder/02-booleans/014-cut-through-sphere-pole",
+        "ladder/02-booleans/012-tangent-along-circle-bowl"
+      ],
+      "tier": "02-booleans",
+      "what": "booleans in the degeneracy classes, and cuts that end in a single line"
+    },
+    {
+      "cases": [
+        "ladder/03-analytic-profiles/001-extrude-rect-with-arc-end",
+        "ladder/03-analytic-profiles/003-extrude-tapered-circle",
+        "ladder/03-analytic-profiles/007-revolve-180-touching-axis",
+        "ladder/03-analytic-profiles/008-extrude-slot",
+        "ladder/03-analytic-profiles/002-extrude-annulus",
+        "ladder/03-analytic-profiles/004-revolve-full-off-axis",
+        "ladder/03-analytic-profiles/006-revolve-partial-90",
+        "ladder/03-analytic-profiles/005-revolve-touching-axis-hemisphere",
+        "ladder/03-analytic-profiles/009-part-boss-and-slot"
+      ],
+      "tier": "03-analytic-profiles",
+      "what": "extrudes and revolves of line-and-arc profiles"
+    },
+    {
+      "cases": [
+        "ladder/04-spline-profiles/001-extrude-bezier-arch",
+        "ladder/04-spline-profiles/008-loft-square-to-circle",
+        "ladder/04-spline-profiles/006-loft-circle-frustum",
+        "ladder/04-spline-profiles/007-loft-three-circles",
+        "ladder/04-spline-profiles/005-loft-square-frustum",
+        "ladder/04-spline-profiles/009-extrude-periodic-fit-spline",
+        "ladder/04-spline-profiles/004-sweep-square-along-bezier",
+        "ladder/04-spline-profiles/002-revolve-bezier-profile",
+        "ladder/04-spline-profiles/003-pipe-along-bezier",
+        "ladder/04-spline-profiles/010-part-bezier-window"
+      ],
+      "tier": "04-spline-profiles",
+      "what": "spline profiles, sweeps and lofts"
+    },
+    {
+      "cases": [
+        "ladder/05-holes-and-taps/010-hole-tangent-to-end-face",
+        "ladder/05-holes-and-taps/002-simple-blind-flat",
+        "ladder/05-holes-and-taps/009-hole-0.5-from-edge",
+        "ladder/05-holes-and-taps/001-simple-through",
+        "ladder/05-holes-and-taps/006-tapped-m6-through",
+        "ladder/05-holes-and-taps/004-counterbore",
+        "ladder/05-holes-and-taps/007-tapped-m8-blind",
+        "ladder/05-holes-and-taps/003-drilled-blind-118",
+        "ladder/05-holes-and-taps/005-countersink",
+        "ladder/05-holes-and-taps/008-tapped-m5-into-curved-face",
+        "ladder/05-holes-and-taps/011-crossing-holes-steinmetz",
+        "ladder/05-holes-and-taps/012-crossing-tapped-holes-offset",
+        "ladder/05-holes-and-taps/013-part-holes"
+      ],
+      "tier": "05-holes-and-taps",
+      "what": "holes and tapped holes"
+    },
+    {
+      "cases": [
+        "ladder/06-threads/003-external-m10-partial-length",
+        "ladder/06-threads/005-internal-m10-through",
+        "ladder/06-threads/004-external-m10-to-shoulder",
+        "ladder/06-threads/001-external-m10-full",
+        "ladder/06-threads/006-external-m10-into-chamfer",
+        "ladder/06-threads/002-external-m10x1-fine",
+        "ladder/06-threads/010-part-threaded-boss",
+        "ladder/06-threads/007-external-m10-at-filleted-shoulder",
+        "ladder/06-threads/008-multi-start-thread",
+        "ladder/06-threads/009-thread-runout-length"
+      ],
+      "tier": "06-threads",
+      "what": "modelled threads"
+    },
+    {
+      "cases": [
+        "ladder/07-fillets/006-variable-r5-to-zero",
+        "ladder/07-fillets/005-variable-r5-to-r1",
+        "ladder/07-fillets/007-variable-r5-to-1e-3",
+        "ladder/07-fillets/015-corner-g2-patch",
+        "ladder/07-fillets/008-constant-r1e-3",
+        "ladder/07-fillets/004-convex-and-concave-r5",
+        "ladder/07-fillets/001-single-edge-r5",
+        "ladder/07-fillets/012-variable-into-rounded-corner",
+        "ladder/07-fillets/014-curved-edge-r2",
+        "ladder/07-fillets/011-chain-ending-at-corner",
+        "ladder/07-fillets/002-four-vertical-edges-r5",
+        "ladder/07-fillets/009-corner-three-equal-r5",
+        "ladder/07-fillets/010-corner-unequal-r7-r3",
+        "ladder/07-fillets/003-tangent-chain-r3",
+        "ladder/07-fillets/016-corner-three-sequential-r5-r3-r7",
+        "ladder/07-fillets/017-part-rounds",
+        "ladder/07-fillets/013-corner-setback"
+      ],
+      "tier": "07-fillets",
+      "what": "constant, variable and corner fillets"
+    },
+    {
+      "cases": [
+        "ladder/08-chamfers/002-two-distances-5-3",
+        "ladder/08-chamfers/001-equal-5",
+        "ladder/08-chamfers/003-distance-angle-5-30",
+        "ladder/08-chamfers/005-corner-two-mitred-3",
+        "ladder/08-chamfers/004-corner-three-equal-3",
+        "ladder/08-chamfers/007-chamfer-then-fillets",
+        "ladder/08-chamfers/006-curved-edge-2",
+        "ladder/08-chamfers/008-part-chamfers"
+      ],
+      "tier": "08-chamfers",
+      "what": "chamfers"
+    },
+    {
+      "cases": [
+        "ladder/09-shells-and-offsets/007-offset-top-face-5",
+        "ladder/09-shells-and-offsets/003-tube-two-open-faces",
+        "ladder/09-shells-and-offsets/001-box-open-top-t2",
+        "ladder/09-shells-and-offsets/004-thin-wall-0.2",
+        "ladder/09-shells-and-offsets/009-shell-outside-t2",
+        "ladder/09-shells-and-offsets/008-offset-cylinder-wall-2",
+        "ladder/09-shells-and-offsets/002-cylinder-open-top-t1",
+        "ladder/09-shells-and-offsets/006-shell-rounds-r1-thinner-than-t2",
+        "ladder/09-shells-and-offsets/005-shell-rounds-r5-t2",
+        "ladder/09-shells-and-offsets/010-shell-under-rounded-top",
+        "ladder/09-shells-and-offsets/011-part-shell"
+      ],
+      "tier": "09-shells-and-offsets",
+      "what": "shells and offsets"
+    },
+    {
+      "cases": [
+        "ladder/10-patterns-and-mirrors/007-pattern-bodies",
+        "ladder/10-patterns-and-mirrors/005-mirror-feature",
+        "ladder/10-patterns-and-mirrors/004-mirror-body-joined",
+        "ladder/10-patterns-and-mirrors/001-rect-pattern-holes",
+        "ladder/10-patterns-and-mirrors/003-overlapping-pattern-leaves-core",
+        "ladder/10-patterns-and-mirrors/002-circular-pattern-holes",
+        "ladder/10-patterns-and-mirrors/006-circular-pattern-counterbores",
+        "ladder/10-patterns-and-mirrors/008-part-vents"
+      ],
+      "tier": "10-patterns-and-mirrors",
+      "what": "patterns and mirrors"
+    },
+    {
+      "cases": [
+        "ladder/11-cumulative-parts/002-flange",
+        "ladder/11-cumulative-parts/001-bracket",
+        "ladder/11-cumulative-parts/003-threaded-flange",
+        "ladder/11-cumulative-parts/004-housing"
+      ],
+      "tier": "11-cumulative-parts",
+      "what": "parts combining every tier"
+    }
+  ],
+  "what": "the kernel complexity ladder: tiers in order of complexity, each building on the shapes before it; cases within a tier in order of measured time (cargo xtask kernel-cases --ladder --record)"
+}

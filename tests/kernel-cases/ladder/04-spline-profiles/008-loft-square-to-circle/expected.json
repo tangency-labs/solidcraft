@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a loft from a 40 square at z=0 to a circle r10 at z=30",
+ "source": "invariants",
+ "method": "sections with different edge counts: the matching is the loft's own; one valid body",
+ "body_count": 1
+}

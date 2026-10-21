@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them",
+ "source": "invariants",
+ "method": "three unequal radii at one corner, one after another; the vertical edge stays sharp below the two top rounds (x=60, y=40, z from 0 to 15), so it can be picked at z=8; one valid body",
+ "body_count": 1
+}

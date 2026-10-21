@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the stock shelled 2 mm, open top and bottom",
+ "source": "analytic",
+ "method": "a rectangular tube: 20 (60*40 - 56*36)",
+ "body_count": 1,
+ "volume_mm3": 7680,
+ "faces": 10
+}

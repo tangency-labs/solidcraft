@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a circle r10 extruded 20 with a -5 deg taper (inward): a cone frustum",
+ "source": "analytic",
+ "method": "positive taper grows outward (tests/oracle/05): top radius 10 - 20 tan5 = 8.250226729; V = pi h/3 (R^2 + R r + r^2)",
+ "body_count": 1,
+ "volume_mm3": 5247.894567706,
+ "faces": 3
+}

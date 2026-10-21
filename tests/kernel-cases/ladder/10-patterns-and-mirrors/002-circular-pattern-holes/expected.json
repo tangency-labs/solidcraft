@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a d6 hole patterned 8 times round a disk r30 h10",
+ "source": "analytic",
+ "method": "eight holes pi 3^2 10",
+ "body_count": 1,
+ "volume_mm3": 26012.387171723,
+ "faces": 11
+}
