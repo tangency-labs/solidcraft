@@ -471,7 +471,7 @@ fn off_surface(rules: &size::Rules) -> f64 {
 /// a whole sphere as one face bounded by its meridian alone, as SMLib writes it, or a sphere
 /// face whose meridian is split where a trim crosses it. Truck's mesher projects both uses onto
 /// one parameter line and meshes nothing; the display plan opens the loop across the period
-/// ([`open_pole_to_pole`]).
+/// ([`open_pole_to_pole`], and [`open_at_pole`] for a seam from one pole to a rim).
 pub(crate) fn has_pole_to_pole_seam(solid: &Solid) -> bool {
     solid.face_iter().any(|f| {
         f.boundaries().iter().any(|w| {
@@ -544,6 +544,64 @@ fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
     }
 }
 
+/// The poles of a loop where it turns straight back along a seam: the nodes either side have
+/// the same parameters.
+fn turning_poles(s: &EvalSurface, per: f64, uv: &[[f64; 2]]) -> Vec<usize> {
+    let n = uv.len();
+    let near = |a: Option<&[f64; 2]>, b: Option<&[f64; 2]>| a.zip(b).is_some_and(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()) <= 1e-9 * per);
+    (0..n)
+        .filter(|&k| uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate(s, *q, d))))
+        .filter(|&k| near(uv.get((k + n - 1) % n), uv.get((k + 1) % n)))
+        .collect()
+}
+
+/// A loop with one pole, where it turns straight back along a seam, that winds once around the
+/// periodic direction as projected: a half sphere's rim, then its seam down to the pole and up
+/// again. Unwrapped along the loop, both runs of the seam lie on one parameter line, and the
+/// period the loop is short of is closed by the rim's jump back. The face lies between the
+/// seam's two uses a period apart, so the loop is unwrapped from the node after the pole round
+/// to the pole, and starts at the node before it: the seam's uses then bound the face's parameter box on either side, and share
+/// their nodes as every other edge does. Kept as it was unless the opened loop spans at most a
+/// period with a positive area.
+fn open_at_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
+    let n = l.uv.len();
+    if n < 4 || l.pts.len() != n {
+        return;
+    }
+    for d in 0..2 {
+        let Some(per) = dom.period[d] else { continue };
+        if (seam::drift(l, d, per).abs() - per).abs() > per * 1e-6 {
+            continue;
+        }
+        let [pole] = turning_poles(s, per, &l.uv)[..] else { continue };
+        // From the node after the pole round to the pole, unwrapped along the way.
+        let order: Vec<usize> = (1..=n).map(|i| (pole + i) % n).collect();
+        let mut uv: Vec<[f64; 2]> = Vec::with_capacity(n);
+        for &k in &order {
+            let Some(mut q) = l.uv.get(k).copied() else { return };
+            if let Some(pr) = uv.last() {
+                for e in 0..2 {
+                    q[e] = uv::unwrap(q[e], pr[e], dom.period[e]);
+                }
+            }
+            uv.push(q);
+        }
+        // The pole's free parameter: its predecessor's (the poles are split from it later).
+        if let (Some(prev), Some(q)) = (uv.len().checked_sub(2).and_then(|i| uv.get(i)).copied(), uv.last_mut()) {
+            q[d] = prev[d];
+        }
+        let (lo, hi) = uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+        // Started at the node before the pole, so the loop closes without a jump.
+        let mut opened = seam::Loop { uv, pts: order.iter().filter_map(|&k| l.pts.get(k).copied()).collect() };
+        opened.uv.rotate_right(2);
+        opened.pts.rotate_right(2);
+        if opened.pts.len() == n && hi - lo <= per * (1.0 + 1e-9) && area2(&opened.uv) > 0.0 && !seam::winds(std::slice::from_ref(&opened), d, per) {
+            *l = opened;
+            return;
+        }
+    }
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 fn plan_face(
@@ -598,6 +656,11 @@ fn plan_face(
     align_periods(&mut projected, &dom);
     // A loop that winds around a periodic direction does not close in (u, v): the face is cut
     // along a parameter line into one period (a seamless cylinder face, a helical trim).
+    // A loop that runs up a seam from a pole and straight back down it (a half sphere bounded
+    // by its rim and its seam used both ways) winds once as projected: it is opened at the pole.
+    for l in projected.iter_mut() {
+        open_at_pole(s, &dom, l);
+    }
     let wound: Vec<usize> = (0..2).filter(|&d| dom.period[d].is_some_and(|per| seam::winds(&projected, d, per))).collect();
     // A face cut along a seam is a long winding strip whose sides are the cut lines and the
     // boundary in turn: Delaunay with sag refinement meshes it (the patch layouts below assume

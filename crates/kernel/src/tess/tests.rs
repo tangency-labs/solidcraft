@@ -449,3 +449,34 @@ fn a_boundary_running_back_along_itself_is_all_slit() {
     let (kept, _) = drop_slits(std::slice::from_ref(&lens), &[Vec::new()], 1e-9);
     assert_eq!(kept, vec![lens]);
 }
+
+/// The display plan of `b` at `tol` (and the display angle), evaluated: closed, with no
+/// zero-area or needle triangle.
+#[cfg(feature = "smlib")]
+fn closed_display_mesh(name: &str, b: &Body, tol: f64) -> Mesh {
+    let plan = ok(b.display_plan_angular(tol, crate::DISPLAY_ANGLE));
+    let m = ok(b.display_mesh_of(&plan));
+    assert_watertight(&m, &format!("{name} at {tol}"));
+    for t in &m.triangles {
+        let [a, b, c] = t.map(|i| m.positions[i as usize]);
+        let longest = (b - a).len().max((c - b).len()).max((a - c).len());
+        assert!((b - a).cross(c - a).len() > 1e-6 * longest * longest, "{name} at {tol}: degenerate triangle {a:?} {b:?} {c:?}");
+    }
+    m
+}
+
+/// A sphere from SMLib cut through its centre: the half sphere is bounded by its rim and its
+/// seam from the pole up to the rim, used both ways. The seam's two uses share their nodes, so
+/// the mesh has no crack along it and nothing degenerate at the pole.
+#[cfg(feature = "smlib")]
+#[test]
+fn a_half_sphere_from_smlib_is_closed_along_its_seam() {
+    use solidcraft_smlib::{BooleanOp, Brep as S};
+    let Ok(ball) = S::make_sphere([0.0; 3], 12.0) else { panic!("sphere") };
+    let Ok(lid) = S::make_box([-20.0, -20.0, 0.0], [40.0, 40.0, 20.0]) else { panic!("box") };
+    let Ok(Some(half)) = ball.boolean(&lid, BooleanOp::Subtract) else { panic!("cut") };
+    let body = ok(crate::native::body_from_smlib(&half));
+    for tol in [0.1, 0.01] {
+        closed_display_mesh("half sphere", &body, tol);
+    }
+}
