@@ -308,8 +308,11 @@ fn compatible(body: &b::Brep) -> Result<()> {
     body.faces.iter().try_for_each(|f| compatible_surface(&f.surface))
 }
 
+/// The solid of a record: validated, its geometry checked against its topology (truck builds
+/// edges and faces from it unchecked), then built as the kernel built it.
 pub(super) fn decode(body: b::Brep) -> Result<mt::Solid> {
     body.validate().map_err(invalid)?;
+    body.check_geometry().map_err(invalid)?;
     compatible(&body)?;
     let b::Brep { shells, faces, edges, vertices, .. } = body;
     let vertices: Vec<mt::Vertex> = vertices.into_iter().map(|v| mt::Vertex::new(p(v.point))).collect();
