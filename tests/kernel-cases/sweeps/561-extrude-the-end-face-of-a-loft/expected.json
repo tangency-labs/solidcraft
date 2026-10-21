@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#561",
+  "tangency-labs/solidcraft#677"
+ ],
+ "what": "the small end face of a square-to-square loft (40 mm side to 20 mm over 40 mm) extruded 10 mm (loft faces had no attachable source)",
+ "source": "analytic",
+ "method": "ruled loft of two squares = pyramid frustum: V = 40/3 (1600 + 400 + 800) = 37333.3; the top face is a 20 x 20 square at z = 40, extruding it 10 mm adds 4000: V = 41333.3.",
+ "body_count": 1,
+ "volume_mm3": 41333.333333333336
+}
