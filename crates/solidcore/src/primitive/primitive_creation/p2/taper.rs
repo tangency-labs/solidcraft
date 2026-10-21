@@ -126,9 +126,12 @@ struct TaperState {
 
 impl PrimitiveCreation {
     /// Extrude the chain of `curves` by `height` along `normal` with a draft of
-    /// `draft_angle_deg` (`CreateTaperExtrude`): 0 is along the normal, 0 to 90 an
-    /// inward and 90 to 180 an outward taper; a negative height puts the taper on the
-    /// other side. `end_caps` is 0 none, 1 at the curves, 2 at the offset end, 3 both.
+    /// `draft_angle_deg` (`CreateTaperExtrude`): 0 is along the normal; only the sign
+    /// picks the side (positive inward, negative outward) and the in-plane offset is
+    /// `|height * tan(|draft_angle_deg|)|`, so 90 to 180 is not the outward taper the
+    /// upstream parameter comment promises (`DOC-5`). A negative height puts the taper on
+    /// the other side. The curves must form one chain; like the release C++, this does not
+    /// check it. `end_caps` is 0 none, 1 at the curves, 2 at the offset end, 3 both.
     /// A zero `normal` is computed from the curves (and written back); a given one
     /// reverses the curves when they wind the other way. `corner` applies to outer
     /// corners. The result is shrunk, stitched and oriented into the target B-rep.

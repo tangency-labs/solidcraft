@@ -447,6 +447,11 @@ pub fn create_curve_sweep_from_edges(
 /// corners over linear extensions. The curve normal is computed by the extrusion.
 /// The caller's curves are copied, never changed.
 ///
+/// As in the C++ code, only the sign of `draft_angle_deg` picks the side (positive
+/// inner, negative outer) and the in-plane offset is `|height * tan(|draft_angle_deg|)|`,
+/// so an angle over 90 does not give the outer draft the C++ header promises. The
+/// curves must form one chain (`DOC-5` in `plan/upstream-issues.md`).
+///
 /// # Errors
 ///
 /// `InvalidInput` for no curves or a `None` curve; the error of a failing curve
