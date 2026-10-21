@@ -86,9 +86,12 @@ fn compatible_surface(s: &b::Surface) -> Result<()> {
     }
 }
 
-/// The body's working tolerance, mm: its "same point" tolerance (`fill::planarity_tolerance`).
+/// The body's working tolerance, mm: how far later operations take its faces to be from its
+/// edges (`fill::face_tolerance`, 10⁻⁶ of its size, at least 10⁻⁵ mm). Truck's own edges sit
+/// that far off their surfaces (a traced intersection, an imported edge), so a pcurve lifts
+/// onto the edge within it and SMLib can check the edge against the face with it.
 fn working_tolerance(body: &Body) -> f64 {
-    crate::fill::planarity_tolerance(body)
+    crate::fill::face_tolerance(body)
 }
 
 /// The record of `body`'s solid, with each face's pcurves from `pcurves` (the face, then the

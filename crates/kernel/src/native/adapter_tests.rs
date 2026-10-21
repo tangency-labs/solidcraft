@@ -82,8 +82,11 @@ fn planar_bodies_encode_in_the_kernels_order_and_decode_exactly() {
     let sheet = crate::copy_faces(&cube, &[Vec3::new(20., 15., 10.)]).unwrap();
     let inner = crate::box_solid(Vec3::new(5., 5., 2.), Vec3::new(10., 10., 6.)).unwrap();
     let hollow = crate::boolean(&cube, &inner, crate::BoolOp::Cut).unwrap().unwrap();
-    for (name, body) in [("cube", cube), ("notched", notched), ("sheet", sheet), ("hollow", hollow)] {
-        assert!(body.solid.face_iter().any(|f| !f.orientation()) || name == "sheet", "{name}: a reversed face is walked");
+    let far = crate::box_solid(Vec3::new(60., 0., 0.), Vec3::new(70., 10., 10.)).unwrap();
+    let pair = crate::boolean(&cube, &far, crate::BoolOp::Union).unwrap().unwrap();
+    let bodies = [("cube", cube), ("notched", notched), ("sheet", sheet), ("hollow", hollow), ("pair", pair)];
+    assert!(bodies.iter().any(|(_, b)| b.solid.face_iter().any(|f| !f.orientation())), "reversed faces are walked");
+    for (name, body) in bodies {
         let record = encode(&body, super::super::pcurve::pcurves).unwrap_or_else(|e| panic!("{name}: {e}"));
         same_indices(&body, &record);
         let decoded = decode(record.clone()).unwrap();
@@ -103,6 +106,14 @@ fn planar_bodies_encode_in_the_kernels_order_and_decode_exactly() {
                     ]
                 );
             }
+            "pair" => assert_eq!(
+                record.regions,
+                vec![
+                    b::Region { shells: vec![0, 1], void: false },
+                    b::Region { shells: vec![0], void: false },
+                    b::Region { shells: vec![1], void: false },
+                ]
+            ),
             _ => assert_eq!(record.regions, vec![b::Region { shells: vec![0], void: false }, b::Region { shells: vec![0], void: false }]),
         }
     }

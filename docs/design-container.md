@@ -148,7 +148,7 @@ a STEP assembly) records the part and its matrix, so it shows that part's displa
 again instead of being meshed on its own.
 
 `cache/model.json` records `solidcraft-model-cache/4`, the producer revision
-`solidcraft-truck-adapter/3`, the application version, the build (source commit,
+`solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the SHA-256 of the exact `document.json` (whose blob
 references pin every STEP, mesh and image payload) and of `cache/bodies.bin`, the
 slices, each kernel body's slice and display share, and the model's records. A
