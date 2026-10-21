@@ -833,6 +833,10 @@ const THICKEN_TOLERANCE: f64 = 0.01;
 /// agree).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
     body.require_brep("thicken")?;
+    #[cfg(feature = "smlib")]
+    if crate::backend()? == crate::Backend::Smlib {
+        return crate::offset_backend::thicken(body, thickness, symmetric);
+    }
     if !(thickness.is_finite() && thickness.abs() > 1e-9) {
         return Err(KernelError::Invalid("thickness must be non-zero".into()));
     }
