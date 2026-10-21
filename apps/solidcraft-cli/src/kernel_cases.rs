@@ -56,6 +56,26 @@ fn scratch(area: &str, name: &str) -> Result<String, String> {
     Ok(d.to_string_lossy().to_string())
 }
 
+/// Chord tolerance of the mesh a `watertight` case is checked on (mm).
+const MESH_TOL: f64 = 0.01;
+
+/// A mesh's edges used by one triangle only (open) and by more than two (over-shared), with
+/// vertices matched by position (a mesh may repeat a vertex for each face).
+fn open_edges(positions: &[solidcraft_engine::geom::Vec3], triangles: &[[u32; 3]]) -> (usize, usize) {
+    let key = |i: u32| positions.get(i as usize).map(|p| [p.x, p.y, p.z].map(|x| (x * 1e6).round() as i64));
+    let mut uses: std::collections::HashMap<([i64; 3], [i64; 3]), usize> = std::collections::HashMap::new();
+    for t in triangles {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (Some(a), Some(b)) = (key(a), key(b)) else { continue };
+            if a == b {
+                continue;
+            }
+            *uses.entry(if a < b { (a, b) } else { (b, a) }).or_default() += 1;
+        }
+    }
+    (uses.values().filter(|&&n| n == 1).count(), uses.values().filter(|&&n| n > 2).count())
+}
+
 /// An error that means "this kernel can't do it yet", not a wrong answer.
 fn unsupported(e: &str) -> bool {
     e.contains("not supported yet")
@@ -170,6 +190,22 @@ fn check_case(dir: &str) -> Value {
             "faces": m.merged.faces, "edges": m.merged.edges, "vertices": m.merged.vertices,
         }));
         shells += m.shells as u64;
+        if want["watertight"].as_bool() == Some(true) {
+            let tol = want["tolerance"]["mesh_mm"].as_f64().unwrap_or(MESH_TOL);
+            let (open, over) = match b.body.tessellate_with(tol, true) {
+                Ok(mesh) => open_edges(&mesh.positions, &mesh.triangles),
+                Err(e) => {
+                    c.push("watertight", json!(format!("{}: {e}", b.name)), json!("no open edges"), false);
+                    continue;
+                }
+            };
+            c.push(
+                "watertight",
+                json!(format!("{}: {open} open, {over} over-shared mesh edges", b.name)),
+                json!("no open edges"),
+                open == 0 && over == 0,
+            );
+        }
         if want_valid {
             // Closed shells, and every validity check this build has.
             if want_shells.is_none() {
@@ -201,9 +237,14 @@ fn check_case(dir: &str) -> Value {
     let diag = |b: ([f64; 3], [f64; 3])| ((b.1[0] - b.0[0]).powi(2) + (b.1[1] - b.0[1]).powi(2) + (b.1[2] - b.0[2]).powi(2)).sqrt();
     let want_bbox = v3(&want["bbox"]["min"]).zip(v3(&want["bbox"]["max"]));
     let abs = want["tolerance"]["abs_mm"].as_f64().unwrap_or_else(|| ABS_FRAC * want_bbox.map(diag).unwrap_or_else(|| diag(got.bbox)).max(1.0));
+    // A count is exact, or an inclusive range `[min, max]` where the geometry only bounds it.
     let count = |c: &mut Checks, k: &str, g: u64| {
         if has(k) {
-            c.push(k, json!(g), want[k].clone(), want[k].as_u64() == Some(g));
+            let ok = match want[k].as_array() {
+                Some(r) => r.first().and_then(Value::as_u64).is_some_and(|lo| g >= lo) && r.get(1).and_then(Value::as_u64).is_some_and(|hi| g <= hi),
+                None => want[k].as_u64() == Some(g),
+            };
+            c.push(k, json!(g), want[k].clone(), ok);
         }
     };
     count(&mut c, "body_count", got.body_count as u64);

@@ -86,7 +86,10 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `shells` | The total number of shells, where it isn't one per body: a body with a sealed void (2), several lumps kept in one body. |
 | `body_count`, `faces`, `edges`, `vertices` | Exact counts, where the geometry fixes them. Faces and edges count whole analytic surfaces and curves once (a full cylinder side is one face). |
 | `volume_mm3`, `area_mm2`, `center_of_mass`, `bbox` | As in `tests/oracle`: totals over every body, relative tolerance 1e-3 for volume and area, 1e-3 of the box diagonal for positions. |
-| `tolerance` | Optional overrides: `rel`, `abs_mm`. |
+| `faces`, `edges`, `vertices`, `shells`, `body_count` as `[min, max]` | An inclusive range, where the geometry only bounds a count (a modelled thread's faces). |
+| `watertight` | `true`: each body's mesh (chord tolerance `tolerance.mesh_mm`, default 0.01 mm) has no open and no over-shared edges. |
+| `timeout_s` | A longer timeout for this case than the run's (at most 1800 s), for cases that are slow by nature. A case that only needs it on a loaded machine shouldn't set it. |
+| `tolerance` | Optional overrides: `rel`, `abs_mm`, `mesh_mm`. |
 | `missing` | A capability SolidCraft has no command or parameter for yet (`"solid.thread has no start count"`): the case is reported **not supported yet** without running, so the gap stays visible. |
 
 ## The complexity ladder
