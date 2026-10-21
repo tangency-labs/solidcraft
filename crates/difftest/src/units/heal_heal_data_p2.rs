@@ -871,6 +871,15 @@ fn pick<I: Copy>(alive: &[I], sel: u64) -> Option<I> {
     }
 }
 
+/// Whether a seed step would queue a face props record a second time (the shim's
+/// `degen_face_seeded`: upstream queues each once, and the repair works on a record
+/// queued twice twice).
+fn degen_face_seeded(h: &HealData<H>) -> bool {
+    h.tgt_face_props
+        .iter()
+        .any(|id| h.bad_face_props_degen_faces.prob_array.contains(id))
+}
+
 fn target_count_after_removals<T: Copy + PartialEq>(
     targets: &[T],
     removed: impl Iterator<Item = T>,
@@ -1584,6 +1593,28 @@ fn rust_heal(
                     stop = true;
                     break;
                 }
+                // (the shim's guard: re-adding a live target this step does not remove
+                // gives it a second props record, which a catch-up that deletes topology
+                // frees through one record and dereferences through the other)
+                let readds = add.iter().flatten().any(|e| {
+                    !rm.contains(e)
+                        && match *e {
+                            EntityRef::Face(f) => b.face(f).is_ok() && h.tgt_faces.contains(&f),
+                            EntityRef::Edge(x) => b.edge(x).is_ok() && h.tgt_edges.contains(&x),
+                            EntityRef::Vertex(v) => {
+                                b.vertex(v).is_ok() && h.tgt_vertices.contains(&v)
+                            }
+                            _ => false,
+                        }
+                });
+                if readds
+                    && i64::from(*op).min(h.done_heal_op.code())
+                        >= HealerOpType::FixCoinVertices.code()
+                {
+                    o.push(NULL_DEREF);
+                    stop = true;
+                    break;
+                }
                 let rf = h.face_props_for_tgts(&rm, true);
                 let re = h.edge_props_for_tgts(&rm, true);
                 let rv = h.vertex_props_for_tgts(&rm, true);
@@ -1624,6 +1655,11 @@ fn rust_heal(
                     h.update_target_lists(&mut k, &mut b, &rm, &add, op_of(i64::from(*op)))
                         .map(|()| false)
                 }
+            }
+            Step::SeedFaceProblems { .. } | Step::SeedDegenFaces if degen_face_seeded(&h) => {
+                o.push(NULL_DEREF);
+                stop = true;
+                break;
             }
             Step::SeedFaceProblems { null_face } => {
                 for (i, &id) in h.tgt_face_props.iter().enumerate() {
