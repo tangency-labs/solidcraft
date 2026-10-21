@@ -16,6 +16,7 @@ use std::sync::Once;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 mod check;
+pub mod export;
 mod ffi;
 pub mod flat;
 pub mod history;

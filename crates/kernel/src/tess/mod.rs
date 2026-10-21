@@ -468,6 +468,60 @@ fn off_surface(rules: &size::Rules) -> f64 {
 
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
+/// Whether a face of `solid` is bounded by one seam edge alone, used both ways between two
+/// distinct vertices (poles): a whole sphere as one face, as SMLib writes it. Truck's mesher
+/// projects both uses onto one parameter line and meshes nothing; the display plan opens the
+/// loop across the period ([`open_pole_to_pole`]).
+pub(crate) fn has_pole_to_pole_seam(solid: &Solid) -> bool {
+    solid.face_iter().any(|f| {
+        f.boundaries().iter().any(|w| {
+            let edges: Vec<&mt::Edge> = w.edge_iter().collect();
+            matches!(edges.as_slice(), [a, b] if a.id() == b.id() && a.front() != a.back())
+        })
+    })
+}
+
+/// Twice the signed area of a parameter polygon.
+fn area2(uv: &[[f64; 2]]) -> f64 {
+    let n = uv.len();
+    (0..n).map(|k| uv.get(k).zip(uv.get((k + 1) % n)).map_or(0.0, |(a, b)| a[0] * b[1] - b[0] * a[1])).sum()
+}
+
+/// A loop that runs from one pole to the other and back along the same parameter line (both
+/// uses of a seam joined only at the poles) encloses nothing once projected: the run after the
+/// second pole is moved one period along the periodic direction, which way gives the loop a
+/// positive area, so the face spans the period between its two seam copies.
+fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
+    let n = l.uv.len();
+    let poles: Vec<usize> = (0..n).filter(|&k| l.uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate(s, *q, d)))).collect();
+    let [p0, p1] = poles.as_slice() else { return };
+    let (lo, hi) = l.uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[0].min(q[1])), b.max(q[0].max(q[1]))));
+    let extent = (hi - lo).abs().max(1e-12);
+    if area2(&l.uv).abs() > 1e-9 * extent * extent {
+        return;
+    }
+    for d in 0..2 {
+        let Some(per) = dom.period[d] else { continue };
+        // Along the seam the periodic parameter is constant between the poles.
+        let second: Vec<usize> = (0..n).filter(|k| (k > p1 || k < p0) && *k != *p0 && *k != *p1).collect();
+        if second.is_empty() {
+            continue;
+        }
+        for sign in [1.0, -1.0] {
+            let mut moved = l.uv.clone();
+            for &k in &second {
+                if let Some(q) = moved.get_mut(k) {
+                    q[d] += sign * per;
+                }
+            }
+            if area2(&moved) > 1e-9 * extent * extent {
+                l.uv = moved;
+                return;
+            }
+        }
+    }
+}
+
 fn plan_face(
     fi: usize,
     s: &EvalSurface,
@@ -532,6 +586,13 @@ fn plan_face(
             projected = seam::cut(s, &projected, *d, per, rules, h).ok_or_else(|| fail("boundary winds around the surface"))?;
         }
         _ => return Err(fail("boundary winds around the surface both ways")),
+    }
+    // A loop from pole to pole and back along one seam (a whole sphere as one face, as another
+    // kernel writes it) projects onto one parameter line: its second run is a period along.
+    if !seamed {
+        for l in projected.iter_mut() {
+            open_pole_to_pole(s, &dom, l);
+        }
     }
     // Split poles.
     let mut fixed: Vec<Vec3> = Vec::new();
