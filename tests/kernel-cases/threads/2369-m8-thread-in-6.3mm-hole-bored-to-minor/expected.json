@@ -1,0 +1,33 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2369",
+  "tangency-labs/solidcraft#2688",
+  "tangency-labs/solidcraft#2853"
+ ],
+ "what": "a modelled M8 thread in a hole narrower than the thread's minor diameter (6.3 mm, and 6 mm in #2688), refused as 'the face is too far from the thread's diameter'",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. A 6.3 mm hole through a D16 x 5 disc takes a modelled M8 (P=1.25). The hole is narrower than the thread's minor diameter 8 - 2 x 5H/8 = 6.6468 mm (ISO D1 = D - 1.0825 P), so a tap takes the extra material off first: the hole is bored out to the minor diameter (rho=3.3234) and the groove cut from there. Whole length (4 turns): V = pi 8^2 5 - pi rho^2 5 - 4 x V_turn(clipped at rho) = 1005.3096 - 173.4961 - 4 x 8.32555 = 798.5114 mm3. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 798.5114,
+ "center_of_mass": [
+  0,
+  0,
+  2.5
+ ],
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   -8,
+   -8,
+   0
+  ],
+  "max": [
+   8,
+   8,
+   5
+  ]
+ }
+}

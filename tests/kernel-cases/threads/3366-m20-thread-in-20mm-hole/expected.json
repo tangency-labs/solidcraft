@@ -1,13 +1,32 @@
 {
  "sources": [
   "tangency-labs/solidcraft#3366",
-  "tangency-labs/solidcraft#3367",
-  "tangency-labs/solidcraft#1018",
-  "tangency-labs/solidcraft#2853"
+  "tangency-labs/solidcraft#3367"
  ],
- "what": "a modelled thread on a hole that isn't the thread's size: refused with the size to use, never a silent change of the hole",
+ "what": "a modelled M20 internal thread in a 20 mm hole, made after the 20 mm cylinder's own thread",
  "source": "analytic",
- "method": "Decision (#1018, #2853): a modelled thread never changes the size of the hole it is on; one that isn't the thread's size is refused, naming the size to use. A fill-to-tap-drill or turn-down option would be opt-in, off by default (see #3060), and get its own case. The refusal's numbers, from ISO 68-1 (H = P sqrt3/2, basic depth 5H/8): M20 (P 2.5): tap drill = 20 - 2.5 = 17.5 mm; depth 5H/8 = 5/8 x 2.5 x sqrt3/2 = 1.353 mm; the 20 mm hole is at the major diameter. Expected message: \"this 20 mm hole is too wide for a modelled M20 thread: it would cut 0.00 mm of the thread's 1.35 mm depth; drill 17.5 mm for M20, or thread this hole M22\".",
- "outcome": "refused",
- "refusal": "this 20 mm hole is too wide for a modelled M20 thread: it would cut 0.00 mm of the thread's 1.35 mm depth; drill 17.5 mm for M20, or thread this hole M22"
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. A 20 mm hole through a D48 x 10 disc, drawn at the thread's nominal size, takes a modelled M20: the hole is first filled to the tap drill (major - pitch = 17.5 mm, rho=8.75), then the groove is cut, the same thread as in a hole drilled at the tap drill. Whole length, both ends free (4 turns): V = pi 24^2 10 - pi 8.75^2 10 - 4 x V_turn(clipped at rho) = 18095.5737 - 2405.2819 - 4 x 74.96751 = 15390.4218 mm3. The thin lips a tap leaves at each end are below 0.2% of the volume. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 15390.4218,
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   -24,
+   -24,
+   0
+  ],
+  "max": [
+   24,
+   24,
+   10
+  ]
+ },
+ "center_of_mass": [
+  0,
+  0,
+  5.0
+ ]
 }
