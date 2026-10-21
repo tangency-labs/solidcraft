@@ -399,12 +399,14 @@ fn smlib_torus_decodes_without_meshing_and_plans_with_a_sphere_beside_it() {
     }
 }
 
-/// SMLib's intersection of a block and a cylinder bounds the top disc with spline edges on
-/// part of their curves: the body decodes (it was refused) with the cylinder's volume inside
-/// the block, π r² h.
+/// SMLib's intersection of a block and a cylinder, both sent as truck's splines, decodes with
+/// the cylinder's volume inside the block, π r² h. (SMLib used to bound the top disc with spline
+/// edges on part of their curves, which the decode refused; since the fork keeps a split face's
+/// surface parameterization it no longer does, and
+/// `spline_edges_on_part_of_their_curve_load_as_that_piece` covers that decode directly.)
 #[cfg(feature = "smlib")]
 #[test]
-fn smlib_spline_edges_on_part_of_their_curve_decode() {
+fn smlib_intersection_of_truck_splines_decodes_with_its_volume() {
     use solidcraft_smlib::BooleanOp;
     let block = crate::box_solid(Vec3::new(7.5, 15., 0.), Vec3::new(25., 32.5, 27.5)).unwrap();
     let post = crate::cylinder(Vec3::new(12.5, 20., 10.), Vec3::Z, 5., 30.).unwrap();
@@ -412,12 +414,6 @@ fn smlib_spline_edges_on_part_of_their_curve_decode() {
     // patches (the import otherwise sends SMLib's cylinder and planes, whose cut leaves circles).
     let keeping = |body: &Body| solidcraft_smlib::Brep::from_record_keeping_splines(&crate::brep_record(body).unwrap(), true).unwrap();
     let common = keeping(&block).boolean(&keeping(&post), BooleanOp::Intersect).unwrap().unwrap();
-    let record = common.to_native().unwrap();
-    assert!(
-        record.edges.iter().any(|e| matches!(e.curve.natural(), b::Natural::Range(lo, hi) if [lo, hi] != e.interval)
-            && matches!(e.curve, b::Curve::Spline { .. } | b::Curve::RationalSpline { .. })),
-        "a spline edge on part of its curve"
-    );
     let body = crate::native::body_from_smlib(&common).unwrap();
     let exact = std::f64::consts::PI * 25. * 17.5;
     let ours = crate::measure(&body).unwrap().volume;
