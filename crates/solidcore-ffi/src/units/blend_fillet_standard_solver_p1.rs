@@ -193,18 +193,18 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
+pub(crate) fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
 /// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
+pub(crate) struct Reader<'a> {
+    pub(crate) input: &'a [f64],
+    pub(crate) at: usize,
 }
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
             .get(self.at)
@@ -214,7 +214,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finite(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() {
             return Err(bad("non-finite value"));
@@ -222,7 +222,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn param(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn param(&mut self) -> Result<f64, FfiError> {
         let v = self.finite()?;
         if v.abs() > MAX_PARAM {
             return Err(bad("parameter too large"));
@@ -230,11 +230,11 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
+    pub(crate) fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
         (0..k).map(|_| self.finite()).collect()
     }
 
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
+    pub(crate) fn index(&mut self, max: usize) -> Result<usize, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
             return Err(bad(format!("bad index/count {v}")));
@@ -242,11 +242,11 @@ impl Reader<'_> {
         Ok(v as usize)
     }
 
-    fn flag(&mut self) -> Result<bool, FfiError> {
+    pub(crate) fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
     }
 
-    fn done(&self) -> Result<(), FfiError> {
+    pub(crate) fn done(&self) -> Result<(), FfiError> {
         if self.at != self.input.len() {
             return Err(bad("trailing input"));
         }
@@ -313,7 +313,7 @@ fn points(rd: &mut Reader<'_>, k: usize) -> Result<Vec<[f64; 4]>, FfiError> {
 }
 
 /// Reads and validates a B-spline curve `n p m cpts knots`; returns its interval.
-fn bcurve(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
+pub(crate) fn bcurve(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
     let n = rd.index(MAX_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;
     let m = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;

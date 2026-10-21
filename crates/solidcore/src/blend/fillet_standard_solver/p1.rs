@@ -46,9 +46,10 @@
 //! | [`CircularCrossSectionFsg`], [`CircularCrossSectionFsg::create_surface_from_curves`] | `SmCircularCrossSectionFSG`, `CreateSurfaceFromCurves` |
 //! | [`BlendCurveCrossSectionFsg`], [`BlendCurveCrossSectionFsg::create_surface_from_curves`] | `SmBlendCurveCrossSectionFSG`, `CreateSurfaceFromCurves` |
 //! | [`GuessSphereSolve::new`]                                | `SmGuessSphereSolveENFO::SmGuessSphereSolveENFO` (file-local class) |
-//! | [`FilletSolver`] (re-exported from `blend.fillet_solver_p1`) | the `SmFilletSolver` base of the solvers (`FilletSolver::is_kind_of` is `SmFilletSolver::IsKindOf`) |
-//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`] (re-exported from `blend.fillet_solver_p1`), [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
-//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read; `Evaluate` is unit `blend.fillet_executive_p1`'s, the constructors `blend.fillet_executive_p2`'s) |
+//! | [`FilletSolverData`] (CO-PORTED)                         | the `SmFilletSolver` members these solvers read       |
+//! | [`fillet_solver_is_kind_of`] (CO-PORTED)                 | `SmFilletSolver::IsKindOf`                            |
+//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`], [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
+//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read; `Evaluate` is in `blend::fillet_executive::p1`, the constructors in `blend::fillet_executive::p2`) |
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
@@ -110,10 +111,8 @@
 //!   (`SmCircularCrossSectionFSG::CreateSurfaceFromCurves` reads past its cross sections
 //!   when a ruled or revolved surface needs a second, knot-equalising pass,
 //!   `plan/upstream-issues.md`).
-//! - **Unported callees.** The fillet law evaluation (`blend.fillet_executive_p1`)
-//!   returns [`SolidError::Unported`]; `SmFilletSolver::SetExtensionFlags`
-//!   ([`FilletSolver::set_extension_flags`]) takes the B-rep and stops at its corner
-//!   lookup (`blend.fillet_executive_p1`).
+//! - **Unported callees.** `SmFilletSolver::SetExtensionFlags` (`blend.fillet_solver_p1`)
+//!   returns [`SolidError::Unported`].
 //! - No recursion.
 
 use crate::blend::fillet_custom_solver::{
@@ -1746,25 +1745,6 @@ impl FilletLaw {
     pub fn set_extended_edge_curve(&mut self, curve: Option<BSplineCurve>) {
         self.extended = curve;
     }
-
-    /// `Evaluate(dParameter, crCurveInterval, bReverseOrientation, dValues)`: the
-    /// radius and its first two derivatives at `parameter`.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] (`blend.fillet_executive_p1`).
-    pub fn evaluate(
-        &mut self,
-        _parameter: f64,
-        _interval: &Extent1d,
-        _reverse: bool,
-    ) -> Result<[f64; 3]> {
-        // UNPORTED(blend.fillet_executive_p1): SmFilletLaw::Evaluate
-        Err(SolidError::unported(
-            "SmFilletLaw::Evaluate",
-            "blend.fillet_executive_p1",
-        ))
-    }
 }
 
 // ---- SmVariableRadiusFS -------------------------------------------------------------------
@@ -1925,9 +1905,8 @@ impl VariableRadiusFs {
     ///
     /// # Errors
     ///
-    /// Those of the law evaluation ([`SolidError::Unported`],
-    /// `blend.fillet_executive_p1`); [`SolidError::InvalidInput`] for a missing offset
-    /// surface.
+    /// Those of the law evaluation ([`FilletLaw::evaluate`]);
+    /// [`SolidError::InvalidInput`] for a missing offset surface.
     pub fn setup_offset_values(&mut self, tsect_pnt: &TsectPnt) -> Result<f64> {
         // compute the radius value at this intersection point
         let t = tsect_pnt
@@ -3543,15 +3522,17 @@ mod tests {
         assert!(fs.offset_radii_can_change().expect("can change"));
         fs.curve_based.solver.set_fillet_surface_generator(None);
         assert!(fs.offset_radii_can_change().is_err());
-        // the base SetExtensionFlags dereferences the missing edge uses
-        assert!(matches!(
-            fs.set_extension_flags(k, &Brep::new()),
-            Err(SolidError::InvalidInput { .. })
-        ));
         assert!(fs
-            .setup_offset_values(&TsectPnt::new())
+            .set_extension_flags()
             .expect_err("unported")
             .is_unported());
+        // the law evaluates (1.25); the solver has no offset surfaces to set
+        let mut t = TsectPnt::new();
+        t.user_doubles[0] = 0.25;
+        assert!(matches!(
+            fs.setup_offset_values(&t),
+            Err(SolidError::InvalidInput { .. })
+        ));
         fs.set_fillet_law_interval(Extent1d::from_min_max(2.0, 3.0));
         assert_eq!(fs.fillet_law_interval().max(), 3.0);
         assert_eq!(fs.jacobian_size(), 5);

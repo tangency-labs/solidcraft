@@ -31,7 +31,10 @@
 //! Not upstream: [`ExecutiveAccess::shrink_face`] shrinks the new fillet faces with
 //! knot snapping of rounding errors (tangency-labs/solidcore#472).
 
-use crate::blend::fillet_geom::p1::FilletCornerType;
+use std::collections::BTreeMap;
+
+use crate::blend::fillet_executive::p1::ExecutiveObjects;
+use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType};
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::error::{EntityRef, Result, SolidError};
@@ -98,7 +101,7 @@ pub struct ErrorInfo<O> {
     /// `m_pFilletEdges`, including null entries.
     pub edges: Vec<Option<O>>,
     /// `m_pFilletCurves` (not copied by operator=).
-    pub curves: Vec<O>,
+    pub curves: Vec<Option<O>>,
     /// `m_vLocation` (not copied by operator=).
     pub location: Option<Point3>,
     /// `m_cComment` (not copied by operator=).
@@ -113,7 +116,7 @@ impl<O> Default for ErrorInfo<O> {
             code: 0,
             status: 0,
             corner_type: FilletCornerType::Unknown,
-            edge_type: 0,
+            edge_type: FilletEdgeType::Unknown as i32,
             executive: None,
             vertex: None,
             edge: None,
@@ -205,6 +208,21 @@ pub struct FilletExecutive<O> {
     /// `m_sLawSequenceEdgeList`: the edge sequences `CreateSequenceOfLaws` set up, each
     /// in order (added by `blend.fillet_executive_p2`).
     pub law_sequence_edges: Vec<Vec<O>>,
+    /// `m_pPseudoBrep`: the fillet B-rep of fillet edges and vertices (added by
+    /// `blend.fillet_executive_p1`).
+    pub pseudo_brep: Option<O>,
+    /// `m_vFSGs`: the fillet surface generators the executive owns (added by
+    /// `blend.fillet_executive_p1`).
+    pub surface_generators: Vec<O>,
+    /// `m_vVertexCornerMap`: the fillet corner of each filleted vertex (added by
+    /// `blend.fillet_executive_p1`).
+    pub vertex_corner_map: BTreeMap<O, O>,
+    /// `m_vEdgeuseSolverMap`: the fillet solver of each filleted edge use (added by
+    /// `blend.fillet_executive_p1`; `blend::fillet_corner::p3::FilletExecutiveData`
+    /// holds the same map over typed ids).
+    pub edgeuse_solver_map: BTreeMap<O, O>,
+    /// `m_pSelfIntersectionHandler` (added by `blend.fillet_executive_p1`).
+    pub self_intersection_handler: Option<O>,
 }
 
 /// Error-only corner metadata, requested only after a corner operation fails.
@@ -792,6 +810,20 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn geom_side_edgeuses(&self, geom: O) -> Result<Vec<O>>;
     /// `SmEdgeuse::GetEdge()` / the edge use's owning edge (`None` for null).
     fn edgeuse_edge(&self, edgeuse: O) -> Result<Option<O>>;
+    /// `SmEdge::GetEdgeuses()` (used by `blend.fillet_executive_p1`).
+    fn edge_edgeuses(&self, edge: O) -> Result<Vec<O>>;
+    /// `SmFilletEdge::GetName`, `GetFilletEdgeType()` and `GetStatus()` of a fillet
+    /// edge; the name is `None` for the types `GetName` writes nothing for (used by
+    /// `blend.fillet_executive_p1`).
+    fn fillet_edge_note(
+        &self,
+        fillet_edge: O,
+    ) -> Result<(Option<&'static str>, FilletEdgeType, FilStatus)>;
+    /// The objects `SmFilletExecutive(crContext, pTargetBrep)` allocates: its identity,
+    /// a new pseudo `SmFilletBrep` with editing enabled and a new
+    /// `SmAttribute(SM_AI_ALL_FILLET_EDGES, SM_AB_STANDALONE_REFERENCE)` (used by
+    /// `blend.fillet_executive_p1`).
+    fn new_executive_objects(&mut self, k: &mut Kernel) -> Result<ExecutiveObjects<O>>;
     /// `SmFilletEdge::GetOriginalFace()`.
     fn fillet_edge_original_face(&self, fillet_edge: O) -> Result<Option<O>>;
     /// `SmFilletEdge::GetOriginalEdge()`.

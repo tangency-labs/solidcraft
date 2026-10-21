@@ -1,0 +1,2816 @@
+{
+ "cases": [
+  {
+   "name": "linear_2_to_0_box_edge",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 2.0,
+     "r1": 0.0
+    },
+    "calls": [
+     {
+      "t": 0,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2.5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 10,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2.5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": true
+     },
+     {
+      "t": -3,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 13,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:2391"
+  },
+  {
+   "name": "linear_2_to_05_reversed",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 2.0,
+     "r1": 0.5
+    },
+    "calls": [
+     {
+      "t": 1.25,
+      "ivl": [
+       1,
+       4
+      ],
+      "reverse": true
+     },
+     {
+      "t": 4,
+      "ivl": [
+       1,
+       4
+      ],
+      "reverse": true
+     },
+     {
+      "t": 1,
+      "ivl": [
+       1,
+       4
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:2693"
+  },
+  {
+   "name": "linear_submap_two_edge_sequence",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1.0,
+     "r1": 3.0
+    },
+    "calls": [
+     {
+      "t": 0,
+      "ivl": [
+       0,
+       2
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1,
+      "ivl": [
+       0,
+       2
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2,
+      "ivl": [
+       0,
+       2
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       2
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.0,
+     0.4
+    ]
+   },
+   "upstream_ref": "source/SMLib/inc/SmFilletExecutive.h:669 (edge maps [0,0.4], [0.4,1])"
+  },
+  {
+   "name": "linear_submap_second_edge",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1.0,
+     "r1": 3.0
+    },
+    "calls": [
+     {
+      "t": 0,
+      "ivl": [
+       5,
+       8
+      ],
+      "reverse": false
+     },
+     {
+      "t": 6.5,
+      "ivl": [
+       5,
+       8
+      ],
+      "reverse": false
+     },
+     {
+      "t": 8,
+      "ivl": [
+       5,
+       8
+      ],
+      "reverse": false
+     },
+     {
+      "t": 8,
+      "ivl": [
+       5,
+       8
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.4,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "linear_zero_length_map_means_none",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1.0,
+     "r1": 2.0
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.3,
+     0.3
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5335"
+  },
+  {
+   "name": "linear_zero_length_interval_divides_by_zero",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1.0,
+     "r1": 2.0
+    },
+    "calls": [
+     {
+      "t": 3,
+      "ivl": [
+       3,
+       3
+      ],
+      "reverse": false
+     },
+     {
+      "t": 3,
+      "ivl": [
+       3,
+       3
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "linear_huge_radii",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1e+200,
+     "r1": 3e+200
+    },
+    "calls": [
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       0.001
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.75,
+      "ivl": [
+       0,
+       0.001
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "linear_tiny_radii",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1e-200,
+     "r1": 3e-200
+    },
+    "calls": [
+     {
+      "t": 250,
+      "ivl": [
+       0,
+       1000.0
+      ],
+      "reverse": false
+     },
+     {
+      "t": 750,
+      "ivl": [
+       0,
+       1000.0
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "base_law_evaluate_is_error",
+   "inputs": {
+    "law": {
+     "kind": "base"
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   },
+   "upstream_ref": "source/SMLib/inc/SmFilletExecutive.h:708"
+  },
+  {
+   "name": "bspline_cubic_bezier_inside_domain",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.2,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.8,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       10,
+       10,
+       10,
+       10
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2.5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 7.5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": true
+     },
+     {
+      "t": 10,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0,
+     10
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:307-399 (dBallRadius 1, edge interval [0,10])"
+  },
+  {
+   "name": "bspline_cubic_bezier_outside_domain_closed_law_copied",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.2,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.8,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       10,
+       10,
+       10,
+       10
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 5,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     },
+     {
+      "t": 12,
+      "ivl": [
+       0,
+       10
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0,
+     10
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:307 (G1-closed law curve: the extension is an unextended copy, evaluation clamps)"
+  },
+  {
+   "name": "bspline_degree1_is_linear_extension_both_sides",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 11,
+      "ivl": [
+       10,
+       14
+      ],
+      "reverse": false
+     },
+     {
+      "t": 11,
+      "ivl": [
+       10,
+       14
+      ],
+      "reverse": true
+     },
+     {
+      "t": 15,
+      "ivl": [
+       10,
+       14
+      ],
+      "reverse": false
+     },
+     {
+      "t": 9,
+      "ivl": [
+       10,
+       14
+      ],
+      "reverse": false
+     },
+     {
+      "t": 20,
+      "ivl": [
+       10,
+       14
+      ],
+      "reverse": false
+     },
+     {
+      "t": -5,
+      "ivl": [
+       10,
+       14
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "bspline_quadratic_extension_reuse_and_regrow",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.2,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.3,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.4,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 3.0,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": -0.1,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": -2,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_snap_to_ends_within_scaled_zero",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 1.0000000000001,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": -1e-13,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.0000000000001,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 3.0000000000000003e-13,
+      "ivl": [
+       0,
+       1e-13
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_zero_length_interval_is_error",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 3,
+      "ivl": [
+       3,
+       3
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_no_map_uses_unit_map",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 1,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_zero_length_map_means_unit",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.7,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "bspline_submap_scales_derivatives",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       -2,
+       -2,
+       -2,
+       -2,
+       2.0,
+       6,
+       6,
+       6,
+       6
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0,
+      "ivl": [
+       0,
+       4
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1,
+      "ivl": [
+       0,
+       4
+      ],
+      "reverse": false
+     },
+     {
+      "t": 4,
+      "ivl": [
+       0,
+       4
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2,
+      "ivl": [
+       0,
+       4
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     -1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "bspline_rational_law",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2.0,
+        0,
+        0,
+        0.5
+       ],
+       [
+        1.5,
+        0,
+        0,
+        2.0
+       ],
+       [
+        2.5,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": -0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_repeated_interior_knot",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.5,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.3,
+       0.3,
+       0.7,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.3,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.7,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.3,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 1.1,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_huge_scale",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        100000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        200000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        150000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        250000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       100000.0,
+       100000.0,
+       100000.0,
+       100000.0,
+       300000.0,
+       300000.0,
+       300000.0,
+       300000.0
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 150000.0,
+      "ivl": [
+       100000.0,
+       300000.0
+      ],
+      "reverse": false
+     },
+     {
+      "t": 250000.0,
+      "ivl": [
+       100000.0,
+       300000.0
+      ],
+      "reverse": true
+     },
+     {
+      "t": 350000.0,
+      "ivl": [
+       100000.0,
+       300000.0
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     100000.0,
+     300000.0
+    ]
+   }
+  },
+  {
+   "name": "bspline_tiny_scale",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1e-05,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2e-05,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5e-05,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5e-05,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.001,
+       0.001,
+       0.001,
+       0.001
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.00025,
+      "ivl": [
+       0,
+       0.001
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.0005,
+      "ivl": [
+       0,
+       0.001
+      ],
+      "reverse": true
+     },
+     {
+      "t": 0.0015,
+      "ivl": [
+       0,
+       0.001
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "bspline_constant_radius_zero_tangent",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 1.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_stray_yz_ignored",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        5,
+        -3,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.5,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.2,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_apex_zero_tangent_replaced",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 5,
+      "ivl": [
+       3,
+       7
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   },
+   "upstream_ref": "source/SMLib/inc/SmCurve.h:390 (bNonZeroTangents defaults TRUE: the zero first derivative at the apex is replaced from the second)"
+  },
+  {
+   "name": "bspline_cubic_apex_zero_tangent_replaced",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 5,
+      "ivl": [
+       3,
+       7
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "linear_reversed_map_and_interval",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 2.0,
+     "r1": 0.0
+    },
+    "calls": [
+     {
+      "t": 2.5,
+      "ivl": [
+       10,
+       0
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2.5,
+      "ivl": [
+       10,
+       0
+      ],
+      "reverse": true
+     },
+     {
+      "t": 0,
+      "ivl": [
+       10,
+       0
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     1.0,
+     0.0
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmExtent1d.cpp:121 (SmExtent1d(a, b) swaps a reversed pair)"
+  },
+  {
+   "name": "bspline_reversed_map_and_interval",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 2,
+      "ivl": [
+       4,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 2,
+      "ivl": [
+       4,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 5,
+      "ivl": [
+       4,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "linear_tiny_map_below_eff_zero_means_unit",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1.0,
+     "r1": 2.0
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.5,
+     0.5000000000005
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5336"
+  },
+  {
+   "name": "linear_tiny_map_above_eff_zero_kept",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": 1.0,
+     "r1": 2.0
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.5,
+     0.500000000002
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5336"
+  },
+  {
+   "name": "bspline_tiny_map_below_eff_zero_means_unit",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.5,
+     0.5000000000005
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5682"
+  },
+  {
+   "name": "bspline_tiny_map_above_eff_zero_kept",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 1,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ],
+    "map": [
+     0.5,
+     0.500000000002
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5682"
+  },
+  {
+   "name": "bspline_snap_boundary_equality_is_not_a_snap",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": -1.9e-12,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": -2e-12,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.0000000000019,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1.000000000002,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   },
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:6052-6062 (strict comparisons: law_t + tol == min extends)"
+  },
+  {
+   "name": "linear_negative_radii",
+   "inputs": {
+    "law": {
+     "kind": "linear",
+     "r0": -2.0,
+     "r1": 1.0
+    },
+    "calls": [
+     {
+      "t": 0,
+      "ivl": [
+       0,
+       3
+      ],
+      "reverse": false
+     },
+     {
+      "t": 1,
+      "ivl": [
+       0,
+       3
+      ],
+      "reverse": false
+     },
+     {
+      "t": 3,
+      "ivl": [
+       0,
+       3
+      ],
+      "reverse": true
+     },
+     {
+      "t": -1,
+      "ivl": [
+       0,
+       3
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "bspline_negative_radii",
+   "inputs": {
+    "law": {
+     "kind": "bspline",
+     "c": {
+      "cpts": [
+       [
+        -1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.5,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "calls": [
+     {
+      "t": 0.25,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     },
+     {
+      "t": 0.75,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": true
+     },
+     {
+      "t": 1.5,
+      "ivl": [
+       0,
+       1
+      ],
+      "reverse": false
+     }
+    ],
+    "kinds": [
+     16039,
+     16040,
+     16041,
+     11001,
+     16042
+    ]
+   }
+  },
+  {
+   "name": "error_info_defaults",
+   "inputs": {
+    "object": "error_info",
+    "exec": 0,
+    "script": []
+   }
+  },
+  {
+   "name": "error_info_with_executive_null_comment_keeps_old",
+   "inputs": {
+    "object": "error_info",
+    "exec": 7,
+    "script": [
+     {
+      "call": "note",
+      "code": 3,
+      "comment": null
+     },
+     {
+      "call": "note",
+      "code": 4,
+      "comment": "first"
+     },
+     {
+      "call": "note",
+      "code": 5,
+      "comment": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "error_info_null_texts_print_null",
+   "inputs": {
+    "object": "error_info",
+    "exec": 0,
+    "script": [
+     {
+      "call": "edge",
+      "edge": 2,
+      "status": 2,
+      "code": 4,
+      "comment": null
+     },
+     {
+      "call": "corner",
+      "code": 3,
+      "corner": 4,
+      "status": 2,
+      "name": null,
+      "vertex": 5,
+      "surfaces": [
+       1,
+       0
+      ],
+      "fillet_vertices": [
+       0,
+       6
+      ],
+      "comment": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "error_info_null_edge_ignored",
+   "inputs": {
+    "object": "error_info",
+    "exec": 0,
+    "script": [
+     {
+      "call": "note",
+      "code": 1,
+      "comment": "keep"
+     },
+     {
+      "call": "edge",
+      "edge": 0,
+      "status": 2,
+      "code": 4,
+      "comment": "dropped"
+     }
+    ]
+   }
+  },
+  {
+   "name": "error_info_comment_cut_to_1023_bytes",
+   "inputs": {
+    "object": "error_info",
+    "exec": 0,
+    "script": [
+     {
+      "call": "note",
+      "code": 2,
+      "comment": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "call": "fillet_edge",
+      "code": 4,
+      "status": 2,
+      "fe_type": 5,
+      "fillet_edge": 3,
+      "name": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "comment": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     }
+    ]
+   }
+  },
+  {
+   "name": "error_info_add_unique_keeps_nulls_once",
+   "inputs": {
+    "object": "error_info",
+    "exec": 0,
+    "script": [
+     {
+      "call": "merge",
+      "code": 7,
+      "status": 2,
+      "edge": 1,
+      "face": 2,
+      "fillet_edge": 0,
+      "surface": 3,
+      "comment": "m1"
+     },
+     {
+      "call": "merge",
+      "code": 7,
+      "status": 3,
+      "edge": 4,
+      "face": 0,
+      "fillet_edge": 0,
+      "surface": 3,
+      "comment": "m2"
+     },
+     {
+      "call": "merge",
+      "code": 7,
+      "status": 3,
+      "edge": 4,
+      "face": 0,
+      "fillet_edge": 5,
+      "surface": 0,
+      "comment": "m3"
+     },
+     {
+      "call": "intersection",
+      "code": 5,
+      "status": 3,
+      "edge": 6,
+      "surfaces": [
+       3,
+       0,
+       8,
+       8
+      ],
+      "curves": [
+       9,
+       9,
+       10
+      ],
+      "edges": [
+       5,
+       0,
+       11
+      ],
+      "at": [
+       1.5,
+       -2.25,
+       1e-300
+      ],
+      "comment": "x"
+     }
+    ]
+   }
+  },
+  {
+   "name": "executive_defaults",
+   "inputs": {
+    "object": "executive",
+    "target": 0,
+    "script": []
+   }
+  },
+  {
+   "name": "executive_setters_and_topo_edges",
+   "inputs": {
+    "object": "executive",
+    "target": 5,
+    "script": [
+     {
+      "call": "add_topo_edge",
+      "h": 1
+     },
+     {
+      "call": "add_topo_edge",
+      "h": 2
+     },
+     {
+      "call": "add_topo_edge",
+      "h": 1
+     },
+     {
+      "call": "add_topo_edge",
+      "h": 0
+     },
+     {
+      "call": "remove_topo_edge",
+      "h": 1
+     },
+     {
+      "call": "remove_topo_edge",
+      "h": 9
+     },
+     {
+      "call": "remove_topo_edge",
+      "h": 0
+     },
+     {
+      "call": "add_generator",
+      "h": 3
+     },
+     {
+      "call": "add_generator",
+      "h": 3
+     },
+     {
+      "call": "handler",
+      "h": 4
+     },
+     {
+      "call": "global_merge",
+      "on": true
+     },
+     {
+      "call": "trimming",
+      "on": false
+     },
+     {
+      "call": "note",
+      "code": 6,
+      "comment": "exec note"
+     }
+    ]
+   }
+  },
+  {
+   "name": "executive_corner_error_names_entity",
+   "inputs": {
+    "object": "executive",
+    "target": 1,
+    "script": [
+     {
+      "call": "corner",
+      "code": 3,
+      "corner": 12,
+      "status": 2,
+      "name": "SM_FCR_N_x_N_CONCAVE",
+      "vertex": 2,
+      "surfaces": [
+       3,
+       3
+      ],
+      "fillet_vertices": [
+       4,
+       5
+      ],
+      "comment": "Unable to intersect fillet surfaces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "executive_lookups_wrappers_and_fillet_edge_errors",
+   "inputs": {
+    "object": "executive",
+    "target": 3,
+    "script": [
+     {
+      "call": "map_corner",
+      "v": 1,
+      "c": 7
+     },
+     {
+      "call": "map_corner",
+      "v": 1,
+      "c": 8
+     },
+     {
+      "call": "map_corner",
+      "v": 0,
+      "c": 9
+     },
+     {
+      "call": "map_solver",
+      "eu": 2,
+      "s": 5
+     },
+     {
+      "call": "corner_of",
+      "v": 1
+     },
+     {
+      "call": "corner_of",
+      "v": 4
+     },
+     {
+      "call": "corner_of",
+      "v": 0
+     },
+     {
+      "call": "solver_of",
+      "eu": 2
+     },
+     {
+      "call": "solver_of",
+      "eu": 3
+     },
+     {
+      "call": "note_fillet_error",
+      "code": 4,
+      "fe_type": 6,
+      "status": 2,
+      "comment": null
+     },
+     {
+      "call": "note_fillet_error",
+      "code": 4,
+      "fe_type": 9,
+      "status": 3,
+      "comment": "rail été 中"
+     },
+     {
+      "call": "merge",
+      "code": 7,
+      "status": 2,
+      "edge": 1,
+      "face": 2,
+      "fillet_edge": 0,
+      "surface": 3,
+      "comment": "merge"
+     },
+     {
+      "call": "corner",
+      "code": 3,
+      "corner": 5,
+      "status": 2,
+      "name": "SM_FCR_3_x_2_MIXED",
+      "vertex": 2,
+      "surfaces": [
+       3,
+       0
+      ],
+      "fillet_vertices": [
+       0,
+       0
+      ],
+      "comment": "corner"
+     },
+     {
+      "call": "intersection",
+      "code": 5,
+      "status": 3,
+      "edge": 6,
+      "surfaces": [],
+      "curves": [
+       0,
+       9,
+       0
+      ],
+      "edges": [
+       0
+      ],
+      "at": [
+       0.0,
+       -0.0,
+       7.5
+      ],
+      "comment": "ok"
+     }
+    ]
+   }
+  }
+ ]
+}

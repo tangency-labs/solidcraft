@@ -581,6 +581,18 @@ impl ExecutiveAccess<Handle> for Access {
     fn geom_side_edgeuses(&self, _: Handle) -> Result<Vec<Handle>> {
         absent()
     }
+    fn edge_edgeuses(&self, _: Handle) -> Result<Vec<Handle>> {
+        absent()
+    }
+    fn fillet_edge_note(
+        &self,
+        _: Handle,
+    ) -> Result<(Option<&'static str>, FilletEdgeType, FilStatus)> {
+        absent()
+    }
+    fn new_executive_objects(&mut self, _: &mut Kernel) -> Result<ExecutiveObjects<Handle>> {
+        absent()
+    }
     fn edgeuse_edge(&self, _: Handle) -> Result<Option<Handle>> {
         absent()
     }
@@ -676,6 +688,11 @@ fn state() -> FilletExecutive<Handle> {
         intersection_edges: vec![],
         intersection_vertices: vec![],
         law_sequence_edges: vec![],
+        pseudo_brep: None,
+        surface_generators: vec![],
+        vertex_corner_map: BTreeMap::new(),
+        edgeuse_solver_map: BTreeMap::new(),
+        self_intersection_handler: None,
     }
 }
 
