@@ -164,6 +164,53 @@ impl Raw {
     }
 }
 
+/// A blend's faces (fillet, chamfer) in `h`, the history of a blend of edges `blended` of its
+/// one operand (operand 0), whose own edges `operand` lists (the faces each bounds, as in the
+/// operand's identity history): SMLib makes a blend face with no tag, so each Generated face is
+/// given [`FaceOrigin::Edge`] for every blended edge whose two faces both lie under faces next
+/// to it and no longer meet each other directly. A corner patch between several blends matches
+/// none of them and stays without origin.
+pub fn blends(h: &mut History, operand: &[EdgeProv], blended: &[usize]) {
+    let mut next_to: Vec<BTreeSet<FaceOrigin>> = vec![BTreeSet::new(); h.faces.len()];
+    for e in &h.edges {
+        for f in &e.faces {
+            for g in &e.faces {
+                if let (Some(set), Some(p)) = (next_to.get_mut(*f), h.faces.get(*g))
+                    && f != g
+                {
+                    set.extend(p.origins.iter().copied());
+                }
+            }
+        }
+    }
+    // Pairs of operand faces whose result faces still meet along an edge.
+    let mut meeting: BTreeSet<(FaceOrigin, FaceOrigin)> = BTreeSet::new();
+    for e in &h.edges {
+        if let [a, b] = e.faces.as_slice()
+            && let (Some(a), Some(b)) = (h.faces.get(*a), h.faces.get(*b))
+        {
+            for x in &a.origins {
+                for y in &b.origins {
+                    meeting.insert((*x.min(y), *x.max(y)));
+                }
+            }
+        }
+    }
+    for (f, around) in h.faces.iter_mut().zip(&next_to) {
+        if f.change != Change::Generated || !f.origins.is_empty() {
+            continue;
+        }
+        let edges = blended.iter().filter(|e| {
+            operand.get(**e).is_some_and(|p| {
+                let [a, b] = p.faces.as_slice() else { return false };
+                let (a, b) = (FaceOrigin::Face { operand: 0, face: *a }, FaceOrigin::Face { operand: 0, face: *b });
+                around.contains(&a) && around.contains(&b) && !meeting.contains(&(a.min(b), a.max(b)))
+            })
+        });
+        f.origins = edges.map(|e| FaceOrigin::Edge { operand: 0, edge: *e }).collect();
+    }
+}
+
 /// Reads non-negative values off the records.
 struct Reader<'a>(std::slice::Iter<'a, i64>);
 
