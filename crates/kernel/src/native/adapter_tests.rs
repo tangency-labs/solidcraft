@@ -9,10 +9,36 @@ fn refuses_domain_or_axis_changes_instead_of_approximating() {
     let plane = b::Surface::Plane { origin: [1e12; 3], u_axis: [1e-6, 0., 0.], v_axis: [0., 1., 0.] };
     assert!(compatible_surface(&plane).is_err());
     assert!(clamped(&[0., 0., 1., 1.], 2).is_ok());
-    // A spline edge on part of its curve would need truck to cut it: refused, not refitted.
     let spline = b::Curve::Spline { knots: vec![0., 0., 1., 1.], points: vec![[0.; 3], [1.; 3]] };
-    assert!(load_edge_curve(spline.clone(), [0., 0.5]).is_err());
     assert!(load_edge_curve(spline, [0., 1.]).is_ok());
+}
+
+/// A spline edge on part of its curve (SMLib bounds an intersection edge on a piece of its
+/// spline) loads as the piece cut out by knot insertion, not a refit: the same points at the
+/// same parameters, over exactly the interval.
+#[test]
+fn spline_edges_on_part_of_their_curve_load_as_that_piece() {
+    use mt::ParametricCurve;
+    let knots = vec![0., 0., 0., 0., 0.4, 0.4, 0.7, 1., 1., 1., 1.];
+    let points: Vec<[f64; 3]> = (0..7).map(|i| [f64::from(i), (f64::from(i) * 1.3).sin() * 4., f64::from(i * i) * 0.2]).collect();
+    let weights = [1., 0.8, 1.3, 0.9, 1.1, 0.7, 1.];
+    let rational = b::Curve::RationalSpline {
+        knots: knots.clone(),
+        homogeneous: points.iter().zip(weights).map(|(q, w)| [q[0] * w, q[1] * w, q[2] * w, w]).collect(),
+    };
+    for record in [b::Curve::Spline { knots, points }, rational] {
+        let exact = solidcraft_geom::brep::eval::CurveEval::new(&record).unwrap();
+        for interval in [[0.1, 0.35], [0.25, 0.9], [0., 0.4], [0.4, 1.]] {
+            let piece = load_edge_curve(record.clone(), interval).unwrap();
+            assert_eq!(piece.range_tuple(), (interval[0], interval[1]), "{interval:?}");
+            for k in 0..=20 {
+                let t = interval[0] + (interval[1] - interval[0]) * f64::from(k) / 20.;
+                let (q, r) = (piece.subs(t), exact.point(t).unwrap());
+                assert!((q - p([r.x, r.y, r.z])).magnitude() < 1e-12, "{interval:?} at {t}");
+            }
+        }
+        assert!(load_edge_curve(record, [0.5, 1.2]).is_err(), "beyond the curve's domain");
+    }
 }
 
 #[test]
@@ -370,4 +396,27 @@ fn smlib_torus_decodes_without_meshing_and_plans_with_a_sphere_beside_it() {
         let ours = crate::measure(&body).unwrap().volume;
         assert!((ours - exact).abs() < 1e-3 * exact, "{name}: decoded volume {ours}, exact {exact}");
     }
+}
+
+/// SMLib's intersection of a block and a cylinder bounds the top disc with spline edges on
+/// part of their curves: the body decodes (it was refused) with the cylinder's volume inside
+/// the block, π r² h.
+#[cfg(feature = "smlib")]
+#[test]
+fn smlib_spline_edges_on_part_of_their_curve_decode() {
+    use solidcraft_smlib::BooleanOp;
+    let block = crate::box_solid(Vec3::new(7.5, 15., 0.), Vec3::new(25., 32.5, 27.5)).unwrap();
+    let post = crate::cylinder(Vec3::new(12.5, 20., 10.), Vec3::Z, 5., 30.).unwrap();
+    let (a, c) = (crate::native::smlib_body(&block).unwrap(), crate::native::smlib_body(&post).unwrap());
+    let common = a.boolean(&c, BooleanOp::Intersect).unwrap().unwrap();
+    let record = common.to_native().unwrap();
+    assert!(
+        record.edges.iter().any(|e| matches!(e.curve.natural(), b::Natural::Range(lo, hi) if [lo, hi] != e.interval)
+            && matches!(e.curve, b::Curve::Spline { .. } | b::Curve::RationalSpline { .. })),
+        "a spline edge on part of its curve"
+    );
+    let body = crate::native::body_from_smlib(&common).unwrap();
+    let exact = std::f64::consts::PI * 25. * 17.5;
+    let ours = crate::measure(&body).unwrap().volume;
+    assert!((ours - exact).abs() < 1e-3 * exact, "decoded volume {ours}, exact {exact}");
 }
