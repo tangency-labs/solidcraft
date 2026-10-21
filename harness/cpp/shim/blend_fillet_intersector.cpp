@@ -2,7 +2,7 @@
 // difftest shim for unit `blend.fillet_intersector`: SmFilletIntersector
 // (source/SMLib/src/SmFilletIntersector.cpp, source/SMLib/inc/SmFilletIntersector.h), run on a
 // real SmFilletIntersector (a derived class reaches the protected state) over a real
-// SmConstantRadiusFS built from the two surfaces, plus the file-static helpers sm_FlushCrv and
+// SmConstantRadiusAssistedFS over offsets of the two surfaces (IxCra below), plus the file-static helpers sm_FlushCrv and
 // sm_FindGuessMidTsectPnt.
 //
 // Static functions of SmFilletIntersector.cpp cannot be linked against, so they are VERBATIM
@@ -16,9 +16,12 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmApiPrimitives.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
+#include <SmBrep.h>
 #include <SmContext.h>
+#include <SmEdge.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmFilletExecutive.h>
@@ -565,6 +568,36 @@ void run_op(int32_t op, Rd& rd, Pts& pts, Peek& si, const SmContext& ctx, std::v
 }
 } // namespace
 
+namespace
+{
+// The solver the intersector runs on: an SmConstantRadiusAssistedFS, whose PointOnPlaneSolve
+// override the intersector's EvaluateLawPoint reaches through the virtual. Its only
+// constructor takes an edge use: it is built on the first edge of an SmApiCreateBox box, then
+// the offset surfaces (offsets of the given base surfaces, allowing extension),
+// orientations and radii are replaced as the SmConstantRadiusFS surfaces constructor sets
+// them, and the edge uses cleared (as the blend.fillet_standard_solver_p2 shim does).
+struct IxCra : SmConstantRadiusAssistedFS
+{
+    IxCra(const SmContext& ctx, double tol, double ang, double tan, double r0, double r1, SmEdgeuse* eu)
+        : SmConstantRadiusAssistedFS(ctx, tol, ang, tan, r0, r1, eu)
+    {
+    }
+    void setup(SmOffsetSurface* s0, SmOffsetSurface* s1, double r0, double r1, double o0, double o1)
+    {
+        delete m_pSurfaces[0];
+        delete m_pSurfaces[1];
+        m_pSurfaces[0] = s0;
+        m_pSurfaces[1] = s1;
+        m_dFilletRadii[0] = r0;
+        m_dFilletRadii[1] = r1;
+        m_dOrientations[0] = o0;
+        m_dOrientations[1] = o1;
+        m_pEdgeuses[0] = NULL;
+        m_pEdgeuses[1] = NULL;
+    }
+};
+} // namespace
+
 // Program: `surfA surfB` (surfB `2` = the same object as A), `dom1[4] dom2[4]`, the solver
 // `r0 r1 orient0 orient1 tol ang_tol tangency_tol`, the intersector settings `ang_tol approx_tol
 // clipped_by_through trace_dir`, `npoints points`, then one op `op args`. Output: `op status
@@ -615,9 +648,28 @@ SC_EXPORT int32_t sc_blend_fillet_intersector_run(const double* in, int64_t n_in
             pts.v.push_back(t);
             read_point(rd, *t);
         }
+        SmBrep* box = NULL;
         {
-            SmConstantRadiusFS fs(ctx, ftol, fang, ftan, r0, r1, *a, *b, o0 ? TRUE : FALSE,
-                                  o1 ? TRUE : FALSE);
+            if (SmApiCreateBox(SmVector3d(0.0, 0.0, 0.0), 1.0, 1.0, 1.0, box) != SM_SUCCESS || box == NULL)
+                throw Bad();
+            SmTArray<SmEdge*> box_edges;
+            box->GetEdges(box_edges);
+            SmEdgeuse* box_eu = box_edges.GetSize() == 0 ? NULL : box_edges[0]->GetPrimaryEdgeuse();
+            if (box_eu == NULL)
+            {
+                delete box;
+                throw Bad();
+            }
+            IxCra fs(ctx, ftol, fang, ftan, r0, r1, box_eu);
+            {
+                double d0 = o0 ? 1.0 : -1.0;
+                double d1 = o1 ? 1.0 : -1.0;
+                SmOffsetSurface* s0 = new (ctx) SmOffsetSurface(r0 * d0, *a);
+                SmOffsetSurface* s1 = new (ctx) SmOffsetSurface(r1 * d1, *b);
+                s0->SetAllowExtension(TRUE);
+                s1->SetAllowExtension(TRUE);
+                fs.setup(s0, s1, r0, r1, d0, d1);
+            }
             {
                 Peek si(*a, d1, *b, d2, fs);
                 si.set(ang, tol, clipped, dir);
@@ -633,6 +685,7 @@ SC_EXPORT int32_t sc_blend_fillet_intersector_run(const double* in, int64_t n_in
                     t->ReSet();
             }
         }
+        delete box;
         if (!same)
             delete b;
         delete a;

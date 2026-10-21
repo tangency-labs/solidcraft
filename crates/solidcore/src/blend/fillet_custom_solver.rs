@@ -17,8 +17,8 @@
 //! | [`SecantConstantRadiusFs::load_initial_values`]   | `SmSecantConstantRadiusFS::LoadInitialValues`     |
 //! | [`SecantConstantRadiusFs::load_jacobian`]         | `SmSecantConstantRadiusFS::LoadJacobian`          |
 //! | [`ConstantRadiusAssistedFs`] (CO-PORTED)          | `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` over the `SmFilletSolver` base ([`FilletSolver`]) |
-//! | `impl FilletSolverOps for ConstantRadiusAssistedFs` | the same inherited overrides plus `SmConstantRadiusFS::LoadJacobian` (`blend.fillet_standard_solver_p1`'s methods); `IsKindOf` and `LoadInitialValues` (`_p2`) return [`SolidError::Unported`] (the class `blend.fillet_intersector` runs `ComputeSurfaceValues` on) |
-//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides `GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType` call `blend.fillet_standard_solver_p1`'s; `IsKindOf` (`_p2`) returns [`SolidError::Unported`] |
+//! | `impl FilletSolverOps for ConstantRadiusAssistedFs` | the same inherited overrides plus `SmConstantRadiusFS::LoadJacobian` (`blend.fillet_standard_solver_p1`'s methods), `SmConstantRadiusAssistedFS::IsKindOf` and `SmConstantRadiusFS::LoadInitialValues` (`_p2`'s) (the class `blend.fillet_intersector` runs `ComputeSurfaceValues` on) |
+//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides `GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType` call `blend.fillet_standard_solver_p1`'s, `IsKindOf` `_p2`'s |
 //! | [`OffsetSurface`], [`SurfaceId`]                  | an `SmOffsetSurface*` rail surface (unit `surface.offset_surface`) and the identity of its base pointer |
 //! | [`JacobianLoad`], [`InitialValues`]               | the in/out arguments of `LoadJacobian`, `LoadInitialValues` |
 //!
@@ -44,7 +44,10 @@
 //!   upstream's `const` evaluators do, so `crSurface1` of `LoadInitialValues` is
 //!   `&mut`. Upstream's `crSurface1` may be one of the solver's own surfaces
 //!   (`GetSurface(i)`), which then keeps that extension after the call; here it is the
-//!   caller's surface (the solver is borrowed shared), so the solver's copy does not.
+//!   caller's surface, a separate object (`SmConstantRadiusAssistedFS::PointOnPlaneSolve`,
+//!   `blend.fillet_standard_solver_p2`, hands its extension back to the solver's
+//!   offset). `GuessPointOnPlaneSolve` runs on the solver itself, whose offsets keep
+//!   the extensions it makes.
 //!   For the same reason `rpSurface2->LocalPointSolve` runs on a copy of the other
 //!   rail's offset and drops an extension it makes (its `MINIMIZE` solve is
 //!   `LocalPointSolve_1`).
@@ -65,14 +68,14 @@
 //!   with checks: an index upstream would read or write out of bounds is
 //!   [`SolidError::InvalidInput`]. `rIntervals` must have room for the two new
 //!   intervals, as upstream's fixed-size `SmExtentNd`.
-//! - **Unported callees.** `SmConstantRadiusAssistedFS::GuessPointOnPlaneSolve`
-//!   (`blend.fillet_standard_solver_p2`) returns [`SolidError::Unported`]. Offset
+//! - **Callees.** `SmConstantRadiusAssistedFS::GuessPointOnPlaneSolve` is
+//!   `blend.fillet_standard_solver_p2`'s
+//!   [`ConstantRadiusAssistedFs::guess_point_on_plane_solve`]. Offset
 //!   evaluations use the real offset port; point solvers and default singularity
 //!   construction propagate the errors of their surface dispatchers.
 
-use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, FilletSolverType, OffsetSurfaceSlot,
-};
+use crate::blend::fillet_intersector::FilletSolverOps as IntersectorOps;
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
 use crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
@@ -98,7 +101,7 @@ use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surface::p1::{evaluate_1st_derivatives, evaluate_2nd_derivatives};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p7::{compute_inward_vector, drop_vectors_at};
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as edgeuse;
 use crate::topology::{Brep, EdgeuseId, FaceId, ObjectHandle};
 
@@ -240,8 +243,8 @@ pub(crate) fn offset_compute_inward_vector(
 /// `LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, bFound, sSol)` of an offset
 /// surface: the found UV point and its distance.
 /// `None` when no answer was found. The solve runs on a copy of the offset (the solver
-/// is borrowed shared), so a base extension it makes is not kept (see the module
-/// deviations).
+/// is borrowed shared); a base extension it makes is kept by the offset (pending, as
+/// its `&self` evaluators keep one), as upstream's `const` evaluators store it.
 pub(crate) fn offset_local_point_solve(
     k: &Kernel,
     s: &OffsetSurface,
@@ -259,6 +262,10 @@ pub(crate) fn offset_local_point_solve(
         point,
         guess,
     )?;
+    // (upstream solves on the offset itself: it keeps an extension the solve made)
+    if let SurfaceKind::OffsetSurface(o) = surface.kind() {
+        s.surface.keep_extension_made_by(o);
+    }
     if !r.found {
         return Ok(None);
     }
@@ -378,6 +385,22 @@ impl ConstantRadiusAssistedFs {
             .ok_or_else(|| SolidError::invalid_input(OP, "no offset surface for the rail"))
     }
 
+    /// Takes over the base extension of `copy`, a copy of `GetSurface(rail)` that a
+    /// caller evaluated in its place (`LoadInitialValues`' `crSurface1`): upstream
+    /// evaluates the solver's own offset surface, whose `m_pExtendedSurface` then holds
+    /// it. A caller that passes a copy of `GetSurface(i)` must hand it back this way
+    /// (as `point_on_plane_solve` does).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a rail index above 1 or a missing surface.
+    pub fn take_surface_extension(&mut self, rail: usize, copy: &OffsetSurface) -> Result<()> {
+        self.surface_mut(rail)?
+            .surface
+            .take_extension_of(&copy.surface);
+        Ok(())
+    }
+
     pub(crate) fn surface_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
         self.solver
             .surface_mut(rail)?
@@ -401,25 +424,6 @@ impl ConstantRadiusAssistedFs {
         let d = self.radius(rail)? * self.orientation(rail)?;
         self.surface_mut(rail)?.set_offset_distance(d);
         Ok(())
-    }
-
-    /// `GuessPointOnPlaneSolve(crPlaneOrig, crPlaneNormal, crUVDomain1, crUVDomain2,
-    /// rUV1, rUV2, rbFoundSolution, rTsectPnt)`.
-    #[allow(clippy::unused_self, clippy::too_many_arguments)]
-    fn guess_point_on_plane_solve(
-        &self,
-        _plane_orig: Point3,
-        _plane_normal: Vec3,
-        _uv_domain1: &Extent2d,
-        _uv_domain2: &Extent2d,
-        _uv1: Point2,
-        _uv2: Point2,
-    ) -> Result<Option<TsectPnt>> {
-        // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusAssistedFS::GuessPointOnPlaneSolve
-        Err(SolidError::Unported {
-            upstream: "SmConstantRadiusAssistedFS::GuessPointOnPlaneSolve",
-            unit: "blend.fillet_standard_solver_p2",
-        })
     }
 }
 
@@ -792,7 +796,7 @@ impl EiffelTowerFs {
     /// notes).
     #[allow(clippy::too_many_arguments)]
     pub fn load_initial_values(
-        &self,
+        &mut self,
         k: &Kernel,
         brep: Option<&Brep>,
         do_surf2_calcs: bool,
@@ -809,9 +813,8 @@ impl EiffelTowerFs {
             // been loaded.
             return Ok(None);
         }
-        let fs = &self.base;
         let s = initial_setup(
-            fs,
+            &self.base,
             k,
             brep,
             rail_index,
@@ -821,24 +824,42 @@ impl EiffelTowerFs {
             guess_t,
             OP,
         )?;
-        let base1 = surface1.base_surface();
-        let base2 = fs.surface(s.surface2_rail)?.base_surface();
         let (mut uv1, mut uv2) = (s.uv1, s.uv2);
 
-        let rad_diff = fs.radius(0)? - fs.radius(1)?;
+        let rad_diff = self.base.radius(0)? - self.base.radius(1)?;
         // Will first solve for the regular tangent case on the cross-section plane
         let scale_factor = 1.2;
+        let mut tsect = TsectPnt::new();
+        // (GuessPointOnPlaneSolve runs on *this: its evaluations extend the solver's
+        // own offsets)
+        let found = if rail_index == 0 {
+            self.base.guess_point_on_plane_solve(
+                s.plane_orig,
+                s.plane_normal,
+                &s.domain1,
+                &s.domain2,
+                uv1,
+                uv2,
+                &mut tsect,
+            )?
+        } else {
+            self.base.guess_point_on_plane_solve(
+                s.plane_orig,
+                s.plane_normal,
+                &s.domain2,
+                &s.domain1,
+                uv2,
+                uv1,
+                &mut tsect,
+            )?
+        };
+        if !found {
+            return Err(SolidError::sm_err(OP));
+        }
+        let fs = &self.base;
+        let base1 = surface1.base_surface();
+        let base2 = fs.surface(s.surface2_rail)?.base_surface();
         if rail_index == 0 {
-            let tsect = fs
-                .guess_point_on_plane_solve(
-                    s.plane_orig,
-                    s.plane_normal,
-                    &s.domain1,
-                    &s.domain2,
-                    uv1,
-                    uv2,
-                )?
-                .ok_or_else(|| SolidError::sm_err(OP))?;
             uv1 = tsect.uv_pos(SrfIndex::First);
             uv2 = tsect.uv_pos(SrfIndex::Second);
             // Then we want to move sUV1 along sNormal2 for a (3D-)distance
@@ -854,16 +875,6 @@ impl EiffelTowerFs {
             let delta2 = drop_vector(k, base2, uv2, v2, OP)?;
             uv2 += delta2;
         } else {
-            let tsect = fs
-                .guess_point_on_plane_solve(
-                    s.plane_orig,
-                    s.plane_normal,
-                    &s.domain2,
-                    &s.domain1,
-                    uv2,
-                    uv1,
-                )?
-                .ok_or_else(|| SolidError::sm_err(OP))?;
             uv1 = tsect.uv_pos(SrfIndex::Second);
             uv2 = tsect.uv_pos(SrfIndex::First);
             // Then we want to move sUV2 along sNormal1 for a (3D-)distance
@@ -1363,7 +1374,7 @@ impl SecantConstantRadiusFs {
     /// As [`EiffelTowerFs::load_initial_values`].
     #[allow(clippy::too_many_arguments)]
     pub fn load_initial_values(
-        &self,
+        &mut self,
         k: &Kernel,
         brep: Option<&Brep>,
         do_surf2_calcs: bool,
@@ -1380,9 +1391,8 @@ impl SecantConstantRadiusFs {
             // been loaded.
             return Ok(None);
         }
-        let fs = &self.base;
         let s = initial_setup(
-            fs,
+            &self.base,
             k,
             brep,
             rail_index,
@@ -1392,22 +1402,40 @@ impl SecantConstantRadiusFs {
             guess_t,
             OP,
         )?;
-        let base1 = surface1.base_surface();
-        let base2 = fs.surface(s.surface2_rail)?.base_surface();
         let (mut uv1, mut uv2) = (s.uv1, s.uv2);
 
         // Will first solve for the regular tangent case on the cross-section plane
+        let mut tsect = TsectPnt::new();
+        // (GuessPointOnPlaneSolve runs on *this: its evaluations extend the solver's
+        // own offsets)
+        let found = if rail_index == 0 {
+            self.base.guess_point_on_plane_solve(
+                s.plane_orig,
+                s.plane_normal,
+                &s.domain1,
+                &s.domain2,
+                uv1,
+                uv2,
+                &mut tsect,
+            )?
+        } else {
+            self.base.guess_point_on_plane_solve(
+                s.plane_orig,
+                s.plane_normal,
+                &s.domain2,
+                &s.domain1,
+                uv2,
+                uv1,
+                &mut tsect,
+            )?
+        };
+        if !found {
+            return Err(SolidError::sm_err(OP));
+        }
+        let fs = &self.base;
+        let base1 = surface1.base_surface();
+        let base2 = fs.surface(s.surface2_rail)?.base_surface();
         if rail_index == 0 {
-            let tsect = fs
-                .guess_point_on_plane_solve(
-                    s.plane_orig,
-                    s.plane_normal,
-                    &s.domain1,
-                    &s.domain2,
-                    uv1,
-                    uv2,
-                )?
-                .ok_or_else(|| SolidError::sm_err(OP))?;
             uv1 = tsect.uv_pos(SrfIndex::First);
             uv2 = tsect.uv_pos(SrfIndex::Second);
             // Now we have a point corresponding to sUV2 where the ball touches
@@ -1418,16 +1446,6 @@ impl SecantConstantRadiusFs {
             let delta = drop_vector(k, base2, uv2, v, OP)?;
             uv2 += delta * 2.0;
         } else {
-            let tsect = fs
-                .guess_point_on_plane_solve(
-                    s.plane_orig,
-                    s.plane_normal,
-                    &s.domain2,
-                    &s.domain1,
-                    uv2,
-                    uv1,
-                )?
-                .ok_or_else(|| SolidError::sm_err(OP))?;
             uv1 = tsect.uv_pos(SrfIndex::Second);
             uv2 = tsect.uv_pos(SrfIndex::First);
             // Now we have a point corresponding to sUV1 where the ball touches
@@ -1610,40 +1628,42 @@ macro_rules! fillet_solver_ops {
                 &mut self.base.solver
             }
 
-            /// `SmConstantRadiusFS::GetJacobianSize` (inherited).
+            /// `SmConstantRadiusFS::GetJacobianSize`.
             fn jacobian_size(&self) -> Result<usize> {
-                Ok(ConstantRadiusAssistedFs::jacobian_size(&self.base))
+                Ok(self.base.jacobian_size())
             }
 
-            /// `SmConstantRadiusFS::SetupOffsetValues` (inherited).
+            /// `SmConstantRadiusFS::SetupOffsetValues`.
             fn setup_offset_values(
                 &mut self,
                 tsect: &TsectPnt,
                 offset_dist: Option<&mut f64>,
             ) -> Result<()> {
-                constant_radius_setup_offset_values(&mut self.base, tsect, offset_dist)
+                let d = self.base.setup_offset_values(tsect)?;
+                if let Some(o) = offset_dist {
+                    *o = d;
+                }
+                Ok(())
             }
 
-            /// `SmConstantRadiusFS::OffsetRadiiCanChange` (inherited).
+            /// `SmConstantRadiusFS::OffsetRadiiCanChange`.
             fn offset_radii_can_change(&self) -> Result<bool> {
-                Ok(ConstantRadiusAssistedFs::offset_radii_can_change(
-                    &self.base,
-                ))
+                Ok(self.base.offset_radii_can_change())
             }
 
-            /// `SmConstantRadiusAssistedFS::GetType` (inherited, `SM_COMMON`).
+            /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`: the derived solvers
+            /// declare none of their own).
             fn type_code(&self) -> Result<i64> {
-                Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+                Ok(crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE)
             }
 
-            /// `SmConstantRadiusAssistedFS::IsKindOf` (unit
-            /// `blend.fillet_standard_solver_p2`, not ported).
-            fn is_kind_of(&self, _t: i64) -> Result<bool> {
-                // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusAssistedFS::IsKindOf
-                Err(SolidError::unported(
-                    "SmConstantRadiusAssistedFS::IsKindOf",
-                    "blend.fillet_standard_solver_p2",
-                ))
+            /// `SmConstantRadiusAssistedFS::IsKindOf` (inherited).
+            fn is_kind_of(&self, t: i64) -> Result<bool> {
+                Ok(
+                    crate::blend::fillet_standard_solver::p2::constant_radius_assisted_is_kind_of(
+                        t,
+                    ),
+                )
             }
 
             /// `SmConstantRadiusAssistedFS::GetSolverType` (inherited):
@@ -1696,6 +1716,138 @@ macro_rules! fillet_solver_ops {
 fillet_solver_ops!(EiffelTowerFs);
 fillet_solver_ops!(SecantConstantRadiusFs);
 
+/// The `SmFilletSolver` interface `SmFilletIntersector` uses
+/// ([`crate::blend::fillet_intersector::FilletSolverOps`]) for a solver derived from
+/// `SmConstantRadiusAssistedFS`: everything is inherited (the base's implementation),
+/// except that `ComputeSurfaceValues` and `PointOnPlaneSolve` dispatch their virtual
+/// calls (`SetupOffsetValues`; `GetJacobianSize`, `LoadInitialValues`, `LoadJacobian`)
+/// on the derived class.
+macro_rules! fillet_intersector_ops {
+    ($t:ty) => {
+        impl crate::blend::fillet_intersector::FilletSolverOps for $t {
+            type FilletGeom = crate::blend::fillet_solver::p1::FilletGeomRef;
+
+            fn compute_surface_values(
+                &mut self,
+                _k: &Kernel,
+                uv_values: [Point2; 2],
+                point: &mut TsectPnt,
+            ) -> Result<()> {
+                FilletSolver::compute_surface_values(self, uv_values, point)
+            }
+
+            fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
+                IntersectorOps::compute_uv_vectors(&mut self.base, k, point)
+            }
+
+            /// `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (inherited, unit
+            /// `blend.fillet_standard_solver_p2`) on this class.
+            fn point_on_plane_solve(
+                &mut self,
+                k: &Kernel,
+                plane_origin: Point3,
+                plane_normal: Vec3,
+                uv_domain1: &Extent2d,
+                uv_domain2: &Extent2d,
+                uv1: Point2,
+                uv2: Point2,
+                point: &mut TsectPnt,
+            ) -> Result<bool> {
+                crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
+                    self,
+                    k,
+                    None,
+                    plane_origin,
+                    plane_normal,
+                    uv_domain1,
+                    uv_domain2,
+                    uv1,
+                    uv2,
+                    point,
+                )
+            }
+
+            fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
+                IntersectorOps::set_surfaces_to_zero_offset(&mut self.base)
+            }
+
+            fn reload_surface_offsets(&mut self) -> Result<()> {
+                IntersectorOps::reload_surface_offsets(&mut self.base)
+            }
+
+            fn rail_surface_evaluate_1st_derivatives(
+                &mut self,
+                rail: usize,
+                uv: Point2,
+            ) -> Result<(Point3, Vec3, Vec3)> {
+                IntersectorOps::rail_surface_evaluate_1st_derivatives(&mut self.base, rail, uv)
+            }
+
+            fn set_status(
+                &mut self,
+                status: crate::blend::fillet_intersector::FilStatus,
+            ) -> Result<()> {
+                IntersectorOps::set_status(&mut self.base, status)
+            }
+
+            fn last_fillet_geom(&self) -> Result<Self::FilletGeom> {
+                IntersectorOps::last_fillet_geom(&self.base)
+            }
+
+            fn self_intersection_handler(
+                &self,
+            ) -> Result<Option<crate::blend::fillet_intersector::HandlingAlgorithmType>> {
+                IntersectorOps::self_intersection_handler(&self.base)
+            }
+
+            fn smooth_out_intersection(
+                &mut self,
+                geom: &Self::FilletGeom,
+                curves_3d: &mut Vec<BSplineCurve>,
+                uv_curves1: &mut Vec<BSplineCurve>,
+                uv_curves2: &mut Vec<BSplineCurve>,
+            ) -> Result<()> {
+                IntersectorOps::smooth_out_intersection(
+                    &mut self.base,
+                    geom,
+                    curves_3d,
+                    uv_curves1,
+                    uv_curves2,
+                )
+            }
+
+            fn has_surface_generator(&self) -> Result<bool> {
+                IntersectorOps::has_surface_generator(&self.base)
+            }
+
+            fn create_fillet_surface(
+                &mut self,
+                k: &Kernel,
+                center_line: &mut BSplineCurve,
+                curve1: &mut BSplineCurve,
+                curve2: &mut BSplineCurve,
+                points: &[TsectPnt],
+                uv1: &mut BSplineCurve,
+                uv2: &mut BSplineCurve,
+            ) -> Result<Option<BSplineSurface>> {
+                IntersectorOps::create_fillet_surface(
+                    &mut self.base,
+                    k,
+                    center_line,
+                    curve1,
+                    curve2,
+                    points,
+                    uv1,
+                    uv2,
+                )
+            }
+        }
+    };
+}
+
+fillet_intersector_ops!(EiffelTowerFs);
+fillet_intersector_ops!(SecantConstantRadiusFs);
+
 /// `SmConstantRadiusFS::SetupOffsetValues` with the optional `pOffsetDist` out-param
 /// (`blend.fillet_standard_solver_p1`'s
 /// [`ConstantRadiusAssistedFs::setup_offset_values`] returns it).
@@ -1713,8 +1865,8 @@ fn constant_radius_setup_offset_values(
 
 /// The virtuals of `SmConstantRadiusAssistedFS` itself (the class `blend.fillet_intersector`
 /// runs `SmFilletSolver::ComputeSurfaceValues` on): the `SmConstantRadiusFS` overrides
-/// are `blend.fillet_standard_solver_p1`'s; those owned by `_p2` are explicit
-/// [`SolidError::Unported`] overrides, so none falls through to the base.
+/// are `blend.fillet_standard_solver_p1`'s, `IsKindOf` and `LoadInitialValues`
+/// `_p2`'s, so none falls through to the base.
 impl FilletSolverOps for ConstantRadiusAssistedFs {
     fn solver(&self) -> &FilletSolver {
         &self.solver
@@ -1748,22 +1900,9 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
     }
 
-    /// `GetSolverType`: `SM_FS_CONST_RADIUS` (`SmConstantRadiusFS::GetSolverType`,
-    /// `SmFilletStandardSolver.h:58`), the class the intersector shim builds; `StepSolve`
-    /// branches on it, and `SM_FS_CONST_RADIUS_ASSISTED` would send a clipped step down
-    /// the assisted branch the C++ does not take. Added by `blend.fillet_solver_p3`.
-    fn solver_type(&self) -> Result<FilletSolverType> {
-        Ok(FilletSolverType::ConstRadius)
-    }
-
-    /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`,
-    /// not ported).
-    fn is_kind_of(&self, _t: i64) -> Result<bool> {
-        // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusAssistedFS::IsKindOf
-        Err(SolidError::unported(
-            "SmConstantRadiusAssistedFS::IsKindOf",
-            "blend.fillet_standard_solver_p2",
-        ))
+    /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`).
+    fn is_kind_of(&self, t: i64) -> Result<bool> {
+        Ok(crate::blend::fillet_standard_solver::p2::constant_radius_assisted_is_kind_of(t))
     }
 
     /// `SmConstantRadiusFS::LoadJacobian` ([`ConstantRadiusAssistedFs::load_jacobian`]);
@@ -1794,25 +1933,32 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         found
     }
 
-    /// `SmConstantRadiusFS::LoadInitialValues` (unit `blend.fillet_standard_solver_p2`,
-    /// not ported).
+    /// `SmConstantRadiusFS::LoadInitialValues` (unit `blend.fillet_standard_solver_p2`:
+    /// [`ConstantRadiusAssistedFs::load_initial_values`]).
     fn load_initial_values(
         &mut self,
-        _k: &Kernel,
-        _brep: Option<&Brep>,
-        _do_surf2_calcs: bool,
-        _rail_index: usize,
-        _surface1: &mut OffsetSurface,
-        _surface1_index: usize,
-        _intervals: &mut ExtentNd,
-        _periodicities: &mut Vec<bool>,
-        _guess_t: &mut Vec<f64>,
+        k: &Kernel,
+        brep: Option<&Brep>,
+        do_surf2_calcs: bool,
+        rail_index: usize,
+        surface1: &mut OffsetSurface,
+        surface1_index: usize,
+        intervals: &mut ExtentNd,
+        periodicities: &mut Vec<bool>,
+        guess_t: &mut Vec<f64>,
     ) -> Result<Option<InitialValues>> {
-        // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusFS::LoadInitialValues
-        Err(SolidError::unported(
-            "SmConstantRadiusFS::LoadInitialValues",
-            "blend.fillet_standard_solver_p2",
-        ))
+        ConstantRadiusAssistedFs::load_initial_values(
+            self,
+            k,
+            brep,
+            do_surf2_calcs,
+            rail_index,
+            surface1,
+            surface1_index,
+            intervals,
+            periodicities,
+            guess_t,
+        )
     }
 }
 
@@ -1978,7 +2124,7 @@ mod tests {
             [1.0, -1.0],
             [None, None],
         );
-        let fs = SecantConstantRadiusFs::new(base, 0.2);
+        let mut fs = SecantConstantRadiusFs::new(base, 0.2);
         let mut ivl = ExtentNd::new(4);
         let mut per = vec![false, true];
         let mut g = vec![0.25, 0.75];

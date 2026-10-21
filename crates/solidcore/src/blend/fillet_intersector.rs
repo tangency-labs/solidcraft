@@ -255,25 +255,21 @@ pub trait FilletSolverOps {
     ///
     /// # Errors
     ///
-    /// The solver's failure; [`SolidError::Unported`] until ported.
+    /// The solver's failure. A virtual: each implementer dispatches it on its own
+    /// class (the base `SmFilletSolver::PointOnPlaneSolve` belongs to unit
+    /// `blend.fillet_solver_p2`).
     #[allow(clippy::too_many_arguments)]
     fn point_on_plane_solve(
         &mut self,
-        _k: &Kernel,
-        _plane_origin: Point3,
-        _plane_normal: Vec3,
-        _uv_domain1: &Extent2d,
-        _uv_domain2: &Extent2d,
-        _uv1: Point2,
-        _uv2: Point2,
-        _point: &mut TsectPnt,
-    ) -> Result<bool> {
-        // UNPORTED(blend.fillet_solver_p2): SmFilletSolver::PointOnPlaneSolve
-        Err(SolidError::unported(
-            "SmFilletSolver::PointOnPlaneSolve",
-            "blend.fillet_solver_p2",
-        ))
-    }
+        k: &Kernel,
+        plane_origin: Point3,
+        plane_normal: Vec3,
+        uv_domain1: &Extent2d,
+        uv_domain2: &Extent2d,
+        uv1: Point2,
+        uv2: Point2,
+        point: &mut TsectPnt,
+    ) -> Result<bool>;
 
     /// `SetSurfacesToZeroOffset()`: saves the offsets of the solver's offset surfaces
     /// and sets them to zero (`void` upstream).
@@ -454,27 +450,32 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         compute_uv_vectors(point)
     }
 
-    fn step_solve(
+    /// `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (unit
+    /// `blend.fillet_standard_solver_p2`). The intersector holds no B-rep: a solver with
+    /// edge uses fails in `LoadInitialValues` ([`SolidError::InvalidInput`]).
+    fn point_on_plane_solve(
         &mut self,
         k: &Kernel,
-        point: &TsectPnt,
-        step_size: &mut f64,
+        plane_origin: Point3,
+        plane_normal: Vec3,
         uv_domain1: &Extent2d,
         uv_domain2: &Extent2d,
-        flags: &mut StepSolve,
-        next: &mut TsectPnt,
-    ) -> Result<()> {
-        // non-virtual in the base; it dispatches on this solver's virtuals
-        // (GetSolverType, LoadInitialValues, ...), so the solver itself is passed. The
-        // flags are copied back on an error too: upstream sets them in place.
-        let mut out = StepSolveOutcome::default();
-        let r = FilletSolver::step_solve(
-            self, k, None, point, step_size, uv_domain1, uv_domain2, next, &mut out,
-        );
-        flags.found_answer = out.found_good_point;
-        flags.clipped = out.clipped;
-        flags.boundary_hit = out.boundary_hit;
-        r
+        uv1: Point2,
+        uv2: Point2,
+        point: &mut TsectPnt,
+    ) -> Result<bool> {
+        crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
+            self,
+            k,
+            None,
+            plane_origin,
+            plane_normal,
+            uv_domain1,
+            uv_domain2,
+            uv1,
+            uv2,
+            point,
+        )
     }
 
     fn set_status(&mut self, status: FilStatus) -> Result<()> {
@@ -518,16 +519,18 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     fn create_fillet_surface(
         &mut self,
         k: &Kernel,
-        _center_line: &mut BSplineCurve,
+        center_line: &mut BSplineCurve,
         curve1: &mut BSplineCurve,
         curve2: &mut BSplineCurve,
         points: &[TsectPnt],
-        _uv1: &mut BSplineCurve,
-        _uv2: &mut BSplineCurve,
+        uv1: &mut BSplineCurve,
+        uv2: &mut BSplineCurve,
     ) -> Result<Option<BSplineSurface>> {
-        // the virtual m_pFSG->CreateSurface: the base's generator (SM_ERR for the
-        // base class, the Eiffel tower surface, Unported for the standard
-        // generators); the generators read only the rails and the fillet points
+        use crate::blend::fillet_standard_solver::p1::RailSurface;
+        // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
+        // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..): the base's generator (SM_ERR for
+        // the base class); it reads the solver's tolerance and GetSolverType()
+        // (SM_FS_CONST_RADIUS_ASSISTED); pSur[i] = GetSurface(i), passed as copies
         let approx_tol_3d = self.solver.this_approx_tol_3d();
         let generator = self
             .solver
@@ -535,8 +538,26 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
             .ok_or(SolidError::null_pointer(
                 "blend::fillet_intersector::create_fillet_surface",
             ))?;
+        let sur0 = Surface::from(self.surface(0)?.surface.clone());
+        let sur1 = Surface::from(self.surface(1)?.surface.clone());
         generator
-            .create_surface(k, approx_tol_3d, curve1, curve2, points)
+            .create_surface(
+                k,
+                approx_tol_3d,
+                crate::blend::fillet_solver::p1::FilletSolverType::ConstRadiusAssisted,
+                Some(center_line),
+                curve1,
+                curve2,
+                points,
+                RailSurface {
+                    surface: Some(&sur0),
+                    uv_curve: Some(uv1),
+                },
+                RailSurface {
+                    surface: Some(&sur1),
+                    uv_curve: Some(uv2),
+                },
+            )
             .map(Some)
     }
 
@@ -2019,6 +2040,20 @@ mod tests {
 
     impl FilletSolverOps for ClipSolver {
         type FilletGeom = ();
+
+        fn point_on_plane_solve(
+            &mut self,
+            _k: &Kernel,
+            _plane_origin: Point3,
+            _plane_normal: Vec3,
+            _uv_domain1: &Extent2d,
+            _uv_domain2: &Extent2d,
+            _uv1: Point2,
+            _uv2: Point2,
+            _point: &mut TsectPnt,
+        ) -> Result<bool> {
+            Err(SolidError::sm_err("test"))
+        }
 
         fn compute_point_values(
             &mut self,

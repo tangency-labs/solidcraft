@@ -7,3 +7,4 @@
 //! units (`blend.fillet_standard_solver_p1`, `_p2`); each lives in its own submodule.
 
 pub mod p1;
+pub mod p2;

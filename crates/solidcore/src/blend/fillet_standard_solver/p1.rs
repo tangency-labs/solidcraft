@@ -75,8 +75,8 @@
 //!   `*GetSurface(lRailIndex)`, whose extension (and grown natural UV domain) then stays
 //!   on the solver, and the other rail's surface is `rpSurface2` itself. Its
 //!   `rpSurface2->LocalPointSolve` / `GlobalPointSolve` run on a copy of the other
-//!   rail's offset (the generic point solvers take the surface shared), so an extension
-//!   made there is not kept by the solver. The `SmTemporaryChangeValue` on the
+//!   rail's offset (the generic point solvers take the surface shared); an extension
+//!   the local solve made is handed back to the solver's offset. The `SmTemporaryChangeValue` on the
 //!   other base's `GetOutOfBoundsEnabled()` changes the solver's surface (and
 //!   `crSurface1` when it has the same base) in place and restores it on every exit.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are dropped.
@@ -206,6 +206,31 @@ pub const fn constant_radius_is_kind_of(t: i64) -> bool {
 pub use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverType, FilletSurfaceGeneratorType,
 };
+
+/// An `SmBoolean` result whose failure upstream cannot see (`IsPeriodic`): `Unported`
+/// propagates, any other failure reads as `TRUE`.
+fn boolean_status(r: Result<bool>) -> Result<bool> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(true),
+    }
+}
+
+/// [`boolean_status`] for `IsSingularity`: a failure reads as singular, direction
+/// unknown (`SM_SP_NEITHER`, the `v` branch).
+fn singularity_status(
+    r: Result<crate::surface::surface::p5::Singularity>,
+) -> Result<crate::surface::surface::p5::Singularity> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(crate::surface::surface::p5::Singularity {
+            singular: true,
+            direction: SurfParamType::Neither,
+        }),
+    }
+}
 
 /// How a fillet surface is trimmed (`SmBoundaryTrimmingType`): the enum co-ported by
 /// `blend.fillet_geom_p1` (PR #147), re-exported here.
@@ -729,11 +754,15 @@ impl SurfaceSurfaceFs {
 
     /// `SmSurfaceSurfaceFS::SetupOffsetExtension`: grows `domain` by the extension
     /// factor times its size at each corner (no growth in a periodic direction), only
-    /// in `u` (`v`) at a corner that is singular in `u` (otherwise).
+    /// in `u` (`v`) at a corner that is singular in `u` (otherwise). Upstream's method
+    /// is `void` and `IsPeriodic` / `IsSingularity` return an `SmBoolean`: a failing
+    /// test reads as `TRUE` (singular in no known direction: the `v` branch), as in the
+    /// base `SmFilletSolver::SetupOffsetExtension`.
     ///
     /// # Errors
     ///
-    /// Those of `IsPeriodic` and `IsSingularity`.
+    /// [`SolidError::Unported`] from `IsPeriodic` or `IsSingularity` (other failures
+    /// read as `TRUE`).
     pub fn setup_offset_extension(
         &self,
         k: &Kernel,
@@ -746,15 +775,15 @@ impl SurfaceSurfaceFs {
         // Do not extend if periodic.
         let periodic_extension_factor = 0.0;
 
-        if surf.is_periodic(k, domain, SurfParamType::U)? {
+        if boolean_status(surf.is_periodic(domain, SurfParamType::U))? {
             size.x *= periodic_extension_factor;
         }
-        if surf.is_periodic(k, domain, SurfParamType::V)? {
+        if boolean_status(surf.is_periodic(domain, SurfParamType::V))? {
             size.y *= periodic_extension_factor;
         }
 
         // process the min domain boundaries
-        let sing = surf.is_singularity(k, domain.min(), EFF_ZERO, false)?;
+        let sing = singularity_status(surf.is_singularity(k, domain.min(), EFF_ZERO, false))?;
         if !sing.singular {
             // when surface is not singular - extend the min domain boundary
             domain.add_point(domain.min() - size);
@@ -772,7 +801,7 @@ impl SurfaceSurfaceFs {
         }
 
         // process the max domain boundaries
-        let sing = surf.is_singularity(k, domain.max(), EFF_ZERO, false)?;
+        let sing = singularity_status(surf.is_singularity(k, domain.max(), EFF_ZERO, false))?;
         if !sing.singular {
             // when surface is not singular - extend the max domain boundary
             domain.add_point(domain.max() + size);

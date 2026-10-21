@@ -1,9 +1,10 @@
 //! Runner for unit `blend.fillet_intersector`: `SmFilletIntersector`.
 //!
 //! C++: `solidcore_ffi::units::blend_fillet_intersector` (a real `SmFilletIntersector` over a
-//! real `SmConstantRadiusFS` on `SmPlane` / `SmBSplineSurface` objects, plus the file-static
-//! helpers). Rust: `solidcore::blend::fillet_intersector` over the co-ported
-//! `ConstantRadiusAssistedFs` (the members `SmConstantRadiusFS` has).
+//! real `SmConstantRadiusAssistedFS` (offsets of `SmPlane` / `SmBSplineSurface` objects, built
+//! on a box edge use whose offsets are replaced), plus the file-static helpers). Rust:
+//! `solidcore::blend::fillet_intersector` over the co-ported `ConstantRadiusAssistedFs`, so the
+//! intersector's `PointOnPlaneSolve` virtual is the assisted solver's override on both sides.
 //!
 //! A case is two surfaces (B may be A itself), their domains, the solver's radii, orientations
 //! and tolerances, the intersector's tolerances and flags, a point arena and one op; both sides

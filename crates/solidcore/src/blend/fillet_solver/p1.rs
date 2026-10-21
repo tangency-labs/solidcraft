@@ -312,24 +312,34 @@ impl FilletSurfaceGenerator {
         }
     }
 
-    /// `CreateSurface` (virtual) on the rails and fillet points: `SM_ERR` for the base,
-    /// the Eiffel tower surface for [`FilletSurfaceGenerator::EiffelTower`] (it reads
-    /// only the solver's `GetThisApproxTol3d()`, passed as `approx_tol_3d`).
+    /// `CreateSurface(rFilletSolver, pCenterLine, pRail1Curve, pRail2Curve,
+    /// crFilletPoints, pSurf1, pUV1, pSurf2, pUV2, rpFilletSurface)` (virtual): `SM_ERR`
+    /// for the base, else the generator's surface. The solver is read only for its
+    /// `GetThisApproxTol3d()` (`approx_tol_3d`) and `GetSolverType()`
+    /// (`solver_type`); `center_line` is `None` for `NULL`.
     ///
     /// # Errors
     ///
     /// `SM_ERR` for [`FilletSurfaceGenerator::Base`]; those of
-    /// `SmEiffelTowerCrossSectionFSG::CreateSurface` and
-    /// `SmLinearCrossSectionFSG::CreateSurface` ([`LinearCrossSectionFsg::create_surface`]);
-    /// [`SolidError::Unported`] for the circular and blend-curve generators.
+    /// `SmEiffelTowerCrossSectionFSG::CreateSurface`,
+    /// `SmLinearCrossSectionFSG::CreateSurface` ([`LinearCrossSectionFsg::create_surface`])
+    /// and the circular and blend-curve generators' `CreateSurface`;
+    /// [`SolidError::InvalidInput`] for a missing centre line of the circular and
+    /// blend-curve generators (upstream dereferences `NULL`).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_surface(
         &self,
         k: &Kernel,
         approx_tol_3d: f64,
+        solver_type: FilletSolverType,
+        center_line: Option<&mut BSplineCurve>,
         rail1: &mut BSplineCurve,
         rail2: &mut BSplineCurve,
         points: &[TsectPnt],
+        side1: crate::blend::fillet_standard_solver::p1::RailSurface<'_>,
+        side2: crate::blend::fillet_standard_solver::p1::RailSurface<'_>,
     ) -> Result<crate::nurbs::b_spline_surface::BSplineSurface> {
+        let no_center = || SolidError::invalid_input(OP, "NULL centre line");
         match self {
             Self::Base => Err(SolidError::sm_err(OP)),
             Self::EiffelTower => {
@@ -338,16 +348,24 @@ impl FilletSurfaceGenerator {
             }
             // the ruled surface between the rails (SER)
             Self::Linear => LinearCrossSectionFsg.create_surface(rail1, rail2),
-            // UNPORTED(blend.fillet_standard_solver_p2): SmCircularCrossSectionFSG::CreateSurface
-            Self::Circular(_) => Err(SolidError::unported(
-                "SmCircularCrossSectionFSG::CreateSurface",
-                "blend.fillet_standard_solver_p2",
-            )),
-            // UNPORTED(blend.fillet_standard_solver_p2): SmBlendCurveCrossSectionFSG::CreateSurface
-            Self::BlendCurve(_) => Err(SolidError::unported(
-                "SmBlendCurveCrossSectionFSG::CreateSurface",
-                "blend.fillet_standard_solver_p2",
-            )),
+            Self::Circular(g) => g.create_surface(
+                k,
+                approx_tol_3d,
+                solver_type,
+                center_line.ok_or_else(no_center)?,
+                rail1,
+                rail2,
+            ),
+            Self::BlendCurve(g) => g.create_surface(
+                k,
+                approx_tol_3d,
+                solver_type,
+                center_line.ok_or_else(no_center)?,
+                rail1,
+                rail2,
+                side1,
+                side2,
+            ),
         }
     }
 }
@@ -2585,7 +2603,7 @@ pub enum AnalyticTestSurface<'a> {
 /// Those of `IsPlanar` and of the cone test (`SmCone::IsNurbSurfaceCone`), except a
 /// failing iso curve status, which upstream returns as the `SmBoolean` and which
 /// reads as `true`; `InvalidInput` for a surface kind that is not an
-/// `SmBSplineSurface`.
+/// `SmBSplineSurface` (a plane is accepted by type before).
 pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Result<bool> {
     use crate::surface::surface::p2::{CONE_TYPE, PLANE_TYPE};
     use crate::surface::surface::SurfaceKind;
@@ -2632,7 +2650,7 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
         },
         AnalyticTestSurface::Cone(c) => c.rev().base(),
         AnalyticTestSurface::Sphere(s) => s.base().base(),
-        AnalyticTestSurface::Torus(t) => t.base().base(),
+        AnalyticTestSurface::Torus(t) => t.base.base(),
     };
     match Cone::is_nurb_surface_cone(k, bss, 1.0) {
         Ok(None) => Ok(false),
