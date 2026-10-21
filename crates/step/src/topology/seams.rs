@@ -4,7 +4,7 @@
 //! apex); schema 4 keeps every loop closed in the surface's (u, v), so such a face gets a seam:
 //! a ruling line on a cylinder or cone, a meridian arc on a sphere, from a vertex of one loop to
 //! the other loop (split there when it has no vertex at that angle) or to the pole the face
-//! covers. The loops merge into one: the first, the seam out, the second (or nothing at a pole),
+//! covers; on a surface of revolution, its profile turned to the vertex's angle. The loops merge into one: the first, the seam out, the second (or nothing at a pole),
 //! the seam back. A torus face winding without a seam is refused for now.
 
 use std::f64::consts::{PI, TAU};
@@ -37,10 +37,12 @@ struct Axis {
     poles: [Option<Vec3>; 2],
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum Kind {
     Ruled,
     Sphere(f64),
+    /// A placed revolution with u the angle: its profile.
+    Revolved(BCurve),
 }
 
 fn axis(s: &BSurface) -> Option<Axis> {
@@ -63,8 +65,51 @@ fn axis(s: &BSurface) -> Option<Axis> {
             let (origin, z) = frame(f);
             Some(Axis { origin, z, kind: Kind::Sphere(*radius), poles: [Some(origin - z * *radius), Some(origin + z * *radius)] })
         }
+        BSurface::PlacedRevolution { profile, origin, axis, matrix, forward: false } if *matrix == IDENTITY => {
+            let (origin, z) = (Vec3::from(*origin), Vec3::from(*axis));
+            let c = CurveEval::new(profile).ok()?;
+            let solidcraft_geom::brep::Natural::Range(a, b) = profile.natural() else { return None };
+            // A profile end on the axis is a pole.
+            let pole = |t: f64| {
+                c.point(t).filter(|p| {
+                    let d = *p - origin;
+                    (d - z * d.dot(z)).len() <= 1e-9 * (1.0 + d.len())
+                })
+            };
+            Some(Axis { origin, z, kind: Kind::Revolved((**profile).clone()), poles: [pole(a), pole(b)] })
+        }
         _ => None,
     }
+}
+
+const IDENTITY: [[f64; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+
+/// `p` turned by `angle` about the axis through `o` along unit `k` (right-handed).
+fn turned(p: Vec3, o: Vec3, k: Vec3, angle: f64) -> Vec3 {
+    let (s, c) = angle.sin_cos();
+    let x = p - o;
+    o + x * c + k.cross(x) * s + k * (k.dot(x) * (1.0 - c))
+}
+
+/// A revolution's profile turned by `angle`: the meridian there, with the profile's parameter.
+fn meridian(profile: &BCurve, o: Vec3, k: Vec3, angle: f64) -> R<BCurve> {
+    let turn = |h: &[f64; 4]| {
+        let w = h[3];
+        let p = turned(Vec3::new(h[0] / w, h[1] / w, h[2] / w), o, k, angle);
+        [p.x * w, p.y * w, p.z * w, w]
+    };
+    Ok(match profile {
+        BCurve::Spline { knots, points } => {
+            BCurve::Spline { knots: knots.clone(), points: points.iter().map(|p| arr(turned(Vec3::from(*p), o, k, angle))).collect() }
+        }
+        BCurve::RationalSpline { knots, homogeneous } => {
+            BCurve::RationalSpline { knots: knots.clone(), homogeneous: homogeneous.iter().map(turn).collect() }
+        }
+        BCurve::Line { start, end } => {
+            BCurve::Line { start: arr(turned(Vec3::from(*start), o, k, angle)), end: arr(turned(Vec3::from(*end), o, k, angle)) }
+        }
+        _ => return Err(unsupported("a revolution of this profile")),
+    })
 }
 
 impl Builder<'_, '_> {
@@ -104,8 +149,8 @@ impl Builder<'_, '_> {
             };
             match (up.as_slice(), down.as_slice()) {
                 // The face lies to the left of its loops in (u, v): above a loop running +u.
-                ([l], []) => self.pole_seam(fi, *l, &ax, ax.poles[1])?,
-                ([], [l]) => self.pole_seam(fi, *l, &ax, ax.poles[0])?,
+                ([l], []) => self.pole_seam(fi, *l, &ax, ax.poles[1], &eval)?,
+                ([], [l]) => self.pole_seam(fi, *l, &ax, ax.poles[0], &eval)?,
                 ([a], [b]) => self.band_seam(fi, *a, *b, &ax, &eval, &mut splits)?,
                 _ => return Err(format!("face #{step}: {}", unsupported("a face with several loops around its axis"))),
             }
@@ -156,12 +201,16 @@ impl Builder<'_, '_> {
         Ok(es.iter().skip(k).chain(es.iter().take(k)).copied().collect())
     }
 
-    /// A seam edge from vertex `a` to vertex `b` on the surface: a ruling line, or a meridian
-    /// arc of a sphere.
-    fn seam_edge(&mut self, a: u32, b: u32, ax: &Axis, eval: Option<&SurfaceEval>) -> R<u32> {
+    /// A seam edge from vertex `a` to vertex `b` on the surface: a ruling line, a meridian arc
+    /// of a sphere, or a revolution's profile turned to their angle. Returns the edge and
+    /// whether it runs from `a` to `b`.
+    fn seam_edge(&mut self, a: u32, b: u32, ax: &Axis, eval: &SurfaceEval, check: bool) -> R<(u32, bool)> {
         let (pa, pb) = (self.vpoint(a)?, self.vpoint(b)?);
-        let (curve, interval) = match ax.kind {
-            Kind::Ruled => (BCurve::Line { start: arr(pa), end: arr(pb) }, [0.0, 1.0]),
+        if pa.dist(pb) <= self.tol {
+            return Err("a seam of no length".into());
+        }
+        let (curve, interval, along) = match &ax.kind {
+            Kind::Ruled => (BCurve::Line { start: arr(pa), end: arr(pb) }, [0.0, 1.0], true),
             Kind::Sphere(r) => {
                 let x = (pa - ax.origin).normalized().ok_or("a seam from the sphere's centre")?;
                 let to = pb - ax.origin;
@@ -170,37 +219,52 @@ impl Builder<'_, '_> {
                 if !(theta > 0.0 && theta <= PI) {
                     return Err("a degenerate seam".into());
                 }
-                (BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(y) }, radius: r }, [0.0, theta])
+                (BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(y) }, radius: *r }, [0.0, theta], true)
+            }
+            Kind::Revolved(profile) => {
+                // a's angle; each vertex's profile parameter (a pole's from the profile's end).
+                let qa = eval.project(pa, None, f64::INFINITY).ok_or("a seam vertex off its surface")?;
+                let qb = eval.project(pb, Some(qa), f64::INFINITY).ok_or("a seam vertex off its surface")?;
+                let solidcraft_geom::brep::Natural::Range(lo, hi) = profile.natural() else { return Err("a periodic profile".into()) };
+                let vb = match ax.poles {
+                    [Some(p), _] if p.dist(pb) <= self.tol => lo,
+                    [_, Some(p)] if p.dist(pb) <= self.tol => hi,
+                    _ => qb[1],
+                };
+                let curve = meridian(profile, ax.origin, ax.z, qa[0])?;
+                let along = qa[1] < vb;
+                (curve, if along { [qa[1], vb] } else { [vb, qa[1]] }, along)
             }
         };
-        if pa.dist(pb) <= self.tol {
-            return Err("a seam of no length".into());
+        if !(interval[0] < interval[1]) {
+            return Err("a degenerate seam".into());
         }
         // On the surface: its middle within the tolerance (a ruling, a meridian).
         let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
-        if let Some(eval) = eval {
+        if check {
             let m = c.point(0.5 * (interval[0] + interval[1])).ok_or("seam point")?;
             let off = eval.project(m, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(m));
             if !(off <= self.tol) {
                 return Err(unsupported("a seam off its surface: loops with no vertices at one angle"));
             }
         }
-        for (t, v) in interval.into_iter().zip([a, b]) {
+        let vertices = if along { [a, b] } else { [b, a] };
+        for (t, v) in interval.into_iter().zip(vertices) {
             let gap = c.point(t).ok_or("seam point")?.dist(self.vpoint(v)?);
             if let Some(x) = self.vertices.get_mut(v as usize) {
                 x.tolerance = x.tolerance.max(1.5 * gap);
             }
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices: [a, b], tolerance: self.tol });
-        Ok(i)
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol });
+        Ok((i, along))
     }
 
     /// Join loop `li` of face `fi` to the pole the face covers: seam out and back.
-    fn pole_seam(&mut self, fi: usize, li: usize, ax: &Axis, pole: Option<Vec3>) -> R<()> {
+    fn pole_seam(&mut self, fi: usize, li: usize, ax: &Axis, pole: Option<Vec3>, eval: &SurfaceEval) -> R<()> {
         let step = self.faces.get(fi).map_or(0, |f| f.step);
         let Some(p) = pole else {
-            return Err(format!("face #{step}: a face around an open cylinder or cone with one bound"));
+            return Err(format!("face #{step}: a face around an open surface of revolution with one bound"));
         };
         let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
@@ -229,10 +293,10 @@ impl Builder<'_, '_> {
                 v
             }
         };
-        let seam = self.seam_edge(a, b, ax, None)?;
+        let (seam, along) = self.seam_edge(a, b, ax, eval, false)?;
         let mut merged = ring;
-        merged.push((seam, true));
-        merged.push((seam, false));
+        merged.push((seam, along));
+        merged.push((seam, !along));
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         if let Some(l) = face.loops.get_mut(li) {
             *l = LoopB::Edges(merged);
@@ -306,11 +370,11 @@ impl Builder<'_, '_> {
         let b_ring = self.rotated(fi, lb, j)?;
         let va = self.start(*a_ring.first().ok_or("empty loop")?)?;
         let vb = self.start(*b_ring.first().ok_or("empty loop")?)?;
-        let seam = self.seam_edge(va, vb, ax, Some(eval))?;
+        let (seam, along) = self.seam_edge(va, vb, ax, eval, true)?;
         let mut merged = a_ring;
-        merged.push((seam, true));
+        merged.push((seam, along));
         merged.extend(b_ring);
-        merged.push((seam, false));
+        merged.push((seam, !along));
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         if let Some(l) = face.loops.get_mut(la) {
             *l = LoopB::Edges(merged);

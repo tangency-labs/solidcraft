@@ -44,12 +44,13 @@ use solidcraft_geom::brep::{
     Surface as BSurface, Vertex,
 };
 
-use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Surface, dot, scale, sub};
+use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, dot, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
 
 mod seams;
+mod swept;
 
 /// Tolerance (mm) when the file states no uncertainty.
 pub const DEFAULT_TOLERANCE: f64 = 1e-3;
@@ -553,8 +554,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         if self.faces.len() >= MAX_FACES {
             return Err(format!("more than {MAX_FACES} faces"));
         }
-        let surface = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
-        let surface = map_surface(&surface).map_err(|m| format!("face #{id}: {m}"))?;
+        let step_surface = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
         let same_sense = flag(p.get(3), "face same_sense")?;
         let bounds = refs(p.get(1), "face bounds")?;
         if bounds.len() > MAX_BOUNDS {
@@ -564,10 +564,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let mut outer = None;
         let mut edges = 0;
         for b in bounds {
-            let (mut l, is_outer) = self.bound(b, &mut edges).map_err(|m| format!("face #{id}: {m}"))?;
-            if !same_sense && let LoopB::Edges(uses) = &mut l {
-                reverse(uses);
-            }
+            let (l, is_outer) = self.bound(b, &mut edges).map_err(|m| format!("face #{id}: {m}"))?;
             if is_outer && outer.is_none() {
                 outer = Some(loops.len());
             }
@@ -576,9 +573,53 @@ impl<'b, 'a> Builder<'b, 'a> {
         if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
             return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
         }
+        let extent = self.extent(&loops)?;
+        let (surface, reversed) = swept::map_surface(&step_surface, &extent).map_err(|m| format!("face #{id}: {m}"))?;
+        // Loops relative to the record's natural normal: the face's normal is STEP's surface
+        // normal when same_sense, and the record's is STEP's unless `reversed`.
+        let sense = same_sense != reversed;
+        if !sense {
+            for l in &mut loops {
+                if let LoopB::Edges(uses) = l {
+                    reverse(uses);
+                }
+            }
+        }
         let i = index(self.faces.len())?;
-        self.faces.push(FaceB { step: id, surface, loops, outer, forward: same_sense });
-        Ok((i, same_sense))
+        self.faces.push(FaceB { step: id, surface, loops, outer, forward: sense });
+        Ok((i, sense))
+    }
+
+    /// Points along a face's loops (each edge at nine points, and its vertex loops), and along
+    /// the edges its loops use twice (its seams).
+    fn extent(&self, loops: &[LoopB]) -> R<swept::Extent> {
+        let mut ext = swept::Extent::default();
+        let mut count: HashMap<u32, usize> = HashMap::new();
+        for l in loops {
+            match l {
+                LoopB::Edges(es) => {
+                    for (e, _) in es {
+                        *count.entry(*e).or_default() += 1;
+                    }
+                }
+                LoopB::Vertex(v) => ext.points.push(v3(self.point(*v)?)),
+            }
+        }
+        let mut edges: Vec<u32> = count.keys().copied().collect();
+        edges.sort_unstable();
+        for e in edges {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+            let [lo, hi] = edge.interval;
+            for k in 0..=8 {
+                let p = c.point(lo + (hi - lo) * f64::from(k) / 8.0).ok_or("edge point")?;
+                ext.points.push(p);
+                if count.get(&e).is_some_and(|n| *n > 1) {
+                    ext.seam.push(p);
+                }
+            }
+        }
+        Ok(ext)
     }
 
     fn shell(&mut self, id: u64) -> R<Vec<(u32, bool)>> {
@@ -1119,40 +1160,6 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     })
 }
 
-/// A face's surface as a schema surface.
-fn map_surface(s: &Surface) -> R<BSurface> {
-    map_surface_in(s, 0)
-}
-
-fn map_surface_in(s: &Surface, depth: usize) -> R<BSurface> {
-    if depth > MAX_NESTING {
-        return Err("surfaces nested too deeply".into());
-    }
-    Ok(match s {
-        Surface::Plane { position } => BSurface::Plane { origin: position.origin, u_axis: position.ref_direction, v_axis: position.y() },
-        Surface::Cylinder { position, radius } => BSurface::Cylinder { frame: frame(position), radius: *radius },
-        Surface::Cone { position, radius, semi_angle } => {
-            if !(*radius >= 0.0) || !(semi_angle.abs() > 1e-12 && semi_angle.abs() < std::f64::consts::FRAC_PI_2) {
-                return Err(unsupported(format!("a cone of radius {radius} and semi-angle {semi_angle}")));
-            }
-            BSurface::Cone { frame: frame(position), radius_at_origin: *radius, half_angle: *semi_angle }
-        }
-        Surface::Sphere { position, radius } => BSurface::Sphere { frame: frame(position), radius: *radius },
-        Surface::Torus { position, major_radius, minor_radius } => {
-            if !(major_radius > minor_radius) {
-                return Err(unsupported("a spindle or horn torus"));
-            }
-            BSurface::Torus { frame: frame(position), major_radius: *major_radius, minor_radius: *minor_radius }
-        }
-        Surface::DegenerateTorus { .. } => return Err(unsupported("DEGENERATE_TOROIDAL_SURFACE")),
-        Surface::BSpline(b) => map_bspline_surface(b)?,
-        Surface::RectangularTrimmed { basis, .. } => map_surface_in(basis, depth + 1)?,
-        Surface::Revolution { .. } => return Err(unsupported("SURFACE_OF_REVOLUTION")),
-        Surface::Extrusion { .. } => return Err(unsupported("SURFACE_OF_LINEAR_EXTRUSION")),
-        Surface::Offset { .. } => return Err(unsupported("OFFSET_SURFACE")),
-    })
-}
-
 /// An edge on its schema curve.
 #[derive(Debug)]
 struct Mapped {
@@ -1213,11 +1220,33 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, near:
             }
             open_or_closed(BCurve::Polyline { points: points.clone() }, ps, pe, same_sense, closed, tol)
         }
-        Curve::Hyperbola { .. } => Err(unsupported("HYPERBOLA")),
-        Curve::Parabola { .. } => Err(unsupported("PARABOLA")),
+        Curve::Hyperbola { position, semi_axis, semi_imag_axis } => {
+            open_conic(curve, ps, pe, same_sense, closed, |lo, hi| swept::hyperbola_spline(position, *semi_axis, *semi_imag_axis, lo, hi))
+        }
+        Curve::Parabola { position, focal_dist } => {
+            open_conic(curve, ps, pe, same_sense, closed, |lo, hi| swept::parabola_spline(position, *focal_dist, lo, hi))
+        }
         Curve::OffsetCurve3d { .. } => Err(unsupported("OFFSET_CURVE_3D")),
         Curve::Trimmed { .. } | Curve::SurfaceCurve { .. } => Err(unsupported("nested trimmed or surface curves")),
     }
+}
+
+/// A hyperbola or parabola: the vertices' parameters in closed form, the edge running the way
+/// they go, as an exact spline over just that interval.
+fn open_conic(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, spline: impl Fn(f64, f64) -> BCurve) -> R<Mapped> {
+    if closed {
+        return Err("a closed edge on an open conic".into());
+    }
+    let (ts, te) = swept::open_conic_params(curve, ps, pe)?;
+    if !((te - ts).abs() > 1e-12 * (1.0 + ts.abs().max(te.abs()))) {
+        return Err("a degenerate edge on an open conic".into());
+    }
+    if (ts - te).abs() > 64.0 {
+        return Err(unsupported("a hyperbola or parabola edge that long"));
+    }
+    let with_step = ts < te;
+    let (lo, hi) = if with_step { (ts, te) } else { (te, ts) };
+    Ok(Mapped { curve: spline(lo, hi), interval: [lo, hi], with_step, sense_mismatch: with_step != same_sense })
 }
 
 /// A circle or ellipse: the vertices' angles, the arc between them in the edge's sense (a full
