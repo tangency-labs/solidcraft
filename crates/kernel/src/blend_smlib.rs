@@ -87,7 +87,7 @@ mod imp {
     use super::Kind;
     use crate::blend_variable::RadiusSpline;
     use crate::body::Body;
-    use crate::history::{BodyHistory, EdgeOrigin, History};
+    use crate::history::{BodyHistory, Change, EdgeOrigin, FaceOrigin, History};
     use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
     use crate::{KernelError, Result, guard, record};
 
@@ -221,7 +221,7 @@ mod imp {
                         let operand = History::identity(body).edges;
                         let replaced = blended(body, edges, &h);
                         solidcraft_smlib::history::blends(&mut h, &operand, &replaced);
-                        Some(h)
+                        Some(with_corners(h))
                     }
                     Err(e) => {
                         log::debug!(target: "smlib", "{what} history: {e}");
@@ -232,6 +232,43 @@ mod imp {
             };
             Ok(out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body))
         })
+    }
+
+    /// `h` with each blend face still without origin (a corner patch where blends meet) made in
+    /// place of all the edges of the blend faces next to it, as truck records a corner, and every
+    /// edge of a face new to the blend recorded as where its faces meet (two chamfers' mitre is
+    /// where the two chamfers meet).
+    fn with_corners(mut h: History) -> History {
+        let mut corners: Vec<(usize, BTreeSet<FaceOrigin>)> = Vec::new();
+        for (i, f) in h.faces.iter().enumerate() {
+            if f.change != Change::Generated || !f.origins.is_empty() {
+                continue;
+            }
+            let around: BTreeSet<FaceOrigin> = h
+                .edges
+                .iter()
+                .filter(|e| e.faces.contains(&i))
+                .flat_map(|e| e.faces.iter().filter(|g| **g != i))
+                .filter_map(|g| h.faces.get(*g))
+                .flat_map(|g| g.origins.iter().copied())
+                .filter(|o| matches!(o, FaceOrigin::Edge { .. }))
+                .collect();
+            if !around.is_empty() {
+                corners.push((i, around));
+            }
+        }
+        for (i, origins) in corners {
+            if let Some(f) = h.faces.get_mut(i) {
+                *f = record::generated(origins.into_iter().collect());
+            }
+        }
+        let faces = h.faces.clone();
+        for e in &mut h.edges {
+            if e.faces.iter().any(|f| faces.get(*f).is_some_and(|f| f.change == Change::Generated)) {
+                e.origins = record::meeting(&e.faces, &faces);
+            }
+        }
+        h
     }
 
     /// The operand's edges the blend replaced: each picked edge, and every edge no result edge
