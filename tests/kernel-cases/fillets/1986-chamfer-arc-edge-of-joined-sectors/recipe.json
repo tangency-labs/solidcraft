@@ -1,0 +1,182 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     10,
+     0
+    ],
+    "end": [
+     -4.999999999999998,
+     8.660254037844387
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -4.999999999999998,
+      8.660254037844387
+     ],
+     [
+      -2.9999999999999987,
+      5.196152422706632
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     6,
+     0
+    ],
+    "end": [
+     -2.9999999999999987,
+     5.196152422706632
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      6,
+      0
+     ],
+     [
+      10,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20,
+    "body_name": "Sector"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     6,
+     0
+    ],
+    "end": [
+     -2.9999999999999987,
+     5.196152422706632
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -2.9999999999999987,
+      5.196152422706632
+     ],
+     [
+      -1.4999999999999993,
+      2.598076211353316
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     3,
+     0
+    ],
+    "end": [
+     -1.4999999999999993,
+     2.598076211353316
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      3,
+      0
+     ],
+     [
+      6,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 18,
+    "operation": "join",
+    "targets": [
+     "Sector"
+    ]
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      5,
+      8.660254037844386,
+      20
+     ]
+    ],
+    "distance": 3
+   }
+  }
+ ]
+}

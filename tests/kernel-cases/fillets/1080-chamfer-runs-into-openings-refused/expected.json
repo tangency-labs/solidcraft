@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1080",
+  "tangency-labs/solidcraft#1124"
+ ],
+ "what": "a 9 mm chamfer on the top front edge of a cube with square openings 5 mm in must be refused: it would cut through the rims of the openings",
+ "source": "invariants",
+ "method": "cube 20 with three orthogonal 10x10 through openings; the top face opening starts 5 mm from the front edge and the front opening 5 mm below the top edge, so a 9 mm setback runs past the face between the edge and the openings and the chamfer plane would cross the openings and leave slivers. The right answer is a clean refusal; nothing is built.",
+ "outcome": "refused"
+}
