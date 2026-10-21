@@ -23,6 +23,7 @@ pub mod history;
 pub mod import;
 mod measure;
 mod ops;
+pub mod ssi;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties};
