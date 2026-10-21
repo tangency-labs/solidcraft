@@ -167,6 +167,10 @@ bool fix_gaps_first_candidate_ok(SmTopologyIntersector* ti, const SmTArray<SmVer
 // over-refuse, so re-check the assumption when topology.brep_p5 lands).
 // The other mate of the B-rep vertex is checked by the caller: the first block
 // dereferences it at once.
+// Each combination must also be given vertices of the B-rep it runs in: a vertex
+// related to one of its own B-rep (Relate does not check) would be combined through
+// the wrong B-rep, which upstream does without complaint and the port refuses
+// ("not a vertex of this B-rep").
 bool squeeze_breps_ok(SmTopologyIntersector* ti, SmVertex* bv, SmVertex* ov)
 {
     bool need_other = false, need_brep = false;
@@ -190,7 +194,10 @@ bool squeeze_breps_ok(SmTopologyIntersector* ti, SmVertex* bv, SmVertex* ov)
         if (!(d_new > d_old + SM_EFF_ZERO_SQRT))
             need_brep = true;
     }
-    return (!need_other || ti->GetOtherBrep() != nullptr) && (!need_brep || ti->GetPrimaryBrep() != nullptr);
+    SmBrep* other = ti->GetOtherBrep();
+    SmBrep* primary = ti->GetPrimaryBrep();
+    return (!need_other || (other != nullptr && ov->GetBrep() == other && other_v->GetBrep() == other)) &&
+           (!need_brep || (primary != nullptr && bv->GetBrep() == primary && brep_v->GetBrep() == primary));
 }
 
 // SetRelationships without the maps (constructor 1): Relate dereferences the null maps only
