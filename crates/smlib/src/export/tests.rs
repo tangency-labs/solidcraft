@@ -1,0 +1,136 @@
+use super::*;
+
+#[cfg(feature = "native")]
+mod native_tests {
+    use super::*;
+    use crate::{CheckLevel, MEASURE_ACCURACY};
+    use std::f64::consts::PI;
+
+    /// SMLib's primitives with their closed-form volumes.
+    #[allow(clippy::unwrap_used)] // test fixture
+    fn primitives() -> Vec<(&'static str, Brep, f64)> {
+        vec![
+            ("box", Brep::make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap(), 6000.0),
+            ("cylinder", Brep::make_cylinder([1.0, 2.0, 3.0], 5.0, 10.0).unwrap(), PI * 25.0 * 10.0),
+            ("sphere", Brep::make_sphere([1.0, 2.0, 3.0], 5.0).unwrap(), 4.0 / 3.0 * PI * 125.0),
+            ("frustum", Brep::make_cone([0.0; 3], 5.0, 2.0, 10.0).unwrap(), PI * 10.0 / 3.0 * (25.0 + 10.0 + 4.0)),
+            ("widening frustum", Brep::make_cone([0.0; 3], 2.0, 5.0, 10.0).unwrap(), PI * 10.0 / 3.0 * (25.0 + 10.0 + 4.0)),
+            ("cone", Brep::make_cone([0.0; 3], 5.0, 0.0, 10.0).unwrap(), PI * 10.0 / 3.0 * 25.0),
+            ("torus", Brep::make_torus([0.0; 3], 10.0, 3.0).unwrap(), 2.0 * PI * PI * 10.0 * 9.0),
+        ]
+    }
+
+    #[test]
+    fn every_primitive_exports_validates_and_keeps_its_volume() {
+        for (name, b, exact) in primitives() {
+            let check = b.check(CheckLevel::All).unwrap();
+            assert!(check.is_valid(), "{name}: {check}");
+            let v = b.mass_properties(MEASURE_ACCURACY).unwrap().volume;
+            assert!((v - exact).abs() < 1e-6 * exact, "{name}: SMLib volume {v}, closed form {exact}");
+            let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
+            native.validate().unwrap();
+            native.check_geometry().unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(
+                report,
+                Report { recognised_edges: report.recognised_edges, ..Report::default() },
+                "{name}: every edge a line or circle, every face agrees"
+            );
+            let [f, e, n] = b.counts().unwrap();
+            assert_eq!((native.faces.len(), native.edges.len(), native.vertices.len()), (f, e, n), "{name}");
+            // One closed shell bounding one material region; no NURBS edges left.
+            assert_eq!(native.shells.len(), 1, "{name}");
+            assert_eq!(native.regions.len(), 2, "{name}");
+            assert!(!native.regions[0].void && !native.regions[1].void, "{name}");
+            assert!(native.edges.iter().all(|e| matches!(e.curve, b::Curve::Line { .. } | b::Curve::Circle { .. })), "{name}");
+        }
+    }
+
+    #[test]
+    fn every_primitive_goes_round_through_schema_4_unchanged() {
+        for (name, s, _) in primitives() {
+            let record = s.to_native().unwrap_or_else(|e| panic!("{name}: {e}"));
+            let back = Brep::from_record(&record, true).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let check = back.check(CheckLevel::All).unwrap();
+            assert!(check.is_valid(), "{name}: {check}");
+            assert_eq!(back.counts().unwrap(), s.counts().unwrap(), "{name}");
+            let (v0, v1) = (s.mass_properties(MEASURE_ACCURACY).unwrap().volume, back.mass_properties(MEASURE_ACCURACY).unwrap().volume);
+            assert!((v1 - v0).abs() < 1e-7 * v0, "{name}: volume {v0} -> {v1}");
+        }
+    }
+
+    #[test]
+    fn recognised_edges_are_on_smlibs_curves() {
+        let cyl = Brep::make_cylinder([0.0; 3], 5.0, 10.0).unwrap().to_native().unwrap();
+        let side = cyl.faces.iter().find(|f| matches!(f.surface, b::Surface::Cylinder { .. })).unwrap();
+        assert!((side.domain[0][1] - side.domain[0][0] - TAU).abs() < 1e-12);
+        assert_eq!(side.domain[1], [0.0, 10.0]);
+        for e in &cyl.edges {
+            let eval = b::eval::CurveEval::new(&e.curve).unwrap();
+            let [a, z] = e.interval;
+            // Ends on the edge's vertices.
+            for (t, v) in [(a, e.vertices[0]), (z, e.vertices[1])] {
+                let p = eval.point(t).unwrap();
+                let q = cyl.vertices[v as usize].point;
+                assert!((p - Vec3::new(q[0], q[1], q[2])).len() < 1e-9, "{:?} at {t}", e.curve);
+            }
+            if let b::Curve::Circle { radius, .. } = e.curve {
+                assert!((radius - 5.0).abs() < 1e-12 && (z - a - TAU).abs() < 1e-9);
+            }
+        }
+        // The narrowing cone keeps SMLib's negative half angle.
+        let cone = Brep::make_cone([0.0; 3], 5.0, 0.0, 10.0).unwrap().to_native().unwrap();
+        let half = cone.faces.iter().find_map(|f| if let b::Surface::Cone { half_angle, .. } = f.surface { Some(half_angle) } else { None });
+        assert!((half.unwrap() + 0.5f64.atan()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hostile_arrays_are_errors_never_panics() {
+        let good = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().arrays().unwrap();
+        assert!(native(&good).is_ok());
+        assert!(native(&Arrays::default()).is_err());
+        let ids: Vec<i32> = good.ints.keys().copied().collect();
+        for id in ids {
+            for edit in 0..4 {
+                let mut f = good.clone();
+                let a = f.ints.get_mut(&id).unwrap();
+                match edit {
+                    0 => a.clear(),
+                    1 => a.iter_mut().for_each(|x| *x = 1 << 40),
+                    2 => a.iter_mut().for_each(|x| *x = -1),
+                    _ => a.push(7),
+                }
+                let _ = native(&f);
+            }
+        }
+        let ids: Vec<i32> = good.reals.keys().copied().collect();
+        for id in ids {
+            for x in [f64::NAN, f64::INFINITY, 1e300, 0.0] {
+                let mut f = good.clone();
+                f.reals.get_mut(&id).unwrap().iter_mut().for_each(|v| *v = x);
+                let _ = native(&f);
+            }
+        }
+    }
+}
+
+#[test]
+fn nurbs_lines_and_arcs_are_recognised_exactly() {
+    let line = Nurbs { knots: vec![2.0, 2.0, 4.0, 4.0], points: vec![[0.0; 3], [1.0, 2.0, 3.0]], weights: vec![1.0, 1.0] };
+    let (c, r) = as_line(&line, [2.0, 4.0]).unwrap_or_else(|| panic!("line"));
+    assert_eq!(c, b::Curve::Line { start: [0.0; 3], end: [1.0, 2.0, 3.0] });
+    assert_eq!(r, [0.0, 1.0]);
+    // A quarter circle of radius 2 about (1, 1, 0) as a rational quadratic Bézier.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let arc = Nurbs {
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        points: vec![[3.0, 1.0, 0.0], [3.0, 3.0, 0.0], [1.0, 3.0, 0.0]],
+        weights: vec![1.0, w, 1.0],
+    };
+    let (c, r) = as_circle(&arc, [0.0, 1.0]).unwrap_or_else(|| panic!("arc"));
+    let b::Curve::Circle { frame, radius } = c else { panic!("not a circle") };
+    assert!((radius - 2.0).abs() < 1e-12 && (r[0]).abs() < 1e-12 && (r[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{r:?}");
+    assert!((frame.origin[0] - 1.0).abs() < 1e-12 && (frame.origin[1] - 1.0).abs() < 1e-12);
+    // A parabola-like quadratic is neither.
+    let not = Nurbs { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[0.0; 3], [1.0, 2.0, 0.0], [2.0, 0.0, 0.0]], weights: vec![1.0; 3] };
+    assert!(as_circle(&not, [0.0, 1.0]).is_none() && as_line(&not, [0.0, 1.0]).is_none());
+}

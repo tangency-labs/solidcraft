@@ -162,7 +162,7 @@ pub(super) fn encode(body: &Body) -> Result<b::Brep> {
     }
     let result = b::Brep { version: b::VERSION, tolerance, regions, shells: shell_records, faces, edges: edge_records, vertices };
     result.validate().map_err(invalid)?;
-    compatible(&result)?;
+    compatible(&result, Producer::Own)?;
     Ok(result)
 }
 
@@ -303,17 +303,36 @@ fn regions(body: &Body) -> Result<Vec<b::Region>> {
     Ok(regions)
 }
 
-fn compatible(body: &b::Brep) -> Result<()> {
+fn compatible(body: &b::Brep, producer: Producer) -> Result<()> {
     body.edges.iter().try_for_each(|e| compatible_curve(&e.curve))?;
-    body.faces.iter().try_for_each(|f| compatible_surface(&f.surface))
+    body.faces.iter().try_for_each(|f| match (&f.surface, producer) {
+        // Truck holds a plane by three points: another kernel's axes load rounded once.
+        (b::Surface::Plane { .. }, Producer::Foreign) => Ok(()),
+        (s, _) => compatible_surface(s),
+    })
+}
+
+/// Who wrote a record, which sets how exactly it must load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Producer {
+    /// This adapter: the record loads back number for number, or is refused.
+    Own,
+    /// Another kernel (SMLib): its records load as truck holds them, analytic surfaces as
+    /// revolutions (as for our own) and planes through three points rounded once.
+    #[cfg_attr(not(feature = "smlib"), allow(dead_code))]
+    Foreign,
 }
 
 /// The solid of a record: validated, its geometry checked against its topology (truck builds
 /// edges and faces from it unchecked), then built as the kernel built it.
 pub(super) fn decode(body: b::Brep) -> Result<mt::Solid> {
+    decode_from(body, Producer::Own)
+}
+
+pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid> {
     body.validate().map_err(invalid)?;
     body.check_geometry().map_err(invalid)?;
-    compatible(&body)?;
+    compatible(&body, producer)?;
     let b::Brep { shells, faces, edges, vertices, .. } = body;
     let vertices: Vec<mt::Vertex> = vertices.into_iter().map(|v| mt::Vertex::new(p(v.point))).collect();
     let vertex = |i: u32| vertices.get(i as usize).ok_or_else(|| invalid("edge vertices"));

@@ -212,3 +212,42 @@ fn every_pcurve_lifts_onto_its_own_edge() {
         }
     }
 }
+
+/// SMLib's primitives load through their schema 4 records as bodies of SMLib's volume, oriented
+/// as the records say (outward without `Body::new` turning them).
+#[cfg(feature = "smlib")]
+#[test]
+fn smlib_primitives_decode_with_their_volume_and_orientation() {
+    use solidcraft_smlib::Brep as S;
+    let cases = [
+        ("box", S::make_box([1., 2., 3.], [10., 20., 30.]).unwrap()),
+        ("cylinder", S::make_cylinder([1., 2., 3.], 5., 10.).unwrap()),
+        ("sphere", S::make_sphere([1., 2., 3.], 5.).unwrap()),
+        ("frustum", S::make_cone([0.; 3], 5., 2., 10.).unwrap()),
+        ("widening frustum", S::make_cone([0.; 3], 2., 5., 10.).unwrap()),
+        ("cone", S::make_cone([0.; 3], 5., 0., 10.).unwrap()),
+        ("torus", S::make_torus([0.; 3], 10., 3.).unwrap()),
+    ];
+    for (name, s) in cases {
+        let record = s.to_native().unwrap();
+        let body = crate::native::body_from_smlib(&s).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let forward: Vec<bool> = record
+            .shells
+            .iter()
+            .flat_map(|sh| match sh {
+                b::Shell::Faces { faces, .. } => faces.iter().map(|f| f.forward).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let loaded: Vec<bool> = body.solid.boundaries().iter().flat_map(|sh| sh.face_iter().map(|f| f.orientation()).collect::<Vec<_>>()).collect();
+        assert_eq!(loaded, forward, "{name}: the body was turned inside out");
+        let smlib = s.mass_properties(solidcraft_smlib::MEASURE_ACCURACY).unwrap().volume;
+        let ours = crate::measure(&body).unwrap().volume;
+        assert!((ours - smlib).abs() < 2e-3 * smlib, "{name}: decoded volume {ours}, SMLib's {smlib}");
+        assert_eq!(
+            (body.face_count(), body.edge_count(), body.vertex_count()),
+            (record.faces.len(), record.edges.len(), record.vertices.len()),
+            "{name}"
+        );
+    }
+}

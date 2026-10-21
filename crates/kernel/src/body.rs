@@ -1278,14 +1278,14 @@ impl Body {
         if let Some(m) = &self.mesh {
             return Ok(m.to_mesh());
         }
-        // Two kinds of face truck cannot mesh in its surface's parameters: one trimmed by a
-        // helix, which turns more than once around its cylinder and comes out with triangles
-        // across the solid (#1289), and one that runs across the join of a B-spline surface that
-        // closes on itself, which comes out folded over itself or with a hole in it.
-        // Such a body is meshed from its display plan, which cuts and unwraps those faces.
-        let planned =
-            guard("tessellate", || Ok(crate::tess::seam::turns_more_than_once(&self.solid) || crate::tess::seam::closes_on_itself(&self.solid)));
-        if planned.unwrap_or(false) {
+        // A face trimmed by a helix (a modelled thread from another CAD system) turns more than
+        // once around its cylinder; truck meshes it with triangles across the solid (#1289).
+        // Such a body is meshed from its display plan, which cuts the face along a seam.
+        // So is one bounded by a single seam from pole to pole (a sphere from SMLib), which truck
+        // meshes as nothing.
+        if guard("tessellate", || Ok(crate::tess::seam::turns_more_than_once(&self.solid) || crate::tess::has_pole_to_pole_seam(&self.solid)))
+            .unwrap_or(false)
+        {
             let turn = (angle.is_finite() && angle > 0.0)
                 .then(|| crate::tess::size::Turn { angle: angle.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR });
             match guard("tessellate", || crate::tess::plan(&self.solid, tol, turn, self.boundary_tol)) {

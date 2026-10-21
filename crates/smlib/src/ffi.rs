@@ -197,3 +197,52 @@ extern "C" fn trampoline(_: *mut c_void, level: i32, line: *const c_char) {
         sink(level, text);
     }
 }
+
+// ---- Primitives (smlib_primitives.cpp) -----------------------------------------------------
+
+#[cfg(feature = "native")]
+unsafe extern "C" {
+    fn smlib_make_cylinder(origin: *const f64, radius: f64, height: f64, out: *mut *mut RawBrep) -> i32;
+    fn smlib_make_sphere(center: *const f64, radius: f64, out: *mut *mut RawBrep) -> i32;
+    fn smlib_make_cone(origin: *const f64, base_radius: f64, top_radius: f64, height: f64, out: *mut *mut RawBrep) -> i32;
+    fn smlib_make_torus(center: *const f64, major_radius: f64, minor_radius: f64, out: *mut *mut RawBrep) -> i32;
+}
+
+#[cfg(feature = "native")]
+mod primitive_calls {
+    use super::*;
+
+    pub fn make_cylinder(origin: &[f64; 3], radius: f64, height: f64) -> Result<Handle, i32> {
+        new_brep(|out| unsafe { smlib_make_cylinder(origin.as_ptr(), radius, height, out) })
+    }
+    pub fn make_sphere(center: &[f64; 3], radius: f64) -> Result<Handle, i32> {
+        new_brep(|out| unsafe { smlib_make_sphere(center.as_ptr(), radius, out) })
+    }
+    pub fn make_cone(origin: &[f64; 3], base_radius: f64, top_radius: f64, height: f64) -> Result<Handle, i32> {
+        new_brep(|out| unsafe { smlib_make_cone(origin.as_ptr(), base_radius, top_radius, height, out) })
+    }
+    pub fn make_torus(center: &[f64; 3], major_radius: f64, minor_radius: f64) -> Result<Handle, i32> {
+        new_brep(|out| unsafe { smlib_make_torus(center.as_ptr(), major_radius, minor_radius, out) })
+    }
+}
+
+/// The same calls when SMLib is not built: each one fails with [`NOT_BUILT`].
+#[cfg(not(feature = "native"))]
+mod primitive_calls {
+    use super::*;
+
+    pub fn make_cylinder(_: &[f64; 3], _: f64, _: f64) -> Result<Handle, i32> {
+        Err(NOT_BUILT)
+    }
+    pub fn make_sphere(_: &[f64; 3], _: f64) -> Result<Handle, i32> {
+        Err(NOT_BUILT)
+    }
+    pub fn make_cone(_: &[f64; 3], _: f64, _: f64, _: f64) -> Result<Handle, i32> {
+        Err(NOT_BUILT)
+    }
+    pub fn make_torus(_: &[f64; 3], _: f64, _: f64) -> Result<Handle, i32> {
+        Err(NOT_BUILT)
+    }
+}
+
+pub use primitive_calls::*;
