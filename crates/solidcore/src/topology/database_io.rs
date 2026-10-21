@@ -1065,11 +1065,14 @@ mod tests {
     #[test]
     fn offset_surface_chain_reads_to_the_bound() {
         assert_eq!(MAX_READ_NESTING, 32);
-        for depth in [1, 31, 32] {
+        // Each offset wrapper takes two nesting levels (the `Surface::read_from_db`
+        // dispatcher and `OffsetSurface::read_from_db` both enter one), so 15 wrappers
+        // over the B-spline fit in the bound and 16 do not.
+        for depth in [1, 14, 15] {
             let s = read_surface(&offset_chain(depth));
             assert!(s.is_ok(), "depth {depth}: {s:?}");
         }
-        for depth in [33, 64, 1000] {
+        for depth in [16, 64, 1000] {
             let s = read_surface(&offset_chain(depth));
             assert!(is_nesting_error(&s), "depth {depth}: {s:?}");
         }
@@ -1081,7 +1084,9 @@ mod tests {
         // of revolution rejects its generator once every level has been read: up to
         // the bound the chain fails with that error, past it with the nesting error.
         let not_b_spline = crate::surface::surf_of_revolution::p1::not_b_spline();
-        for (offsets, pairs) in [(0, 1), (1, 15), (0, 16)] {
+        // A revolution/iso pair takes three nesting levels on main's readers, so 10
+        // pairs fit in the bound and 11 do not.
+        for (offsets, pairs) in [(0, 1), (0, 9), (0, 10)] {
             let s = read_surface(&rev_iso_chain(offsets, pairs));
             assert_eq!(
                 s.as_ref().err(),
@@ -1090,7 +1095,7 @@ mod tests {
                 offsets + 2 * pairs
             );
         }
-        for (offsets, pairs) in [(1, 16), (0, 17), (0, 32), (0, 500)] {
+        for (offsets, pairs) in [(0, 11), (0, 17), (0, 32), (0, 500)] {
             let s = read_surface(&rev_iso_chain(offsets, pairs));
             assert!(
                 is_nesting_error(&s),
