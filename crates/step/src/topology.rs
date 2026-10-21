@@ -963,6 +963,10 @@ impl<'b, 'a> Builder<'b, 'a> {
         // does not wrap: a loop around a closed spline surface without a seam edge jumps across
         // its domain.
         let natural = surface.natural();
+        // At a pole (where the surface collapses to a point across a direction) a loop may jump
+        // in that direction: the seam's two uses meet there a period apart.
+        let poles = SurfaceEval::new(&surface).ok();
+        let at_pole = |uv: [f64; 2]| poles.as_ref().is_some_and(|e| e.pole(uv).iter().any(|p| *p));
         for (l, pc) in edge_loops.iter().zip(&pcs) {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
@@ -972,6 +976,9 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             for k in 0..ends.len() {
                 let (Some((start, _)), Some((_, end))) = (ends.get(k), ends.get(if k == 0 { ends.len() - 1 } else { k - 1 })) else { continue };
+                if at_pole(*start) || at_pole(*end) {
+                    continue;
+                }
                 for d in 0..2 {
                     // Only a bounded direction has a seam to jump; half its width is no gap.
                     let Some(Natural::Range(a, b)) = natural.get(d) else { continue };
