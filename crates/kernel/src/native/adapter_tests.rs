@@ -87,11 +87,11 @@ fn planar_bodies_encode_in_the_kernels_order_and_decode_exactly() {
     let bodies = [("cube", cube), ("notched", notched), ("sheet", sheet), ("hollow", hollow), ("pair", pair)];
     assert!(bodies.iter().any(|(_, b)| b.solid.face_iter().any(|f| !f.orientation())), "reversed faces are walked");
     for (name, body) in bodies {
-        let record = encode(&body, super::super::pcurve::pcurves).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let record = encode(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
         same_indices(&body, &record);
         let decoded = decode(record.clone()).unwrap();
         let again = Body::new(decoded).unwrap();
-        let record2 = encode(&again, super::super::pcurve::pcurves).unwrap();
+        let record2 = encode(&again).unwrap();
         assert_eq!(record, record2, "{name}: decoded body re-encodes to the same record");
         match name {
             "sheet" => assert_eq!(record.regions, vec![b::Region { shells: vec![0], void: false }]),
@@ -122,7 +122,7 @@ fn planar_bodies_encode_in_the_kernels_order_and_decode_exactly() {
 #[test]
 fn records_truck_cannot_hold_are_refused() {
     let cube = crate::box_solid(Vec3::ZERO, Vec3::new(4., 3., 1.)).unwrap();
-    let record = encode(&cube, super::super::pcurve::pcurves).unwrap();
+    let record = encode(&cube).unwrap();
     let mut wire = record.clone();
     wire.shells.push(b::Shell::Vertex { vertex: 0 });
     assert!(decode(wire).is_err());
@@ -181,7 +181,7 @@ fn every_pcurve_lifts_onto_its_own_edge() {
     let holed = crate::boolean(&rounded, &bore, crate::BoolOp::Cut).unwrap().unwrap();
     let sphere = crate::sphere(Vec3::ZERO, 12.).unwrap();
     for (name, body) in [("cube", cube), ("holed", holed), ("sphere", sphere)] {
-        let record = encode(&body, super::super::pcurve::pcurves).unwrap();
+        let record = encode(&body).unwrap();
         for (f, face) in record.faces.iter().zip(body.solid.face_iter()) {
             let surface = face.surface();
             for l in &f.loops {
@@ -191,7 +191,7 @@ fn every_pcurve_lifts_onto_its_own_edge() {
                     let curve = load_edge_curve(e.curve.clone(), e.interval).unwrap();
                     for s in [0., 0.5, 1.] {
                         let t = e.interval[0] + s * (e.interval[1] - e.interval[0]);
-                        let [x, y] = super::super::pcurve::eval(&u.pcurve, t).unwrap();
+                        let [x, y] = u.pcurve.eval(t).unwrap();
                         let d = surface.subs(x, y).distance(curve.subs(t));
                         assert!(d <= e.tolerance, "{name}: edge {} at {s}: {d} mm off (forward face {})", u.edge, face.orientation());
                     }
