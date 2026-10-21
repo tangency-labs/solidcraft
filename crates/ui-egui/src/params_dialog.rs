@@ -687,7 +687,9 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             }
             Err(error) => {
                 d.error = Some(error);
-                if let Some(id) = focused_id {
+                // Enter stays in the field that was submitted. A click into another cell
+                // has to keep that cell, or an invalid name cannot be corrected (#3965).
+                if submit && let Some(id) = focused_id {
                     ui.memory_mut(|m| m.request_focus(id));
                 }
             }
