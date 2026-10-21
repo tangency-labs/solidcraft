@@ -51,6 +51,7 @@ impl Brep {
 mod tests {
     use super::*;
     use crate::Error;
+    use std::f64::consts::PI;
 
     fn rel(a: f64, b: f64) -> f64 {
         if b == 0.0 { a.abs() } else { (a / b - 1.0).abs() }
@@ -95,6 +96,133 @@ mod tests {
         let t = m.inertia_tensor();
         assert_eq!(t[0][1], t[1][0]);
         assert!(t[0][1].abs() < 1e-9 * m.moments[2]);
+    }
+
+    /// Reads `tests/oracle/<case>/expected.json`.
+    #[allow(clippy::unwrap_used)] // test fixture
+    fn oracle(case: &str) -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/oracle").join(case).join("expected.json");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(v["source"], "analytic", "{case}");
+        v
+    }
+
+    /// Closed forms: area, volume, centroid and Ixx, Iyy, Izz about it (products are 0 for all).
+    struct Expected {
+        name: &'static str,
+        body: Brep,
+        area: f64,
+        volume: f64,
+        centroid: [f64; 3],
+        moments: [f64; 3],
+    }
+
+    #[allow(clippy::unwrap_used)] // test fixture
+    fn cylinder(name: &'static str, o: [f64; 3], r: f64, h: f64) -> Expected {
+        let v = PI * r * r * h;
+        let ixx = v * (3.0 * r * r + h * h) / 12.0;
+        Expected {
+            name,
+            body: Brep::make_cylinder(o, r, h).unwrap(),
+            area: 2.0 * PI * r * r + 2.0 * PI * r * h,
+            volume: v,
+            centroid: [o[0], o[1], o[2] + h / 2.0],
+            moments: [ixx, ixx, v * r * r / 2.0],
+        }
+    }
+
+    #[allow(clippy::unwrap_used)] // test fixture
+    fn sphere(name: &'static str, o: [f64; 3], r: f64) -> Expected {
+        let v = 4.0 / 3.0 * PI * r * r * r;
+        let i = 0.4 * v * r * r;
+        Expected { name, body: Brep::make_sphere(o, r).unwrap(), area: 4.0 * PI * r * r, volume: v, centroid: o, moments: [i; 3] }
+    }
+
+    /// A frustum (a cone when `rt` is 0) about +Z on its base centre. Its volume integrals are
+    /// polynomials in z of degree at most 4, so three-point Gauss-Legendre gives them exactly.
+    #[allow(clippy::unwrap_used)] // test fixture
+    fn cone(name: &'static str, o: [f64; 3], rb: f64, rt: f64, h: f64) -> Expected {
+        let (x, w) = ([-(0.6f64).sqrt(), 0.0, (0.6f64).sqrt()], [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0]);
+        let (mut v, mut mz, mut zz, mut izz) = (0.0, 0.0, 0.0, 0.0);
+        for i in 0..3 {
+            let (z, wi) = (h / 2.0 * (1.0 + x[i]), w[i] * h / 2.0);
+            let rho = rb + (rt - rb) * z / h;
+            let disc = PI * rho * rho;
+            v += wi * disc;
+            mz += wi * disc * z;
+            zz += wi * disc * z * z;
+            izz += wi * disc * rho * rho / 2.0;
+        }
+        let zc = mz / v;
+        let ixx = izz / 2.0 + zz - v * zc * zc;
+        let s = ((rb - rt).powi(2) + h * h).sqrt();
+        Expected {
+            name,
+            body: Brep::make_cone(o, rb, rt, h).unwrap(),
+            area: PI * (rb * rb + rt * rt + (rb + rt) * s),
+            volume: v,
+            centroid: [o[0], o[1], o[2] + zc],
+            moments: [ixx, ixx, izz],
+        }
+    }
+
+    /// A ring torus about +Z (Pappus for area and volume).
+    #[allow(clippy::unwrap_used)] // test fixture
+    fn torus(name: &'static str, o: [f64; 3], big: f64, r: f64) -> Expected {
+        let v = 2.0 * PI * PI * big * r * r;
+        let ixx = v * (big * big / 2.0 + 5.0 * r * r / 8.0);
+        Expected {
+            name,
+            body: Brep::make_torus(o, big, r).unwrap(),
+            area: 4.0 * PI * PI * big * r,
+            volume: v,
+            centroid: o,
+            moments: [ixx, ixx, v * (big * big + 0.75 * r * r)],
+        }
+    }
+
+    /// Every primitive against its closed form, at the origin and 2e5 mm out, to 1e-6 (tests/oracle
+    /// accepts 1e-3). Cylinders as oracle 02 and 38 give them, against their expected.json too.
+    #[test]
+    fn primitives_match_their_closed_forms() {
+        for (case, r) in [("02-cylinder", 15.0), ("38-coincident-cylinders", 10.0)] {
+            let e = oracle(case);
+            let m = Brep::make_cylinder([0.0; 3], r, 50.0).unwrap().mass_properties(MEASURE_ACCURACY).unwrap();
+            assert!(rel(m.volume, e["volume_mm3"].as_f64().unwrap()) < 1e-6, "{case}: {m:?}");
+            assert!(rel(m.area, e["area_mm2"].as_f64().unwrap()) < 1e-6, "{case}: {m:?}");
+            for i in 0..3 {
+                assert!((m.centroid[i] - e["center_of_mass"][i].as_f64().unwrap()).abs() < 1e-6, "{case}: {m:?}");
+            }
+        }
+        let far = [1.0e5, -2.0e5, 3.0e4];
+        let cases = [
+            cylinder("cylinder r15 h50", [0.0; 3], 15.0, 50.0),
+            cylinder("cylinder r0.25 h80, far", far, 0.25, 80.0),
+            // The primitives of oracle 40-box-sphere-torus, whole.
+            sphere("sphere r12", [0.0; 3], 12.0),
+            sphere("sphere r7, far", far, 7.0),
+            torus("torus R22 r4", [0.0; 3], 22.0, 4.0),
+            torus("torus R30 r0.5, far", far, 30.0, 0.5),
+            cone("frustum r10..4 h20", [0.0; 3], 10.0, 4.0, 20.0),
+            cone("cone r10 h20", [0.0; 3], 10.0, 0.0, 20.0),
+            cone("inverted frustum r3..9 h7", [0.0; 3], 3.0, 9.0, 7.0),
+            cone("frustum r6..2 h9, far", far, 6.0, 2.0, 9.0),
+        ];
+        for e in &cases {
+            let m = e.body.mass_properties(MEASURE_ACCURACY).unwrap();
+            let name = e.name;
+            assert!(rel(m.area, e.area) < 1e-6, "{name}: {m:?}");
+            assert!(rel(e.body.area(MEASURE_ACCURACY).unwrap(), e.area) < 1e-6, "{name}");
+            assert!(rel(m.volume, e.volume) < 1e-6, "{name}: {m:?}");
+            // The centroid against the body's size: twice its largest radius of gyration.
+            let size = 2.0 * e.moments.iter().fold(0.0f64, |a, &b| a.max(b)).sqrt() / e.volume.sqrt();
+            let imax = e.moments.iter().fold(0.0f64, |a, &b| a.max(b));
+            for i in 0..3 {
+                assert!((m.centroid[i] - e.centroid[i]).abs() < 1e-6 * size, "{name}: {m:?}");
+                assert!(rel(m.moments[i], e.moments[i]) < 1e-6, "{name}: {m:?}");
+                assert!(m.products[i].abs() < 1e-6 * imax, "{name}: {m:?}");
+            }
+        }
     }
 
     #[test]
