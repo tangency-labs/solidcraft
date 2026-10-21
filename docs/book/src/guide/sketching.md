@@ -199,6 +199,53 @@ is projected in one undo step. A rejected projection keeps the selection for cor
 an empty or mixed selection starts the ordinary picking tool. External sketch selections
 retain their source sketch, even when the active sketch uses the same point or curve names.
 
+Picking a face projects every loop of its boundary, holes included; picking an edge projects
+that edge only. Projected curves and points are drawn in the projected colour (lost ones in
+the lost colour), and dashed when switched to construction with **Normal/Construction**: then
+they bound no profile but stay linked and keep following their source.
+
+**Projecting from another part.** Geometry picked on another component is read from the exact
+placement it was picked on: an edge of the second copy of a part (`A:2`) follows `A:2` when
+it is moved or turned, and moving `A:1` changes nothing. The projection is worked out in the
+placement of the sketch's own component it was made in (the active one when the sketch's
+component is active), so moving the sketch's component moves it the other way, moving both
+together leaves it as it is, and a sketch made in a second copy of its component (`B:2`)
+keeps that view when the design is saved and opened again. Scripts give the placement as an
+occurrence path: `sketch.project {refs: [{edge: [x,y,z], body: "Plate", path: [occurrence
+ids]}]}` (the browser's instance names, such as `Plate (A:2)`, work too). A sketch cannot
+project another copy of its own component, and a sketch of a part placed more than once
+needs a `path` to be projected from. Whatever the sketch is constrained to and the features
+built on it are rebuilt with it.
+
+Projections follow captured positions: a move kept pending (`occurrence.move` with
+`capture: false`) is not followed until it is captured. Each projection is listed under its
+sketch in the browser, with the placement it reads and its state (lost, frozen, pending). Its
+eye hides it without changing the sketch (it still bounds profiles), and its menu offers:
+
+- **Update References** (`sketch.update_references {sketch?, capture?, files?}`) reads every
+  projection where its source is now, solves and stores the sketch and rebuilds what follows,
+  reporting each projection changed, unchanged, frozen or lost and any feature that failed.
+  `capture: true` first captures the pending moves of the placements it reads; `files: true`
+  first runs **Update Links** for each linked design, and reports a design whose file cannot
+  be read as unavailable while its bodies stay usable.
+- **Freeze Link** (`sketch.freeze_link`) keeps the projection as it is until **Resume Link**
+  (`sketch.resume_link`).
+- **Remove Projection** (`sketch.remove_link`) deletes the projection's curves and points and
+  the constraints on them; **Break Link** keeps them as ordinary geometry instead. Deleting
+  some of a projected face's curves keeps the rest linked. The projection remembers the
+  source edges they came from by name, so exactly those stay deleted when it is updated, the
+  part moves or the face is resized. A curve made of part of a source edge, or one of edges
+  told apart only by number (the two halves of a hole), can only be deleted together with
+  the rest of them. A projection that is not made of a face's edges (a silhouette, a section,
+  a mesh body's face) is removed whole. If a deleted member's source edge no longer exists,
+  the projection is reported lost and keeps its last geometry until it is repaired or removed.
+
+A projection whose source is gone keeps the last geometry it was stored with (Update
+References stores it) and says it is lost; it is never moved onto another copy of the part
+or a nearby edge. `sketch.repair_link {link, ref}` points it at a new source, keeping its
+curve ids and the constraints on them when the new geometry has the same shape.
+`sketch.references` lists every projection with its source, placements and status.
+
 A sketch on a construction plane built from the model (through a sketch line, through three
 points, midway between two faces…) projects, intersects, includes and holds text like a sketch
 on any other plane, and its links follow when a parameter moves that plane.

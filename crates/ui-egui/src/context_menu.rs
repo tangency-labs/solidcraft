@@ -109,6 +109,11 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// A projection (link) listed under its sketch.
+    SketchLink {
+        sketch: u64,
+        link: String,
+    },
 }
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
@@ -400,6 +405,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Folder { component, folder, scope } => crate::browser::folder_items(app, *component, folder, scope),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
+        Target::SketchLink { sketch, link } => sketch_link_items(app, *sketch, link),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Section => crate::browser::section_items(app),
@@ -1095,6 +1101,51 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v
 }
 
+/// A projection's menu (its row under the sketch): update it where its source is now, freeze
+/// or resume it, show or hide it, switch its curves between profile and construction lines,
+/// remove it, or break it into normal geometry.
+fn sketch_link_items(app: &SolveApp, sketch: u64, link: &str) -> Vec<Item> {
+    let Ok(sk) = app.session.doc.sketch(sketch) else { return Vec::new() };
+    let Some(l) = sk.link(link) else { return Vec::new() };
+    let editing = app.session.active_sketch == Some(sketch);
+    let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.clone()).collect();
+    let one = json!({"sketch": sketch, "link": link});
+    let mut v = vec![
+        cmd(app, "sketch.update_references", "Update References").with(json!({"sketch": sketch})),
+        if l.frozen {
+            cmd(app, "sketch.resume_link", "Resume Link").with(one.clone())
+        } else {
+            cmd(app, "sketch.freeze_link", "Freeze Link").with(one.clone())
+        },
+        cmd(app, "sketch.link_visibility", "Show/Hide").with(one.clone()),
+    ];
+    // Line type and Break Link work on the sketch being edited.
+    v.push(cmd(app, "sketch.construction", "Normal/Construction").with(json!({"curves": curves})).on(editing && !curves.is_empty()));
+    v.push(Item::sep());
+    v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(one));
+    v.push(cmd(app, "sketch.break_link", "Break Link").with(json!({"link": link})).on(editing));
+    v
+}
+
+/// The links (projections, not text) owning the selected sketch entities.
+fn selected_links(sk: &solidcraft_engine::sketch::Sketch, ents: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in ents {
+        let link = sk
+            .curves
+            .iter()
+            .find(|c| c.id == *e)
+            .and_then(|c| c.link.clone())
+            .or_else(|| sk.points.iter().find(|p| p.id == *e).and_then(|p| p.link.clone()));
+        if let Some(link) = link.filter(|l| sk.link(l).is_some_and(|l| l.kind != solidcraft_engine::sketch::LinkKind::Text))
+            && !out.contains(&link)
+        {
+            out.push(link);
+        }
+    }
+    out
+}
+
 /// Explode Text (#1842): the selected text's outlines become normal sketch lines, arcs and
 /// curves, no longer tied to the text, so they can be picked, trimmed and edited one by one.
 fn explode_text(app: &SolveApp) -> Option<Item> {
@@ -1244,6 +1295,19 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .collect();
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    }
+    // Projected geometry: the whole projection, or just the selected members (Delete).
+    let links = selected_links(&ss.sketch, &ents);
+    if !links.is_empty() {
+        let frozen = links.iter().all(|l| ss.sketch.link(l).is_some_and(|l| l.frozen));
+        let p = json!({"links": links});
+        v.push(Item::heading("Projection"));
+        v.push(cmd(app, "sketch.update_references", "Update References").with(json!({"sketch": sid})));
+        v.push(if frozen { cmd(app, "sketch.resume_link", "Resume Link") } else { cmd(app, "sketch.freeze_link", "Freeze Link") }.with(p.clone()));
+        v.push(cmd(app, "sketch.link_visibility", "Show/Hide").with(json!({"links": links, "visible": false})));
+        v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(p));
+        v.push(cmd(app, "sketch.break_link", "Break Link").with(json!({"entities": ents})));
+        v.push(Item::sep());
     }
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
