@@ -7,18 +7,12 @@ use crate::p21::{Exchange, Param};
 use crate::read::Units;
 
 /// What a representation context says about its numbers.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Context {
     pub units: Units,
     /// The context's distance uncertainty in millimetres (the last UNCERTAINTY_MEASURE_WITH_UNIT
     /// it lists), if any.
     pub uncertainty: Option<f64>,
-}
-
-impl Default for Context {
-    fn default() -> Self {
-        Context { units: Units::default(), uncertainty: None }
-    }
 }
 
 fn si_prefix(p: Option<&Param>) -> f64 {
