@@ -22,7 +22,8 @@ pub const SWEEP_FOLLOW: i32 = 0;
 pub const SWEEP_TRANSLATE: i32 = 1;
 
 /// A curve list as the C API reads it: kinds (with a NURBS curve's degree and point count) and
-/// each curve's numbers.
+/// each curve's numbers. Only the calls read them, which a build without SMLib does not have.
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
 pub struct List<'a> {
     pub kinds: &'a [i64],
     pub reals: &'a [f64],
