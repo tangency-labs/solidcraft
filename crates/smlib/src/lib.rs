@@ -10,7 +10,7 @@
 //! [`Error::NotBuilt`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::CString;
 use std::path::Path;
 use std::sync::Once;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -70,8 +70,7 @@ fn c_path(p: &Path) -> Result<CString> {
     CString::new(p.to_string_lossy().as_bytes()).map_err(|_| Error::Argument)
 }
 
-extern "C" fn log_line(_: *mut c_void, level: i32, line: *const c_char) {
-    let text = ffi::line(line);
+fn log_line(level: i32, text: String) {
     if level == 0 {
         log::debug!(target: "smlib", "{text}");
     } else {
