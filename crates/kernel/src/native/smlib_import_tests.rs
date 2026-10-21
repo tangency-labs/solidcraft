@@ -93,3 +93,20 @@ fn a_cavity_comes_back_from_smlib() {
     let got = super::smlib_body(&back).unwrap().volume(1e-7).unwrap();
     assert!((got - (64_000.0 - 125.0)).abs() < 1e-6, "{got}");
 }
+
+/// A square revolved off the axis through three quarters of a turn: its flat ends are planes
+/// square to the axis (annular sectors), its walls cylinders.
+#[test]
+fn a_revolved_annulus_goes_with_its_flat_faces() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let square =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(4., 12.), Vec2::new(12., 12.), Vec2::new(12., 20.), Vec2::new(4., 20.)]), holes: vec![] };
+    let plane = Plane { y: v(0., 0., 1.), ..Plane::XZ };
+    let body = crate::revolve(&plane, &[square], Vec2::ZERO, Vec2::Y, 1.5 * PI).unwrap().pop().unwrap();
+    let s = super::smlib_body(&body).unwrap();
+    let check = s.check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    let exact = 0.75 * PI * (144.0 - 16.0) * 8.0;
+    let got = s.volume(1e-7).unwrap();
+    assert!((got - exact).abs() <= 1e-6 * exact, "SMLib volume {got}, exact {exact}");
+}
