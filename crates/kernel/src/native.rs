@@ -453,4 +453,61 @@ mod tests {
             assert!(pcurve::pcurves(face, 1e-9).unwrap().iter().flatten().all(|c| matches!(c, solidcraft_geom::brep::Curve2::RationalSpline { .. })));
         }
     }
+
+    /// The kernel's own curved bodies: the cylinder (in halves), patch sphere, torus, a cone
+    /// (apex), a revolved ball, a tube, the cylinder cut by a tilted box (intersection curves),
+    /// a filleted box.
+    fn curved_bodies() -> Vec<(&'static str, Body)> {
+        use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+        use std::f64::consts::{FRAC_PI_2, PI, TAU};
+        let turn = |outer: Loop2| crate::revolve(&Plane::XZ, &[Region2 { outer, holes: vec![] }], Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 5., 40.).unwrap();
+        let block = crate::box_solid(Vec3::new(-20., -20., 20.), Vec3::new(20., 20., 60.)).unwrap();
+        let block = crate::transform(&block, Vec3::ZERO, Vec3::new(0., 0., 20.), Vec3::X, 0.4).unwrap();
+        let cut = crate::boolean(&cyl, &block, crate::BoolOp::Cut).unwrap().unwrap();
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
+        let half = Loop2 {
+            segs: vec![
+                Seg2::Arc { center: Vec2::ZERO, radius: 6., start: -FRAC_PI_2, sweep: PI },
+                Seg2::Line { a: Vec2::new(0., 6.), b: Vec2::new(0., -6.) },
+            ],
+        };
+        vec![
+            ("cylinder", cyl),
+            ("sphere", crate::sphere(Vec3::ZERO, 12.).unwrap()),
+            ("torus", crate::torus(Vec3::ZERO, 20., 4.).unwrap()),
+            ("cone", turn(Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(5., 0.), Vec2::new(0., 10.)]))),
+            ("ball", turn(half)),
+            ("tube", turn(Loop2::polygon(&[Vec2::new(3., 0.), Vec2::new(5., 0.), Vec2::new(5., 4.), Vec2::new(3., 4.)]))),
+            ("cut", cut),
+            ("fillet", rounded),
+        ]
+    }
+
+    #[test]
+    fn pcurves_fit_curved_faces_within_tolerance() {
+        for (name, body) in curved_bodies() {
+            for tol in [1e-3, 1e-5, 1e-6] {
+                // Truck places intersection curves on their surfaces to about 1e-6 mm only.
+                if name == "cut" && tol < 1e-5 {
+                    let face = body.solid.face_iter().find(|f| {
+                        f.edge_iter().any(|e| matches!(e.curve(), truck_modeling::Curve::IntersectionCurve(_)))
+                            && !matches!(f.surface(), truck_modeling::Surface::Plane(_))
+                    });
+                    let error = pcurve::pcurves(face.unwrap(), tol).unwrap_err().to_string();
+                    assert!(error.contains("off the surface"), "{error}");
+                    continue;
+                }
+                let start = std::time::Instant::now();
+                for face in body.solid.face_iter() {
+                    pcurve::pcurves(face, tol).unwrap();
+                }
+                let took = start.elapsed();
+                let winding = check_pcurves(&body, tol);
+                eprintln!("{name} at {tol}: {took:?}; loops round the surface: {winding:?}");
+                assert!(winding.is_empty(), "{name}");
+            }
+        }
+    }
 }
