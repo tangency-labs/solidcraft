@@ -918,18 +918,18 @@ fn take_attempt() -> bool {
 /// The result carries its exact history ([`Body::history`]) over the operands `[a, b]`,
 /// whichever way it was made, or none where a step it took does not report one.
 ///
-/// Truck runs it unless [`crate::BOOLEANS_ENV`] picks SMLib ([`crate::boolean_backend`]).
+/// Truck runs it unless [`crate::KERNEL_ENV`] picks SMLib ([`crate::backend`]).
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || match crate::boolean_backend()? {
-        crate::BooleanBackend::Truck => boolean_untimed(a, b, op),
-        crate::BooleanBackend::Smlib => smlib_boolean(a, b, op),
+    crate::profile::timed(crate::profile::Kind::Boolean, || match crate::backend()? {
+        crate::Backend::Truck => boolean_untimed(a, b, op),
+        crate::Backend::Smlib => smlib_boolean(a, b, op),
     })
 }
 
 /// [`boolean`] through SMLib, its result given the operands' roles as truck's is.
 #[cfg(feature = "smlib")]
 fn smlib_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
-    let r = guard("SMLib boolean", || crate::boolean_backend::smlib_boolean(a, b, op));
+    let r = guard("SMLib boolean", || crate::smlib_boolean::smlib_boolean(a, b, op));
     with_operand_roles(a, b, op, r)
 }
 

@@ -1,4 +1,5 @@
-//! SMLib's modelling operations: booleans, fillet, chamfer and shell. Each returns a new body
+//! SMLib's modelling operations: booleans, fillet, chamfer, shell, offset faces and thicken.
+//! Each returns a new body
 //! and leaves its inputs unchanged.
 //!
 //! Edges and faces are chosen by points, never by SMLib's internal order: each point selects the
@@ -66,9 +67,25 @@ impl Brep {
 
     /// Hollowed to a wall of `thickness` (negative: inside the original surface, positive:
     /// outside), open at the faces nearest to `open_faces` (each within `tolerance`); none gives
-    /// a closed hollow body.
+    /// a closed hollow body. An inward wall that leaves no room inside is [`Error::NoRoom`].
     pub fn shell(&self, open_faces: &[[f64; 3]], tolerance: f64, thickness: f64) -> Result<Brep> {
         self.pick_op(ffi::ops::Pick::Shell, open_faces, tolerance, thickness, true)
+    }
+
+    /// The solid with the faces nearest to `faces` (each within `tolerance`) moved `distance`
+    /// along their outward normals (negative: into the body), onto their surfaces' offsets, the
+    /// faces around them extended or trimmed to meet them. Faces moved in past all of the body
+    /// behind them are [`Error::NoRoom`].
+    pub fn offset_faces(&self, faces: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
+        self.pick_op(ffi::ops::Pick::OffsetFaces, faces, tolerance, distance, false)
+    }
+
+    /// A sheet thickened into a solid by `thickness` along its surfaces' normals (negative:
+    /// against them), or by half each way when `symmetric`, with ruled walls along its open
+    /// edges. A closed solid is [`Error::Argument`].
+    pub fn thicken(&self, thickness: f64, symmetric: bool) -> Result<Brep> {
+        init()?;
+        ffi::ops::thicken(&self.0, thickness, symmetric).map(Brep).map_err(error)
     }
 
     fn pick_op(&self, kind: ffi::ops::Pick, points: &[[f64; 3]], tolerance: f64, size: f64, allow_none: bool) -> Result<Brep> {

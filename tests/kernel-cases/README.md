@@ -11,7 +11,7 @@ cargo run -p solidcraft-cli -- kernel-cases tests/kernel-cases/booleans/<id>    
 ```
 
 For the `smlib` column, build `solidcraft-cli` with `--features smlib` (after
-`scripts/fetch-smlib.sh`). The rig sets `SOLIDCRAFT_BOOLEANS=smlib` for those runs.
+`scripts/fetch-smlib.sh`). The rig sets `SOLIDCRAFT_KERNEL=smlib` for those runs.
 
 ## Rules
 

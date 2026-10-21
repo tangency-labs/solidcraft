@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod backend;
 mod blend;
 mod blend_corner;
 mod blend_fit;
@@ -20,7 +21,6 @@ mod blend_vertex;
 #[cfg(test)]
 mod blend_wrong_way_tests;
 mod body;
-mod boolean_backend;
 mod boolean_diagnostics;
 mod boolean_guard;
 mod boolean_record;
@@ -121,6 +121,8 @@ pub mod provenance;
 mod record;
 mod seam_faces;
 mod sew;
+#[cfg(feature = "smlib")]
+mod smlib_boolean;
 mod smooth_edges;
 mod sphere_lens;
 mod spline_conv;
@@ -157,11 +159,11 @@ mod validity;
 pub mod watch;
 mod whole_face;
 
+pub use backend::{Backend, KERNEL_ENV, backend};
 pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_max, fillet_max_each};
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, Paint};
-pub use boolean_backend::{BOOLEANS_ENV, BooleanBackend, boolean_backend};
 pub use boolean_diagnostics::{BooleanDiagnostics, BooleanFallback, BooleanStrategy, capture_boolean_diagnostics};
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};

@@ -206,16 +206,16 @@ fn hostile_inputs_are_errors() {
         assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, t).unwrap_err(), Error::Argument, "thickness {t}");
     }
     // Sizes SMLib cannot build fail as errors, whatever SMLib says.
-    for (what, r) in [
-        ("radius larger than the cube", c.fillet(&mid, 0.1, 50.0)),
-        ("chamfer past the faces", c.chamfer(&mid, 0.1, 30.0)),
-        ("wall thicker than the box", c.shell(&[[10.0, 10.0, 20.0]], 0.1, -15.0)),
-    ] {
+    for (what, r) in [("radius larger than the cube", c.fillet(&mid, 0.1, 50.0)), ("chamfer past the faces", c.chamfer(&mid, 0.1, 30.0))] {
         match r {
             Ok(b) => panic!("{what}: SMLib built a body of volume {:?}, counts {:?}", b.volume(ACC), b.counts()),
             Err(e) => eprintln!("{what}: {e:?}"),
         }
     }
+    // A wall with no room inside it never reaches SMLib's offset.
+    assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, -15.0).unwrap_err(), Error::NoRoom);
+    assert_eq!(c.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, -20.0).unwrap_err(), Error::NoRoom);
+    assert_eq!(c.thicken(1.0, false).unwrap_err(), Error::Argument, "a solid is no sheet");
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
