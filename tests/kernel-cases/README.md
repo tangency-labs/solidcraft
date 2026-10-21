@@ -107,7 +107,7 @@ cargo xtask kernel-cases --ladder --kernel both --cli target/release/solidcraft-
 cargo xtask kernel-cases --ladder --kernel both --cli target/release/solidcraft-cli --record "why"
 ```
 
-`--record` measures one case at a time, rewrites the golden and sorts each tier by the first
+Ladder runs measure one case at a time (unless `--jobs`); `--record` rewrites the golden and sorts each tier by the first
 kernel's time, fastest first; commit both files. The report, `docs/kernel-ladder.md`, gives per
 tier and kernel the counts per status and the **frontier**: the first case in ladder order the
 kernel fails.
