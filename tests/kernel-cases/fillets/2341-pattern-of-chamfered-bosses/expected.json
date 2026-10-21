@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2341",
+  "tangency-labs/solidcraft#2774",
+  "tangency-labs/solidcraft#2775",
+  "tangency-labs/solidcraft#2342"
+ ],
+ "what": "a 2 x 2 grid made by a feature pattern of a boss and its two chamfers (a concave root chamfer and a convex tip chamfer)",
+ "source": "analytic",
+ "method": "plate 84x84x3 with four bosses (34x34 rounded square, corners R4, 4 deep below the plate): boss area 34^2 - (4-pi)*16 = 1142.265, perimeter P = 4*26 + 2 pi 4 = 129.133. Root chamfer 1 mm (concave, round the boss where it meets the plate underside) adds the triangle c^2/2 along the loop at its centroid line, which lies c/3 outside the wall: c^2/2 (P + 2 pi c/3) = 65.6136 per boss. Tip chamfer 0.8 (convex, on the boss end loop) removes c^2/2 (P - 2 pi c/3) = 40.7863 per boss. V = 84*84*3 + 4 (4 Ab + root - tip) = 39543.557. Copies are 42 apart, 8 mm clear of each other, so the chamfers never meet.",
+ "body_count": 1,
+ "volume_mm3": 39543.556743793306
+}
