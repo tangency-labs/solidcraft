@@ -237,10 +237,23 @@ impl EvalSurface {
         }
     }
 
-    /// `uv` with each parameter along which a spline closes on itself moved by whole periods
-    /// into the spline's active knot interval (unchanged inside it, and for any other surface):
-    /// the parameters both evaluators take for a point of a closed spline found a period away.
+    /// `uv` with each parameter along which a spline closes on itself (or a revolution's
+    /// profile does) moved by whole periods into the active knot interval (unchanged inside it,
+    /// and for any other surface): the parameters both evaluators take for a point of a closed
+    /// spline found a period away.
     pub fn wrap(&self, uv: [f64; 2]) -> [f64; 2] {
+        if let EvalSurface::Revolved { profile, swap, .. } = self {
+            let d = usize::from(*swap);
+            let range = (|| Some((*profile.knots.get(profile.degree)?, *profile.knots.get(profile.ctrl.len())?)))();
+            let mut out = uv;
+            if let (Some(r), Some(x)) = (range, out.get_mut(d))
+                && !(r.0..=r.1).contains(x)
+                && uv::closed_curve(profile)
+            {
+                *x = uv::wrap_into(*x, r);
+            }
+            return out;
+        }
         let EvalSurface::Nurbs { degree, knots, count, ctrl, .. } = self else { return uv };
         let range = |d: usize| Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?));
         let outside: Vec<usize> = (0..2).filter(|&d| range(d).is_some_and(|(a, b)| !(a..=b).contains(&uv[d]))).collect();
@@ -270,6 +283,7 @@ impl EvalSurface {
                 nurbs_derivs(*degree, knots, *count, ctrl, u, v)
             }
             EvalSurface::Revolved { profile, origin, axis, transform, swap } => {
+                let [u, v] = self.wrap([u, v]);
                 let (s, a) = if *swap { (v, u) } else { (u, v) };
                 let (c, dc) = profile.eval(s)?;
                 let (sin, cos) = a.sin_cos();

@@ -473,8 +473,9 @@ fn save_surface(s: &mt::Surface, d: usize) -> Result<b::Surface> {
 }
 
 /// An edge's curve for truck, which bounds an edge by its curve's range: the record itself
-/// where the interval is that range (all this adapter writes), else the piece on the interval
-/// for the kinds that have one in closed form.
+/// where the interval is that range (all this adapter writes), else the piece on the interval:
+/// in closed form for lines and conics, cut out of a spline by knot insertion (the same points
+/// at the same parameters).
 fn load_edge_curve(c: b::Curve, interval: [f64; 2]) -> Result<mt::Curve> {
     match c {
         b::Curve::Line { start, end } if interval != [0., 1.] => {
@@ -486,9 +487,34 @@ fn load_edge_curve(c: b::Curve, interval: [f64; 2]) -> Result<mt::Curve> {
         b::Curve::Line { .. } => load_curve(c),
         c => match c.natural() {
             b::Natural::Range(a, z) if [a, z] == interval => load_curve(c),
-            _ => Err(unsupported("a spline or intersection edge on part of its curve")),
+            b::Natural::Range(..) if matches!(c, b::Curve::Spline { .. } | b::Curve::RationalSpline { .. }) => {
+                load_curve(spline_piece(&c, interval)?)
+            }
+            _ => Err(unsupported("an intersection edge on part of its curve")),
         },
     }
+}
+
+/// A spline record's piece on `interval` (inside its domain), as a spline record of the same
+/// kind whose domain is the interval ([`solidcraft_geom::bspline::segment`]).
+fn spline_piece(c: &b::Curve, [a, z]: [f64; 2]) -> Result<b::Curve> {
+    use solidcraft_geom::bspline::{HPoint, segment};
+    let (knots, h): (&[f64], Vec<HPoint>) = match c {
+        b::Curve::Spline { knots, points } => (knots, points.iter().map(|q| HPoint { x: q[0], y: q[1], z: q[2], w: 1.0 }).collect()),
+        b::Curve::RationalSpline { knots, homogeneous } => {
+            (knots, homogeneous.iter().map(|q| HPoint { x: q[0], y: q[1], z: q[2], w: q[3] }).collect())
+        }
+        _ => return Err(invalid("not a spline")),
+    };
+    let degree = knots.len().checked_sub(h.len() + 1).ok_or_else(|| invalid("spline degree"))?;
+    let (knots, h) = segment(degree, knots, &h, a, z).map_err(invalid)?;
+    Ok(match c {
+        b::Curve::Spline { .. } => b::Curve::Spline {
+            knots,
+            points: h.iter().map(|q| q.project().map(|v| [v.x, v.y, v.z]).ok_or_else(|| invalid("spline piece"))).collect::<Result<_>>()?,
+        },
+        _ => b::Curve::RationalSpline { knots, homogeneous: h.iter().map(|q| [q.x, q.y, q.z, q.w]).collect() },
+    })
 }
 fn load_curve(c: b::Curve) -> Result<mt::Curve> {
     Ok(match c {

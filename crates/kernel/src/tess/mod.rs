@@ -466,17 +466,22 @@ fn off_surface(rules: &size::Rules) -> f64 {
     (rules.extent * ON_SURFACE).max(rules.boundary_tol.unwrap_or(0.0)).max(1e-6)
 }
 
-/// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
-/// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
-/// Whether a face of `solid` is bounded by one seam edge alone, used both ways between two
-/// distinct vertices (poles): a whole sphere as one face, as SMLib writes it. Truck's mesher
-/// projects both uses onto one parameter line and meshes nothing; the display plan opens the
-/// loop across the period ([`open_pole_to_pole`]).
+/// Whether a face of `solid` has a loop that runs along a seam edge between two distinct
+/// vertices and straight back along it, the two uses one after the other (they meet at a pole):
+/// a whole sphere as one face bounded by its meridian alone, as SMLib writes it, or a sphere
+/// face whose meridian is split where a trim crosses it. Truck's mesher projects both uses onto
+/// one parameter line and meshes nothing; the display plan opens the loop across the period
+/// ([`open_pole_to_pole`]).
 pub(crate) fn has_pole_to_pole_seam(solid: &Solid) -> bool {
     solid.face_iter().any(|f| {
         f.boundaries().iter().any(|w| {
             let edges: Vec<&mt::Edge> = w.edge_iter().collect();
-            matches!(edges.as_slice(), [a, b] if a.id() == b.id() && a.front() != a.back())
+            let n = edges.len();
+            n >= 2
+                && (0..n).any(|k| match (edges.get(k), edges.get((k + 1) % n)) {
+                    (Some(a), Some(b)) => a.id() == b.id() && a.orientation() != b.orientation() && a.front() != a.back(),
+                    _ => false,
+                })
         })
     })
 }
@@ -487,21 +492,24 @@ fn area2(uv: &[[f64; 2]]) -> f64 {
     (0..n).map(|k| uv.get(k).zip(uv.get((k + 1) % n)).map_or(0.0, |(a, b)| a[0] * b[1] - b[0] * a[1])).sum()
 }
 
-/// A loop that runs from one pole to the other and back along the same parameter line (both
-/// uses of a seam joined only at the poles) encloses nothing once projected: the run after the
-/// second pole is moved one period along the periodic direction, which way gives the loop a
-/// positive area, so the face spans the period between its two seam copies.
+/// A loop through both poles that turns straight back at one of them (it runs along a seam
+/// and back: a whole sphere bounded by its meridian, or a sphere face whose split meridian it
+/// uses both ways) retraces that seam once projected, since the periodic parameter carries on
+/// unchanged across the pole. Across a pole it may jump by any amount, so the run from the
+/// second pole back to the first is moved one period along, whichever way keeps the loop
+/// within one period with a positive area: the seam's two uses then lie a period apart.
 fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
     let n = l.uv.len();
     let poles: Vec<usize> = (0..n).filter(|&k| l.uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate(s, *q, d)))).collect();
     let [p0, p1] = poles.as_slice() else { return };
-    let (lo, hi) = l.uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[0].min(q[1])), b.max(q[0].max(q[1]))));
-    let extent = (hi - lo).abs().max(1e-12);
-    if area2(&l.uv).abs() > 1e-9 * extent * extent {
-        return;
-    }
     for d in 0..2 {
         let Some(per) = dom.period[d] else { continue };
+        let near =
+            |a: Option<&[f64; 2]>, b: Option<&[f64; 2]>| a.zip(b).is_some_and(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()) <= 1e-9 * per);
+        let turns_back = [*p0, *p1].iter().any(|&p| near(l.uv.get((p + n - 1) % n), l.uv.get((p + 1) % n)));
+        if !turns_back {
+            continue;
+        }
         // Along the seam the periodic parameter is constant between the poles.
         let second: Vec<usize> = (0..n).filter(|k| (k > p1 || k < p0) && *k != *p0 && *k != *p1).collect();
         if second.is_empty() {
@@ -514,7 +522,21 @@ fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
                     q[d] += sign * per;
                 }
             }
-            if area2(&moved) > 1e-9 * extent * extent {
+            // The poles as the planner splits them: one copy at each neighbour's parameter.
+            let mut ring = Vec::with_capacity(n + 2);
+            for k in 0..n {
+                let (Some(q), Some(a), Some(b)) = (moved.get(k), moved.get((k + n - 1) % n), moved.get((k + 1) % n)) else { continue };
+                if k == *p0 || k == *p1 {
+                    let (mut qa, mut qb) = (*q, *q);
+                    qa[d] = a[d];
+                    qb[d] = b[d];
+                    ring.extend([qa, qb]);
+                } else {
+                    ring.push(*q);
+                }
+            }
+            let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+            if hi - lo <= per * (1.0 + 1e-9) && area2(&ring) > 0.0 {
                 l.uv = moved;
                 return;
             }
@@ -522,6 +544,8 @@ fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
     }
 }
 
+/// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
+/// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 fn plan_face(
     fi: usize,
     s: &EvalSurface,

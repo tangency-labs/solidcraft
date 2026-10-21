@@ -343,6 +343,46 @@ pub fn insert_knot(p: usize, knots: &[f64], ctrl: &[HPoint], u: f64) -> SplineRe
     Ok((nk, q))
 }
 
+/// The piece of a B-spline (degree `p`, knots, homogeneous control points) on `[a, b]`, a
+/// sub-interval of its domain, as a clamped B-spline of its own whose domain is exactly
+/// `[a, b]`: the same points at the same parameters. Exact up to rounding: Boehm insertion of
+/// `a` and `b` until each has multiplicity `p` (NURBS Book §5.3, curve splitting), then the
+/// knots and control points between them.
+pub fn segment(p: usize, knots: &[f64], ctrl: &[HPoint], a: f64, b: f64) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+    let n = ctrl.len();
+    if n <= p || knots.len() != n + p + 1 {
+        return invalid("knot and control point counts do not match the degree");
+    }
+    let (lo, hi) = (knots.get(p).copied().unwrap_or(f64::NAN), knots.get(n).copied().unwrap_or(f64::NAN));
+    if !(lo <= a && a < b && b <= hi) {
+        return invalid(format!("[{a}, {b}] is not a piece of the domain [{lo}, {hi}]"));
+    }
+    let (mut k, mut c) = (knots.to_vec(), ctrl.to_vec());
+    for t in [a, b] {
+        // At most p insertions each.
+        for _ in 0..p {
+            if k.iter().filter(|&&x| x == t).count() >= p {
+                break;
+            }
+            (k, c) = insert_knot(p, &k, &c, t)?;
+        }
+    }
+    // The curve at a (from the right) is control point j0 − p, j0 the last knot equal to a;
+    // at b (from the left) control point j1 − 1, j1 the first knot equal to b.
+    let j0 = k.iter().rposition(|&x| x == a).filter(|&j| j >= p).ok_or_else(|| SplineError::Invalid("segment start".into()))?;
+    let j1 = k.iter().position(|&x| x == b).filter(|&j| j > j0).ok_or_else(|| SplineError::Invalid("segment end".into()))?;
+    let points = c.get(j0 - p..j1).ok_or_else(|| SplineError::Invalid("segment control points".into()))?.to_vec();
+    let inner = k.get(j0 + 1..j1).ok_or_else(|| SplineError::Invalid("segment knots".into()))?;
+    let mut out = Vec::with_capacity(inner.len() + 2 * p + 2);
+    out.extend(std::iter::repeat_n(a, p + 1));
+    out.extend_from_slice(inner);
+    out.extend(std::iter::repeat_n(b, p + 1));
+    if out.len() != points.len() + p + 1 {
+        return invalid("segment counts");
+    }
+    Ok((out, points))
+}
+
 /// The binomial coefficient `(n k)` (zero for `k > n`).
 pub(crate) fn binomial(n: usize, k: usize) -> f64 {
     if k > n {
@@ -712,6 +752,35 @@ pub(crate) mod tests {
         }
         assert_eq!(find_span(&knots, p, n, 1.5), None);
         assert_eq!(find_span(&knots, p, n, f64::NAN), None);
+    }
+
+    #[test]
+    fn a_segment_is_the_same_curve_on_its_interval() {
+        use crate::brep::{Curve, eval::CurveEval};
+        let p = 3;
+        let mut rng = Lcg(11);
+        let ctrl: Vec<HPoint> = (0..KNOTS.len() - p - 1)
+            .map(|_| HPoint::weighted(Vec3::new(rng.unit() * 10.0, rng.unit() * 10.0, rng.unit() * 10.0), 0.5 + rng.unit()))
+            .collect();
+        let record =
+            |k: &[f64], c: &[HPoint]| Curve::RationalSpline { knots: k.to_vec(), homogeneous: c.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() };
+        let whole = CurveEval::new(&record(&KNOTS, &ctrl)).unwrap();
+        // Inside one span, across knots (a double one included), from or to a domain end, and
+        // from one existing knot to another.
+        for (a, b) in [(0.1, 0.2), (0.12, 0.95), (0.0, 0.42), (0.3, 1.0), (0.3, 0.5), (0.0, 1.0)] {
+            let (k, c) = segment(p, &KNOTS, &ctrl, a, b).unwrap();
+            assert_eq!((k.first(), k.last()), (Some(&a), Some(&b)), "[{a}, {b}]: clamped on the interval");
+            assert_eq!(k.len(), c.len() + p + 1);
+            let piece = CurveEval::new(&record(&k, &c)).unwrap();
+            for x in samples() {
+                let t = a + (b - a) * x;
+                let (q, r) = (whole.point(t).unwrap(), piece.point(t).unwrap());
+                assert!(q.dist(r) < 1e-12, "[{a}, {b}] at {t}: {q:?} vs {r:?}");
+            }
+        }
+        assert!(segment(p, &KNOTS, &ctrl, 0.5, 0.5).is_err());
+        assert!(segment(p, &KNOTS, &ctrl, -0.1, 0.5).is_err());
+        assert!(segment(p, &KNOTS, &ctrl, 0.2, f64::NAN).is_err());
     }
 
     #[test]

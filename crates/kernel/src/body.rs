@@ -440,6 +440,13 @@ fn rephase_revolved(solid: Solid) -> Solid {
                     faces.push(f.clone());
                     continue;
                 };
+                // A face bounded by a seam it uses both ways goes all the way round (SMLib's
+                // sphere, torus or cylinder side as one face): its wrap belongs on that seam,
+                // and turning the surface would run it through the face or one of its holes.
+                if uses_an_edge_twice(f) {
+                    faces.push(f.clone());
+                    continue;
+                }
                 let surf = f.surface();
                 // The face's middle angle.
                 let mut acc = Vec3::ZERO;
@@ -492,6 +499,12 @@ fn rephase_revolved(solid: Solid) -> Solid {
         Ok(Some(s)) => s,
         _ => solid,
     }
+}
+
+/// Whether a face's boundary uses one edge twice (a seam).
+fn uses_an_edge_twice(f: &mt::Face) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    f.boundaries().iter().flat_map(|w| w.edge_iter()).any(|e| !seen.insert(e.id()))
 }
 
 pub(crate) fn p3(v: Vec3) -> mt::Point3 {
@@ -672,6 +685,16 @@ impl Body {
             meshes: None,
             phased: true,
         })
+    }
+
+    /// Like [`Body::new`], for a solid whose faces already point out of its material as
+    /// recorded (another kernel's B-rep, through its schema 4 record): revolved faces turned as
+    /// `new` turns them, the orientation kept. `new` orients by the volume of truck's coarse
+    /// mesh, which leaves out a face it cannot mesh (SMLib's sphere bounded by its seam alone)
+    /// and then turns a correct body inside out.
+    #[cfg_attr(not(feature = "smlib"), allow(dead_code))]
+    pub(crate) fn oriented(solid: Solid) -> Result<Body> {
+        Body::new_placed(solid, false, None, false)
     }
 
     /// Like [`Body::new`], for a solid made by placing an already-oriented body (see
