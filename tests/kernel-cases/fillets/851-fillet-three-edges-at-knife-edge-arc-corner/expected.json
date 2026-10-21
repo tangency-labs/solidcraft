@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#854",
+  "tangency-labs/solidcraft#926",
+  "tangency-labs/solidcraft#935",
+  "tangency-labs/solidcraft#1294"
+ ],
+ "what": "three edges meeting at the front corner of a plate with a concave arc wall that runs out in a knife-edge tip: top front edge, arc top edge and front upright, R2 together",
+ "source": "invariants",
+ "method": "plate 41.5 x 21 plus the corner that a circle of radius 21 leaves (the arc wall meets the front face square and runs out tangent into the back face at (62.1667, 0)), 10 high. The three rounds meet at the corner in a piece of sphere or a crease, and the rounding is possible (the rolling ball of R2 fits everywhere on those edges). No closed form for the corner volume: one closed valid solid is the right answer.",
+ "body_count": 1
+}

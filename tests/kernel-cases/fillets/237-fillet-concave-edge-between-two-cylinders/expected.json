@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#237",
+  "tangency-labs/solidcraft#238"
+ ],
+ "what": "an R6 round on the vertical edge where two cylinder walls meet (the concave corner of two merged discs), the two walls meeting at an angle",
+ "source": "analytic",
+ "method": "sketch of two arcs (R1 = 17.1406 about the origin and R2 = 9.6669 about (10.7158, 13.3781), which lies on the first circle) closing at A and B: the outline of the union of the two discs, 10 high. Union area = pi R1^2 + pi R2^2 - lens(R1, R2, d) = 1087.5019. The edge at B (reflex corner) is concave: the R6 round fills the corner with the circle tangent externally to both walls (centre at distance R1+6 and R2+6 from the two centres). Area added = polygon area of the region bounded by the two wall arcs (B to the tangent points) and the R6 arc = 1.4755 (120000-point shoelace). V = 10*(union + added) = 10889.773. The round stays on the walls (the tangent points lie on the outline part of each circle).",
+ "body_count": 1,
+ "volume_mm3": 10889.773289961511
+}

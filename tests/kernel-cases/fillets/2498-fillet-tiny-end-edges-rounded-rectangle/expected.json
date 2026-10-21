@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2498",
+  "tangency-labs/solidcraft#2506"
+ ],
+ "what": "an R2 round of the top loop of a 26.4x8.6x8.4 rounded rectangle whose end edges are only 0.02 mm long (corner radius 4.29)",
+ "source": "analytic",
+ "method": "rounded rectangle 26.4 x 8.6, corners R4.29 (the two end lines are 8.6 - 8.58 = 0.02 long), extruded 8.4: area 26.4*8.6 - (4-pi)*4.29^2, perimeter P = 2*17.82 + 2*0.02 + 2*pi*4.29 = 62.635. The R2 round of the whole top loop removes (1-pi/4) r^2 (P - 2 pi x r), x r = r (5/6-pi/4)/(1-pi/4). V = 1723.0743. Topology (all contacts tangent, nothing merges): 18 faces (top, bottom, 8 wall faces, 8 round faces), 24 vertices (8 on the bottom loop, 8 where the round meets the wall, 8 where it meets the top), 40 edges (V - E + F = 2).",
+ "body_count": 1,
+ "volume_mm3": 1723.0742532035633,
+ "faces": 18,
+ "edges": 40,
+ "vertices": 24
+}
