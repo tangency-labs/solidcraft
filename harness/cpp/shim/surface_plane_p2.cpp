@@ -14,6 +14,8 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmCircle.h>
+#include <SmCone.h>
+#include <SmCylinder.h>
 #include <SmContext.h>
 #include <SmCurve.h>
 #include <SmDatabaseIO.h>
@@ -479,14 +481,53 @@ void run_op(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
         SmExtent2d da = rd.dom4();
         bool same = rd.flag();
         SmSurface* b = NULL;
+        bool natural_db = false;
+        bool built = true;
         if (!same)
         {
-            int64_t kind = rd.idx(0, 1);
-            b = kind == 0 ? (SmSurface*)read_plane(rd, ctx) : (SmSurface*)read_bspline_surface(rd, ctx);
+            int64_t kind = rd.idx(0, 2);
+            if (kind == 2)
+            {
+                // a real SmCone (CreateCanonical(origin, bot, top, height)) or SmCylinder
+                // (CreateCanonical(origin, radius)), over its natural domain when asked
+                SmPoint3d co = rd.vec();
+                SmVector3d cx = rd.vec();
+                SmVector3d cy = rd.vec();
+                bool cyl = rd.flag();
+                double bot = rd.num();
+                double top = rd.num();
+                double h = rd.num();
+                natural_db = rd.flag();
+                SmAxis2Placement f(co, cx, cy);
+                if (cyl)
+                {
+                    SmCylinder* c = NULL;
+                    built = SmCylinder::CreateCanonical(ctx, f, bot, c) == SM_SUCCESS && c != NULL;
+                    b = c;
+                }
+                else
+                {
+                    SmCone* c = NULL;
+                    built = SmCone::CreateCanonical(ctx, f, bot, top, h, c) == SM_SUCCESS && c != NULL;
+                    b = c;
+                }
+            }
+            else
+                b = kind == 0 ? (SmSurface*)read_plane(rd, ctx) : (SmSurface*)read_bspline_surface(rd, ctx);
         }
         SmExtent2d db = rd.dom4();
+        if (natural_db && b != NULL)
+            db = b->GetNaturalUVDomain();
         double tol_slot = 0.0;
         const double* tol = read_opt(rd, tol_slot);
+        if (!built)
+        {
+            // the cone's construction status (both sides report it alone)
+            o.push_back(-2.0);
+            delete b;
+            delete a;
+            break;
+        }
         if (a == NULL || (!same && b == NULL))
             throw Bad();
         const SmSurface* other = same ? (const SmSurface*)a : b;

@@ -176,6 +176,22 @@ pub enum OtherIn {
     Plane(PlaneIn),
     /// A B-spline surface.
     BSpline(SurfaceData),
+    /// A real `SmCone` (`CreateCanonical(origin, bot, top, height)`) or, with
+    /// `cylinder`, `SmCylinder` (`CreateCanonical(origin, bot)`).
+    Cone {
+        /// Placement origin, X and Y axes.
+        frame: [[f64; 3]; 3],
+        /// `SmCylinder` instead of `SmCone`.
+        cylinder: bool,
+        /// Bottom radius (the cylinder's radius).
+        bot: f64,
+        /// Top radius.
+        top: f64,
+        /// Height (`0`: infinite cone, semi-angle `top` degrees).
+        height: f64,
+        /// Intersect over the cone's natural domain instead of `db`.
+        natural: bool,
+    },
 }
 
 /// One op.
@@ -582,6 +598,36 @@ impl Enc {
                         self.flag(false);
                         self.int(1);
                         self.surface(s)?;
+                    }
+                    OtherIn::Cone {
+                        frame,
+                        cylinder,
+                        bot,
+                        top,
+                        height,
+                        natural,
+                    } => {
+                        if !*global {
+                            return Err(bad("IntersectWithPlane needs a plane"));
+                        }
+                        // a zero or parallel placement axis makes a degenerate frame
+                        let [_, x, y] = frame;
+                        let c = [
+                            x[1] * y[2] - x[2] * y[1],
+                            x[2] * y[0] - x[0] * y[2],
+                            x[0] * y[1] - x[1] * y[0],
+                        ];
+                        if len_sq(&c).partial_cmp(&(1e-12 * len_sq(x) * len_sq(y))) != Some(core::cmp::Ordering::Greater) {
+                            return Err(bad("cone placement axes zero or parallel"));
+                        }
+                        self.flag(false);
+                        self.int(2);
+                        for v in frame {
+                            self.nums(v)?;
+                        }
+                        self.flag(*cylinder);
+                        self.nums(&[*bot, *top, *height])?;
+                        self.flag(*natural);
                     }
                 }
                 self.nums(db)?;

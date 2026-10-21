@@ -731,6 +731,90 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "global_cone_plane_perp_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#0",
+      "values_compared": 83
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cone_plane_oblique",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#1",
+      "values_compared": 83
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cone_plane_through_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#2",
+      "values_compared": 80
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "global_cone_plane_parallel_offset",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#3",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cone_plane_bounded",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#4",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cone_plane_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#5",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cylinder_plane_perp",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#6",
+      "values_compared": 83
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cylinder_plane_oblique",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#7",
+      "values_compared": 83
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cylinder_plane_along_axis",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#8",
+      "values_compared": 80
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "global_cone_plane_miss",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.plane_p2/cone.json#9",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "pp_infinite_perp",
       "outcome": "pass",
       "pass": true,
@@ -17779,12 +17863,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 8,
+  "cases_deferred": 9,
   "cases_failed": 0,
-  "cases_passed": 2210,
-  "cases_total": 2218,
+  "cases_passed": 2219,
+  "cases_total": 2228,
   "deferred_by_unit": {
-    "surface.surface_cache_p1": 8
+    "surface.surface_cache_p1": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

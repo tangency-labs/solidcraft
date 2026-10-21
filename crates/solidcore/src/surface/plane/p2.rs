@@ -46,8 +46,9 @@
 //!   `SmMatrix::SolveLinearSystem`'s near-singular warning, which upstream returns
 //!   through `SER`, is [`SolidError::Upstream`] with `SM_ERR_WARNING`.
 //! - **Recognisers** after the plane in `GlobalSurfaceIntersect`: the surface of
-//!   revolution's special case runs; the cone, cylinder, sphere and extrusion need
-//!   surface kinds not in [`SurfaceKind`] yet. Against a surface of revolution, a plane
+//!   revolution's and the cone's (`SmCone::IntersectWithPlane`, also for a cylinder)
+//!   special cases run; the sphere and extrusion need surface kinds not in
+//!   [`SurfaceKind`] yet. Against a surface of revolution, a plane
 //!   with a face returns [`SolidError::Unported`] (`SmFace::GetTolerance`) even where
 //!   the special case would not reach the plane's box. The general
 //!   `SmSurface::GlobalSurfaceIntersect` runs `SmSurfaceIntersector::DoIntersection`
@@ -1384,21 +1385,23 @@ pub(crate) fn global_surface_intersect(
                 owned,
             )?;
         }
-        // SurfOfRevolution/plane special case intersection: the orders and the UV
-        // curves are swapped (the surface of revolution's edge flags and angle
-        // tolerance are not used by it)
-        SurfaceKind::Cone(rev) => {
+        // cone/plane special case intersection (SmCone_TYPE and SmCylinder_TYPE):
+        // SmCone::IntersectWithPlane, which hides the surface of revolution's; the
+        // orders and the UV curves are swapped
+        SurfaceKind::Cone(cone) => {
             // the plane's boxes take its face's tolerance (taken as without owner
             // there; see the module header)
             if this.face()?.is_some() {
                 zone_tolerance(true)?;
             }
             let (need, mut x) =
-                rev.rev()
-                    .intersect_with_plane(k, plane, uv_domain, approx_tol_3d)?;
+                cone.intersect_with_plane(k, other_uv_domain, plane, uv_domain, approx_tol_3d)?;
             core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
             (need_nurb_intersection, out) = (need, x);
         }
+        // SurfOfRevolution/plane special case intersection: the orders and the UV
+        // curves are swapped (the surface of revolution's edge flags and angle
+        // tolerance are not used by it)
         SurfaceKind::SurfOfRevolution(rev) => {
             // the plane's boxes take its face's tolerance (taken as without owner
             // there; see the module header)
@@ -1409,8 +1412,8 @@ pub(crate) fn global_surface_intersect(
             core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
             (need_nurb_intersection, out) = (need, x);
         }
-        // (the cone, cylinder, sphere and extrusion special cases need surface kinds
-        // that are not ported yet)
+        // (the sphere and extrusion special cases need surface kinds that are not
+        // ported yet)
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
