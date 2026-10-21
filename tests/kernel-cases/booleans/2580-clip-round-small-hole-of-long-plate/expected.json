@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2580",
+    "tangency-labs/solidcraft#2579"
+  ],
+  "what": "a 16 mm box cut out round a small (r 1.8) hole of a 3 m long, 2 mm plate keeps the hole in both faces",
+  "source": "analytic",
+  "method": "plate 3000x300x2 with ten through holes r1.8, intersected with the 16x16 box centred on the first hole: a 16x16x2 piece with one through hole, V = 16*16*2 - pi*1.8^2*2. Faces: top and bottom (each with the hole), 4 sides, hole wall = 7",
+  "body_count": 1,
+  "volume_mm3": 491.6424796047381,
+  "faces": 7
+}

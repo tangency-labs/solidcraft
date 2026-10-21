@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2755"
+  ],
+  "what": "copies of a primitive cut made with a rectangular pattern change only the seed's targets, not a body the seed was told to leave alone",
+  "source": "analytic",
+  "method": "Plaque 100x60x10 loses three through holes r3 (seed at x=10, copies at 40 and 70, all inside the plate): 60000 - 3*pi*3^2*10. Voisin (z 5..15, overlapping the plate) and Loin are not targets, so they stay whole: 60000 and 1000. Total = 121000 - 3*pi*90",
+  "body_count": 3,
+  "volume_mm3": 120151.76998353076
+}
