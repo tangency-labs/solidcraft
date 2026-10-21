@@ -201,8 +201,11 @@ ends (within the edge's and the vertex's tolerances together); every oriented
 edge's pcurve, lifted through its face's surface, lies on the edge's curve at the
 interval's ends and middle (within the edge's) and starts on the same period as
 the use before it ends, except along a direction that collapses at a pole; every
-vertex loop's vertex lies on its face's surface (within the vertex's). It makes a
-fixed number of evaluations per record, so its work is linear in the item
+edge loop's pcurves enclose (u, v) area (more than 10⁻⁹ of the square of the
+loop's extent), and exactly one loop of each face, the outer, runs
+counter-clockwise about the natural normal, the rest clockwise (told apart by
+their areas, not their order); every vertex loop's vertex lies on its face's
+surface (within the vertex's). It makes a fixed number of evaluations per record, so its work is linear in the item
 budget, and a point it cannot evaluate is an error naming the record. It is not
 a certificate either: between the points it checks, an edge may still leave its
 surface. The truck adapter runs it before building topology, which truck does

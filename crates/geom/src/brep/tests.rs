@@ -201,6 +201,19 @@ fn closed_band() -> Brep {
         &[(0, true), (1, true), (2, false), (1, false)],
     )
 }
+/// A whole sphere bounded by one meridian from pole to pole, used twice: a closed shell.
+fn ball() -> Brep {
+    let meridian = Curve::Circle { frame: Frame { origin: [1., 2., 3.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] }, radius: 2. };
+    let mut b = one_face(
+        Surface::Sphere { frame: a_frame(), radius: 2. },
+        [[0., TAU], [-FRAC_PI_2, FRAC_PI_2]],
+        vec![(meridian, [-FRAC_PI_2, FRAC_PI_2], [0, 1])],
+        &[[1., 2., 1.], [1., 2., 5.]],
+        &[(0, true), (0, false)],
+    );
+    b.regions.push(Region { shells: vec![0], void: false });
+    b
+}
 /// The sheet with a vertex loop inside it, a wire shell and a vertex shell beside it.
 fn sheet_with_lower_forms() -> Brep {
     let mut b = sheet();
@@ -229,6 +242,7 @@ fn every_form_validates_and_round_trips_without_a_kernel() {
         ("void", hollow()),
         ("seam", tube()),
         ("seam on a closed spline", closed_band()),
+        ("seam from pole to pole", ball()),
         ("lower forms", sheet_with_lower_forms()),
     ] {
         body.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -525,6 +539,39 @@ fn geometric_defects_are_refused_by_record() {
             {
                 let mut b = closed_band();
                 shift(pcurve_of(&mut b, 0, 1), [-1., 0.]);
+                b
+            },
+        ),
+        (
+            "seam from pole to pole on one line",
+            Record::Loop { face: 0, r#loop: 0 },
+            Box::new(|p: &Problem| {
+                matches!(p, Problem::Empty { area } if area.abs() < 1e-9) && p.to_string().starts_with("loop encloses no (u, v) area (signed area ")
+            }),
+            {
+                let mut b = ball();
+                let mid = |b: &mut Brep, k: usize| pcurve_of(b, 0, k).eval(0.).unwrap()[0];
+                let by = mid(&mut b, 0) - mid(&mut b, 1);
+                assert!((by.abs() - TAU).abs() < 1e-9, "a period apart: {by}");
+                shift(pcurve_of(&mut b, 0, 1), [by, 0.]);
+                b
+            },
+        ),
+        (
+            "outer loop clockwise",
+            Record::Loop { face: 0, r#loop: 0 },
+            Box::new(|p: &Problem| {
+                matches!(p, Problem::Turn { outer: true, area } if (*area + 1.).abs() < 1e-12)
+                    && p.to_string() == "outer loop runs clockwise in (u, v) (signed area -1)"
+            }),
+            {
+                // The plane's axes swapped turn its natural normal over: the loop, unchanged in
+                // space, runs clockwise about it.
+                let mut b = sheet();
+                if let Surface::Plane { u_axis, v_axis, .. } = &mut b.faces[0].surface {
+                    std::mem::swap(u_axis, v_axis);
+                }
+                fit_pcurves(&mut b);
                 b
             },
         ),

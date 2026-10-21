@@ -2,11 +2,13 @@
 //! assumes when it builds topology from the records without checking them itself. Each edge's
 //! curve meets its vertices at its interval's ends; each oriented edge's pcurve, lifted through
 //! its face's surface, lies on the edge's curve at the interval's ends and middle, and continues
-//! the use before it without jumping a period; each vertex loop's vertex lies on its surface.
+//! the use before it without jumping a period; each edge loop's pcurves enclose (u, v) area,
+//! one loop of each face counter-clockwise about the natural normal (the outer) and the rest
+//! clockwise; each vertex loop's vertex lies on its surface.
 //!
 //! A spot check, not a certificate: a fixed number of evaluations per record (three points of
-//! each edge, three of each use, one projection per vertex loop), so the work is linear in the
-//! item budget [`Brep::validate`] caps. Every distance is held to the record's own tolerance:
+//! each edge, [`AREA_SAMPLES`] of each use, one projection per vertex loop), so the work is
+//! linear in the item budget [`Brep::validate`] caps. Every distance is held to the record's own tolerance:
 //! an edge's for its pcurves, an edge's and its vertex's together where they meet, a vertex's on
 //! its surface. A point that cannot be evaluated is an error, never a panic.
 use super::eval::{CurveEval, SurfaceEval};
@@ -24,6 +26,8 @@ pub enum Record {
     Use { face: u32, r#loop: u32, position: u32 },
     /// `faces[face].loops[loop]`, a vertex loop.
     VertexLoop { face: u32, r#loop: u32 },
+    /// `faces[face].loops[loop]`, an edge loop.
+    Loop { face: u32, r#loop: u32 },
 }
 
 impl std::fmt::Display for Record {
@@ -32,7 +36,7 @@ impl std::fmt::Display for Record {
             Record::Edge(e) => write!(f, "edge {e}"),
             Record::Face(i) => write!(f, "face {i}"),
             Record::Use { face, r#loop, position } => write!(f, "face {face} loop {loop} use {position}"),
-            Record::VertexLoop { face, r#loop } => write!(f, "face {face} loop {loop}"),
+            Record::VertexLoop { face, r#loop } | Record::Loop { face, r#loop } => write!(f, "face {face} loop {loop}"),
         }
     }
 }
@@ -47,6 +51,15 @@ pub enum Problem {
     /// another period.
     #[error("pcurve starts {gap} from the end of the use before it, on another period (period {period})")]
     Period { gap: f64, period: f64 },
+    /// An edge loop's pcurves enclose no (u, v) area, within rounding of the loop's size: its
+    /// face has no surface to it (a seam's two uses on one parameter line).
+    #[error("loop encloses no (u, v) area (signed area {area})")]
+    Empty { area: f64 },
+    /// An edge loop runs the wrong way round in (u, v), seen from the surface's natural normal:
+    /// no loop of the face runs counter-clockwise (`outer`: the largest runs clockwise), or a
+    /// second one does (an inner loop, the smaller of them).
+    #[error("{} loop runs {} in (u, v) (signed area {area})", if *outer { "outer" } else { "inner" }, if *outer { "clockwise" } else { "counter-clockwise" })]
+    Turn { outer: bool, area: f64 },
     /// A point of the record cannot be evaluated (an unsupported kind, a non-finite value).
     #[error("{0}")]
     Unevaluable(String),
@@ -75,6 +88,11 @@ fn unevaluable(record: Record, what: impl std::fmt::Display) -> Mismatch {
 fn within(record: Record, what: &'static str, gap: f64, tolerance: f64) -> Result<()> {
     if gap <= tolerance { Ok(()) } else { Err(Mismatch { record, problem: Problem::Off { what, gap, tolerance } }) }
 }
+
+/// Points of each use's pcurve that its loop's (u, v) area is taken over.
+pub const AREA_SAMPLES: usize = 16;
+/// Signed area this small against the square of the loop's (u, v) extent is none.
+const EMPTY_AREA: f64 = 1e-9;
 
 const PCURVE_POINTS: [&str; 3] =
     ["pcurve start lifts off its edge's curve", "pcurve middle lifts off its edge's curve", "pcurve end lifts off its edge's curve"];
@@ -106,6 +124,8 @@ impl Brep {
             let face = index(fi);
             let surface = SurfaceEval::new(&f.surface).map_err(|err| unevaluable(Record::Face(face), err))?;
             let period = surface.domain().period;
+            // Each edge loop's signed (u, v) area.
+            let mut areas: Vec<(u32, f64)> = Vec::with_capacity(f.loops.len());
             for (li, l) in f.loops.iter().enumerate() {
                 let r#loop = index(li);
                 match l {
@@ -152,10 +172,52 @@ impl Brep {
                                 }
                             }
                         }
+                        // The area the loop encloses, its sign by its place (outer first). Where
+                        // uses meet at a pole the ring runs straight along the pole's line.
+                        let at = Record::Loop { face, r#loop };
+                        let mut ring: Vec<[f64; 2]> = Vec::with_capacity(edges.len().saturating_mul(AREA_SAMPLES));
+                        for u in edges {
+                            let [t0, t1] = self.edges.get(u.edge as usize).ok_or_else(|| unevaluable(at, "edge reference"))?.interval;
+                            for k in 0..AREA_SAMPLES {
+                                let f = k as f64 / AREA_SAMPLES as f64;
+                                let t = if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f };
+                                ring.push(u.pcurve.eval(t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?);
+                            }
+                        }
+                        let area = signed_area(&ring);
+                        let extent = (0..2)
+                            .map(|d| {
+                                let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+                                hi - lo
+                            })
+                            .fold(0.0, f64::max);
+                        if !(area.abs() > EMPTY_AREA * extent * extent) {
+                            return Err(Mismatch { record: at, problem: Problem::Empty { area } });
+                        }
+                        areas.push((r#loop, area));
                     }
                 }
+            }
+            // One loop runs counter-clockwise, the outer; every other one clockwise. Which is
+            // which comes from the areas, not the loops' order: the truck adapter writes a face's
+            // wires in truck's order, which need not put the outer one first.
+            let by_size = |a: &(u32, f64), b: &(u32, f64)| a.1.abs().total_cmp(&b.1.abs());
+            let ccw: Vec<(u32, f64)> = areas.iter().copied().filter(|a| a.1 > 0.0).collect();
+            let wrong = match ccw.len() {
+                0 => areas.into_iter().max_by(by_size).map(|(l, area)| (l, true, area)),
+                1 => None,
+                _ => ccw.into_iter().min_by(by_size).map(|(l, area)| (l, false, area)),
+            };
+            if let Some((r#loop, outer, area)) = wrong {
+                return Err(Mismatch { record: Record::Loop { face, r#loop }, problem: Problem::Turn { outer, area } });
             }
         }
         Ok(())
     }
+}
+
+/// Signed area of a closed polygon in (u, v): positive counter-clockwise.
+fn signed_area(ring: &[[f64; 2]]) -> f64 {
+    let n = ring.len();
+    0.5 * (0..n).filter_map(|i| Some((ring.get(i)?, ring.get((i + 1) % n)?))).map(|(p, q)| p[0] * q[1] - q[0] * p[1]).sum::<f64>()
 }
