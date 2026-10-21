@@ -3034,47 +3034,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#3 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#4 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#5 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#6 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#7 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3191,11 +3206,14 @@
       "values_compared": 292
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#22 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3312,47 +3330,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e2_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#37 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e2_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#38 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e2_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#39 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e2_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#40 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e2_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#41 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3469,11 +3502,14 @@
       "values_compared": 292
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e2_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#56 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3510,47 +3546,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e5_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#61 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e5_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#62 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e5_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#63 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e5_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#64 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e5_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#65 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3667,11 +3718,14 @@
       "values_compared": 292
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e5_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#80 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3708,47 +3762,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e9_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#85 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e9_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#86 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e9_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#87 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e9_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#88 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e9_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#89 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3865,11 +3934,14 @@
       "values_compared": 292
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e9_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#104 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -3906,47 +3978,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#109 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#110 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#111 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#112 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#113 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -4063,11 +4150,14 @@
       "values_compared": 292
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_e11_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#128 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -4104,47 +4194,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#133 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#134 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#135 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#136 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#137 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -4261,11 +4366,14 @@
       "values_compared": 292
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "Mouse_rb_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#152 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -5158,47 +5266,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#264",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#265",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#266",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#267",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#268",
       "values_compared": 0
     },
@@ -5315,11 +5438,14 @@
       "values_compared": 730
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_e11_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#283",
       "values_compared": 0
     },
@@ -5556,47 +5682,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#313",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#314",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#315",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#316",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#317",
       "values_compared": 0
     },
@@ -5713,11 +5854,14 @@
       "values_compared": 76
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#332",
       "values_compared": 0
     },
@@ -5834,47 +5978,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e2_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#347",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e2_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#348",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e2_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#349",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e2_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#350",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e2_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#351",
       "values_compared": 0
     },
@@ -5991,11 +6150,14 @@
       "values_compared": 76
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e2_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#366",
       "values_compared": 0
     },
@@ -6032,47 +6194,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e5_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#371",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e5_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#372",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e5_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#373",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e5_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#374",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e5_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#375",
       "values_compared": 0
     },
@@ -6189,11 +6366,14 @@
       "values_compared": 76
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e5_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#390",
       "values_compared": 0
     },
@@ -6230,47 +6410,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e9_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#395",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e9_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#396",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e9_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#397",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e9_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#398",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e9_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#399",
       "values_compared": 0
     },
@@ -6387,11 +6582,14 @@
       "values_compared": 76
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e9_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#414",
       "values_compared": 0
     },
@@ -6428,47 +6626,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e11_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#419",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e11_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#420",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e11_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#421",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e11_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#422",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e11_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#423",
       "values_compared": 0
     },
@@ -6585,11 +6798,14 @@
       "values_compared": 76
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_e11_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#438",
       "values_compared": 0
     },
@@ -6626,47 +6842,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_rb_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#443",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_rb_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#444",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_rb_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#445",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_rb_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#446",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_rb_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#447",
       "values_compared": 0
     },
@@ -6783,11 +7014,14 @@
       "values_compared": 76
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "cone_rb_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#462",
       "values_compared": 0
     },
@@ -6832,47 +7066,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#468",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#469",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#470",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#471",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#472",
       "values_compared": 0
     },
@@ -6989,11 +7238,14 @@
       "values_compared": 50
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#487",
       "values_compared": 0
     },
@@ -7110,47 +7362,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e2_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#502",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e2_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#503",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e2_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#504",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e2_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#505",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e2_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#506",
       "values_compared": 0
     },
@@ -7267,11 +7534,14 @@
       "values_compared": 50
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e2_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#521",
       "values_compared": 0
     },
@@ -7308,47 +7578,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e5_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#526",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e5_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#527",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e5_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#528",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e5_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#529",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e5_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#530",
       "values_compared": 0
     },
@@ -7465,11 +7750,14 @@
       "values_compared": 50
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e5_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#545",
       "values_compared": 0
     },
@@ -7506,47 +7794,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e9_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#550",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e9_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#551",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e9_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#552",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e9_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#553",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e9_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#554",
       "values_compared": 0
     },
@@ -7663,11 +7966,14 @@
       "values_compared": 50
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e9_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#569",
       "values_compared": 0
     },
@@ -7704,47 +8010,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e11_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#574",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e11_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#575",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e11_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#576",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e11_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#577",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e11_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#578",
       "values_compared": 0
     },
@@ -7861,11 +8182,14 @@
       "values_compared": 50
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_e11_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#593",
       "values_compared": 0
     },
@@ -7902,47 +8226,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_rb_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#598",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_rb_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#599",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_rb_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#600",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_rb_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#601",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_rb_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#602",
       "values_compared": 0
     },
@@ -8059,11 +8398,14 @@
       "values_compared": 50
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "sphere_rb_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#617",
       "values_compared": 0
     },
@@ -8108,47 +8450,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#623",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#624",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#625",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#626",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#627",
       "values_compared": 0
     },
@@ -8265,11 +8622,14 @@
       "values_compared": 97
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#642",
       "values_compared": 0
     },
@@ -8386,47 +8746,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e2_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#657",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e2_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#658",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e2_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#659",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e2_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#660",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e2_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#661",
       "values_compared": 0
     },
@@ -8543,11 +8918,14 @@
       "values_compared": 97
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e2_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#676",
       "values_compared": 0
     },
@@ -8584,47 +8962,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e5_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#681",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e5_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#682",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e5_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#683",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e5_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#684",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e5_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#685",
       "values_compared": 0
     },
@@ -8741,11 +9134,14 @@
       "values_compared": 97
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e5_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#700",
       "values_compared": 0
     },
@@ -8782,47 +9178,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e9_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#705",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e9_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#706",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e9_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#707",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e9_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#708",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e9_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#709",
       "values_compared": 0
     },
@@ -8939,11 +9350,14 @@
       "values_compared": 97
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e9_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#724",
       "values_compared": 0
     },
@@ -8980,47 +9394,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e11_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#729",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e11_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#730",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e11_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#731",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e11_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#732",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e11_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#733",
       "values_compared": 0
     },
@@ -9137,11 +9566,14 @@
       "values_compared": 97
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_e11_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#748",
       "values_compared": 0
     },
@@ -9178,47 +9610,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_rb_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#753",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_rb_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#754",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_rb_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#755",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_rb_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#756",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_rb_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#757",
       "values_compared": 0
     },
@@ -9335,11 +9782,14 @@
       "values_compared": 97
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "torus_rb_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#772",
       "values_compared": 0
     },
@@ -10624,47 +11074,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#933",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#934",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#935",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#936",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#937",
       "values_compared": 0
     },
@@ -10781,11 +11246,14 @@
       "values_compared": 108
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#952",
       "values_compared": 0
     },
@@ -10902,47 +11370,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e2_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#967",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e2_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#968",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e2_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#969",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e2_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#970",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e2_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#971",
       "values_compared": 0
     },
@@ -11059,11 +11542,14 @@
       "values_compared": 108
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e2_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#986",
       "values_compared": 0
     },
@@ -11100,47 +11586,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e5_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#991",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e5_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#992",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e5_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#993",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e5_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#994",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e5_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#995",
       "values_compared": 0
     },
@@ -11257,11 +11758,14 @@
       "values_compared": 108
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e5_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1010",
       "values_compared": 0
     },
@@ -11298,47 +11802,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e9_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1015",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e9_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1016",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e9_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1017",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e9_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1018",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e9_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1019",
       "values_compared": 0
     },
@@ -11455,11 +11974,14 @@
       "values_compared": 108
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e9_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1034",
       "values_compared": 0
     },
@@ -11496,47 +12018,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e11_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1039",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e11_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1040",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e11_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1041",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e11_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1042",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e11_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1043",
       "values_compared": 0
     },
@@ -11653,11 +12190,14 @@
       "values_compared": 108
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_e11_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1058",
       "values_compared": 0
     },
@@ -11694,47 +12234,62 @@
       "values_compared": 4
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rb_e0_seam",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1063",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rb_e0_seam_f",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1064",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rb_e0_topological",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1065",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rb_e0_tangent",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1066",
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rb_e0_blend",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1067",
       "values_compared": 0
     },
@@ -11851,11 +12406,14 @@
       "values_compared": 108
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "difftest: exact analytic geometry import for edge evaluation",
+        "unit": "topology.edge"
+      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rb_e0_radial",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "fixture:fixtures/topology.edge/upstream_files.json#1082",
       "values_compared": 0
     },
@@ -14508,13 +15066,14 @@
       "values_compared": 1
     }
   ],
-  "cases_both_errored": 186,
-  "cases_deferred": 6,
+  "cases_both_errored": 0,
+  "cases_deferred": 192,
   "cases_failed": 0,
-  "cases_passed": 1781,
+  "cases_passed": 1595,
   "cases_total": 1787,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p3": 6
+    "intersect.surface_drop_lib_p3": 6,
+    "topology.edge": 186
   },
   "max_rel_err": 0.0,
   "pass": true,

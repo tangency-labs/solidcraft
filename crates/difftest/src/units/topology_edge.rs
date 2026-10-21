@@ -20,8 +20,9 @@
 //! its B-spline part only, as do `SmBSplineSurface` subclasses other than `SmPlane`. Ops
 //! that evaluate such an edge curve (`EndTangent`, `Trimmed`, `Reverse`, `Ode`,
 //! `RadialCurve`) or the surface of a face of the edge (`Seam`, `Topological`,
-//! `Tangent`, `Radial`, `RadialCurve`, `Blend`) are not compared: both sides report
-//! `inexact_geometry`.
+//! `Tangent`, `Radial`, `RadialCurve`, `Blend`) are not compared: the C++ runner
+//! reports `inexact_geometry`, and the Rust runner defers on this harness import
+//! limitation. Neither runner evaluates the skipped operation.
 //!
 //! Selectors are taken modulo the entity count (`-1` selecting null where allowed); the
 //! sector of `AddPair` and the edge use of `ResetPrimary` are taken from the edge's own
@@ -1424,7 +1425,8 @@ fn op_args(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
 }
 
 /// Whether the op evaluates geometry that was not imported exactly (see the module
-/// docs).
+/// docs). The C++ side refuses these inputs with `inexact_geometry`; the Rust side
+/// reports a harness deferral instead of an empty parity pass.
 fn inexact(op: &OpIn, im: &Imported) -> bool {
     let curve_inexact = |e: i64| !im.exact_curves.get(e as usize).copied().unwrap_or(true);
     let faces_inexact = |e: i64| {
@@ -1685,7 +1687,10 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         return Ok(Output::err("no_edge"));
     };
     if inexact(&op, &im) {
-        return Ok(Output::err("inexact_geometry"));
+        return Ok(Output::deferred(
+            "topology.edge",
+            "difftest: exact analytic geometry import for edge evaluation",
+        ));
     }
     match run_rust_op(&mut im.b, &op) {
         Ok(o) => Ok(o),
@@ -2258,5 +2263,90 @@ impl UnitDiff for Runner {
             op,
         };
         serde_json::to_value(i).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CaseContext, RunOptions};
+
+    struct SelectedCases(Vec<Case>);
+
+    impl UnitDiff for SelectedCases {
+        fn id(&self) -> &'static str {
+            Runner.id()
+        }
+
+        fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+            Runner.run_cpp(case)
+        }
+
+        fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+            Runner.run_rust(case)
+        }
+
+        fn cases(&self, _ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    // Keep all native calls in one test and run with --test-threads=1: the C++
+    // kernel has global state, as documented in the difftest README.
+    #[test]
+    fn inexact_import_defers_but_exact_operations_still_compare() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let fixtures = ctx.fixture_cases(Runner.id()).unwrap();
+        let mut selected = Vec::new();
+        for (name, deferred) in [
+            ("Mouse_e0_seam", true),
+            ("Mouse_e0_seam_f", true),
+            ("Mouse_e0_topological", true),
+            ("Mouse_e0_tangent", true),
+            ("Mouse_e0_blend", true),
+            ("Mouse_e0_radial", true),
+            ("line_join_fw_tangent_start", false),
+            ("line_join_fw_trimmed", false),
+            ("net_trimmed_e0", false),
+            ("plane_square_e0_tangent", false),
+            // The same imported Mouse B-rep still supports exact queries.
+            ("Mouse_e0_query", false),
+        ] {
+            let case = fixtures.iter().find(|case| case.name == name).unwrap();
+            let cpp = Runner.run_cpp(case).unwrap();
+            let rust = Runner.run_rust(case).unwrap();
+            assert!(cpp.rejected.is_none() && rust.rejected.is_none(), "{name}");
+            assert!(cpp.deferred.is_none(), "{name}");
+            assert!(rust.error.is_none(), "{name}: {rust:?}");
+            if deferred {
+                assert_eq!(cpp.error.as_deref(), Some("inexact_geometry"), "{name}");
+                let why = rust.deferred.as_ref().unwrap();
+                assert_eq!(why.unit, "topology.edge");
+                assert_eq!(
+                    why.symbol,
+                    "difftest: exact analytic geometry import for edge evaluation"
+                );
+                assert!(rust.values.is_empty() && rust.ints.is_empty());
+                assert!(rust.topology.is_none());
+            } else {
+                assert!(rust.deferred.is_none() && cpp.error.is_none(), "{name}");
+                let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
+                assert!(diff.pass(), "{name}: {diff:?}");
+                assert!(diff.values_compared > 0, "{name}");
+            }
+            selected.push(case.clone());
+        }
+        let result = crate::run_unit(&SelectedCases(selected), &ctx, &RunOptions::default());
+        assert_eq!((result.passed(), result.deferred(), result.failed()), (5, 6, 0));
+        assert_eq!(result.rejected(), 0);
+        assert_eq!(result.deferred_by_unit().get("topology.edge"), Some(&6));
+        for case in &result.cases {
+            assert_eq!(case.is_deferred(), case.name.starts_with("Mouse_e0_")
+                && case.name != "Mouse_e0_query", "{}", case.name);
+            assert_eq!(case.compared_values(), case.pass(), "{}", case.name);
+        }
     }
 }
