@@ -3,6 +3,7 @@
 //! root, which check their arguments and own the handles.
 #![allow(unsafe_code)]
 
+#[cfg(feature = "native")]
 use std::ffi::{c_char, c_void};
 
 /// `SMLIB_ABI_VERSION` this crate was written against.
