@@ -1375,6 +1375,53 @@ fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     }
 }
 
+/// Cases whose C++ result depends on an uninitialised Jacobian (UB-204, #94): the generator
+/// keeps them away from the C++ side, like an input the FFI guard rejects.
+///
+/// `SM_SO_3D_SIGNED_DIRECTED_MINIMIZE` (9) runs `SmCurve::LocalCurveIntersect` on the two projected
+/// curves. When a Newton step ends at a Hermite end whose tangent has zero length (`d2` at
+/// `t = 1`, `d1` at `t = 0`) while the other curve passes within 0.1 of that end (the
+/// `gap^2 < 0.01` test of `SmCCIntersectENFO::Evaluate`), upstream calls
+/// `SmCCTangentIntENFO::StaticEvaluate`, which fails before it writes the Jacobian, and the
+/// solver goes on with whatever the stack held. Rust's `Matrix::new` zeroes it instead, so the two
+/// sides cannot agree. In the default 30,093 cases this is 4 cases (`gen21507` and 3 pairs
+/// that touch exactly at that end and agree anyway); the other 38 with a zero end tangent are 0.5 or more apart.
+fn reads_uninitialised_jacobian(k: &Kernel, op: &OpIn) -> bool {
+    let OpIn::Gcs {
+        c1,
+        ivl1,
+        c2,
+        ivl2,
+        sop: 9,
+        ..
+    } = op
+    else {
+        return false;
+    };
+    let other_curve = c2.as_ref().unwrap_or(c1);
+    [(c1, ivl1, other_curve, ivl2), (other_curve, ivl2, c1, ivl1)]
+        .into_iter()
+        .any(|(c, ivl, other, other_ivl)| {
+            let CurveIn::Hermite(h) = c else { return false };
+            let end = if h.d2 == [0.0; 3] && ivl[1] >= 1.0 {
+                1.0
+            } else if h.d1 == [0.0; 3] && ivl[0] <= 0.0 {
+                0.0
+            } else {
+                return false;
+            };
+            let e = point_at(k, c, end);
+            (0..=64).any(|i| {
+                let q = point_at(
+                    k,
+                    other,
+                    other_ivl[0] + (other_ivl[1] - other_ivl[0]) * f64::from(i) / 64.0,
+                );
+                (e[0] - q[0]).powi(2) + (e[1] - q[1]).powi(2) + (e[2] - q[2]).powi(2) < 0.01
+            })
+        })
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.curve_p9"
@@ -1388,6 +1435,9 @@ impl UnitDiff for Runner {
                 continue;
             };
             if ffi::validate(code, &input).is_err() {
+                continue;
+            }
+            if reads_uninitialised_jacobian(k, &op) {
                 continue;
             }
             return serde_json::to_value(op).ok();
