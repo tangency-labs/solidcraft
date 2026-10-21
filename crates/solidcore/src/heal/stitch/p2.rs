@@ -861,6 +861,7 @@ impl Stitch<'_> {
                         add_unique(modified_faces, f);
                     }
                     match glue_edges_general(
+                        k,
                         b,
                         keep,
                         orientation,

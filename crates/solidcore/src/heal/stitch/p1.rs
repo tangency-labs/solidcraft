@@ -56,16 +56,19 @@
 //!   as they were: `SmVector3d`'s default `SM_UNDEF_DOUBLE` (defined; the 3D evaluation
 //!   writes them only after its last status), [`Point3::UNDEF`] / [`Vec3::UNDEF`] here.
 //! - `SmBrep::GlueVertices`, `RemoveFaces` (with the B-rep's own editing flag) and
-//!   `StitchAndOrient` call `topology.brep_p5`, which defers at its own barriers.
-//! - The calls into `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
-//!   (`topology.brep_p3`) and `CalculateBoundingBox` (`query.brep`) return
-//!   [`SolidError::Unported`]. `SmApiStitch(pBrep, pFace)` builds its `SmMerge` with
-//!   `boolean.merge_p2`'s [`MergeState::with_breps`], whose computed tolerance fails on
-//!   the null other B-rep where upstream crashes (UB-167), so its `MergeAddedFace` is
-//!   never reached. The API entry points call `DoStitching`, `StitchIntoSolid` and
-//!   `StitchIntoShell` in [`super::p2`]. `SmBrep::Notify(SM_NO_PRE_EDIT)` is
-//!   `topology::brep::p2::notify` on an empty notify state (no B-rep cache, no attribute
-//!   state on the heal path).
+//!   `StitchAndOrient` call `topology.brep_p5`, which defers at its own barriers;
+//!   `GlueEdgesGeneral` calls `topology.brep_p7` on a default record per arena object
+//!   (`brep_p2::ArenaNotifyState`) and the kernel's notification context (it defers at
+//!   `SmBrep::DeleteEdge`, `topology.brep_p4`, for a wire edge, else at part 7's own
+//!   first unported callee).
+//! - The calls into `SqueezeEdge` (`topology.brep_p3`) and `CalculateBoundingBox`
+//!   (`query.brep`) return [`SolidError::Unported`]. `SmApiStitch(pBrep, pFace)` builds
+//!   its `SmMerge` with `boolean.merge_p2`'s [`MergeState::with_breps`], whose computed
+//!   tolerance fails on the null other B-rep where upstream crashes (UB-167), so its
+//!   `MergeAddedFace` is never reached. The API entry points call `DoStitching`,
+//!   `StitchIntoSolid` and `StitchIntoShell` in [`super::p2`]. `SmBrep::Notify(SM_NO_PRE_EDIT)`
+//!   is `topology::brep::p2::notify` on an empty notify state (no B-rep cache, no
+//!   attribute state on the heal path).
 
 use std::collections::BTreeMap;
 
@@ -75,7 +78,7 @@ use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, SM_ERR};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
-use crate::geom::context::{with_mark_lock, ALL_MARKS};
+use crate::geom::context::{with_mark_lock, Context, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
@@ -1121,6 +1124,7 @@ impl<'c> Stitch<'c> {
                         }
                     }
                     glue_edges_general(
+                        k,
                         b,
                         keep,
                         orientation,
@@ -1814,6 +1818,7 @@ impl<'c> Stitch<'c> {
                     // glue pE/pTestE edge pair - keep pE
                     let old_tol = edge::tolerance(b, test_e)?;
                     match glue_edges_general(
+                        k,
                         b,
                         e,
                         orientation,
@@ -2006,8 +2011,15 @@ fn stitch_and_orient(
 }
 
 /// `SmBrep::GlueEdgesGeneral(keep, orientation, dist, bDoRegionNesting, delete,
-/// pInsideFaceuses)` (unit `topology.brep_p7`; header default `pInsideFaceuses = NULL`).
+/// pInsideFaceuses)` (unit `topology.brep_p7`; header default `pInsideFaceuses = NULL`):
+/// [`crate::topology::brep::p7::glue_edges_general`]. Upstream notifies the B-rep's
+/// own `SmTopology` objects through its context; the heal path keeps no records of
+/// its own, so the call runs on a default record per arena object
+/// ([`brep_p2::ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState), so
+/// that `SmTopology::Notify`'s propagation finds both edges) and on the kernel's
+/// notification context, so its installed callbacks see the events.
 pub(crate) fn glue_edges_general(
+    k: &mut Kernel,
     b: &mut Brep,
     keep: EdgeId,
     orientation: OrientType,
@@ -2016,20 +2028,21 @@ pub(crate) fn glue_edges_general(
     delete: EdgeId,
     inside_faceuses: Option<&[crate::topology::FaceuseId]>,
 ) -> Result<()> {
-    let _ = (
-        b,
-        keep,
-        orientation,
-        dist,
-        do_region_nesting,
-        delete,
-        inside_faceuses,
-    );
-    // UNPORTED(topology.brep_p7): SmBrep::GlueEdgesGeneral
-    Err(SolidError::unported(
-        "SmBrep::GlueEdgesGeneral",
-        "topology.brep_p7",
-    ))
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
+    Context::with_notification_context(k, |k, context| {
+        let mut env = state.env(Some(context));
+        crate::topology::brep::p7::glue_edges_general(
+            k,
+            b,
+            Some(keep),
+            orientation,
+            dist,
+            do_region_nesting,
+            Some(delete),
+            inside_faceuses,
+            &mut env,
+        )
+    })
 }
 
 /// `SmBrep::SqueezeEdge(edge, keep)` (unit `topology.brep_p3`).
@@ -2366,6 +2379,8 @@ pub fn api_stitch_advanced(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::object::NotifyOperation;
+    use crate::topology::EdgeuseOwner;
 
     #[test]
     fn sort_by_param_matches_insertion_order() {
@@ -2382,5 +2397,155 @@ mod tests {
         assert!(!s.ignore_problems && !s.fast_edge_compare && !s.squeeze_small_edges);
         assert!(!s.remove_laminar_slivers);
         assert!((s.stitch_tol_3d() - 0.01).abs() < 1e-15);
+    }
+
+    /// A notify callback that records the operations it sees.
+    #[derive(Debug, Default)]
+    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<NotifyOperation>>>);
+
+    impl crate::geom::context::NotifyCallback for Recorder {
+        fn execute(
+            &mut self,
+            operation: NotifyOperation,
+            _caller: ObjectRef,
+            _data1: Option<ObjectRef>,
+            _data2: Option<ObjectRef>,
+            _data3: Option<ObjectRef>,
+        ) -> Result<()> {
+            self.0.lock().unwrap().push(operation);
+            Ok(())
+        }
+    }
+
+    /// A kernel with a recording user notify callback, and the record it writes.
+    fn recording_kernel() -> (
+        Kernel,
+        std::sync::Arc<std::sync::Mutex<Vec<NotifyOperation>>>,
+    ) {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut k = Kernel::default();
+        k.context
+            .set_user_notify_callback(Some(Box::new(Recorder(events.clone()))));
+        (k, events)
+    }
+
+    /// Two vertices, a shell and `n` edges between the vertices, each with two edge
+    /// uses owned by `owner` (a shell: wire edges; a loop use: face-bounded edges).
+    fn edges_between(b: &mut Brep, owner: EdgeuseOwner, n: usize) -> Vec<EdgeId> {
+        use crate::geom::extent1d::Extent1d;
+        use crate::topology::{Edge, Edgeuse, Vertex, Vertexuse, VertexuseOwner};
+        let mut vertex = |point| {
+            b.add_vertex_record(Vertex {
+                point,
+                ..Vertex::default()
+            })
+            .unwrap()
+        };
+        let (a, c) = (vertex(Vec3::ZERO), vertex(Vec3::X));
+        (0..n)
+            .map(|_| {
+                let e = b
+                    .add_edge_record(Edge {
+                        vertices: [a, c],
+                        edgeuses: Vec::new(),
+                        interval: Extent1d::from_raw(0.0, 1.0),
+                        tolerance: 0.0,
+                        curve: None,
+                    })
+                    .unwrap();
+                for (v, orientation) in [(a, OrientType::Same), (c, OrientType::Opposite)] {
+                    let eu = b
+                        .add_edgeuse_record(Edgeuse {
+                            edge: Some(e),
+                            owner,
+                            orientation,
+                            ..Edgeuse::default()
+                        })
+                        .unwrap();
+                    let vu = b
+                        .add_vertexuse_record(Vertexuse {
+                            vertex: Some(v),
+                            owner: VertexuseOwner::Edgeuse(Some(eu)),
+                            ..Vertexuse::default()
+                        })
+                        .unwrap();
+                    b.edgeuse_mut(eu).unwrap().vertexuse = Some(vu);
+                    b.vertex_mut(v).unwrap().vertexuses.push(vu);
+                    b.edge_mut(e).unwrap().edgeuses.push(eu);
+                }
+                e
+            })
+            .collect()
+    }
+
+    #[test]
+    fn glue_edges_general_forwards_callbacks_and_defers_at_delete_edge() {
+        use crate::topology::Shell;
+        // Two wire edges between the same vertices: the wrapper runs the part 7 routine
+        // (its notifies are live since #149) on the kernel's context, so the installed
+        // callback sees the B-rep PreEdit that upstream emits (SmBrep.cpp:9840-9848)
+        // before the wire edge's `SmBrep::DeleteEdge` defers (topology.brep_p4), and
+        // the callback is back on the kernel afterwards. The same edge twice is the
+        // upstream no-op.
+        let (mut k, events) = recording_kernel();
+        let mut b = Brep::new();
+        let shell = b.add_shell_record(Shell::default()).unwrap();
+        let edges = edges_between(&mut b, EdgeuseOwner::Shell(Some(shell)), 2);
+        let (e0, e1) = (edges[0], edges[1]);
+        let err = glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                SolidError::Unported {
+                    upstream: "SmBrep::DeleteEdge",
+                    unit: "topology.brep_p4",
+                }
+            ),
+            "{err}"
+        );
+        assert_eq!(
+            events.lock().unwrap().as_slice(),
+            [NotifyOperation::PreEdit]
+        );
+        assert!(k.context.user_notify_callback().is_some());
+        glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e0, None).unwrap();
+        assert_eq!(events.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn glue_edges_general_notifies_merge_in_brep_for_face_bounded_edges() {
+        use crate::topology::Loopuse;
+        // Face-bounded (non-wire) edges reach part 7's SM_NO_MERGE_IN_BREP notify
+        // (SmBrep.cpp:9854), whose SmTopology propagation needs a record for both
+        // edges: with the seeded arena records it runs and the callback sees it (with
+        // an empty record map it would fail as "not a topology object", swallowed).
+        let (mut k, events) = recording_kernel();
+        let mut b = Brep::new();
+        let lu = b.add_loopuse_record(Loopuse::default()).unwrap();
+        let edges = edges_between(&mut b, EdgeuseOwner::Loopuse(Some(lu)), 2);
+        let result = glue_edges_general(
+            &mut k,
+            &mut b,
+            edges[0],
+            OrientType::Same,
+            0.0,
+            false,
+            edges[1],
+            None,
+        );
+        let seen = events.lock().unwrap().clone();
+        assert!(
+            seen.contains(&NotifyOperation::MergeInBrep),
+            "{seen:?} {result:?}"
+        );
+        // Past the notify this minimal fixture is degenerate (its loop use has no face
+        // use): part 7 stops at its face lookup, where upstream would dereference null
+        // (SmEdgeuse.cpp:336), not at a notification failure.
+        assert!(
+            matches!(&result, Err(SolidError::InvalidInput { reason, .. }) if reason.contains("loop use without face use")),
+            "{result:?}"
+        );
+        assert!(k.context.user_notify_callback().is_some());
     }
 }
