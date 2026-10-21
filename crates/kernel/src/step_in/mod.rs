@@ -88,10 +88,6 @@ pub struct StepImport {
     pub schema: String,
     /// FILE_NAME originating system.
     pub system: String,
-    /// FILE_NAME preprocessor version.
-    pub preprocessor: String,
-    /// FILE_DESCRIPTION text.
-    pub description: String,
 }
 
 /// A solid the walk found, converted later.
@@ -118,9 +114,6 @@ pub(crate) struct Ctx<'a> {
     pub ang: f64,
     /// Vertex-on-curve tolerance (mm).
     pub tol: f64,
-    /// Farthest an edge's vertex may sit off its curve and still be moved onto it (mm, at least
-    /// `tol`): see [`snap_limit`].
-    pub snap: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -128,115 +121,21 @@ struct Units {
     len: f64,
     ang: f64,
     tol: f64,
-    snap: f64,
 }
 
-const DEFAULT_UNITS: Units = Units { len: 1.0, ang: 1.0, tol: 0.01, snap: 0.01 };
+const DEFAULT_UNITS: Units = Units { len: 1.0, ang: 1.0, tol: 0.01 };
 
-/// Largest tolerance a file can ask for (mm), however coarse the accuracy it declares.
-const MAX_TOL: f64 = 1.0;
-
-/// Gap between an edge's vertex and its curve that is still read as the same point, as a share
-/// of the model's size: the chord error the kernel's own coarse meshes allow at that size
-/// (`Body::size() * 1e-3`), so moving the vertex onto the curve changes the shape by less than
-/// those meshes already do.
-const SNAP_SHARE: f64 = 1e-3;
-
-/// Farthest a vertex may sit off its edge's curve and be moved onto it (mm): the file's own
-/// tolerance `tol`, or up to [`SNAP_SHARE`] of the model's size `extent` (mm) when that is
-/// larger. Some exporters write vertices further off than the accuracy they declare (a surface
-/// export may declare 0.01 mm and join two curves 0.38 mm apart at a vertex between them).
-/// Never more than [`MAX_TOL`], so a far stray point cannot turn the check off.
-fn snap_limit(tol: f64, extent: f64) -> f64 {
-    let share = if extent.is_finite() { extent * SNAP_SHARE } else { 0.0 };
-    tol.max(share.min(MAX_TOL))
-}
-
-fn si_prefix(p: Option<&Param>) -> f64 {
-    match p.and_then(Param::as_enum) {
-        Some("EXA") => 1e18,
-        Some("PETA") => 1e15,
-        Some("TERA") => 1e12,
-        Some("GIGA") => 1e9,
-        Some("MEGA") => 1e6,
-        Some("KILO") => 1e3,
-        Some("HECTO") => 1e2,
-        Some("DECA") => 1e1,
-        Some("DECI") => 1e-1,
-        Some("CENTI") => 1e-2,
-        Some("MILLI") => 1e-3,
-        Some("MICRO") => 1e-6,
-        Some("NANO") => 1e-9,
-        Some("PICO") => 1e-12,
-        Some("FEMTO") => 1e-15,
-        Some("ATTO") => 1e-18,
-        _ => 1.0,
-    }
-}
-
-/// A unit's size: millimetres for lengths, radians for plane angles.
-fn unit_factor(ex: &Exchange, id: u64, depth: usize) -> Option<(&'static str, f64)> {
-    if depth > 4 {
-        return None;
-    }
-    let e = ex.get(id)?;
-    let kind = if e.has("LENGTH_UNIT") {
-        "length"
-    } else if e.has("PLANE_ANGLE_UNIT") {
-        "angle"
-    } else {
-        "other"
-    };
-    if let Some(si) = e.record("SI_UNIT") {
-        let base = match si.get(1).and_then(Param::as_enum) {
-            Some("METRE") => 1000.0,
-            Some("RADIAN") => 1.0,
-            _ => return Some((kind, 1.0)),
-        };
-        return Some((kind, si_prefix(si.first()) * base));
-    }
-    if let Some(cb) = e.record("CONVERSION_BASED_UNIT") {
-        let m = ex.get(cb.get(1)?.as_ref_id()?)?;
-        let mp = m.params();
-        let v = mp.first()?.as_f64()?;
-        let (_, f) = unit_factor(ex, mp.get(1)?.as_ref_id()?, depth + 1)?;
-        let x = v * f;
-        return (x.is_finite() && x > 0.0).then_some((kind, x));
-    }
-    Some((kind, 1.0))
-}
-
-/// Units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT, uncertainty).
+/// Units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT, uncertainty), read by
+/// [`solidcraft_step::units::context`]; the vertex-on-curve tolerance is ten times the
+/// uncertainty (at least 1e-3 mm), else a hundredth of the length unit, within [1e-4, 1] mm.
 fn context_units(ex: &Exchange, ctx: Option<u64>, cache: &mut HashMap<u64, Units>) -> Units {
     let Some(id) = ctx else { return DEFAULT_UNITS };
     if let Some(u) = cache.get(&id) {
         return *u;
     }
-    let mut u = DEFAULT_UNITS;
-    let mut tol_file = None;
-    if let Some(e) = ex.get(id) {
-        if let Some(units) = e.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").and_then(|r| r.first()).and_then(Param::as_list) {
-            for uid in units.iter().filter_map(Param::as_ref_id) {
-                match unit_factor(ex, uid, 0) {
-                    Some(("length", f)) if f.is_finite() && f > 0.0 => u.len = f,
-                    Some(("angle", f)) if f.is_finite() && f > 0.0 => u.ang = f,
-                    _ => {}
-                }
-            }
-        }
-        if let Some(unc) = e.record("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT").and_then(|r| r.first()).and_then(Param::as_list) {
-            for uid in unc.iter().filter_map(Param::as_ref_id) {
-                if let Some(m) = ex.get(uid)
-                    && let Some(v) = m.params().first().and_then(Param::as_f64)
-                {
-                    let f = m.params().get(1).and_then(Param::as_ref_id).and_then(|x| unit_factor(ex, x, 0)).map(|x| x.1);
-                    tol_file = Some(v * f.unwrap_or(u.len));
-                }
-            }
-        }
-    }
-    u.tol = tol_file.filter(|t| t.is_finite() && *t > 0.0).map(|t| (t * 10.0).max(1e-3)).unwrap_or(u.len * 1e-2).clamp(1e-4, MAX_TOL);
-    u.snap = snap_limit(u.tol, ex.vertex_extent() * u.len);
+    let c = solidcraft_step::units::context(ex, id);
+    let tol = c.uncertainty.map(|t| (t * 10.0).max(1e-3)).unwrap_or(c.units.len * 1e-2).clamp(1e-4, 1.0);
+    let u = Units { len: c.units.len, ang: c.units.ang, tol };
     cache.insert(id, u);
     u
 }
@@ -588,41 +487,12 @@ impl Reader {
     }
 
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<mt::Matrix4> {
-        let cx = Ctx { ex: &self.ex, len: u.len, ang: u.ang, tol: u.tol, snap: u.snap };
+        let cx = Ctx { ex: &self.ex, len: u.len, ang: u.ang, tol: u.tol };
         let e = geom::entity(&cx, item)?;
-        if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
+        if e.name() == "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
             let p = e.params();
             let o = geom::point(&cx, p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            let direction = |i: usize, fallback: mt::Vector3| -> R<mt::Vector3> {
-                match p.get(i) {
-                    None | Some(Param::Null) => Ok(fallback),
-                    Some(Param::Ref(id)) => geom::direction(&cx, *id),
-                    _ => Err("invalid transformation direction".into()),
-                }
-            };
-            let scale = |i: usize, fallback: f64| -> R<f64> {
-                match p.get(i) {
-                    None | Some(Param::Null) => Ok(fallback),
-                    Some(v) => v.as_f64().filter(|x| x.is_finite() && *x != 0.0).ok_or_else(|| "invalid transformation scale".into()),
-                }
-            };
-            let sx = scale(5, 1.0)?;
-            let (sy, sz) = (scale(7, sx)?, scale(8, sx)?);
-            let m = mt::Matrix4::from_cols(
-                (direction(2, mt::Vector3::unit_x())? * sx).extend(0.0),
-                (direction(3, mt::Vector3::unit_y())? * sy).extend(0.0),
-                (direction(6, mt::Vector3::unit_z())? * sz).extend(0.0),
-                o.to_homogeneous(),
-            );
-            if !to_array(&m).iter().flatten().all(|x| x.is_finite()) {
-                return Err("invalid transformation scale".into());
-            }
-            use mt::SquareMatrix as _;
-            let det = m.determinant();
-            if !det.is_finite() || det == 0.0 {
-                return Err("singular transformation".into());
-            }
-            return Ok(m);
+            return Ok(mt::Matrix4::from_translation(o.to_homogeneous().truncate()));
         }
         Ok(geom::frame(&cx, item)?.matrix())
     }
@@ -789,7 +659,7 @@ impl Reader {
             };
             let placement = self.batches.get(p.batch).map_or(mt::Matrix4::from_scale(1.0), |b| b.m);
             sources.push((i, item));
-            jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item), tol: units.tol });
+            jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
         // Reading and orienting new parts is shared out between the workers.
         let prepared = parallel::bodies(&ex, &jobs, self.workers);
@@ -1322,15 +1192,7 @@ impl StepReading {
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));
         }
         let bodies = std::mem::take(&mut rd.bodies);
-        Ok(StepImport {
-            bodies,
-            tree,
-            warnings,
-            schema: ex.schemas.join(", "),
-            system: ex.originating_system.clone(),
-            preprocessor: ex.preprocessor.clone(),
-            description: ex.description.clone(),
-        })
+        Ok(StepImport { bodies, tree, warnings, schema: ex.schemas.join(", "), system: ex.originating_system.clone() })
     }
 
     /// [`Self::finish`], and the import is cached for the next read of the same text.
