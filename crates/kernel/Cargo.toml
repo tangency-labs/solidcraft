@@ -16,6 +16,7 @@ smlib = ["dep:solidcraft-smlib", "solidcraft-smlib/native"]
 [dependencies]
 solidcraft-geom = { workspace = true }
 solidcraft-smlib = { workspace = true, optional = true }
+solidcraft-step = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
