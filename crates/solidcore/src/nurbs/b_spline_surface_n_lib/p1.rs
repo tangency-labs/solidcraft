@@ -80,12 +80,16 @@
 //!   flag; its unused point argument is dropped.
 //! - **Back-edges.** `CreateExtendedSurface` calls `SmSurface::IsSingularity`
 //!   (`surface.surface_p5`) and `SmSurface::IsClosed` (`surface::surface::p7`);
-//!   `sm_CreateNonRationalCurve` drops its curve with `SmSurface::DropCurve`
-//!   (`intersect.surface_drop_lib_p3`). The unported calls return [`SolidError::Unported`]
+//!   `sm_CreateNonRationalCurve` drops its curve with the virtual `SmSurface::DropCurve`
+//!   of its base surface, dispatched on the surface kind (the `SmPlane` override
+//!   [`Plane::drop_curve`](crate::surface::plane::Plane::drop_curve) or the base body
+//!   [`Surface::drop_curve_base`](crate::surface::surface::Surface::drop_curve_base)),
+//!   taking the caller's kernel. The unported calls return [`SolidError::Unported`]
 //!   until the units are ported. `sm_CreateNonRationalCurve` takes a
 //!   [`BSplineCurve`] (upstream casts its `SmCurve` with `SM_CAST_PTR`, failing with
-//!   `NER` for other curve types) and a [`BSplineSurface`] base surface (the only
-//!   surface type so far; `GetNaturalUVDomain` is its override).
+//!   `NER` for other curve types) and the caller's
+//!   [`Surface`](crate::surface::surface::Surface) as base surface (with its kind and
+//!   owner, as upstream's `SmSurface*`).
 //! - **`CreateExtendedSurface`** halves the extension distance after each failed
 //!   extension until it drops below `dDist / 100`, which never happens for a zero or
 //!   NaN distance (upstream then loops forever); the port stops after
@@ -230,19 +234,38 @@ struct DroppedCurves {
     uv_curves: Vec<BSplineCurve>,
 }
 
-/// `SmSurface::DropCurve(context, domain, curve, interval, tol, ..)`.
+/// `SmSurface::DropCurve(context, domain, curve, interval, tol, maxDist, deviation,
+/// uvCurves)` (virtual, with the default `bKeepAllDropCurves = TRUE`,
+/// `pOptDropCurveFail = NULL`, `bCreatingUVTrimCurve = TRUE`), dispatched on the kind of
+/// `srf` as upstream: the `SmPlane` override ([`crate::surface::plane::Plane::drop_curve`],
+/// with the surface's owner) for a plane, the base body
+/// ([`crate::surface::surface::Surface::drop_curve_base`]) otherwise. The surface is
+/// the caller's (a face's surface keeps its owner).
 fn drop_curve(
-    _srf: &BSplineSurface,
-    _domain: &Extent2d,
-    _curve: &BSplineCurve,
-    _interval: &Extent1d,
-    _approx_tol: f64,
+    k: &Kernel,
+    srf: &crate::surface::surface::Surface,
+    domain: &Extent2d,
+    curve: &BSplineCurve,
+    interval: &Extent1d,
+    approx_tol: f64,
 ) -> Result<DroppedCurves> {
-    // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-    Err(SolidError::Unported {
-        upstream: "SmSurface::DropCurve",
-        unit: "intersect.surface_drop_lib_p3",
-    })
+    use crate::curve::curve::{Curve as AnyCurve, CurveKind};
+
+    let curve = AnyCurve::from(curve.clone());
+    let out = srf.drop_curve::<crate::surface::surface::p4::NoObject>(
+        k, domain, &curve, interval, approx_tol, true, None, true,
+    )?;
+    // the drop gives `SmBSplineCurve`s (for a plane a UV `SmLine` or B-spline)
+    let uv_curves = out
+        .uv_curves
+        .into_iter()
+        .map(|c| match c.kind() {
+            CurveKind::BSpline(b) => Ok(b.clone()),
+            CurveKind::Line(l) => Ok(l.base().clone()),
+            _ => Err(invalid(OP_NONRAT, "plane drop curve is not a B-spline")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(DroppedCurves { uv_curves })
 }
 
 // ---- NLib copies ----------------------------------------------------------------------
@@ -947,12 +970,13 @@ pub fn check_zero_surface_derivs(
 /// # Errors
 ///
 /// The errors of the rationality test, the approximation, the reparametrisation and
-/// the drop ([`SolidError::Unported`] for now); `InvalidInput` when the drop gives no
+/// the drop; `InvalidInput` when the drop gives no
 /// curve (upstream asserts exactly one).
 pub fn create_non_rational_curve(
+    k: &Kernel,
     curve: &BSplineCurve,
     opt_uv_trim_curve: Option<&BSplineCurve>,
-    opt_base_surface: Option<&BSplineSurface>,
+    opt_base_surface: Option<&crate::surface::surface::Surface>,
     approx_tol: f64,
 ) -> Result<(BSplineCurve, Option<BSplineCurve>)> {
     // for rational curves
@@ -966,7 +990,7 @@ pub fn create_non_rational_curve(
         if let Some(base) = opt_base_surface {
             let trim_ivl = new_curve.natural_interval();
             let domain = base.natural_uv_domain();
-            let dropped = drop_curve(base, &domain, &new_curve, &trim_ivl, approx_tol)?;
+            let dropped = drop_curve(k, base, &domain, &new_curve, &trim_ivl, approx_tol)?;
             new_uv_trim_curve = Some(
                 dropped
                     .uv_curves

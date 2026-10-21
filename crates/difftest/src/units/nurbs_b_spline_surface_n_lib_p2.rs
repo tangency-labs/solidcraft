@@ -28,7 +28,7 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::{
-    EvaluateFlags, OrientType, SkinnedSurfaceOptions,
+    BlendNeighbour, EvaluateFlags, OrientType, SkinnedSurfaceOptions,
 };
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::knots::Side;
@@ -181,7 +181,10 @@ struct Inputs {
 fn numbers(path: &str) -> Result<Vec<f64>, HarnessError> {
     let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
     text.split_whitespace()
-        .map(|t| t.parse::<f64>().map_err(|e| harness(format!("{path}: {e}"))))
+        .map(|t| {
+            t.parse::<f64>()
+                .map_err(|e| harness(format!("{path}: {e}")))
+        })
         .collect()
 }
 
@@ -198,7 +201,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let m = int(path, num()?)?;
     let p = int(path, num()?)?;
@@ -214,8 +220,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -224,7 +234,10 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let p = int(path, num()?)?;
     let rat = num()? != 0.0;
@@ -237,7 +250,9 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
         let w = if rat { num()? } else { NOW };
         cpts.push([x, y, z, w]);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineCrv { cpts, p, u })
 }
 
@@ -256,9 +271,15 @@ fn crv(c: &CrvIn) -> Result<InlineCrv, HarnessError> {
 }
 
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -274,8 +295,15 @@ fn flag(b: bool) -> f64 {
 fn push_srf(o: &mut Vec<f64>, s: &InlineSrf) -> Result<(), HarnessError> {
     let (n, m) = shape(s)?;
     o.extend(
-        [n, m, s.p, s.q, s.u.len().saturating_sub(1), s.v.len().saturating_sub(1)]
-            .map(|x| x as f64),
+        [
+            n,
+            m,
+            s.p,
+            s.q,
+            s.u.len().saturating_sub(1),
+            s.v.len().saturating_sub(1),
+        ]
+        .map(|x| x as f64),
     );
     for row in &s.net {
         for p in row {
@@ -289,7 +317,12 @@ fn push_srf(o: &mut Vec<f64>, s: &InlineSrf) -> Result<(), HarnessError> {
 
 fn push_crv(o: &mut Vec<f64>, c: &InlineCrv) {
     let n = c.cpts.len().saturating_sub(1);
-    o.extend([3.0, n as f64, c.p as f64, c.u.len().saturating_sub(1) as f64]);
+    o.extend([
+        3.0,
+        n as f64,
+        c.p as f64,
+        c.u.len().saturating_sub(1) as f64,
+    ]);
     for p in &c.cpts {
         o.extend_from_slice(p);
     }
@@ -462,7 +495,10 @@ impl Split<'_> {
                 return Err(harness(format!("bad surface dims {dims:?}")));
             }
             self.put(&format!("{pfx}dims"), dims);
-            self.vals(&format!("{pfx}cpts"), 4 * (n as usize + 1) * (m as usize + 1))?;
+            self.vals(
+                &format!("{pfx}cpts"),
+                4 * (n as usize + 1) * (m as usize + 1),
+            )?;
             self.vals(&format!("{pfx}u"), r as usize + 1)?;
             self.vals(&format!("{pfx}v"), s as usize + 1)?;
         }
@@ -531,7 +567,11 @@ fn surface_of(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|r| r.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect())
+        .map(|r| {
+            r.iter()
+                .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("surface input: {e}")))
@@ -698,10 +738,7 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
             },
             None,
         ) => {
-            let secs = sections
-                .iter()
-                .map(bsc_of)
-                .collect::<Result<Vec<_>, _>>()?;
+            let secs = sections.iter().map(bsc_of).collect::<Result<Vec<_>, _>>()?;
             let mut r1 = rail1.as_deref().map(bsc_of).transpose()?;
             let mut r2 = rail2.as_deref().map(bsc_of).transpose()?;
             let ds = match derivs.as_deref() {
@@ -752,15 +789,27 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
                 .iter()
                 .map(|s| s.as_ref().map(bss_of).transpose())
                 .collect::<Result<Vec<_>, _>>()?;
-            let sr: Vec<Option<&BSplineSurface>> = ss.iter().map(Option::as_ref).collect();
-            BSplineSurface::create_corner_blend(k, &c3, &ors, &uv, &sr, *tol, *ang, *bilinear).map(
-                |patches| {
+            // the shim passes plain unowned `SmBSplineSurface`s
+            let whole: Vec<Option<solidcore::surface::surface::Surface>> = ss
+                .iter()
+                .map(|s| s.as_ref().map(|s| s.clone_exact().into()))
+                .collect();
+            let sr: Vec<Option<BlendNeighbour<'_>>> = ss
+                .iter()
+                .zip(&whole)
+                .map(|(b, s)| {
+                    b.as_ref()
+                        .zip(s.as_ref())
+                        .map(|(b_spline, surface)| BlendNeighbour { surface, b_spline })
+                })
+                .collect();
+            BSplineSurface::create_corner_blend(k, &c3, &ors, &uv, &sr, *tol, *ang, *bilinear)
+                .map(|patches| {
                     o.push(patches.len() as f64);
                     for p in &patches {
                         dump_state(&mut o, p);
                     }
-                },
-            )
+                })
         }
         _ => return Err(harness("op and `this` do not match")),
     };
@@ -799,7 +848,9 @@ fn gen_knots(rng: &mut Rng, n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
     let interior = n - p;
     let mut inner: Vec<f64> = (0..interior).map(|_| rng.uniform(0.05, 0.95)).collect();
     if rng.chance(0.4) {
-        inner = (1..=interior).map(|i| i as f64 / (interior + 1) as f64).collect();
+        inner = (1..=interior)
+            .map(|i| i as f64 / (interior + 1) as f64)
+            .collect();
     }
     inner.sort_by(f64::total_cmp);
     // keep interior knots distinct (multiplicity 1)
@@ -969,7 +1020,9 @@ fn gen_trim(rng: &mut Rng) -> Inputs {
         let len = b - a;
         let near = |rng: &mut Rng| {
             let kn = *rng.choose(k).unwrap_or(&a);
-            let eps = *rng.choose(&[0.0, 1e-12, -1e-12, 1e-9, -1e-9, 3e-8, -3e-8]).unwrap_or(&0.0);
+            let eps = *rng
+                .choose(&[0.0, 1e-12, -1e-12, 1e-9, -1e-9, 3e-8, -3e-8])
+                .unwrap_or(&0.0);
             (kn + eps).clamp(a, b)
         };
         let mut lo = if rng.chance(0.4) {
@@ -1000,11 +1053,7 @@ fn gen_trim(rng: &mut Rng) -> Inputs {
             empty,
             oob: rng.chance(0.1),
             form: default_form(),
-            srf: if empty {
-                None
-            } else {
-                Some(SrfIn::Inline(s))
-            },
+            srf: if empty { None } else { Some(SrfIn::Inline(s)) },
         }),
         op: OpIn::Trim {
             dom: [ul, vl, ur, vr],
@@ -1081,8 +1130,14 @@ fn gen_skin(rng: &mut Rng) -> Inputs {
     let (a, b) = gen_domain(rng);
     let ts = gen_params(rng, k, a, b);
     let m = s.net.first().map_or(0, Vec::len) - 1;
-    let start_pts: Vec<[f64; 4]> = sections.iter().map(|c| *c.cpts.first().unwrap_or(&[0.0; 4])).collect();
-    let end_pts: Vec<[f64; 4]> = sections.iter().map(|c| *c.cpts.get(m).unwrap_or(&[0.0; 4])).collect();
+    let start_pts: Vec<[f64; 4]> = sections
+        .iter()
+        .map(|c| *c.cpts.first().unwrap_or(&[0.0; 4]))
+        .collect();
+    let end_pts: Vec<[f64; 4]> = sections
+        .iter()
+        .map(|c| *c.cpts.get(m).unwrap_or(&[0.0; 4]))
+        .collect();
     let rational = start_pts.first().is_some_and(|p| p[3] != NOW);
     let mode = rng.below(10);
     let mut rail1 = None;
@@ -1278,7 +1333,12 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
         let m = s.net.first().map_or(0, Vec::len) - 1;
         // [left, bottom, right, top] in natural parametrisation: left (u = min,
         // along v) and top (v = max, along u) run against the CCW order
-        let mut curves = vec![row_curve(&s, 0), col_curve(&s, 0), row_curve(&s, n), col_curve(&s, m)];
+        let mut curves = vec![
+            row_curve(&s, 0),
+            col_curve(&s, 0),
+            row_curve(&s, n),
+            col_curve(&s, m),
+        ];
         let mut orients = vec![2u8, 1, 1, 2];
         for (c, o) in curves.iter_mut().zip(orients.iter_mut()) {
             if rng.chance(0.3) {
@@ -1319,7 +1379,11 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
         };
     }
     // G1 blends on a plane: 4 (Coons) or 5/6 (n-sided) sides
-    let k = if mode <= 7 { 4 } else { 5 + rng.below(2) as usize };
+    let k = if mode <= 7 {
+        4
+    } else {
+        5 + rng.below(2) as usize
+    };
     let (c3, c2, pl) = plane_loop(rng, k);
     let mut uvs: Vec<Option<CrvIn>> = c2.into_iter().map(|c| Some(CrvIn::Inline(c))).collect();
     let mut srfs: Vec<Option<SrfIn>> = (0..k).map(|_| Some(SrfIn::Inline(pl.clone()))).collect();

@@ -62,8 +62,11 @@
 //!   produces a curve (`plan/upstream-issues.md` WR-158); the port builds and discards
 //!   it as upstream does. `NormalizedEvaluate` returns `SM_SUCCESS` for a point it
 //!   dropped to the surface even where upstream's trim curve was missing.
-//! - **Unported callees.** `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`)
-//!   and the paths of
+//! - **Drop curves.** `SmSurface::DropCurve` is wired (`intersect.surface_drop_lib_p3`;
+//!   a plane runs its own override): the UV curves keep their kind (`Vec<Curve>`),
+//!   and only the two-singular-end-points stitch takes their `SmBSplineCurve` parts.
+//! - **Unported callees.** `SmFace::CreateUVTrimCurves`
+//!   (`topology.face_p3`, through the face's surface cache) and the paths of
 //!   `SmSurface::DropPoint` / `LocalPointSolve` that reach `LocalPointSolve_1`
 //!   (`surface.surface_point_solve_p3`) return [`SolidError::Unported`];
 //!   `GlobalPointSolve` of a non-plane surface is `surface.surface_point_solve_p3`
@@ -140,14 +143,17 @@ struct DropCurveOut {
     max_dist_to_surf: f64,
     /// `rdMaxApproxDev`.
     max_approx_dev: f64,
-    /// `rUVCurves`.
-    uv_curves: Vec<BSplineCurve>,
+    /// `rUVCurves`: upstream's `SmBSplineCurve*` array, whose elements may be derived
+    /// curves (a plane drops a line to an `SmLine`), so they keep their kind.
+    uv_curves: Vec<Curve>,
 }
 
 /// `SmSurface::DropCurve(ctx, domain, curve, interval, tol, rdMaxDropToSurf,
-/// rdMaxApproxDev, rUVCurves, bKeepAllDropCurves, pDropCurveFail)`: the UV curves the
-/// curve over `interval` drops to (`intersect.surface_drop_lib_p3`).
-#[allow(clippy::too_many_arguments)]
+/// rdMaxApproxDev, rUVCurves, bKeepAllDropCurves, pDropCurveFail)` (virtual, with the
+/// default `bCreatingUVTrimCurve = TRUE`): the UV curves the curve over `interval`
+/// drops to ([`Surface::drop_curve`]: a plane has its own override, which does not use
+/// `pOptDropCurveFail` and passes `NULL` on to the general method; every other kind runs
+/// the general one, `intersect.surface_drop_lib_p3`).
 fn surface_drop_curve(
     k: &Kernel,
     surface: &Surface,
@@ -156,23 +162,36 @@ fn surface_drop_curve(
     interval: &Extent1d,
     approx_tol_3d: f64,
     keep_all_drop_curves: bool,
-    record: Option<&mut DropCurveFail<ObjectHandle>>,
+    record: Option<crate::intersect::surface_drop_lib::p1::DropFailRecord<'_, ObjectHandle>>,
 ) -> Result<DropCurveOut> {
-    let _ = (
+    let d = surface.drop_curve::<ObjectHandle>(
         k,
-        surface,
         domain,
         curve,
         interval,
         approx_tol_3d,
         keep_all_drop_curves,
         record,
-    );
-    // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-    Err(SolidError::unported(
-        "SmSurface::DropCurve",
-        "intersect.surface_drop_lib_p3",
-    ))
+        true,
+    )?;
+    Ok(DropCurveOut {
+        max_dist_to_surf: d.max_drop_to_surf,
+        max_approx_dev: d.max_approx_dev,
+        uv_curves: d.uv_curves,
+    })
+}
+
+/// The `SmBSplineCurve` an element of a drop's curve array is (a B-spline, or the
+/// B-spline part of a line).
+fn b_spline_of(curve: Curve) -> Result<BSplineCurve> {
+    match curve.into_kind() {
+        CurveKind::BSpline(b) => Ok(b),
+        CurveKind::Line(l) => Ok(l.base_with_nurb()?.into_owned()),
+        _ => Err(SolidError::invalid_input(
+            OP,
+            "drop curve is not an SmBSplineCurve",
+        )),
+    }
 }
 
 /// `pSurface->GetSingularities() != SM_SS_NONE` (the virtual, without pole outputs; it
@@ -537,13 +556,17 @@ pub fn create_uv_trim_curve(
                     &edge_domain,
                     zone_tol,
                     false,
-                    Some(&mut *fail),
+                    Some(crate::intersect::surface_drop_lib::p1::DropFailRecord {
+                        fail: &mut *fail,
+                        surface: Some(surface_handle),
+                        curve: Some(curve_handle),
+                    }),
                 ))?;
                 l_ok = r.is_some();
                 if let Some(out) = r {
                     max_dist_to_surf = out.max_dist_to_surf;
                     max_drop_approx_dev = out.max_approx_dev;
-                    uv_curves = out.uv_curves.into_iter().map(Curve::from).collect();
+                    uv_curves = out.uv_curves;
                 }
             } else {
                 // (ii==1 || ii==3) - Try DropAndTrimCurve branch
@@ -597,7 +620,7 @@ pub fn create_uv_trim_curve(
                 if let Some(out) = r {
                     max_dist_to_surf = out.max_dist_to_surf;
                     max_drop_approx_dev = out.max_approx_dev;
-                    uv_curves = out.uv_curves.into_iter().map(Curve::from).collect();
+                    uv_curves = out.uv_curves;
                 }
 
                 // when reverse curve dropping works
@@ -1160,7 +1183,7 @@ fn two_singular_end_points(
                     // restore parameterization of 1stHalf drop curve
                     if let Some(c) = first_out.uv_curves.first_mut() {
                         let old = new_interval;
-                        c.reverse_parameterization(&old)?;
+                        c.reverse_parameterization(k, &old)?;
                     }
 
                     // stitch the two halves together
@@ -1169,10 +1192,12 @@ fn two_singular_end_points(
                         .pop()
                         .ok_or_else(|| null("two singular end points: no second curve"))?;
                     first_out.uv_curves.push(second_curve_out);
-                    let joined = status(BSplineCurve::create_by_joining(
-                        &mut first_out.uv_curves,
-                        None,
-                    ))?;
+                    let mut halves = first_out
+                        .uv_curves
+                        .into_iter()
+                        .map(b_spline_of)
+                        .collect::<Result<Vec<BSplineCurve>>>()?;
+                    let joined = status(BSplineCurve::create_by_joining(&mut halves, None))?;
 
                     // when stitching worked (the joined curve is dropped with the
                     // second half's array: upstream defect WR-158, module docs)

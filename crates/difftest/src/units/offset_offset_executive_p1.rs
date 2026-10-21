@@ -62,7 +62,8 @@ use solidcore::topology::edgeuse::p1::{faceuse_edgeuses, mate as edgeuse_mate};
 use solidcore::topology::topology_traverser::face_edges;
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
-    LoopEdge, Loopuse, LoopuseStart, Shell, Vertex, VertexId, Vertexuse, VertexuseOwner,
+    LoopEdge, Loopuse, LoopuseStart, Region, RegionId, Shell, Vertex, VertexId, Vertexuse,
+    VertexuseOwner,
 };
 use solidcore::SolidError;
 use solidcore_ffi::units::offset_offset_executive_p1 as ffi;
@@ -996,6 +997,19 @@ fn state(executive: &OffsetExecutive) -> Vec<f64> {
 fn add_wire(k: &Kernel, brep: &mut Brep, curve: Curve, interval: Extent1d) -> HResult<EdgeId> {
     add_wire_with_vertices(k, brep, curve, interval, None)
 }
+/// The region of the shim's `SmBrep` that every shell it builds lives in (`MakeShellVertex`
+/// and `CreateFaceFromSurface` put the shell in the B-rep's region), so `GetBrep()` of an
+/// edge use finds the B-rep, as `SetUVTrimCurve` needs once the plane's `DropCurve` runs.
+fn brep_region(brep: &mut Brep) -> HResult<RegionId> {
+    if let Some((id, _)) = brep.regions().iter().find(|(_, r)| r.in_brep) {
+        return Ok(id);
+    }
+    brep.add_region_record(Region {
+        in_brep: true,
+        ..Region::default()
+    })
+    .map_err(setup)
+}
 fn add_wire_with_vertices(
     k: &Kernel,
     brep: &mut Brep,
@@ -1005,10 +1019,11 @@ fn add_wire_with_vertices(
 ) -> HResult<EdgeId> {
     let start = curve.evaluate_point(k, interval.min()).map_err(setup)?;
     let end = curve.evaluate_point(k, interval.max()).map_err(setup)?;
+    let region = brep_region(brep)?;
     let shell = brep
         .add_shell_record(Shell {
             faces: Vec::new(),
-            region: None,
+            region: Some(region),
             ..Shell::default()
         })
         .map_err(setup)?;
@@ -1098,10 +1113,11 @@ fn face_with_edges(
     surface: Surface,
     edges: &[EdgeId],
 ) -> HResult<(FaceId, FaceuseId)> {
+    let region = brep_region(brep)?;
     let shell = brep
         .add_shell_record(Shell {
             faces: Vec::new(),
-            region: None,
+            region: Some(region),
             ..Shell::default()
         })
         .map_err(setup)?;

@@ -70,9 +70,12 @@
 //!   from a UV point to the x and y of the last 3D sample point when picking the
 //!   seam-side solution, as upstream does.
 //! - **Unported callees** return [`SolidError::Unported`] (see the `UNPORTED`
-//!   markers): `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`) except the
-//!   plane override. The surface point solves defer inside their own units
-//!   (`LocalPointSolve_1`, `GlobalPointSolve_1`).
+//!   markers). `SmSurface::DropCurve` is the plane override for planes and the base
+//!   body ([`Surface::drop_curve_base`]) otherwise. The surface point solves defer
+//!   inside their own units
+//!   (`LocalPointSolve_1`, `GlobalPointSolve_1`). An
+//!   `SmCrvOnSurf` over a surface that is not a B-spline surface is a dispatch gap
+//!   of `curve.crv_on_surf` (the ported curve holds an `SmBSplineSurface`).
 //! - The `SM_DEBUG_CODE` drawing blocks and `Dump` are not ported. No recursion
 //!   depends on input; the seam search loop is bounded (19 steps) as upstream.
 
@@ -372,37 +375,17 @@ fn surface_drop_curve(
     keep_all: bool,
     creating_uv_trim_curve: bool,
 ) -> Result<(f64, f64, Vec<Curve>)> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => {
-            let r = p.drop_curve(
-                k,
-                uv_domain,
-                curve,
-                interval,
-                approx_tol,
-                keep_all,
-                creating_uv_trim_curve,
-            )?;
-            Ok((r.max_drop_to_surf, r.max_approx_dev, r.uv_curves))
-        }
-
-        SurfaceKind::Cone(_)
-        | SurfaceKind::Sphere(_)
-        | SurfaceKind::Torus(_)
-        | SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::SurfOfExtrusion(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-            Err(SolidError::unported(
-                "SmSurface::DropCurve",
-                "intersect.surface_drop_lib_p3",
-            ))
-        }
-    }
+    let r = surface.drop_curve::<NoObject>(
+        k,
+        uv_domain,
+        curve,
+        interval,
+        approx_tol,
+        keep_all,
+        None,
+        creating_uv_trim_curve,
+    )?;
+    Ok((r.max_drop_to_surf, r.max_approx_dev, r.uv_curves))
 }
 
 /// `IsClosed(domain, param)` (default arguments); a failure answers `false`.
@@ -1761,6 +1744,13 @@ impl<'s> SurfaceDropCurve<'s> {
             } else {
                 // more than one solution - probably walking in/out of a boundary:
                 // the SmSurfaceTracer algorithm
+                //
+                // First suspect for a later disagreement (WR-182, plan/findings.md "The
+                // start list after `DoTrace` shares nodes with the curve list"): upstream
+                // TraceCurve2 appends `start` to the intrusive curve ring without taking it
+                // off m_vStartPoints, and this base `TraceCurve` walks the start list too
+                // (end test, AddStartPoint). The port's id `Vec`s do not model that
+                // aliasing; the harness reports such a start list as -3 on both sides.
                 match trace_curve_base(self, k, start, &out.curves_3d) {
                     Ok(()) => flush_curve(k, &mut self.base, out, Some(self.curve))?,
                     Err(e) if e.is_unported() => return Err(e),

@@ -12,8 +12,8 @@
 //!
 //! Deferred cases: `CoincidenceCheck` with a surface that is not a plane
 //! (`SmSurface::IsPlanar`, `surface.surface_p7`), `DropCurve` falling back to the
-//! general `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`) and
-//! `GlobalLineIntersect` of a line in the plane meeting the domain in one line
+//! general `SmSurface::DropCurve` (ported, `intersect.surface_drop_lib_p3`) where that
+//! reaches a unit not ported yet, and `GlobalLineIntersect` of a line in the plane meeting the domain in one line
 //! parameter (`SmSurface::GlobalLineIntersect`, `surface.surface_p8`).
 
 use serde::{Deserialize, Serialize};
@@ -910,7 +910,7 @@ fn rust_op(k: &Kernel, op: &OpIn, a: &mut Plane, o: &mut Vec<f64>) -> Result<(),
             let d = dom_of(a, *dom);
             let c = rust_curve(curve)?;
             let i = ivl.map_or_else(|| c.natural_interval(), |[x, y]| Extent1d::from_min_max(x, y));
-            let r = a.drop_curve(k, &d, &c, &i, *tol, *keep_all, *creating);
+            let r = a.drop_curve(k, &d, &c, &i, *tol, *keep_all, *creating, None);
             if let Some(res) = st(o, r)? {
                 o.extend([
                     res.max_drop_to_surf,
@@ -1557,7 +1557,8 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let g = Geo::of(&make);
     let n = 1 + rng.below(5) as usize;
     // A NURB upstream makes lazily in a const method (or a copy) stays with the plane;
-    // the port makes it on a copy. ToggleSwapUVBit (which leaves the NURB alone) and
+    // the port makes it on a copy (also in the general DropCurve a drop may fall back on).
+    // ToggleSwapUVBit (which leaves the NURB alone) and
     // operator== (which compares NURBs) observe the difference, so they come only
     // while both sides agree: before any such method or once the NURB is made in place.
     let mut made = matches!(make, MakeIn::Canonical { .. });
@@ -1571,7 +1572,10 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             | OpIn::Rebuild
             | OpIn::Reverse { .. }
             | OpIn::Swap => made = true,
-            OpIn::Coincidence { .. } | OpIn::Iso { .. } | OpIn::Copy => lazy = true,
+            // (DropCurve: the general SmSurface::DropCurve asks GetNaturalUVDomain)
+            OpIn::Coincidence { .. } | OpIn::Iso { .. } | OpIn::Copy | OpIn::DropCurve { .. } => {
+                lazy = true;
+            }
             OpIn::Drop { sop, .. } if *sop == 5 => lazy = true,
             _ => {}
         }

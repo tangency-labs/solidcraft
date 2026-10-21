@@ -64,19 +64,12 @@
 //!   edges, type and `TestRailRailInterpolationCurve` are `UNPORTED(blend.fillet_corner_p1)`
 //!   stubs (the four vertex calculators stop at the filleted vertex, right after the
 //!   corner's null check; `CalcRailRailInterpolation` only with a corner).
-//! - **Solver virtuals.** The `solvers` table holds base [`FilletSolver`]s, so
-//!   `RailRailIntersect` and the virtual `PointOnPlaneSolve` run with the base
-//!   `SmFilletSolver` virtuals (`impl FilletSolverOps for FilletSolver`), as for the
-//!   base `SmFilletSolver` the difftest shims build; the virtuals' changes to the
-//!   solver (offsets, surface extensions) stay in the table. When both solvers of
-//!   `RailRailIntersect` / `sm_CreateCubicRailRailInterpolant` are the same table entry
-//!   (one object upstream, which Rust cannot lend twice) the second runs on a copy and
-//!   its changes are dropped (`plan/findings.md`, "`blend.fillet_solver_p2`: back-edges
-//!   into the solver from `blend.fillet_geom`").
-//! - **Unported callees.** `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`)
-//!   for a solver (its set-up is a no-op for a `NULL` solver); `SmSurface::DropCurve`
-//!   (`intersect.surface_drop_lib_p3`) on anything but a plane (the `SmPlane` override
-//!   is ported). Each stub replaces only its call; the code behind it is ported.
+//! - **Unported callees.** `SmFilletSolver::RailRailIntersect` and `PointOnPlaneSolve`
+//!   (`blend.fillet_solver_p2`); `SmFilletGeom::GetRailIndexOfSideEU`,
+//!   `RailEdgeuseIntersect` and `SmFilletEdge::ShouldSwapFaces`
+//!   (`blend.fillet_geom_p6`); `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`)
+//!   for a solver (its set-up is a no-op for a `NULL` solver). Each stub replaces only
+//!   its call; the code behind it is ported.
 //! - **Record writes.** `SetPoint` on a fillet vertex and `SetCurve` on a fillet edge
 //!   apply the `SM_NO_CHANGE_GEOMETRY` resets directly (as `_p1` and `_p4` do: the
 //!   pseudo B-rep has no notification environment); `SetOwner` of the new curve is
@@ -373,8 +366,8 @@ const fn b_spline_net(s: &Surface) -> Option<&BSplineSurface> {
 
 /// `pSurface->DropCurve(crContext, crDomain, cr3dCurve, crInterval, dApproxTol,
 /// rdMaxDist, rdDeviation, rUVCurves)` with the defaults (`bKeepAllDropCurves =
-/// TRUE`, no fail record, `bCreatingUVTrimCurve = TRUE`): the UV curves. The
-/// `SmPlane` override is ported; the general drop is `intersect.surface_drop_lib_p3`.
+/// TRUE`, no fail record, `bCreatingUVTrimCurve = TRUE`): the UV curves
+/// ([`Surface::drop_curve`]; the `SmPlane` override or the general drop).
 fn surface_drop_curve(
     k: &Kernel,
     surface: &Surface,
@@ -384,28 +377,10 @@ fn surface_drop_curve(
     approx_tol: f64,
 ) -> Result<Vec<Curve>> {
     let approx_tol = approx_tol3d(k, approx_tol);
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p
-            .drop_curve(k, domain, curve, interval, approx_tol, true, true)?
-            .uv_curves),
-        SurfaceKind::BSpline(_)
-        | SurfaceKind::Cone(_)
-        | SurfaceKind::Sphere(_)
-        | SurfaceKind::Torus(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SrfInVolume(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::SurfOfExtrusion(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::OffsetSurface(_) => {
-            // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-            unported_on(
-                (k, surface, domain, curve, interval, approx_tol),
-                "SmSurface::DropCurve",
-                "intersect.surface_drop_lib_p3",
-            )
-        }
-    }
+    // no failure record (`pOptDropCurveFail = NULL`)
+    Ok(surface
+        .drop_curve::<NoObject>(k, domain, curve, interval, approx_tol, true, None, true)?
+        .uv_curves)
 }
 
 /// The surface as upstream's `GetNaturalUVDomain` leaves it: a plane without a NURB gets
@@ -693,8 +668,7 @@ struct Candidate {
 /// `SM_ERR` when no candidate passes; `SM_ERR_NULL_POINTER` for a best curve of a kind
 /// not derived from `SmBSplineCurve`; those of the general intersector, the drops,
 /// trims, reversals and evaluations; [`SolidError::Unported`] from
-/// `sm_TwoPntsIntersection` and `SmSurface::DropCurve`
-/// (`intersect.surface_drop_lib_p3`, except on a plane).
+/// `sm_TwoPntsIntersection`.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub fn srf_srf_intersection(
     k: &Kernel,
@@ -2002,9 +1976,8 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without original face, B-spline surface, rail, edge use or
     /// curve; `SM_ERR` when a vertex does not drop onto its rail within 100 times the
     /// tolerance or a drop gives other than one UV curve; those of the evaluations,
-    /// constructions and lifts; [`SolidError::Unported`] for `SmSurface::DropCurve`
-    /// (`intersect.surface_drop_lib_p3`) on a non-planar face and for the corner
-    /// (`blend.fillet_corner_p1`).
+    /// constructions, lifts and `SmSurface::DropCurve`; [`SolidError::Unported`] for the
+    /// corner (`blend.fillet_corner_p1`).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_rail_rail_interpolation(
         &mut self,

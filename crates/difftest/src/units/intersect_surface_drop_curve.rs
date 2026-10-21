@@ -341,7 +341,8 @@ fn rust_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
             );
             // with its NURB, as the shim makes it (a read-only query of the Rust plane
             // never keeps one; upstream's would, changing later point solves)
-            p.make_nurb().map_err(|e| harness(format!("plane NURB: {e}")))?;
+            p.make_nurb()
+                .map_err(|e| harness(format!("plane NURB: {e}")))?;
             Ok(Surface::from(p))
         }
         SurfIn::Bspline(d) => {
@@ -486,7 +487,21 @@ fn put_acc(o: &mut Vec<f64>, a: &TraceOutput) {
     put_doubles(o, &a.deviations);
 }
 
+/// The start list value when a start point is also on the curve list (the shim's
+/// `SHARED_START_LIST`): upstream's intrusive start list then walks the curve ring
+/// (`DoTrace`'s `TraceCurve2` appends the start node it traces to `m_vCurvePoints`,
+/// `plan/upstream-issues.md` WR-182), which the port's id lists do not model.
+const SHARED_START_LIST: f64 = -3.0;
+
 fn put_start_points(o: &mut Vec<f64>, t: &SurfaceDropCurve<'_>) -> Result<(), Fail> {
+    if t.base
+        .start_points
+        .iter()
+        .any(|id| t.base.curve_points.contains(id))
+    {
+        o.push(SHARED_START_LIST);
+        return Ok(());
+    }
     o.push(t.base.start_points.len() as f64);
     for &id in &t.base.start_points {
         let p = t
@@ -951,7 +966,10 @@ fn gen_curve(k: &Kernel, rng: &mut Rng, surface: &Surface, d: [f64; 4], lift: f6
     };
     let segment = |a: [f64; 3], bb: [f64; 3]| {
         let l = ((bb[0] - a[0]).powi(2) + (bb[1] - a[1]).powi(2) + (bb[2] - a[2]).powi(2)).sqrt();
-        let m = a.iter().chain(bb.iter()).fold(1.0_f64, |m, x| m.max(x.abs()));
+        let m = a
+            .iter()
+            .chain(bb.iter())
+            .fold(1.0_f64, |m, x| m.max(x.abs()));
         (l > 1e-8 * m).then_some(CurveIn::Segment { a, b: bb })
     };
     match rng.below(10) {
@@ -1145,14 +1163,15 @@ fn gen_inputs(k: &Kernel, rng: &mut Rng) -> Option<Inputs> {
                     continue;
                 }
                 let param = if rng.chance(0.3) {
-                    *curve_knots(&curve).get(rng.below(2) as usize).unwrap_or(&civl.0)
+                    *curve_knots(&curve)
+                        .get(rng.below(2) as usize)
+                        .unwrap_or(&civl.0)
                 } else {
                     param_in(rng, civl)
                 };
                 OpIn::Step {
                     param,
-                    old: pick(rng, &[0.0, 1e-13, 0.01, 0.2, 1.0, 10.0], 0.1)
-                        * (civl.1 - civl.0),
+                    old: pick(rng, &[0.0, 1e-13, 0.01, 0.2, 1.0, 10.0], 0.1) * (civl.1 - civl.0),
                 }
             }
             4 => {

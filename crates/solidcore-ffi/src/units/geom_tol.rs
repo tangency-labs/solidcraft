@@ -8,8 +8,12 @@
 //! |--------------|------------------------|----------------------------------|
 //! | [`op`]       | `sc_geom_tol_op`       | one `SmTol` call per [`Op`]      |
 //! | [`relation`] | `sc_geom_tol_relation` | a script of `SmRelation<int, int>` calls |
+//! | [`curve_tols`] | `sc_geom_tol_curve`  | the `SmCurve` overloads of `GetScaledZero`, `MapTo1d`, `IsDegenerate` |
 
 use crate::{call_with_buffer, check, FfiError};
+
+use super::intersect_surface_drop_lib_p2::encode_curve;
+pub use super::intersect_surface_drop_lib_p2::{CurveIn, MAX_COORD};
 
 mod sys {
     extern "C" {
@@ -24,6 +28,13 @@ mod sys {
             objs: *const f64,
             out: *mut f64,
             out_n: *mut i32,
+        ) -> i32;
+        pub fn sc_geom_tol_curve(
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
         ) -> i32;
         pub fn sc_geom_tol_relation(
             card: i32,
@@ -227,6 +238,59 @@ pub fn relation(
                 n_second,
                 script.as_ptr(),
                 n_script,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// On a real `SmLine`, `SmCircle` or `SmBSplineCurve` `curve`: `GetScaledZero(const
+/// SmCurve&)`, `MapTo1d(SmTol3d(tol), param, curve)` and `IsDegenerate(&curve,
+/// SmExtent1d(interval), xsect ? &SmXSectTol3d(xsect) : NULL)` (as `1.0`/`0.0`), in this
+/// order.
+///
+/// Accepts finite values of at most [`MAX_COORD`] magnitude. A `param` or interval
+/// outside the curve's range is not undefined: `SmBSplineCurve::Evaluate` clamps and a
+/// line and a circle extend, so the ignored `Evaluate`s of `SmCurve::IsDegenerate` never
+/// fail (see `intersect_surface_drop_lib_p3`).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a rejected input.
+pub fn curve_tols(
+    curve: &CurveIn,
+    param: f64,
+    tol: f64,
+    interval: [f64; 2],
+    xsect: Option<f64>,
+) -> Result<Vec<f64>, FfiError> {
+    let fin = |x: f64| {
+        if x.is_finite() && x.abs() <= MAX_COORD {
+            Ok(x)
+        } else {
+            Err(FfiError::InvalidArgument(
+                "value not finite or too large".into(),
+            ))
+        }
+    };
+    let mut v = Vec::new();
+    encode_curve(curve, &mut v)?;
+    v.push(fin(param)?);
+    v.push(fin(tol)?);
+    v.push(fin(interval[0])?);
+    v.push(fin(interval[1])?);
+    v.push(if xsect.is_some() { 1.0 } else { 0.0 });
+    v.push(fin(xsect.unwrap_or(0.0))?);
+    let n_in = i64::try_from(v.len()).map_err(|_| FfiError::InvalidArgument("too long".into()))?;
+    call_with_buffer(8, |buf: &mut [f64], len| {
+        // SAFETY: `v` is valid for `n_in` reads; `buf` for `buf.len()` writes; `len` is a
+        // valid i64; nothing is retained.
+        unsafe {
+            sys::sc_geom_tol_curve(
+                v.as_ptr(),
+                n_in,
                 buf.as_mut_ptr(),
                 buf.len() as i64,
                 &raw mut *len,

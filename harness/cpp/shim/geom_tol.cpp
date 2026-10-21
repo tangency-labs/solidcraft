@@ -4,6 +4,14 @@
 // SmRelation (source/SMLib/inc/SmRelation.h).
 #include "sc_shim.h"
 
+#include "StdAfx.h"
+#include <SmBSplineCurve.h>
+#include <SmCircle.h>
+#include <SmCurve.h>
+#include <SmLine.h>
+#include <SmNurbsCrv.h>
+#include <nurbs.h>
+
 #include <SmContext.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
@@ -14,6 +22,7 @@
 #include <SmVector3d.h>
 
 #include <algorithm>
+#include <stdexcept>
 #include <vector>
 
 // Operation codes (keep in sync with crates/solidcore-ffi/src/units/geom_tol.rs).
@@ -379,5 +388,134 @@ SC_EXPORT int32_t sc_geom_tol_relation(int32_t card, int64_t n1, int64_t n2, con
         push_sorted(v);
     }
     return sc_copy_out(res.data(), (int64_t)res.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+// ---- tolerances of a curve ---------------------------------------------------------
+//
+// sc_geom_tol_curve(in, n_in, out, cap, out_len): one real SmLine / SmCircle /
+// SmBSplineCurve and, on it, GetScaledZero(const SmCurve&), MapTo1d(SmTol3d, dParam,
+// const SmCurve&) and IsDegenerate(const SmCurve*, SmExtent1d, [&xsect]). Input:
+//   curve block: `0 a[3] b[3]` SmLine | `1 c[3] x[3] y[3] d0 d1 r` SmCircle |
+//                `2 p ncp cpts(x y z w) knots` SmBSplineCurve (dim 3)
+//   then: param tol ivl0 ivl1 has_xsect xsect_tol
+// Output: scaled_zero map_to_1d is_degenerate (1 or 0).
+namespace
+{
+struct ScBad : std::runtime_error
+{
+    ScBad() : std::runtime_error("bad program") {}
+};
+
+struct ScRd
+{
+    const double* in;
+    int64_t n;
+    int64_t at;
+    double num()
+    {
+        if (at >= n)
+            throw ScBad();
+        return in[at++];
+    }
+    int64_t idx(int64_t lo, int64_t hi)
+    {
+        double d = num();
+        if (!(d >= (double)lo && d <= (double)hi) || d != (double)(int64_t)d)
+            throw ScBad();
+        return (int64_t)d;
+    }
+    SmVector3d vec()
+    {
+        double x = num();
+        double y = num();
+        double z = num();
+        return SmVector3d(x, y, z);
+    }
+};
+
+SmCurve* sc_read_curve(ScRd& rd, const SmContext& ctx)
+{
+    int64_t kind = rd.idx(0, 2);
+    if (kind == 0)
+    {
+        SmPoint3d a = rd.vec();
+        SmPoint3d b = rd.vec();
+        SmLine* l = new (ctx) SmLine(a, b, 3, &ctx);
+        l->GetOrCreateGwNurbPointer();
+        return l;
+    }
+    if (kind == 1)
+    {
+        SmPoint3d c = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double d0 = rd.num();
+        double d1 = rd.num();
+        double r = rd.num();
+        return new (ctx) SmCircle(c, x, y, SmExtent1d(d0, d1), r, 3, &ctx);
+    }
+    int64_t p = rd.idx(1, 8);
+    int64_t ncp = rd.idx(2, 64);
+    if (p >= ncp)
+        throw ScBad();
+    int64_t n = ncp - 1;
+    int64_t m = n + p + 1;
+    std::vector<double> v;
+    for (int64_t i = 0; i < 4 * ncp + m + 1; i++)
+        v.push_back(rd.num());
+    gw_CURVE* cur = sm_AllocateNurbCurve((gw_INDEX)n, (gw_DEGREE)p, (gw_INDEX)m);
+    for (int64_t i = 0; i <= n; i++)
+    {
+        cur->pol->Pw[i].x = v[4 * i];
+        cur->pol->Pw[i].y = v[4 * i + 1];
+        cur->pol->Pw[i].z = v[4 * i + 2];
+        cur->pol->Pw[i].w = v[4 * i + 3];
+    }
+    for (int64_t i = 0; i <= m; i++)
+        cur->knt->U[i] = v[4 * ncp + i];
+    return new (ctx) SmBSplineCurve(cur, 3, FALSE);
+}
+} // namespace
+
+SC_EXPORT int32_t sc_geom_tol_curve(const double* in, int64_t n_in, double* out, int64_t cap, int64_t* out_len)
+{
+    if (in == nullptr || n_in < 1 || out_len == nullptr || (out == nullptr && cap > 0))
+        return SC_ERR_ARG;
+    SC_TRY
+    SmContext ctx;
+    ScRd rd{in, n_in, 0};
+    std::vector<double> o;
+    SmCurve* c = NULL;
+    try
+    {
+        c = sc_read_curve(rd, ctx);
+        double param = rd.num();
+        double tol = rd.num();
+        double i0 = rd.num();
+        double i1 = rd.num();
+        int64_t has_x = rd.idx(0, 1);
+        double xs = rd.num();
+        if (rd.at != n_in)
+        {
+            delete c;
+            return SC_ERR_ARG;
+        }
+        SmScaledZero sz = SmTol::GetScaledZero(*c);
+        SmTol3d t3(tol);
+        SmTol1d t1 = SmTol::MapTo1d(t3, param, *c);
+        SmXSectTol3d xt(xs);
+        SmBoolean deg = SmTol::IsDegenerate(c, SmExtent1d(i0, i1), has_x ? &xt : NULL);
+        o.push_back((double)sz);
+        o.push_back((double)t1);
+        o.push_back(deg ? 1.0 : 0.0);
+    }
+    catch (const ScBad&)
+    {
+        delete c;
+        return SC_ERR_ARG;
+    }
+    delete c;
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }

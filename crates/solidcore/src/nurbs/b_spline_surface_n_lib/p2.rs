@@ -5,7 +5,7 @@
 //!
 //! | Rust                                          | Upstream                                  |
 //! |-----------------------------------------------|-------------------------------------------|
-//! | [`BSplineSurface::create_corner_blend`], [`OrientType`] | `CreateCornerBlend`, `SmOrientType` |
+//! | [`BSplineSurface::create_corner_blend`], [`OrientType`], [`BlendNeighbour`] | `CreateCornerBlend`, `SmOrientType`, its `SmSurface*` |
 //! | [`BSplineSurface::create_skinned_surface`], [`SkinnedSurfaceOptions`] | `CreateSkinnedSurface` |
 //! | [`BSplineSurface::trim_with_domain`], [`BSplineSurface::trim_with_domain_with`], [`TrimOptions`] | `TrimWithDomain` |
 //! | [`BSplineSurface::evaluate`], [`EvaluateFlags`] | `Evaluate`                              |
@@ -19,9 +19,12 @@
 //!   `Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT)` in `TrimWithDomain` is omitted (a
 //!   surface here has no owner to notify).
 //! - **Curve and surface types.** `CreateCornerBlend` takes [`BSplineCurve`] 3D curves
-//!   and [`BSplineSurface`] neighbour surfaces (upstream `SmCurve*` / `SmSurface*`;
-//!   `sm_CreateNonRationalCurve` fails with `NER` for any other curve type, and
-//!   B-spline surfaces are the only surfaces so far). `NULL` UV curves and surfaces
+//!   and [`BlendNeighbour`] neighbour surfaces (upstream `SmCurve*` / `SmSurface*`;
+//!   `sm_CreateNonRationalCurve` fails with `NER` for any other curve type). A
+//!   neighbour is the caller's surface (its kind and owner, for the virtual `DropCurve`
+//!   of `sm_CreateNonRationalCurve`) with its B-spline representation, which the
+//!   cross-tangent construction evaluates (B-spline evaluators are the only ones it
+//!   takes so far). `NULL` UV curves and surfaces
 //!   are `None`. Where upstream indexes past the end of the orientation, UV curve or
 //!   surface arrays, or dereferences a `NULL` UV curve or surface (n-sided blends,
 //!   bilinear blends with more than four curves), the port returns `InvalidInput`.
@@ -108,15 +111,15 @@ pub enum OrientType {
     Opposite,
 }
 
-/// Options of [`BSplineSurface::trim_with_domain_with`]. `Default` is upstream's
-/// `TrimWithDomain`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct TrimOptions {
-    /// Not upstream (tangency-labs/solidcore#472): a trim boundary at most
-    /// `SM_EFF_ZERO_PARAM` inside a knot is snapped onto the knot instead of being
-    /// moved `10 * SM_EFF_ZERO_SQRT * (1 + |t|)` away from it, which leaves a sliver
-    /// span. Off by default (upstream).
-    pub snap_roundoff_to_knots: bool,
+/// A neighbour surface of [`BSplineSurface::create_corner_blend`] (upstream's
+/// `SmSurface*`).
+#[derive(Debug, Clone, Copy)]
+pub struct BlendNeighbour<'a> {
+    /// The surface itself, with its kind and owner: `sm_CreateNonRationalCurve`
+    /// drops rational curves onto it through the virtual `SmSurface::DropCurve`.
+    pub surface: &'a crate::surface::surface::Surface,
+    /// Its B-spline representation, which the cross-tangent construction evaluates.
+    pub b_spline: &'a BSplineSurface,
 }
 
 /// The flags of [`BSplineSurface::evaluate`].
@@ -395,7 +398,7 @@ impl BSplineSurface {
     /// With four curves the result is one Coons patch
     /// ([`BSplineSurface::create_coons_patch`]): bilinear with
     /// `create_bilinear_patch` (UV curves and surfaces are then optional), else
-    /// bicubic matching the cross tangents of the neighbour `surfaces` along their
+    /// bicubic matching the cross tangents of the `neighbours` surfaces along their
     /// `uv_curves` within `tangency_tol_radians` (one degenerate curve without surface
     /// gives a triangular patch). More curves give an n-sided patch
     /// ([`BSplineSurface::create_n_sided_patch`]) matching the neighbours' cross
@@ -414,7 +417,7 @@ impl BSplineSurface {
         curves_3d: &[BSplineCurve],
         curve_orients: &[OrientType],
         uv_curves: &[Option<BSplineCurve>],
-        surfaces: &[Option<&BSplineSurface>],
+        neighbours: &[Option<BlendNeighbour<'_>>],
         approx_tol: f64,
         tangency_tol_radians: f64,
         create_bilinear_patch: bool,
@@ -426,6 +429,9 @@ impl BSplineSurface {
             return Err(SolidError::sm_err(OP));
         }
         let curve_cnt = curves_3d.len();
+        let surfaces: Vec<Option<&BSplineSurface>> =
+            neighbours.iter().map(|n| n.map(|n| n.b_spline)).collect();
+        let surfaces = surfaces.as_slice();
         if uv_curves.len() < curve_cnt || surfaces.len() < curve_cnt {
             return Err(SolidError::invalid_input(
                 OP,
@@ -458,11 +464,12 @@ impl BSplineSurface {
         // convert all input edges from NURBs to NUBs
         let mut boundaries: Vec<BSplineCurve> = Vec::with_capacity(curve_cnt);
         let mut uv_crvs: Vec<Option<BSplineCurve>> = Vec::with_capacity(curve_cnt);
-        for ((curve, uv), srf) in curves_3d.iter().zip(uv_curves).zip(surfaces) {
+        for ((curve, uv), srf) in curves_3d.iter().zip(uv_curves).zip(neighbours) {
             // copy NUBs and their UVTrimCurves, approx NURBs and drop them to make their
             // UVTrimCurves
+            let base = srf.map(|n| n.surface);
             let (boundary, ps_curve) =
-                create_non_rational_curve(curve, uv.as_ref(), *srf, approx_tol / 2.0)?;
+                create_non_rational_curve(k, curve, uv.as_ref(), base, approx_tol / 2.0)?;
             boundaries.push(boundary); // cleaned up 3d boundary curves
             uv_crvs.push(ps_curve); // associated UVTrimCurves
         }

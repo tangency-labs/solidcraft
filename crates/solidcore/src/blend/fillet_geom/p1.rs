@@ -150,10 +150,9 @@
 //!   mate's gap too) and the cached gaps of their vertex uses. The examine routine
 //!   then drops the new rail onto the solver's offset surface with its offset distance
 //!   at `0` over its `GetNaturalUVDomain`: `SmSurface::DropCurve`
-//!   (`intersect.surface_drop_lib_p3`) is a call stub, so it returns
-//!   [`SolidError::Unported`] there; the tail behind them (a failed drop
-//!   skips the rail, a single UV curve becomes the mate edge use's UV curve through
-//!   `SetUVCurve` with its defaults) is ported.
+//!   (`intersect.surface_drop_lib_p3`, the general drop on a copy of the offset surface)
+//!   then runs; a failed drop skips the rail and a single UV curve becomes the mate
+//!   edge use's UV curve through `SetUVCurve` with its defaults.
 //! - **Difftest coverage.** The shim builds plain `SmBSplineSurface` / `SmBSplineCurve`
 //!   geometry, except for [`evaluate_mate`], which is also compared on a real `SmPlane`
 //!   (with and without its NURB) and a canonical `SmSurfOfRevolution` of a line (an
@@ -176,14 +175,9 @@
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` of `topology.face_p1`) and the
 //!   unported callees of `SmFace::Point3DClassify` (wired to `query::face::p1`) in
 //!   `sm_ClassifyFacePoint`;
-//!   `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`) inside the wired
-//!   `SmFilletSolver::RailRailIntersect` of `sm_CreateCubicRailRailInterpolant` (the
-//!   cubic built from its result is ported behind it; the solvers are `SmFilletSolver*`
-//!   upstream, here `&mut` [`FilletSolver`]s because its virtual callees may change
-//!   them); `SmSurface::DropCurve`
-//!   (`intersect.surface_drop_lib_p3`) in the
-//!   adjusting path of
-//!   `sm_ExamineNFixFilletGeoms`. Every stub replaces only its call.
+//!   `SmFilletSolver::RailRailIntersect` (`blend.fillet_solver_p2`) in
+//!   `sm_CreateCubicRailRailInterpolant` (the cubic built from their result is ported
+//!   behind them). Every stub replaces only its call.
 //! - **Bounds.** `sm_ExamineNFixFilletGeoms` copies at most the smaller control net
 //!   row; indices are checked. No input-driven recursion.
 
@@ -3150,10 +3144,9 @@ pub fn cleanup_noise(uv: Point2) -> Point2 {
 /// [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`) for a geometry without a fillet
 /// surface or rails, or, on the adjusting path, without a solver or a solver without
 /// the rail's offset surface (upstream dereferences them); `SM_ERR` when both surfaces
-/// need adjusting; [`SolidError::Unported`]: after rebuilding the rail curves, the drop
-/// of each rail onto the solver's offset surface (`SmOffsetSurface::GetNaturalUVDomain`
-/// of `surface.offset_surface`, then `SmSurface::DropCurve` of
-/// `intersect.surface_drop_lib_p3`).
+/// need adjusting; those of the rail drop onto the solver's offset surface
+/// (`SmSurface::DropCurve`, unit `intersect.surface_drop_lib_p3`; a failed drop only
+/// skips the rail, [`SolidError::Unported`] propagates).
 pub fn examine_n_fix_fillet_geoms(
     k: &Kernel,
     fb: &mut FilletBrep,
@@ -3496,17 +3489,31 @@ fn offset_natural_uv_domain(surface: &OffsetSurface) -> Extent2d {
 /// `intersect.surface_drop_lib_p3`): the out-parameters `(rdMaxDistToSurf,
 /// rdDeviation, rUVCurves)`.
 fn offset_surface_drop_curve(
-    _k: &Kernel,
-    _surface: &OffsetSurface,
-    _drop_domain: &Extent2d,
-    _curve_3d: &Curve,
-    _interval: &Extent1d,
-    _dist_tol: f64,
+    k: &Kernel,
+    surface: &OffsetSurface,
+    drop_domain: &Extent2d,
+    curve_3d: &Curve,
+    interval: &Extent1d,
+    dist_tol: f64,
 ) -> Result<(f64, f64, Vec<Curve>)> {
-    // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-    Err(SolidError::unported(
-        "SmSurface::DropCurve",
-        "intersect.surface_drop_lib_p3",
+    // `SmOffsetSurface` does not override `DropCurve`: the general drop
+    // (`bKeepAllDropCurves = TRUE`, no fail record) runs on the offset surface as a
+    // surface; the port's drop takes a `Surface`, so it runs on a copy of the offset.
+    let as_surface = Surface::from(surface.surface.copy(k)?);
+    let dropped = as_surface.drop_curve::<NoObject>(
+        k,
+        drop_domain,
+        curve_3d,
+        interval,
+        dist_tol,
+        true,
+        None,
+        true,
+    )?;
+    Ok((
+        dropped.max_drop_to_surf,
+        dropped.max_approx_dev,
+        dropped.uv_curves,
     ))
 }
 
@@ -4111,7 +4118,7 @@ mod tests {
     }
 
     #[test]
-    fn examine_copies_the_good_row_rebuilds_the_rail_and_stops_at_the_drop() {
+    fn examine_copies_the_good_row_rebuilds_the_rail_and_drops_it() {
         use crate::blend::fillet_custom_solver::SurfaceId;
         let k = Kernel::default();
         let (mut fb, [g0, g1], [start_fv, end_fv], eu, vu) = corner_for_examine(&k);
@@ -4163,14 +4170,10 @@ mod tests {
             [Some(&mut solver), None],
         )
         .unwrap_err();
+        // the real drop runs on rail 0 (a failed drop skips the rail); rail 1 has no
+        // solver offset surface, which upstream dereferences without a check
         assert!(
-            matches!(
-                err,
-                SolidError::Unported {
-                    upstream: "SmSurface::DropCurve",
-                    unit: "intersect.surface_drop_lib_p3"
-                }
-            ),
+            matches!(err, SolidError::Upstream { code: 1006, .. }),
             "{err:?}"
         );
         // the offset distance was zeroed for the drop and restored
@@ -4189,8 +4192,8 @@ mod tests {
         assert!(near(at(0.0, 0.0), Point3::new(3.0, 0.0, 0.0)));
         assert!(near(at(0.0, 1.0), Point3::new(3.0, 2.0, 0.0)));
         assert!(near(at(1.0, 0.0), Point3::new(3.5, 0.0, 0.0)));
-        // rail 0 is the v = 0 iso-curve of the adjusted surface; the drop of rail 0
-        // stopped the loop, so rail 1 keeps no curve
+        // rail 0 is the v = 0 iso-curve of the adjusted surface; rail 1's iso-curve is
+        // set before its drop hits the missing offset surface
         let rails = fb.geom(g0).unwrap().rails;
         let rail0 = fb.brep().edge(rails[0].unwrap()).unwrap();
         let curve = rail0.curve.as_ref().unwrap();
@@ -4203,7 +4206,7 @@ mod tests {
             curve.evaluate_point(&k, ivl.max()).unwrap(),
             Point3::new(3.5, 0.0, 0.0)
         ));
-        assert!(fb.brep().edge(rails[1].unwrap()).unwrap().curve.is_none());
+        assert!(fb.brep().edge(rails[1].unwrap()).unwrap().curve.is_some());
         // the SetCurve notification cleared the cached state of rail 0's uses
         let rec = fb.brep().edgeuse(eu).unwrap();
         assert!(rec.uv_trim_curve.is_none());

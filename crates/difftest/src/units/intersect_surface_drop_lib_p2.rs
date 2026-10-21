@@ -66,7 +66,7 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum CurveIn {
+pub(crate) enum CurveIn {
     Line {
         a: [f64; 3],
         b: [f64; 3],
@@ -87,7 +87,7 @@ enum CurveIn {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum SurfIn {
+pub(crate) enum SurfIn {
     Plane {
         o: [f64; 3],
         x: [f64; 3],
@@ -158,7 +158,7 @@ enum Inputs {
 
 // ---- C++ side -----------------------------------------------------------------------
 
-fn ffi_curve(c: &CurveIn) -> ffi::CurveIn {
+pub(crate) fn ffi_curve(c: &CurveIn) -> ffi::CurveIn {
     match c {
         CurveIn::Line { a, b } => ffi::CurveIn::Line { a: *a, b: *b },
         CurveIn::Circle { c, x, y, d, r } => ffi::CurveIn::Circle {
@@ -176,7 +176,7 @@ fn ffi_curve(c: &CurveIn) -> ffi::CurveIn {
     }
 }
 
-fn ffi_surface(s: &SurfIn) -> ffi::SurfaceIn {
+pub(crate) fn ffi_surface(s: &SurfIn) -> ffi::SurfaceIn {
     match s {
         SurfIn::Plane {
             o,
@@ -354,11 +354,11 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-fn v3(p: [f64; 3]) -> Vec3 {
+pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 
-fn ext(d: [f64; 4]) -> Extent2d {
+pub(crate) fn ext(d: [f64; 4]) -> Extent2d {
     Extent2d::from_bounds(d[0], d[1], d[2], d[3])
 }
 
@@ -407,7 +407,7 @@ fn rust_circle(
     Ok(Curve::from(e))
 }
 
-fn rust_curve(k: &Kernel, c: &CurveIn) -> Result<Curve, HarnessError> {
+pub(crate) fn rust_curve(k: &Kernel, c: &CurveIn) -> Result<Curve, HarnessError> {
     match c {
         CurveIn::Line { a, b } => {
             let mut l = Line::from_points(v3(*a), v3(*b), 3);
@@ -429,7 +429,7 @@ fn rust_curve(k: &Kernel, c: &CurveIn) -> Result<Curve, HarnessError> {
 }
 
 /// The surface; `Ok(None)` when a surface of revolution cannot be made.
-fn rust_surface(k: &Kernel, s: &SurfIn) -> Result<Option<Surface>, HarnessError> {
+pub(crate) fn rust_surface(k: &Kernel, s: &SurfIn) -> Result<Option<Surface>, HarnessError> {
     Ok(match s {
         SurfIn::Plane {
             o,
@@ -446,8 +446,12 @@ fn rust_surface(k: &Kernel, s: &SurfIn) -> Result<Option<Surface>, HarnessError>
                 &ext(*domain),
             );
             // with its NURB, as the shim makes it (a read-only query of the Rust plane
-            // never keeps one; upstream's would, changing later point solves)
-            p.make_nurb().map_err(|e| harness(format!("plane NURB: {e}")))?;
+            // never keeps one; upstream's would, changing later point solves). The shim
+            // ignores the NURB's status as well: a plane whose natural domain has no
+            // width or height makes none on either side (probed: the C++ drop does not
+            // crash and agrees with the Rust one, intersect.surface_drop_lib_p3
+            // fixtures plane_natural_zero_*).
+            let _ = p.make_nurb();
             Some(Surface::from(p))
         }
         SurfIn::Bspline { p, q, net, u, v } => {
@@ -541,7 +545,7 @@ fn put_pt(o: &mut Vec<f64>, p: &DropPt) {
     o.push(f64::from(p.drop_deriv_rtn));
 }
 
-fn put_curve(o: &mut Vec<f64>, c: &BSplineCurve) -> solidcore::Result<()> {
+pub(crate) fn put_curve(o: &mut Vec<f64>, c: &BSplineCurve) -> solidcore::Result<()> {
     o.push(c.degree()? as f64);
     let cp = c.control_points()?;
     o.push(cp.len() as f64);
@@ -558,7 +562,7 @@ fn put_curve(o: &mut Vec<f64>, c: &BSplineCurve) -> solidcore::Result<()> {
 }
 
 /// The `SmStatus` of a Rust error.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
@@ -797,11 +801,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- generation ---------------------------------------------------------------------
 
-fn pick<T: Copy>(rng: &mut Rng, xs: &[T], default: T) -> T {
+pub(crate) fn pick<T: Copy>(rng: &mut Rng, xs: &[T], default: T) -> T {
     rng.choose(xs).copied().unwrap_or(default)
 }
 
-fn unit_dir(rng: &mut Rng) -> [f64; 3] {
+pub(crate) fn unit_dir(rng: &mut Rng) -> [f64; 3] {
     loop {
         let p = rng.point3(-1.0, 1.0);
         let l = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
@@ -811,15 +815,15 @@ fn unit_dir(rng: &mut Rng) -> [f64; 3] {
     }
 }
 
-fn scale3(p: [f64; 3], s: f64) -> [f64; 3] {
+pub(crate) fn scale3(p: [f64; 3], s: f64) -> [f64; 3] {
     [p[0] * s, p[1] * s, p[2] * s]
 }
 
-fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(crate) fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
-fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(crate) fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -827,7 +831,7 @@ fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-fn norm3(a: [f64; 3]) -> [f64; 3] {
+pub(crate) fn norm3(a: [f64; 3]) -> [f64; 3] {
     let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
     if l > 0.0 {
         scale3(a, 1.0 / l)
@@ -836,7 +840,7 @@ fn norm3(a: [f64; 3]) -> [f64; 3] {
     }
 }
 
-fn arr3(v: Vec3) -> [f64; 3] {
+pub(crate) fn arr3(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
@@ -882,7 +886,7 @@ fn gen_pt(rng: &mut Rng, uv: [f64; 2], duv: [f64; 2], crv: [[f64; 3]; 3], t: f64
     v
 }
 
-fn gen_knots(rng: &mut Rng, n1: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
+pub(crate) fn gen_knots(rng: &mut Rng, n1: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
     let interior = n1 - p - 1;
     let mut mid: Vec<f64> = (0..interior).map(|_| rng.uniform(a, b)).collect();
     mid.sort_by(f64::total_cmp);
@@ -1038,7 +1042,7 @@ fn gen_revolution(rng: &mut Rng, s: f64) -> SurfIn {
     }
 }
 
-fn gen_surface(rng: &mut Rng, s: f64) -> SurfIn {
+pub(crate) fn gen_surface(rng: &mut Rng, s: f64) -> SurfIn {
     match rng.below(10) {
         0..=2 => gen_plane(rng, s),
         3..=5 => gen_bspline_surface(rng, s),
@@ -1046,19 +1050,19 @@ fn gen_surface(rng: &mut Rng, s: f64) -> SurfIn {
     }
 }
 
-fn gen_scale(rng: &mut Rng) -> f64 {
+pub(crate) fn gen_scale(rng: &mut Rng) -> f64 {
     pick(rng, &[1.0, 1.0, 1.0, 1.0e-3, 1.0e3, 0.01, 100.0], 1.0)
 }
 
 /// The surface and its natural domain (`None` when it cannot be built).
-fn surface_with_domain(k: &Kernel, s: &SurfIn) -> Option<(Surface, [f64; 4])> {
+pub(crate) fn surface_with_domain(k: &Kernel, s: &SurfIn) -> Option<(Surface, [f64; 4])> {
     let srf = rust_surface(k, s).ok()??;
     let d = srf.natural_uv_domain();
     Some((srf, [d.u_min(), d.v_min(), d.u_max(), d.v_max()]))
 }
 
 /// The natural domain or a random sub-domain.
-fn gen_domain(rng: &mut Rng, nat: [f64; 4]) -> [f64; 4] {
+pub(crate) fn gen_domain(rng: &mut Rng, nat: [f64; 4]) -> [f64; 4] {
     if rng.chance(0.6) {
         return nat;
     }
@@ -1076,7 +1080,7 @@ fn gen_domain(rng: &mut Rng, nat: [f64; 4]) -> [f64; 4] {
     ]
 }
 
-fn uv_in(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
+pub(crate) fn uv_in(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
     [rng.uniform(d[0], d[2]), rng.uniform(d[1], d[3])]
 }
 
@@ -1108,7 +1112,7 @@ fn gen_uv_tol(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
     [f * (1.0 + (d[2] - d[0]).abs()), f * (1.0 + (d[3] - d[1]).abs())]
 }
 /// A curve near the surface: through surface points (perhaps offset).
-fn gen_curve_near(k: &Kernel, rng: &mut Rng, srf: &Surface, d: [f64; 4], s: f64) -> Option<CurveIn> {
+pub(crate) fn gen_curve_near(k: &Kernel, rng: &mut Rng, srf: &Surface, d: [f64; 4], s: f64) -> Option<CurveIn> {
     let n = 2 + rng.below(4) as usize;
     let off = pick(rng, &[0.0, 0.0, 1.0e-9, 1.0e-6, 1.0e-3, 0.1], 0.0) * s;
     let mut cpts = Vec::new();

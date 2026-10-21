@@ -75,14 +75,9 @@
 //! - Boundary views use required handle mappings and the same [`ClassGeometry`]
 //!   implementation as part 5. Lazy UV and gap calculations run on a private B-rep
 //!   snapshot; numerical results are preserved while cache-only updates are discarded.
-//! - **Vertex/face gaps.** With `bHasBigGaps`, `IntersectVertices` reads each vertex's
-//!   `GetVertexuseOfFace(pFace)->GetVertexFaceGap()` length. [`curve_on_classify`]
-//!   computes them from the B-rep (on one private snapshot per call, which keeps the
-//!   gap caches across both passes) for the face's vertices before the vertex
-//!   intersections, and answers [`ClassGeometry::vertex_face_gap`] for them around the
-//!   caller's [`ClassGeometry`]; a gap error therefore surfaces before the earlier
-//!   vertices are intersected (upstream: a null dereference or the same unported
-//!   callee). A vertex without a face use is unresolved (upstream dereferences null).
+//!   The UV trim curves `IntersectTSBound`'s `ComputeUVPoint` calls make there (upstream
+//!   on the face's own B-rep) stay visible for the rest of the classification through
+//!   the private `WithMadeTrimCurves` geometry.
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -952,16 +947,66 @@ fn boundary_edge<O: ClassObject>(
     })
 }
 
+/// The caller's classification geometry plus the UV trim curves the classification
+/// made on its private B-rep snapshot (`trims`: their handles and curves).
+///
+/// `IntersectTSBound`'s `pVertexuse->ComputeUVPoint(sUV)` (SmCurveClass.cpp:15964,
+/// `bOKToMakeUVTrimCurve = TRUE`) makes the missing UV trim curves of the vertex use's
+/// edge use and its predecessor (`NormalizedEvaluate(.., bOKToMakeUVTrimCurve)`,
+/// SmVertexuse.cpp:223-226) on the face's B-rep, so the edge use pass after it
+/// (`pEU->GetUVTrimCurve(); NER(..)`, SmCurveClass.cpp:16092) and the interval
+/// classification see them. The port makes them on the snapshot; their handles
+/// resolve here, the others through the caller's geometry.
+struct WithMadeTrimCurves<'g, O, G> {
+    inner: &'g G,
+    trims: &'g [(O, Curve)],
+}
+
+impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometry<O> for WithMadeTrimCurves<'_, O, G> {
+    fn curve(&self, o: O) -> Option<&Curve> {
+        match self.trims.iter().find(|(h, _)| *h == o) {
+            Some((_, c)) => Some(c),
+            None => self.inner.curve(o),
+        }
+    }
+    fn surface(&self, o: O) -> Option<&Surface> {
+        self.inner.surface(o)
+    }
+    fn volume(&self, o: O) -> Option<&crate::surface::volume::Volume> {
+        self.inner.volume(o)
+    }
+    fn point(&self, o: O) -> Option<Point3> {
+        self.inner.point(o)
+    }
+    fn classification_vertex_point(&self, vertex: O) -> Option<Point3> {
+        self.inner.classification_vertex_point(vertex)
+    }
+    fn topology_zone_tol_3d(&self, object: O) -> Option<f64> {
+        self.inner.topology_zone_tol_3d(object)
+    }
+    fn vertex_face_gap(&self, vertex: O, surface: &Surface, face: Option<O>) -> Option<f64> {
+        self.inner.vertex_face_gap(vertex, surface, face)
+    }
+    fn owner_of(
+        &self,
+        owner: crate::geom::object::ObjectRef,
+    ) -> Option<crate::geom::object::ObjectRef> {
+        self.inner.owner_of(owner)
+    }
+}
+
 /// Build real ordered topology views; only handle identity is caller-specific.
-/// UV computation uses the existing vertexuse port on one private arena snapshot.
+/// UV computation uses the existing vertexuse port on the private arena `snapshot`;
+/// the UV trim curves it makes (missing from `b`) are added to `made_trims`.
 fn boundary_loops<O: ClassObject>(
     k: &Kernel,
     b: &Brep,
+    snapshot: &mut Brep,
     objects: &impl CurveOnClassifyObjects<O>,
+    made_trims: &mut Vec<(O, Curve)>,
     face: FaceId,
 ) -> Result<Vec<BoundaryLoop<O>>> {
     let fu = fp2::upward_faceuse(b, face)?.ok_or(SolidError::null_pointer(OP_CURVE))?;
-    let mut snapshot = b.clone();
     let cached = objects.trim_cache(face).is_some_and(|cache| {
         let base = cache.base();
         !base.face_was_modified
@@ -986,10 +1031,7 @@ fn boundary_loops<O: ClassObject>(
                     Point2::UNDEF
                 } else {
                     ignored(crate::topology::vertexuse::compute_uv_point(
-                        k,
-                        &mut snapshot,
-                        vu,
-                        true,
+                        k, snapshot, vu, true,
                     ))?
                     .unwrap_or(Point2::UNDEF)
                 },
@@ -1003,15 +1045,23 @@ fn boundary_loops<O: ClassObject>(
                 .edgeuse(eu)?
                 .edge
                 .ok_or(SolidError::null_pointer(OP_CURVE))?;
-            let (trim, owner) = eu1::uv_trim_curve(b, eu)?;
-            let trim_curve = if trim.is_some() {
-                owner.map(|owner| objects.trim_curve(owner))
-            } else {
-                None
+            // the trim curve as of now: ComputeUVPoint above may have made it
+            let (trim, owner) = eu1::uv_trim_curve(snapshot, eu)?;
+            let trim_curve = match (trim, owner) {
+                (Some(trim), Some(owner)) => {
+                    let handle = objects.trim_curve(owner);
+                    if eu1::uv_trim_curve(b, eu)?.0.is_none()
+                        && !made_trims.iter().any(|(h, _)| *h == handle)
+                    {
+                        made_trims.push((handle, trim.clone()));
+                    }
+                    Some(handle)
+                }
+                _ => None,
             };
             edges.push(BoundaryEdgeuse {
                 edgeuse: objects.edgeuse(eu),
-                edge: boundary_edge(k, &mut snapshot, objects, face, edge, false)?,
+                edge: boundary_edge(k, snapshot, objects, face, edge, false)?,
                 trim_curve,
             });
         }
@@ -1049,8 +1099,10 @@ pub fn curve_on_classify<O: ClassObject>(
     reset_classification(k, cc)?;
     cc.set_face(Some(objects.face(f)));
     let mut modified = false;
-    // (the vertex/face gap caches GetVertexFaceGap fills: a private B-rep snapshot)
-    let mut gap_snapshot: Option<Brep> = None;
+    // the B-rep as the trim boundary intersection leaves it (UV trim curves made by its
+    // ComputeUVPoint calls, see WithMadeTrimCurves)
+    let mut snapshot: Option<Brep> = None;
+    let mut made_trims: Vec<(O, Curve)> = Vec::new();
 
     // for two iterations to allow the surf/surf/surf intersection heuristic a chance to
     // update curve and edge shapes.
@@ -1068,7 +1120,8 @@ pub fn curve_on_classify<O: ClassObject>(
         if curve.dim() == 2 {
             // 2D Curve branch - work in surface's uv space directly on the Face's UVcurves
             cc.set_surface1(objects.face_surface(f));
-            match intersect_ts_bound(k, b, objects, cc, f, do_check_3d) {
+            let snapshot = snapshot.get_or_insert_with(|| b.clone());
+            match intersect_ts_bound(k, b, snapshot, objects, &mut made_trims, cc, f, do_check_3d) {
                 Ok(()) => {}
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) => return Err(SolidError::sm_err(OP_CURVE)),
@@ -1154,7 +1207,10 @@ pub fn curve_on_classify<O: ClassObject>(
         if ivl.mid.point_class() == PointClassType::Unknown {
             cc.classify_face_interval(
                 k,
-                objects,
+                &WithMadeTrimCurves {
+                    inner: objects,
+                    trims: made_trims.as_slice(),
+                },
                 ii,
                 do_point_classify,
                 face_handle,
@@ -1182,11 +1238,15 @@ fn reset_classification<O: ClassObject>(k: &Kernel, cc: &mut CurveClassification
     cc.reset(k, &ResetOptions::default())
 }
 
-/// `SmCurveClassification::IntersectTSBound(this, bDoCheck3d)`.
+/// `SmCurveClassification::IntersectTSBound(this, bDoCheck3d)`, on the private
+/// `snapshot` of `b` (see [`WithMadeTrimCurves`]).
+#[allow(clippy::too_many_arguments)]
 fn intersect_ts_bound<O: ClassObject>(
     k: &Kernel,
     b: &Brep,
+    snapshot: &mut Brep,
     objects: &impl CurveOnClassifyObjects<O>,
+    made_trims: &mut Vec<(O, Curve)>,
     cc: &mut CurveClassification<O>,
     face: FaceId,
     do_check_3d: bool,
@@ -1196,7 +1256,7 @@ fn intersect_ts_bound<O: ClassObject>(
         .surface
         .as_ref()
         .ok_or(SolidError::null_pointer(OP_CURVE))?;
-    let loops = boundary_loops(k, b, objects, face)?;
+    let loops = boundary_loops(k, b, snapshot, objects, made_trims, face)?;
     let fresh;
     let cache = if let Some(cache) = objects.trim_cache(face) {
         cache
@@ -1206,7 +1266,10 @@ fn intersect_ts_bound<O: ClassObject>(
     };
     cc.intersect_ts_bound(
         k,
-        objects,
+        &WithMadeTrimCurves {
+            inner: objects,
+            trims: made_trims.as_slice(),
+        },
         &BoundaryFace {
             surface,
             loops: &loops,
@@ -1726,7 +1789,7 @@ mod tests {
                 2,
             )),
         };
-        let loops = boundary_loops(&k, &b, &objects, f).unwrap();
+        let loops = boundary_loops(&k, &b, &mut b.clone(), &objects, &mut Vec::new(), f).unwrap();
         assert_eq!(loops.len(), 1);
         assert_eq!(loops[0].vertices.len(), 1);
         assert!(loops[0].edges.is_empty());
@@ -1740,7 +1803,19 @@ mod tests {
             Extent1d::from_min_max(0., 1.),
             1e-6,
         );
-        intersect_ts_bound(&k, &b, &objects, &mut cc, f, false).unwrap();
+        let mut snapshot = b.clone();
+        let mut made = Vec::new();
+        intersect_ts_bound(
+            &k,
+            &b,
+            &mut snapshot,
+            &objects,
+            &mut made,
+            &mut cc,
+            f,
+            false,
+        )
+        .unwrap();
         assert_eq!(cc.size(), 1);
         let objects = Handles {
             b: &b,
@@ -1780,7 +1855,7 @@ mod tests {
             cache: Some(cache),
             source: Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 2)),
         };
-        let loops = boundary_loops(&k, &b, &objects, f).unwrap();
+        let loops = boundary_loops(&k, &b, &mut b.clone(), &objects, &mut Vec::new(), f).unwrap();
         assert_eq!(loops[0].vertices.len(), 4);
         assert_eq!(loops[0].edges.len(), 4);
         for eu in &loops[0].edges {

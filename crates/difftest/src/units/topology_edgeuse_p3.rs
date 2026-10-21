@@ -8,12 +8,12 @@
 //! ported functions run on both. Edge use arguments are selectors taken modulo the edge
 //! use count.
 //!
-//! `CreateUVTrimCurve` and every path that has to make a UV trim curve reach
-//! `SmSurface::DropCurve` (unit `intersect.surface_drop_lib_p3`), `DropPoint` and
-//! `LocalPointSolve` (`surface.surface_p5`) and the global point solve of non-planes
-//! (`surface.surface_point_solve_p3`): those cases are deferred; the paths with
-//! existing UV trim curves, the 3D evaluation, the null dereferences and the wire edge
-//! uses are compared. The state compared after an op is that of
+//! `CreateUVTrimCurve` and every path that has to make a UV trim curve run
+//! `SmSurface::DropCurve` (the plane override or the general drop, unit
+//! `intersect.surface_drop_lib_p3`) and are compared with the paths with existing UV
+//! trim curves, the 3D evaluation, the null dereferences and the wire edge uses; the
+//! cases that reach a unit not ported yet (the face's `CreateUVTrimCurves`, B-rep
+//! makers, surface kinds, the curve classifier) are deferred. The state compared after an op is that of
 //! `topology.edgeuse_p2`'s `put_eu_state` for the edge use and its mate and the edge's
 //! interval and tolerance. The graph export carries only whether an edge use's maximum
 //! edge/face gap is set, not its length (a B-rep read with `rebuild` has it set), so the

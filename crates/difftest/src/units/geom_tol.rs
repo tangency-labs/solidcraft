@@ -17,6 +17,13 @@
 //! hash (address) order, which is unspecified, so both sides report them sorted
 //! (see `plan/findings.md`).
 //!
+//! A curve case (`op = "curve"`) runs the `SmCurve` overloads of `GetScaledZero`,
+//! `MapTo1d(.., dParam, ..)` and `IsDegenerate(.., SmExtent1d, ..)` on a real line,
+//! circle or B-spline curve (`curve`), with a parameter and an interval inside the
+//! curve's range or overhanging it (the evaluators clamp or extend), a zero-length or an
+//! inverted interval, tolerances around the intersection tolerance, and an optional
+//! override; the result is `r = [scaled zero, tol1d, degenerate]`.
+//!
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
 use serde::{Deserialize, Serialize};
@@ -29,9 +36,13 @@ use solidcore::geom::tol::{self, Cardinality, Relation, ScaledZero, SmallTopoTyp
 use solidcore::geom::vector2d::Vec2;
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::math::{Vec3, EFF_ZERO, PI};
+use solidcore::nurbs::math::NOW;
 use solidcore::SolidError;
 use solidcore_ffi::units::geom_tol::{self as ffi, Op, OpArgs, RelationStep};
 
+use super::intersect_surface_drop_lib_p2::{
+    add3, ffi_curve, gen_knots, gen_scale, pick, rust_curve, scale3, unit_dir, CurveIn,
+};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -73,6 +84,11 @@ const OPS: [(&str, Op); 25] = [
 
 /// Name of the relation pseudo-op.
 const RELATION: &str = "relation";
+
+/// Name of the curve pseudo-op: `GetScaledZero(const SmCurve&)`, `MapTo1d(.., dParam,
+/// const SmCurve&)` and `IsDegenerate(const SmCurve*, SmExtent1d, ..)` on `curve`, with
+/// `a = [param, tol, ivl0, ivl1, xsect]` (`flag`: pass `xsect`).
+const CURVE: &str = "curve";
 
 fn use_default() -> f64 {
     tol::USE_DEFAULT
@@ -118,6 +134,8 @@ struct Inputs {
     n2: i64,
     #[serde(default)]
     steps: Vec<Step>,
+    #[serde(default)]
+    curve: Option<CurveIn>,
 }
 
 fn lookup(name: &str) -> Result<Op, HarnessError> {
@@ -197,7 +215,31 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             Err(e) => Err(HarnessError::new(e.to_string())),
         };
     }
+    if i.op == CURVE {
+        return cpp_curve(i);
+    }
     cpp_tol(i)
+}
+
+fn curve_operands(i: &Inputs) -> Result<(&CurveIn, [f64; 5]), HarnessError> {
+    let c = i
+        .curve
+        .as_ref()
+        .ok_or_else(|| HarnessError::new("curve case without curve"))?;
+    let mut a = [0.0; 5];
+    for (dst, src) in a.iter_mut().zip(&i.a) {
+        *dst = *src;
+    }
+    Ok((c, a))
+}
+
+fn cpp_curve(i: &Inputs) -> Result<Output, HarnessError> {
+    let (c, a) = curve_operands(i)?;
+    let xsect = i.flag.then_some(a[4]);
+    match ffi::curve_tols(&ffi_curve(c), a[0], a[1], [a[2], a[3]], xsect) {
+        Ok(v) => Ok(Output::new().values("r", v)),
+        Err(e) => Err(HarnessError::new(e.to_string())),
+    }
 }
 
 // ---- Rust side ----------------------------------------------------------------------
@@ -306,16 +348,16 @@ fn rust_values(op: Op, i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, Harnes
         )),
         Op::AngTolRad => v1(tol::ang_tol_rad()),
         Op::ModelSize => v1(tol::model_size_estimate(&k)),
-        Op::AreParallel => {
-            Ok(vec![flag(tol::are_parallel(vec3(0), vec3(3), i.flag.then(|| a(6))))])
-        }
-        Op::ArePerpendicular => {
-            Ok(vec![flag(tol::are_perpendicular(
-                vec3(0),
-                vec3(3),
-                i.flag.then(|| a(6)),
-            ))])
-        }
+        Op::AreParallel => Ok(vec![flag(tol::are_parallel(
+            vec3(0),
+            vec3(3),
+            i.flag.then(|| a(6)),
+        ))]),
+        Op::ArePerpendicular => Ok(vec![flag(tol::are_perpendicular(
+            vec3(0),
+            vec3(3),
+            i.flag.then(|| a(6)),
+        ))]),
         Op::IsZeroSpeed => v1(flag(tol::is_zero_speed(
             a(0),
             a(1),
@@ -414,15 +456,40 @@ fn rust_relation(i: &Inputs) -> Result<Output, HarnessError> {
     Ok(Output::new().ints("r", out))
 }
 
+fn rust_curve_case(i: &Inputs) -> Result<Output, HarnessError> {
+    let (c, a) = curve_operands(i)?;
+    let k = kernel(i.model, i.ratio);
+    let curve = rust_curve(&k, c)?;
+    let ivl = Extent1d::from_min_max(a[2], a[3]);
+    let xsect = i.flag.then_some(tol::tol3d(a[4]));
+    let r = (|| -> solidcore::Result<Vec<f64>> {
+        Ok(vec![
+            tol::scaled_zero_of_curve(&k, &curve)?,
+            tol::map_to_1d_on_curve(&k, tol::tol3d(a[1]), a[0], &curve)?,
+            flag(tol::is_degenerate_curve(&k, Some(&curve), &ivl, xsect)?),
+        ])
+    })();
+    match r {
+        Ok(v) => Ok(Output::new().values("r", v)),
+        Err(e) => {
+            Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+        }
+    }
+}
+
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     if i.op == RELATION {
         return rust_relation(i);
     }
+    if i.op == CURVE {
+        return rust_curve_case(i);
+    }
     let op = lookup(&i.op)?;
     match rust_values(op, i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
-        Err(e) => Ok(Output::unported(&e)
-            .unwrap_or_else(|| Output::err(format!("rust_error: {e}")))),
+        Err(e) => {
+            Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+        }
     }
 }
 
@@ -491,7 +558,11 @@ fn vector(rng: &mut Rng, len_scale: f64) -> [f64; 3] {
     let t = rng.uniform(0.0, 2.0 * PI);
     let p = rng.uniform(-PI / 2.0, PI / 2.0);
     let len = len_scale * rng.uniform(0.5, 1.5);
-    [len * p.cos() * t.cos(), len * p.cos() * t.sin(), len * p.sin()]
+    [
+        len * p.cos() * t.cos(),
+        len * p.cos() * t.sin(),
+        len * p.sin(),
+    ]
 }
 
 fn obj(rng: &mut Rng) -> Obj {
@@ -548,6 +619,110 @@ fn relation_case(rng: &mut Rng) -> Inputs {
         n1,
         n2,
         steps,
+        curve: None,
+    }
+}
+
+/// A curve case: a real line, circle or B-spline curve (or a point curve), a parameter
+/// and interval inside or just outside its range (the evaluators clamp or extend), a
+/// tolerance, and an intersection tolerance around the curve's length.
+fn curve_case(rng: &mut Rng) -> Inputs {
+    let s = gen_scale(rng);
+    let xs = tol::xsect_tol_3d(&Kernel::default(), SmallTopoType::NormalSize);
+    let org = scale3(unit_dir(rng), s * pick(rng, &[0.0, 1.0, 10.0], 0.0));
+    let (curve, range) = match rng.below(5) {
+        0 | 1 => {
+            // a line; sometimes about as long as the intersection tolerance
+            let len = if rng.chance(0.4) {
+                xs * rng.uniform(0.2, 5.0)
+            } else {
+                s * pick(rng, &[1.0, 0.1, 10.0], 1.0)
+            };
+            let b = add3(org, scale3(unit_dir(rng), len));
+            (CurveIn::Line { a: org, b }, [0.0, 1.0])
+        }
+        2 => {
+            let t0 = pick(rng, &[0.0, -1.0, 2.0], 0.0);
+            let t1 = t0 + pick(rng, &[1.0, 3.0, 6.0], 1.0);
+            let r = if rng.chance(0.3) {
+                xs * rng.uniform(0.2, 5.0)
+            } else {
+                s
+            };
+            (
+                CurveIn::Circle {
+                    c: org,
+                    x: [1.0, 0.0, 0.0],
+                    y: [0.0, 1.0, 0.0],
+                    d: [t0, t1],
+                    r,
+                },
+                [t0, t1],
+            )
+        }
+        _ => {
+            let n = 2 + rng.below(4) as usize;
+            let deg = (n - 1).min(1 + rng.below(3) as usize);
+            let spread = if rng.chance(0.3) {
+                xs * rng.uniform(0.0, 3.0)
+            } else {
+                s
+            };
+            let cpts = (0..n)
+                .map(|_| {
+                    let q = add3(org, scale3(unit_dir(rng), spread * rng.uniform(0.0, 1.0)));
+                    [q[0], q[1], q[2], NOW]
+                })
+                .collect();
+            let t0 = pick(rng, &[0.0, -1.0, 2.0], 0.0);
+            let t1 = t0 + pick(rng, &[1.0, 0.5, 10.0], 1.0);
+            (
+                CurveIn::Bspline {
+                    p: deg,
+                    cpts,
+                    knots: gen_knots(rng, n, deg, t0, t1),
+                },
+                [t0, t1],
+            )
+        }
+    };
+    let w = range[1] - range[0];
+    let at = |rng: &mut Rng, lo: f64, hi: f64| range[0] + rng.uniform(lo, hi) * w;
+    let param = if rng.chance(0.15) {
+        at(rng, -0.1, 1.1)
+    } else {
+        at(rng, 0.0, 1.0)
+    };
+    let (i0, i1) = match rng.below(6) {
+        0 => (at(rng, 0.0, 0.4), at(rng, 0.6, 1.0)),
+        1 => (at(rng, -0.1, 0.0), at(rng, 1.0, 1.1)),
+        2 => {
+            let x = at(rng, 0.0, 1.0);
+            (x, x)
+        }
+        3 => (at(rng, 0.6, 1.0), at(rng, 0.0, 0.4)),
+        _ => (range[0], range[1]),
+    };
+    let tol_v = xs * pick(rng, &[0.5, 1.0, 10.0, 1.0e-3], 1.0) * pick(rng, &[1.0, -1.0], 1.0);
+    Inputs {
+        op: CURVE.into(),
+        model: tol::USE_DEFAULT,
+        ratio: tol::USE_DEFAULT,
+        a: vec![
+            param,
+            tol_v,
+            i0,
+            i1,
+            xs * pick(rng, &[0.5, 1.0, 2.0, 1.0e3], 1.0),
+        ],
+        flag: rng.chance(0.4),
+        small: 0,
+        objs: Vec::new(),
+        card: 0,
+        n1: 0,
+        n2: 0,
+        steps: Vec::new(),
+        curve: Some(curve),
     }
 }
 
@@ -555,8 +730,14 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     if rng.chance(0.12) {
         return relation_case(rng);
     }
+    if rng.chance(0.12) {
+        return curve_case(rng);
+    }
     let idx = rng.below(OPS.len() as u64) as usize;
-    let (name, op) = OPS.get(idx).copied().unwrap_or(("size_estimate", Op::SizeEstimate));
+    let (name, op) = OPS
+        .get(idx)
+        .copied()
+        .unwrap_or(("size_estimate", Op::SizeEstimate));
     let model = model_size(rng);
     let ratio = ratio(rng);
     let zone = tol::size_estimate_to_zone_tol_3d(if model == tol::USE_DEFAULT {
@@ -659,6 +840,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         n1: 0,
         n2: 0,
         steps: Vec::new(),
+        curve: None,
     }
 }
 

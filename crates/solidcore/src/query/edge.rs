@@ -48,7 +48,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::euclidian_step_off;
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -478,11 +478,15 @@ fn evaluate_binormal_step_off(
 }
 
 /// The status of a vector operation upstream checks with `SER` (`Unitize`,
-/// `AngleBetween` of a zero-length vector): a failing status (`SM_ERR`), not a null
-/// dereference.
+/// `AngleBetween` of a zero-length vector): both return `SM_ERR_INVALID_INPUT` as a
+/// status (not a null dereference), which `SER` passes on unchanged.
 fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
     r.map_err(|e| match e {
-        SolidError::InvalidInput { .. } => SolidError::sm_err(operation),
+        SolidError::InvalidInput { .. } => SolidError::Upstream {
+            operation,
+            code: SM_ERR_INVALID_INPUT,
+            entity: None,
+        },
         e => e,
     })
 }
@@ -524,7 +528,10 @@ fn on_plane(brep: &Brep, eu: EdgeuseId) -> Result<bool> {
 /// # Errors
 ///
 /// `SM_ERR` when the point cannot be dropped onto the other edge or the first step-off
-/// leaves a face; [`SolidError::InvalidInput`] where upstream dereferences a null
+/// leaves a face; `SM_ERR_INVALID_INPUT` (as [`SolidError::Upstream`]) when the first
+/// step-off's tangent or a binormal to measure is zero-length (a failed first step-off
+/// leaves the tangent uninitialised, which `Unitize` rejects before the step-off
+/// failure is looked at); [`SolidError::InvalidInput`] where upstream dereferences a null
 /// pointer; `SM_ERR_NULL_POINTER` for an edge use without edge or an edge without
 /// curve to classify; those of the evaluations; [`SolidError::Unported`] for the
 /// step-offs' deferred callees (see [`crate::topology::edgeuse::p3`]).
@@ -905,7 +912,9 @@ pub fn radial_sector_classify_between(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the curve's projected direction vanishes; [`SolidError::InvalidInput`]
+/// `SM_ERR` when the curve's projected direction vanishes; `SM_ERR_INVALID_INPUT` (as
+/// [`SolidError::Upstream`]) for a zero-length vector to unitize or measure;
+/// [`SolidError::InvalidInput`]
 /// for a sector edge use without radial partner; those of the step-offs and
 /// evaluations; [`SolidError::Unported`] for the step-offs
 /// (see [`crate::topology::edgeuse::p3`]).

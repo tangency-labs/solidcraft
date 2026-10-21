@@ -44,12 +44,12 @@
 //!   `MakeAnalyticCornerSurface`, the `SmFilletConvexNxNCorner` /
 //!   `SmFilletNx1ClosedCorner` overrides (`blend.fillet_corner_p2`),
 //!   `TestAndConvertBigRadFillet` and `NoteFilletError` (`blend.fillet_executive_p1`),
-//!   `SmFilletEdge::MakeFilletEdge` (`blend.fillet_geom_p5`), `ReCalcFilletGeom`
-//!   (`blend.fillet_geom_p3`), `SplitFilletGeomAtSideEdge` (ported in
-//!   `blend.fillet_solver_p1`, but on the solver's own fillet geometry handles, which
-//!   carry no geometry data for its part 6 calls, so the stub carries that unit's tag)
-//!   and `SmSurface::DropCurve`
-//!   (`intersect.surface_drop_lib_p3`) return [`SolidError::Unported`] at the call site.
+//!   `SmFilletEdge::MakeFilletEdge` (`blend.fillet_geom_p5`), `GetRailVertex`
+//!   (`blend.fillet_geom_p6`), `ReCalcFilletGeom` (`blend.fillet_geom_p3`),
+//!   `SplitFilletGeomAtSideEdge` (ported in `blend.fillet_solver_p1` on its own fillet
+//!   geometry handles; its first call `GetRailIndexOfVertexuse` is
+//!   `blend.fillet_geom_p6`, so the stub carries that tag) return
+//!   [`SolidError::Unported`] at the call site.
 //! - **Intersection-point user pointers.** `SmTsectPnt::m_apUserPointer[0..2]` (the two
 //!   surfaces of a fillet vertex use's intersection point, read by
 //!   `AdjustTangentCorner`) are not members of the Rust [`TsectPnt`]: the caller passes
@@ -90,7 +90,8 @@ use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
+use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::{p1 as eu1, p2 as eu2, p3 as eu3};
 use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
@@ -865,10 +866,14 @@ impl FilletCorner {
                         .ok_or_else(|| invalid(OP_PATCH, "boundary curve is not a B-spline"))?,
                 );
             }
-            let mut surfs: Vec<Option<&BSplineSurface>> = Vec::with_capacity(ordered_surfs.len());
+            let mut surfs: Vec<Option<BlendNeighbour<'_>>> =
+                Vec::with_capacity(ordered_surfs.len());
             for s in &ordered_surfs {
                 surfs.push(match s {
-                    Some(s) => Some(bspline_surface(s)?),
+                    Some(surface) => Some(BlendNeighbour {
+                        surface,
+                        b_spline: bspline_surface(surface)?,
+                    }),
                     None => None,
                 });
             }
@@ -916,7 +921,8 @@ impl FilletCorner {
     /// not `SM_FV_ON_VERTEX` or starts the on-extended-edge edge, or one not in the
     /// corner; `SM_ERR_NULL_POINTER` for a missing on-edge / on-extended-edge edge, a
     /// non-B-spline curve or a missing original face; those of `JoinWith`;
-    /// [`SolidError::Unported`] (`SmSurface::DropCurve`).
+    /// [`SolidError::Unported`] (the drop onto a surface kind whose `DropCurve` needs
+    /// unported code, see [`Surface::drop_curve`]).
     pub fn create_corner_patch_3x2(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         // check state - 4 edges
         if self.edges.len() != 4 {
@@ -1009,13 +1015,32 @@ impl FilletCorner {
             .fillet_edge(fe_on_extended_edge)?
             .original_face()
             .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
-        let _surface = env.target.face(orig_face)?.surface.as_ref();
-        let _ = (&curve1, self.approx_tol_3d);
-        // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-        let uv_curves: Vec<BSplineCurve> = Err(unported(
-            "SmSurface::DropCurve",
-            "intersect.surface_drop_lib_p3",
-        ))?;
+        let surface = env
+            .target
+            .face(orig_face)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
+        // `pSurface->DropCurve(m_crContext, pSurface->GetNaturalUVDomain(), *pCurve1,
+        // pCurve1->GetNaturalInterval(), m_dThisApproxTol3d, ..)` (virtual with the
+        // defaults `bKeepAllDropCurves = TRUE`, no fail record): the `SmPlane`
+        // override for a plane (with the surface's owner), the base body otherwise.
+        let domain = surface.natural_uv_domain();
+        let interval = curve1.natural_interval();
+        // (the drop gives `SmBSplineCurve`s; for a plane a UV `SmLine` stays a line, as
+        // upstream keeps the `SmLine` object behind the pointer, `SetUVCurve` stores it)
+        let uv_curves: Vec<Curve> = surface
+            .drop_curve::<NoObject>(
+                env.k,
+                &domain,
+                &curve1,
+                &interval,
+                self.approx_tol_3d,
+                true,
+                None,
+                true,
+            )?
+            .uv_curves;
         if uv_curves.len() != 1 {
             return Err(SolidError::sm_err(OP_3X2)); // Unknown problem
         }
@@ -1027,7 +1052,7 @@ impl FilletCorner {
         let mate_eu =
             eu1::mate(env.pseudo.brep(), prim)?.ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
         env.pseudo
-            .set_edgeuse_uv_curve(mate_eu, Some(Curve::from(new_ps_curve)), true, true)?;
+            .set_edgeuse_uv_curve(mate_eu, Some(new_ps_curve), true, true)?;
 
         // Create a 3-sided corner patch
         self.create_corner_patch_default(k, env)

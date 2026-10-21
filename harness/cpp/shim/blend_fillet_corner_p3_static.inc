@@ -201,16 +201,49 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
         SmBSplineCurve* b1 = SM_CAST_PTR(SmBSplineCurve, k1);
         SmBSplineCurve* b2 = SM_CAST_PTR(SmBSplineCurve, k2);
         SmStatus js = (cs1 == SM_SUCCESS && cs2 == SM_SUCCESS && b1 && b2) ? b1->JoinWith(1, b2, 0) : SM_ERR;
-        delete k1;
         delete k2;
         if (js != SM_SUCCESS)
+        {
+            delete k1;
             return 0.0;
+        }
         ULONG idx = 0;
         if (V.FindElement(cornerV, idx) == FALSE)
+        {
+            delete k1;
             return 0.0; // SER(SM_ERR) before any deletion
+        }
         if (onExt->GetOriginalFace() == NULL)
+        {
+            delete k1;
             return P3C_REFUSE; // deletes Model objects, then NER
-        return P3C_NOT_RUN;    // SmSurface::DropCurve
+        }
+        // pSurface->DropCurve(.., *pCurve1 (the joined curve), ..) dereferences the original
+        // face's surface; the mate of the primary edge use is dereferenced after it. Run the
+        // DropCurve here (a pure function of the surface and the joined copy; the model's
+        // faces are unit bilinear patches, so UB-182 / HANG-38 do not arise): when it (or the
+        // one-curve check) fails, upstream returns having deleted the Model's objects (refused,
+        // like a missing original face above); else the op reaches the unported MakeFaceBrep.
+        SmSurface* srf = onExt->GetOriginalFace()->GetSurface();
+        if (srf == NULL)
+        {
+            delete k1;
+            return P3C_REFUSE;
+        }
+        double maxDist = 0, deviation = 0;
+        SmTArray<SmBSplineCurve*> uv(M.ctx);
+        SmStatus ds = srf->DropCurve(M.ctx, srf->GetNaturalUVDomain(), *k1, k1->GetNaturalInterval(),
+                                     c->*P3CornerPeek::tol(), maxDist, deviation, uv);
+        bool one = uv.GetSize() == 1;
+        for (ULONG i = 0; i < uv.GetSize(); ++i)
+            delete uv[i];
+        delete k1;
+        if (ds != SM_SUCCESS || !one)
+            return P3C_REFUSE; // pFEOnEdge and pCornerV are already deleted: the Model's export would walk freed objects
+        SmEdgeuse* primary = onExt->GetPrimaryEdgeuse();
+        if (primary == NULL || primary->GetMate() == NULL)
+            return P3C_REFUSE;
+        return P3C_NOT_RUN; // SmFilletCorner::MakeFaceBrep
     }
     case 3:
     case 5: // Nx1, open

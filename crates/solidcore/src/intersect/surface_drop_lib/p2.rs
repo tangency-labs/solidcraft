@@ -46,7 +46,9 @@
 //! - **Kernel.** `SmSurface::IsSingularity` and `SmSurface::LocalPointSolve` take the
 //!   caller's [`Kernel`]; `sm_AddToCurve` takes it (for `IsSingularity`) in place of
 //!   its unused `crContext`. `EvaluateGeometric`'s status is ignored, as upstream: a
-//!   failed evaluation leaves the principal curvatures at their initial `0.0`.
+//!   failed evaluation leaves the principal curvatures at their initial `0.0`. So is
+//!   `SetProperties`' offset `EvaluateDirectionalDerivs` (it fails at a pole): the
+//!   derivatives then stay `SM_UNDEF_DOUBLE` and the tangent drop tests bad.
 //! - **Unported callees.** The offset surface evaluations (`surface.offset_surface`)
 //!   return [`SolidError::Unported`].
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
@@ -588,7 +590,9 @@ impl DropPt {
         // the curve tangent
         if self.degen_curve != Some(true) {
             if !self.uv_pd[1].is_zero(EFF_ZERO) {
-                let [_, mut offset_d1] = DropOffset::evaluate_directional_derivs(
+                // (status ignored upstream: a failed evaluation, e.g. the offset at a
+                // pole, leaves `sOffsetPD` at its default `SM_UNDEF_DOUBLE` values)
+                let [_, mut offset_d1] = ignored(DropOffset::evaluate_directional_derivs(
                     offset,
                     k,
                     surface,
@@ -596,7 +600,8 @@ impl DropPt {
                     self.uv_pd[1],
                     from_left_u,
                     from_left_v,
-                )?;
+                ))?
+                .unwrap_or([Point3::UNDEF; 2]);
                 let uv_speed = self.uv_pd[1].length();
                 offset_d1 = uv_speed * offset_d1;
 

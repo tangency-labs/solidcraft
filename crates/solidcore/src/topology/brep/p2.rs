@@ -413,8 +413,9 @@ pub fn rebuild_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 
     // for every Edgeuse
     for eu in edgeuses(b, None)? {
-        // skip those without UVTrimCurves
-        if b.edgeuse(eu)?.uv_trim_curve.is_none() {
+        // skip those without UVTrimCurves (`GetUVTrimCurve()` reads the mate's slot when
+        // the edge use holds none, so both members of a mated pair are rebuilt)
+        if eu1::uv_trim_curve(b, eu)?.0.is_none() {
             continue;
         }
 

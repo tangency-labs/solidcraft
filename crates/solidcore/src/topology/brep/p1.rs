@@ -128,7 +128,7 @@ use crate::math::{max2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_S
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
 use crate::nurbs::knots::Side;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition, SurfaceKind};
@@ -2444,7 +2444,8 @@ pub fn create_corner_blend(
     // SmSurface::CreateCornerBlend locals
     let mut ordered_uv: Vec<Option<BSplineCurve>> = Vec::new();
     let mut ordered_3d: Vec<Curve> = Vec::new();
-    let mut ordered_surfs: Vec<Option<BSplineSurface>> = Vec::new();
+    // (the faces whose surfaces are sOrderedSurfs)
+    let mut ordered_surfs: Vec<Option<FaceId>> = Vec::new();
 
     // for every ordered Edgeuse - load a trimmed copy of Edgeuse->Edge->Curve to sOrdered3D
     //   and when tangency to adjacent surfaces are needed build sOrderedUV and sOrderedSurf arrays
@@ -2481,11 +2482,13 @@ pub fn create_corner_blend(
             };
             ordered_uv.push(Some(uv_bspline));
             let face = eu1::face(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
-            ordered_surfs.push(
-                face2::surface(b, face)?
-                    .map(|s| bspline_surface(s).cloned())
-                    .transpose()?,
-            );
+
+            // pF->GetSurface(): the face's own surface (kind and owner), read below once
+            // the edge uses are done editing the B-rep
+            if let Some(s) = face2::surface(b, face)? {
+                bspline_surface(s)?;
+            }
+            ordered_surfs.push(Some(face));
         } else {
             ordered_uv.push(None);
             ordered_surfs.push(None);
@@ -2533,8 +2536,24 @@ pub fn create_corner_blend(
     ordered_surfs.rotate_right(1);
 
     // pass the call along (FALSE = bicubic patch through curves and crossTangents)
-    let surfs: Vec<Option<&BSplineSurface>> = ordered_surfs.iter().map(Option::as_ref).collect();
-    let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &surfs)?;
+    let b: &Brep = b;
+    let mut surfs: Vec<Option<BlendNeighbour<'_>>> = Vec::with_capacity(ordered_surfs.len());
+    for face in &ordered_surfs {
+        let surface = match face {
+            Some(f) => face2::surface(b, *f)?,
+            None => None,
+        };
+        surfs.push(match surface {
+            Some(surface) => Some(BlendNeighbour {
+                surface,
+                b_spline: bspline_surface(surface)?,
+            }),
+            None => None,
+        });
+    }
+    let b_splines: Vec<Option<&BSplineSurface>> =
+        surfs.iter().map(|s| s.map(|n| n.b_spline)).collect();
+    let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &b_splines)?;
     BSplineSurface::create_corner_blend(
         k,
         &ordered_3d,

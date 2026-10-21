@@ -102,7 +102,7 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p1::map_to_2d_dir;
@@ -2254,9 +2254,13 @@ impl FilletBrep {
             ordered_3d.push(as_b_spline(c).ok_or_else(nul)?.clone());
             ordered_surfs.push(base_surface);
         }
-        let nets: Vec<Option<&BSplineSurface>> = ordered_surfs
+        let nets: Vec<Option<BlendNeighbour<'_>>> = ordered_surfs
             .iter()
-            .map(|s| s.and_then(b_spline_net))
+            .map(|s| {
+                s.and_then(|surface| {
+                    b_spline_net(surface).map(|b_spline| BlendNeighbour { surface, b_spline })
+                })
+            })
             .collect();
         let surfaces = BSplineSurface::create_corner_blend(
             k,

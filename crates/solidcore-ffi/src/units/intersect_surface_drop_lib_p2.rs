@@ -611,3 +611,29 @@ pub fn run(op: &Op) -> Result<Vec<f64>, FfiError> {
         }
     })
 }
+
+/// Appends the shim's block for the surface `s` to `out` (the layout the
+/// `intersect.surface_drop_lib_p3` shim shares).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a rejected surface.
+pub fn encode_surface(s: &SurfaceIn, out: &mut Vec<f64>) -> Result<(), FfiError> {
+    let mut e = Enc { v: Vec::new() };
+    e.surface(s)?;
+    out.extend(e.v);
+    Ok(())
+}
+
+/// Appends the shim's block for the curve `c` to `out` (the layout the
+/// `intersect.surface_drop_lib_p3` shim shares).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a rejected curve.
+pub fn encode_curve(c: &CurveIn, out: &mut Vec<f64>) -> Result<(), FfiError> {
+    let mut e = Enc { v: Vec::new() };
+    e.curve(c)?;
+    out.extend(e.v);
+    Ok(())
+}
