@@ -1,6 +1,7 @@
 //! SolidCraft-owned portable B-rep data, independent of a modelling backend.
 //! Millimetres, radians, right-handed Z-up. See docs/native-brep.md for semantics.
-//! Validation checks structure and resource budgets, not geometric equivalence or trust.
+//! Validation checks structure and resource budgets; `check_geometry` spot-checks that the
+//! geometry agrees with the topology. Neither certifies geometric validity or trust.
 //!
 //! The records follow SMLib's flat form (`SmBrepData`): one record per logical use, the mated
 //! halves a kernel keeps at run time left for it to rebuild. Names are STEP's B-rep names; each
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 mod curve2;
 pub mod envelope;
 pub mod eval;
+pub mod geometry;
 pub mod history;
 pub mod pcurve;
 mod topology;
@@ -466,7 +468,8 @@ impl Brep {
     /// Validate portable structure without calling a kernel or evaluating geometry: resource
     /// budgets, geometry records, parameter ranges, references, loops, regions, every edge's
     /// list of uses and the canonical order. Does not certify watertightness, that edges lie on
-    /// their surfaces or that pcurves lift onto their edges.
+    /// their surfaces or that pcurves lift onto their edges ([`Brep::check_geometry`] spot-checks
+    /// those).
     pub fn validate(&self) -> Result<()> {
         require(self.version == VERSION, "unsupported version")?;
         tolerance(self.tolerance)?;

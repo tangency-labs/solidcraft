@@ -4,9 +4,6 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 fn segment(a: f64, b: f64) -> Curve2 {
     Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.], [b, 1.]] }
 }
-fn plane() -> Surface {
-    Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }
-}
 fn a_frame() -> Frame {
     Frame { origin: [1., 2., 3.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }
 }
@@ -22,6 +19,34 @@ fn list_uses(b: &mut Brep) {
                 for (p, u) in edges.iter().enumerate() {
                     let at = EdgeUseRef { face: fi as u32, r#loop: li as u32, position: p as u32, upper: !u.forward };
                     b.edges[u.edge as usize].uses.push(at);
+                }
+            }
+        }
+    }
+}
+
+/// Every oriented edge's pcurve from its face's surface and its edge (`pcurve::pcurves`).
+fn fit_pcurves(b: &mut Brep) {
+    for f in &mut b.faces {
+        let loops: Vec<Vec<pcurve::EdgeUse<'_>>> = f
+            .loops
+            .iter()
+            .map(|l| match l {
+                Loop::Edges { edges } => edges
+                    .iter()
+                    .map(|u| {
+                        let e = &b.edges[u.edge as usize];
+                        pcurve::EdgeUse { edge: u.edge, curve: &e.curve, interval: e.interval, forward: u.forward }
+                    })
+                    .collect(),
+                Loop::Vertex { .. } => vec![],
+            })
+            .collect();
+        let fitted = pcurve::pcurves(&f.surface, &loops, 1e-7).unwrap();
+        for (l, pcs) in f.loops.iter_mut().zip(fitted) {
+            if let Loop::Edges { edges } = l {
+                for (u, pc) in edges.iter_mut().zip(pcs) {
+                    u.pcurve = pc;
                 }
             }
         }
@@ -65,11 +90,16 @@ fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) ->
                 loop_.push(OrientedEdge { edge, forward, pcurve: segment(0., 1.) });
             }
             uses.push(OrientedFace { face: b.faces.len() as u32, forward: true });
-            b.faces.push(Face { surface: plane(), domain: [[-10., 10.], [-10., 10.]], loops: vec![Loop::Edges { edges: loop_ }] });
+            // The plane through the cycle's first three points: its natural normal is the cycle's.
+            let [o, p, q] = [0, 1, 2].map(|k| points[cycle[k]]);
+            let axis = |a: [f64; 3]| [a[0] - o[0], a[1] - o[1], a[2] - o[2]];
+            let surface = Surface::Plane { origin: o, u_axis: axis(p), v_axis: axis(q) };
+            b.faces.push(Face { surface, domain: [[-10., 10.], [-10., 10.]], loops: vec![Loop::Edges { edges: loop_ }] });
         }
         b.shells.push(Shell::Faces { faces: uses, wires: vec![] });
     }
     list_uses(&mut b);
+    fit_pcurves(&mut b);
     b
 }
 
@@ -127,6 +157,7 @@ fn tube() -> Brep {
         vertices: vec![Vertex { point: [3., 2., 3.], tolerance: 1e-7 }, Vertex { point: [3., 2., 8.], tolerance: 1e-7 }],
     };
     list_uses(&mut b);
+    fit_pcurves(&mut b);
     b
 }
 /// The sheet with a vertex loop inside it, a wire shell and a vertex shell beside it.
@@ -153,6 +184,7 @@ fn sheet_with_lower_forms() -> Brep {
 fn every_form_validates_and_round_trips_without_a_kernel() {
     for (name, body) in [("sheet", sheet()), ("closed", tetra()), ("void", hollow()), ("seam", tube()), ("lower forms", sheet_with_lower_forms())] {
         body.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
+        body.check_geometry().unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = serde_json::to_vec(&body).unwrap();
         let restored: Brep = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body, restored, "{name}");
@@ -380,6 +412,114 @@ fn one_defect_fixtures_are_refused() {
     for (name, expected, body) in cases {
         let error = body.validate().err().unwrap_or_else(|| panic!("{name} was accepted"));
         assert_eq!(error.0, expected, "{name}");
+    }
+}
+
+fn pcurve_of(b: &mut Brep, face: usize, position: usize) -> &mut Curve2 {
+    let Loop::Edges { edges } = &mut b.faces[face].loops[0] else { panic!("an edge loop") };
+    &mut edges[position].pcurve
+}
+fn shift(c: &mut Curve2, by: [f64; 2]) {
+    match c {
+        Curve2::Spline { points, .. } => points.iter_mut().for_each(|p| *p = [p[0] + by[0], p[1] + by[1]]),
+        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter_mut().for_each(|h| *h = [h[0] + by[0] * h[2], h[1] + by[1] * h[2], h[2]]),
+    }
+}
+
+/// One geometric defect each, structurally valid: every one is refused, naming the record.
+#[test]
+fn geometric_defects_are_refused_by_record() {
+    use geometry::{Problem, Record};
+    let off = |what| move |p: &Problem| matches!(p, Problem::Off { what: w, .. } if *w == what);
+    let cases: Vec<(&str, Record, Box<dyn Fn(&Problem) -> bool>, Brep)> = vec![
+        ("vertex off its curve's start", Record::Edge(0), Box::new(off("curve start misses its start vertex")), {
+            let mut b = sheet();
+            b.vertices[0].point = [0., 0., 0.01];
+            b
+        }),
+        ("vertex off its curve's end", Record::Edge(0), Box::new(off("curve end misses its end vertex")), {
+            let mut b = sheet();
+            b.edges[0].curve = Curve::Line { start: SQUARE[0], end: [1., 0., 0.01] };
+            b
+        }),
+        ("pcurve shifted off its edge", Record::Use { face: 0, r#loop: 0, position: 1 }, Box::new(off("pcurve start lifts off its edge's curve")), {
+            let mut b = sheet();
+            shift(pcurve_of(&mut b, 0, 1), [0., 0.1]);
+            b
+        }),
+        ("pcurve bowed off its edge", Record::Use { face: 0, r#loop: 0, position: 0 }, Box::new(off("pcurve middle lifts off its edge's curve")), {
+            let mut b = sheet();
+            let pc = pcurve_of(&mut b, 0, 0);
+            let (a, z) = (pc.eval(0.).unwrap(), pc.eval(1.).unwrap());
+            let middle = [0.5 * (a[0] + z[0]), 0.5 * (a[1] + z[1]) + 0.1];
+            *pc = Curve2::Spline { knots: vec![0., 0., 0., 1., 1., 1.], points: vec![a, middle, z] };
+            b
+        }),
+        (
+            "seam pcurve on the wrong period",
+            Record::Use { face: 0, r#loop: 0, position: 1 },
+            Box::new(|p: &Problem| matches!(p, Problem::Period { .. })),
+            {
+                let mut b = tube();
+                shift(pcurve_of(&mut b, 0, 1), [TAU, 0.]);
+                b
+            },
+        ),
+        ("vertex loop off its surface", Record::VertexLoop { face: 0, r#loop: 1 }, Box::new(off("vertex lies off its face's surface")), {
+            let mut b = sheet_with_lower_forms();
+            b.vertices[6].point[2] = 0.01;
+            b
+        }),
+    ];
+    for (name, record, problem, body) in cases {
+        body.validate().unwrap_or_else(|e| panic!("{name}: structurally valid: {e}"));
+        let error = body.check_geometry().err().unwrap_or_else(|| panic!("{name} was accepted"));
+        assert_eq!(error.record, record, "{name}: {error}");
+        assert!(problem(&error.problem), "{name}: {error}");
+    }
+}
+
+/// Records `validate` would refuse, checked anyway: errors, never panics.
+#[test]
+fn hostile_records_never_panic_the_geometry_check() {
+    let mut cases: Vec<Brep> = Vec::new();
+    let mut b = sheet();
+    b.vertices[0].point = [f64::NAN; 3];
+    cases.push(b);
+    let mut b = sheet();
+    b.edges[0].vertices = [u32::MAX; 2];
+    cases.push(b);
+    let mut b = sheet();
+    if let Loop::Edges { edges } = &mut b.faces[0].loops[0] {
+        edges[2].edge = u32::MAX;
+    }
+    cases.push(b);
+    let mut b = sheet();
+    shift(pcurve_of(&mut b, 0, 0), [f64::NAN, 0.]);
+    cases.push(b);
+    let mut b = sheet();
+    *pcurve_of(&mut b, 0, 3) = Curve2::Spline { knots: vec![], points: vec![] };
+    cases.push(b);
+    let mut b = sheet();
+    b.edges[1].interval = [f64::NEG_INFINITY, f64::INFINITY];
+    cases.push(b);
+    let mut b = sheet_with_lower_forms();
+    b.faces[0].loops[1] = Loop::Vertex { vertex: u32::MAX };
+    cases.push(b);
+    let mut b = tube();
+    b.faces[0].surface = Surface::Cylinder { frame: a_frame(), radius: f64::NAN };
+    cases.push(b);
+    let mut b = tube();
+    b.edges[0].tolerance = f64::NAN;
+    cases.push(b);
+    let mut b = sheet();
+    let circle = Box::new(Curve::Circle { frame: a_frame(), radius: 1. });
+    let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    b.faces[0].surface = Surface::PlacedRevolution { profile: circle, origin: [0.; 3], axis: [0., 0., 1.], matrix: identity, forward: true };
+    cases.push(b);
+    for (i, b) in cases.iter().enumerate() {
+        let checked = std::panic::catch_unwind(|| b.check_geometry());
+        assert!(matches!(checked, Ok(Err(_))), "case {i}: {checked:?}");
     }
 }
 
