@@ -17,7 +17,9 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 mod check;
 mod ffi;
+pub mod flat;
 pub mod history;
+pub mod import;
 mod measure;
 
 pub use check::{CheckLevel, CheckReport};
@@ -38,6 +40,8 @@ pub enum Error {
     Version(i32),
     /// This build has no SMLib (the `native` feature is off).
     NotBuilt,
+    /// A B-rep record SMLib cannot take (see [`import::Unsupported`]).
+    Record(import::Unsupported),
 }
 
 impl std::fmt::Display for Error {
@@ -50,6 +54,7 @@ impl std::fmt::Display for Error {
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Version(v) => write!(f, "SMLib C API version {v}, expected {}", ffi::ABI_VERSION),
             Error::NotBuilt => write!(f, "not supported yet: this build has no SMLib"),
+            Error::Record(u) => write!(f, "{u}"),
         }
     }
 }
