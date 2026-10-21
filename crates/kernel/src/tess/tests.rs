@@ -558,10 +558,18 @@ fn an_smlib_torus_stays_within_the_chord_tolerance() {
 /// y, carried `turns` turns of `pitch` about z from `base`, as an SMLib solid.
 #[cfg(feature = "smlib")]
 fn smlib_groove(section: [(f64, f64); 4], base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcraft_geom::{Loop2, Vec2};
+    smlib_screw(Loop2::polygon(&section.map(|(r, z)| Vec2::new(r, z))), base, pitch, turns)
+}
+
+/// The `section` (radius, axial offset) in the plane through the z axis along y, carried
+/// `turns` turns of `pitch` about z from `base`, as an SMLib solid.
+#[cfg(feature = "smlib")]
+fn smlib_screw(section: solidcraft_geom::Loop2, base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
+    use solidcraft_geom::{Plane, Region2};
     let origin = Vec3::new(0.0, 0.0, base);
     let plane = Plane { origin, x: Vec3::Y, y: Vec3::Z };
-    let region = Region2 { outer: Loop2::polygon(&section.map(|(r, z)| Vec2::new(r, z))), holes: Vec::new() };
+    let region = Region2 { outer: section, holes: Vec::new() };
     let Some(numbered) = crate::numbered::number_regions(std::slice::from_ref(&region)).pop() else { panic!("profile") };
     let profile = numbered.outer.oriented(false);
     let groove = ok(crate::smlib_sweeps::screw(&plane, &crate::smlib_sweeps::pieces([&profile]), origin, Vec3::Z, pitch, turns));
@@ -686,5 +694,41 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
         assert!(chord <= tol * 1.05, "thread run out at {tol}: chord {chord}");
         assert!(m.triangles.len() < 60_000, "thread run out at {tol}: {} triangles", m.triangles.len());
         assert_faces_lie_flat("thread run out", &ok(body.display_plan_angular(tol, crate::DISPLAY_ANGLE)));
+    }
+}
+
+/// #793: a coil (a 1 mm wire at 20 mm, six turns of pitch 4) cut in two across its axis. Its
+/// halves go to the display plan for their mesh; at the measuring tolerance a half's wall wants
+/// more cells than a grid may have, and its cut grid gave up for an under-refined Delaunay (the
+/// halves measured 1.5% short of the whole). The cut grid now thins its lines to fit.
+#[cfg(feature = "smlib")]
+#[test]
+fn the_halves_of_a_split_smlib_coil_measure_as_the_whole() {
+    use solidcraft_geom::{Loop2, Vec2};
+    use solidcraft_smlib::{BooleanOp, Brep as S};
+    let coil = smlib_screw(Loop2::circle(Vec2::new(20.0, 0.0), 1.0), 0.0, 4.0, 6.0);
+    let Ok(top) = S::make_box([-30.0, -30.0, 12.5], [60.0, 60.0, 30.0]) else { panic!("box") };
+    let (Ok(Some(upper)), Ok(Some(lower))) = (coil.boolean(&top, BooleanOp::Intersect), coil.boolean(&top, BooleanOp::Subtract)) else {
+        panic!("split")
+    };
+    let volume = |b: &S| ok(crate::measure(&ok(crate::native::body_from_smlib(b)))).volume;
+    // π r² · 2πR · turns; SMLib's wall is a spline within a ten-thousandth of the pitch.
+    let (whole, analytic) = (volume(&coil), PI * 2.0 * PI * 20.0 * 6.0);
+    assert!((whole - analytic).abs() < 3e-3 * analytic, "coil {whole} vs {analytic}");
+    let halves = volume(&upper) + volume(&lower);
+    assert!((halves - whole).abs() < 1e-3 * whole, "halves {halves} vs the whole {whole}");
+}
+
+/// Thinning keeps a grid within its cap whatever the rounding, both ends of each direction,
+/// and never fewer than two lines a direction (a cap below four points takes four).
+#[test]
+fn thinned_grid_lines_stay_within_the_cap() {
+    let lines = |n: usize| (0..n).map(|i| i as f64 / (n - 1) as f64).collect::<Vec<f64>>();
+    for (nu, nv, cap) in [(1237, 122, 150_000), (8192, 3, 1000), (3, 8192, 10), (2, 2, 1), (5000, 5000, 4)] {
+        let (mut us, mut vs) = (lines(nu), lines(nv));
+        grid::thin(&mut us, &mut vs, cap);
+        assert!(us.len() * vs.len() <= cap.max(4), "{nu}x{nv} to {cap}: {}x{}", us.len(), vs.len());
+        assert!(us.len() >= 2 && vs.len() >= 2);
+        assert!(us.first() == Some(&0.0) && us.last() == Some(&1.0) && vs.first() == Some(&0.0) && vs.last() == Some(&1.0));
     }
 }

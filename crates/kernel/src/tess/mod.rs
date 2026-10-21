@@ -772,7 +772,7 @@ fn plan_face(
     let (extra, triangles) = {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
         let mut vs = uv::divide(s, 1, bbox[1], bbox[0], rules, h, MAX_LINES);
-        thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
+        grid::thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
         let structured = match (ranges.len(), if seamed { None } else { grid::quad(&uvs) }) {
             (1, Some(q)) => {
                 // Interior lines: the boundary's own where opposite sides agree (refined where the
@@ -1117,24 +1117,6 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], triangles:
             side(a, b).is_none_or(|k| sides.get(&k).copied() == Some(1))
         })
     })
-}
-
-/// Keep at most `cap` grid points by taking every k-th line in both directions (ends kept).
-fn thin(us: &mut Vec<f64>, vs: &mut Vec<f64>, cap: usize) {
-    let total = us.len().saturating_mul(vs.len());
-    if total <= cap {
-        return;
-    }
-    let f = (total as f64 / cap.max(4) as f64).sqrt();
-    let pick = |d: &mut Vec<f64>| {
-        let n = ((d.len() as f64 / f).ceil() as usize).max(2);
-        if d.len() > n {
-            let len = d.len();
-            *d = (0..n).filter_map(|i| d.get(i * (len - 1) / (n - 1)).copied()).collect();
-        }
-    };
-    pick(us);
-    pick(vs);
 }
 
 #[cfg(test)]
