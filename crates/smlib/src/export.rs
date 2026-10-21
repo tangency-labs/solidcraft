@@ -19,6 +19,10 @@
 //!   oriented faces as the side in the region that is not material uses them (out of the
 //!   material). A sheet's one shell holds both uses of each face: the `same` one is kept. The
 //!   infinite region is never a void (SMLib marks it one).
+//! - **Touching:** an edge or vertex solids touching each other share is copied once per solid;
+//!   an edge one solid touches itself along (four or more uses in a shell) is copied once per
+//!   pair of faces SMLib's radial order puts across one sector round it, so every edge bounds
+//!   two faces.
 //! - **Order:** faces, edges and vertices renumbered in the canonical walk; each edge's uses
 //!   from that walk (`upper = !forward`), never SMLib's radial entry flags.
 //! - **Pcurves:** computed from each edge record on its face's surface record
@@ -160,6 +164,8 @@ const I64_IDS: &[i32] = &[
     LOOP_VERTEX,
     EDGEUSE_EDGE,
     EDGEUSE_ORIENTATION,
+    EDGEUSE_NEXT_RADIAL,
+    EDGEUSE_RADIAL_ENTRY,
     EDGE_CURVE_TYPE,
     EDGE_VERTICES,
     EDGE_NURBS_VERTEX_COUNT,
@@ -572,6 +578,8 @@ struct Face {
     /// SMLib's natural normal is the record's.
     agrees: bool,
     loops: Vec<Loop>,
+    /// The array edgeuse record of each use, loop by loop as `loops` (none for a vertex loop).
+    records: Vec<Vec<usize>>,
 }
 
 #[derive(Clone)]
@@ -696,14 +704,17 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let natural = surface.natural();
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
         let mut out = Vec::with_capacity(loops.len());
+        let mut records = Vec::with_capacity(loops.len());
         for l in loops.clone() {
             let uses = loop_edgeuses.get(l).ok_or_else(|| invalid("loop"))?;
             if uses.is_empty() {
                 let v = idx(at(flat.i(LOOP_VERTEX), l, "loop vertex")?, n_vertices, "loop vertex")?;
                 out.push(Loop::Vertex(index(v)?));
+                records.push(Vec::new());
                 continue;
             }
             let mut l = Vec::with_capacity(uses.len());
+            records.push(uses.clone().collect());
             for u in uses.clone() {
                 let e = idx(at(flat.i(EDGEUSE_EDGE), u, "edgeuse")?, n_edges, "edgeuse edge")?;
                 let same = at(flat.i(EDGEUSE_ORIENTATION), u, "edgeuse")? == 1;
@@ -712,7 +723,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
             }
             out.push(Loop::Edges(l));
         }
-        faces.push(Face { surface, domain, agrees: true, loops: out });
+        faces.push(Face { surface, domain, agrees: true, loops: out, records });
     }
     for face in &mut faces {
         if outer_area(face, &edges, largest)? < 0.0 {
@@ -723,6 +734,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                     uses.iter_mut().for_each(|u| u.1 = !u.1);
                 }
             }
+            face.records.iter_mut().for_each(|r| r.reverse());
             report.reversed_faces += 1;
         }
     }
@@ -816,7 +828,13 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     }
     let shells: Vec<Vec<(u32, bool)>> = order.iter().filter_map(|s| shells.get(*s as usize).cloned()).collect();
 
-    let parts = Parts { faces, edges, shells, regions };
+    // Round each edge: SMLib's radial order of its uses, and the side of each face the material
+    // is on, which say which faces bound the same material where a solid touches itself.
+    let material_same =
+        face_uses.iter().map(|uses| uses.iter().find(|(s, _)| material(region_of.get(*s).copied().unwrap_or(0))).map(|(_, same)| *same)).collect();
+    let radial = radial(flat, n_edgeuses, n_edges, material_same)?;
+
+    let parts = Parts { faces, edges, shells, regions, radial };
     let made = match canonical(parts.clone(), n_vertices, flat, &tolerances) {
         // SMLib's own tolerance for an edge or vertex can understate what its approximated
         // geometry needs here (a blend's end curve 2.3e-5 mm off its plane at 2e-5): then the
@@ -837,6 +855,56 @@ struct Parts {
     edges: Vec<Edge>,
     shells: Vec<Vec<(u32, bool)>>,
     regions: Vec<b::Region>,
+    radial: Option<Radial>,
+}
+
+/// SMLib's order of the faces round each edge (`EDGEUSE_NEXT_RADIAL`, `EDGEUSE_RADIAL_ENTRY`),
+/// read where the arrays have it. Each edgeuse record is a face's two sides along the edge; a
+/// right-hand traversal round the edge meets one side of each record, then its other side, then
+/// the next record. Between two records lies one sector of space round the edge, empty or
+/// material.
+#[derive(Clone)]
+struct Radial {
+    /// The next record round the edge.
+    next: Vec<usize>,
+    /// The traversal enters the record from its face's `same` side (SMLib's top edgeuse, the
+    /// one on the faceuse the surface normal points out of) and leaves from the other.
+    top_entry: Vec<bool>,
+    /// Per array face: whether the material is on its `same` side; none for a face with no
+    /// material on either side (a sheet's).
+    material_same: Vec<Option<bool>>,
+}
+
+/// The radial arrays, checked: in range, entries 0 or 1, each edge's records one cycle or more.
+/// None where the arrays have neither (the export of a library without them).
+fn radial(flat: View, n_edgeuses: usize, n_edges: usize, material_same: Vec<Option<bool>>) -> Res<Option<Radial>> {
+    let (next, entry) = (flat.i(EDGEUSE_NEXT_RADIAL), flat.i(EDGEUSE_RADIAL_ENTRY));
+    if next.is_empty() && entry.is_empty() {
+        return Ok(None);
+    }
+    if next.len() != n_edgeuses || entry.len() != n_edgeuses {
+        return Err(invalid("radial arrays"));
+    }
+    let edge = flat.i(EDGEUSE_EDGE).iter().map(|e| idx(*e, n_edges, "edgeuse edge")).collect::<Res<Vec<_>>>()?;
+    let next = next.iter().map(|n| idx(*n, n_edgeuses, "next radial edgeuse")).collect::<Res<Vec<_>>>()?;
+    // Each record is some record's next (the lists are cycles), on its own edge.
+    let mut reached = vec![false; n_edgeuses];
+    for (u, n) in next.iter().enumerate() {
+        let slot = reached.get_mut(*n).ok_or_else(|| invalid("next radial edgeuse"))?;
+        if *slot || edge.get(u) != edge.get(*n) {
+            return Err(invalid("a radial list that is not a cycle round its edge"));
+        }
+        *slot = true;
+    }
+    let top_entry = entry
+        .iter()
+        .map(|x| match x {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(invalid("radial entry")),
+        })
+        .collect::<Res<Vec<_>>>()?;
+    Ok(Some(Radial { next, top_entry, material_same }))
 }
 
 /// The record in canonical order: faces in first appearance through the shells, edges through
@@ -862,10 +930,11 @@ impl Tolerances {
 
 fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerances) -> Res<(b::Brep, Order)> {
     let tolerance = tolerances.body;
-    let Parts { mut faces, mut edges, shells, regions } = parts;
+    let Parts { mut faces, mut edges, shells, regions, radial } = parts;
     let n_edges = edges.len();
-    // A copy made by the split keeps the tolerance of the array edge or vertex it copies.
-    let (edge_source, vertex_source) = split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
+    // A copy made by the splits keeps the tolerance of the array edge or vertex it copies.
+    let (mut edge_source, vertex_source) = split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
+    split_touching(&mut faces, &mut edges, &mut edge_source, radial.as_ref())?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
@@ -1110,6 +1179,119 @@ fn split_shared(faces: &mut [Face], edges: &mut Vec<Edge>, shells: &[Vec<(u32, b
         }
     }
     Ok((edge_source, vertex_source))
+}
+
+/// Edges one shell uses more than twice, where a solid touches itself along a line (a hole
+/// tangent to its outline, holes touching each other), split so that every edge bounds two faces:
+/// SMLib's radial order round the edge pairs each record with the next one across a sector, and
+/// each pair gets its own copy of the edge. The pairs are those across a material sector, so the
+/// surface is cut apart along the line round each wedge of material, unless that would give one
+/// face two copies (a face on both sides of the line, its loop running along one copy and back
+/// along the other), which SMLib refuses (its check's tests 33 and 34, coincident edges in a
+/// face): then the pairs across the empty sectors, so that face meets itself across the line as
+/// SMLib's crack edges do, one edge used twice. The vertices at the ends stay shared, the points
+/// where the boundary meets itself: copies would give a face whose loop passes the point twice two
+/// coincident vertices, which SMLib also refuses (test 32). The geometry is unchanged; each copy
+/// is added to `edge_source` with its original's source.
+fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut Vec<usize>, radial: Option<&Radial>) -> Res<()> {
+    // The records using each edge, and where each record is: (face, loop, position).
+    let mut records_of: Vec<Vec<usize>> = vec![Vec::new(); edges.len()];
+    let mut place: HashMap<usize, (usize, usize, usize)> = HashMap::new();
+    for (f, face) in faces.iter().enumerate() {
+        for (li, (l, records)) in face.loops.iter().zip(&face.records).enumerate() {
+            let Loop::Edges(uses) = l else { continue };
+            if records.len() != uses.len() {
+                return Err(invalid("loop records"));
+            }
+            for (p, (&(e, _), &r)) in uses.iter().zip(records).enumerate() {
+                records_of.get_mut(e as usize).ok_or_else(|| invalid("edge"))?.push(r);
+                if place.insert(r, (f, li, p)).is_some() {
+                    return Err(invalid("an edgeuse record in two loops"));
+                }
+            }
+        }
+    }
+    let crowded: Vec<usize> = (0..edges.len()).filter(|e| records_of.get(*e).is_some_and(|r| r.len() > 2)).collect();
+    if crowded.is_empty() {
+        return Ok(());
+    }
+    let radial = radial.ok_or_else(|| unsupported("a solid touching itself along an edge, without SMLib's radial order"))?;
+    let face_of = |r: usize| place.get(&r).map(|p| p.0).ok_or_else(|| invalid("edgeuse record"));
+    let material_same = |r: usize| -> Res<bool> {
+        radial.material_same.get(face_of(r)?).copied().flatten().ok_or_else(|| unsupported("a sheet touching itself along an edge"))
+    };
+    let top_entry = |r: usize| radial.top_entry.get(r).copied().ok_or_else(|| invalid("radial entry"));
+    // Whether the sector the traversal leaves a record into, and the one it enters a record
+    // from, is material: it leaves from the side it did not enter.
+    let after = |r: usize| -> Res<bool> { Ok(material_same(r)? != top_entry(r)?) };
+    let before = |r: usize| -> Res<bool> { Ok(material_same(r)? == top_entry(r)?) };
+
+    for e in crowded {
+        let mine = records_of.get(e).cloned().unwrap_or_default();
+        let start = *mine.first().ok_or_else(|| invalid("edge"))?;
+        // The edge's radial list from one of its records, keeping this edge's (another solid's
+        // faces may lie between them where solids touch each other too).
+        let mut cycle = Vec::with_capacity(mine.len());
+        let mut r = start;
+        for _ in 0..radial.next.len() {
+            if mine.contains(&r) {
+                cycle.push(r);
+            }
+            r = radial.next.get(r).copied().ok_or_else(|| invalid("next radial edgeuse"))?;
+            if r == start {
+                break;
+            }
+        }
+        if r != start || cycle.len() != mine.len() {
+            return Err(invalid("a radial list that does not go once round its edge's uses"));
+        }
+        let k = cycle.len();
+        let at = |i: usize| cycle.get(i % k).copied().ok_or_else(|| invalid("radial list"));
+        // Sectors alternate material and space, each seen alike from the records on its sides.
+        let mut alternate = k % 2 == 0;
+        for i in 0..k {
+            let (a, b) = (at(i)?, at(i + 1)?);
+            alternate &= after(a)? == before(b)? && after(a)? != after(b)?;
+        }
+        if !alternate {
+            return Err(unsupported("a solid touching itself along an edge whose faces do not alternate between material and space round it"));
+        }
+        // The pairs across material sectors, unless one face would get two copies; then those
+        // across empty sectors, unless that does too.
+        let material = if after(at(0)?)? { 0 } else { 1 };
+        let one_copy_per_face = |first: usize| -> Res<bool> {
+            let mut pair_of: HashMap<usize, usize> = HashMap::new();
+            for i in 0..k {
+                let f = face_of(at(first + i)?)?;
+                if *pair_of.entry(f).or_insert(i / 2) != i / 2 {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        };
+        let first = if one_copy_per_face(material)? || !one_copy_per_face(1 - material)? { material } else { 1 - material };
+        for pair in 0..k / 2 {
+            let (a, b) = (at(first + 2 * pair)?, at(first + 2 * pair + 1)?);
+            let copy = if pair == 0 {
+                e
+            } else {
+                let c = edges.len();
+                edges.push(edges.get(e).ok_or_else(|| invalid("edge"))?.clone());
+                edge_source.push(edge_source.get(e).copied().ok_or_else(|| invalid("edge"))?);
+                c
+            };
+            for r in [a, b] {
+                let (f, li, p) = place.get(&r).copied().ok_or_else(|| invalid("edgeuse record"))?;
+                let slot = faces
+                    .get_mut(f)
+                    .and_then(|face| face.loops.get_mut(li))
+                    .and_then(|l| if let Loop::Edges(u) = l { u.get_mut(p) } else { None })
+                    .ok_or_else(|| invalid("edgeuse record"))?;
+                slot.0 = index(copy)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A face's pcurves, edge loop by edge loop, from the plain-record routine on the face's

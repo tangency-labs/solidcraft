@@ -106,6 +106,95 @@ mod native_tests {
         assert!((half.unwrap() + 0.5f64.atan()).abs() < 1e-12);
     }
 
+    /// A hole tangent to the block's outline from inside: the material touches itself along the
+    /// tangent line, where SMLib's one shell uses the edge four times. The record has two copies
+    /// of that edge, each bounding one wedge of material (a face of the side and the half of the
+    /// hole on the same side of the line), so every edge has two uses; the line's two vertices
+    /// stay shared. The record goes back into SMLib as a valid solid of the same volume.
+    #[test]
+    fn a_hole_tangent_to_the_outline_comes_back_as_a_manifold_boundary() {
+        let block = Brep::make_box([0.0; 3], [31.0, 29.0, 10.0]).unwrap();
+        let hole = Brep::make_cylinder([5.0, 14.5, -1.0], 5.0, 12.0).unwrap();
+        let r = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
+        assert!(!r.is_manifold_solid().unwrap(), "SMLib keeps the touching boundary as one non-manifold shell");
+        let (record, order) = r.to_native_ordered().unwrap();
+        let [f, e, v] = r.counts().unwrap();
+        assert_eq!((record.faces.len(), record.edges.len(), record.vertices.len()), (f, e + 1, v));
+        assert_eq!((record.shells.len(), record.regions.len()), (1, 2));
+        assert!(record.edges.iter().all(|e| e.uses.len() == 2));
+        record.check_geometry().unwrap();
+        let on_line = |e: &b::Edge| {
+            e.vertices.iter().all(|v| {
+                let p = record.vertices[*v as usize].point;
+                p[0].abs() < 1e-9 && (p[1] - 14.5).abs() < 1e-9
+            })
+        };
+        let middle = |e: &b::Edge| b::eval::CurveEval::new(&e.curve).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
+        let copies: Vec<&b::Edge> = record.edges.iter().filter(|e| on_line(e)).collect();
+        assert_eq!(copies.len(), 2);
+        for copy in copies {
+            // Each face's other edges lie on one side of y = 14.5: the same side for both faces.
+            let sides: Vec<f64> = copy
+                .uses
+                .iter()
+                .map(|u| {
+                    let b::Loop::Edges { edges } = &record.faces[u.face as usize].loops[u.r#loop as usize] else { panic!("vertex loop") };
+                    let others: Vec<f64> =
+                        edges.iter().map(|o| &record.edges[o.edge as usize]).filter(|o| !on_line(o)).map(|o| middle(o).y - 14.5).collect();
+                    others.iter().sum::<f64>() / others.len() as f64
+                })
+                .collect();
+            assert!(sides[0] * sides[1] > 0.0, "the copy joins faces on opposite sides of the line: {sides:?}");
+        }
+        // SMLib's history of the tangent line goes to both copies.
+        assert_eq!(order.pieces.len(), 2);
+        let back = Brep::from_record(&record, true).unwrap();
+        let check = back.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "{check}");
+        let want = 31.0 * 29.0 * 10.0 - PI * 25.0 * 10.0;
+        let got = back.mass_properties(MEASURE_ACCURACY).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
+    }
+
+    /// A blind hole from z = 2 tangent to the block's side y = 20 from inside: the side is one
+    /// face on both sides of the tangent line (joined below the hole), so pairing the faces round
+    /// the line across the material would give it two coincident copies of the line, which
+    /// SMLib refuses. The line is then copied across the empty sectors: the side uses one copy
+    /// twice (a crack, as SMLib keeps a face meeting itself), the hole's two halves the other.
+    #[test]
+    fn a_blind_hole_tangent_to_a_side_leaves_the_side_a_crack() {
+        let block = Brep::make_box([0.0; 3], [30.0, 20.0, 10.0]).unwrap();
+        let hole = Brep::make_cylinder([10.0, 15.0, 2.0], 5.0, 9.0).unwrap();
+        let r = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
+        let (record, _) = r.to_native_ordered().unwrap();
+        assert!(record.edges.iter().all(|e| e.uses.len() == 2));
+        record.check_geometry().unwrap();
+        let on_line = |e: &b::Edge| {
+            e.vertices.iter().all(|v| {
+                let p = record.vertices[*v as usize].point;
+                (p[0] - 10.0).abs() < 1e-9 && (p[1] - 20.0).abs() < 1e-9
+            })
+        };
+        let copies: Vec<&b::Edge> = record.edges.iter().filter(|e| on_line(e)).collect();
+        assert_eq!(copies.len(), 2);
+        let kinds: Vec<(bool, bool)> = copies
+            .iter()
+            .map(|e| {
+                let faces: Vec<&b::Face> = e.uses.iter().map(|u| &record.faces[u.face as usize]).collect();
+                let side = |f: &b::Face| matches!(f.surface, b::Surface::Plane { .. });
+                (faces.iter().all(|f| side(f)), e.uses[0].face == e.uses[1].face)
+            })
+            .collect();
+        assert!(kinds.contains(&(true, true)), "one copy is the side's crack: {kinds:?}");
+        assert!(kinds.contains(&(false, false)), "the other joins the hole's halves: {kinds:?}");
+        let back = Brep::from_record(&record, true).unwrap();
+        let check = back.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "{check}");
+        let want = 6000.0 - PI * 25.0 * 8.0;
+        let got = back.mass_properties(MEASURE_ACCURACY).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
+    }
+
     #[test]
     fn hostile_arrays_are_errors_never_panics() {
         let good = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().arrays().unwrap();
