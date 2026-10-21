@@ -220,3 +220,19 @@ fn revolutions_become_the_same_surface_as_a_rational_spline() {
         }
     }
 }
+
+/// A circle or ellipse edge past a full turn (schema 4 allows up to one turn past the seam)
+/// goes to SMLib a whole turn back, within [-2π, 2π]; other curves keep their interval.
+#[test]
+fn arcs_past_a_turn_come_a_turn_back() {
+    use std::f64::consts::{FRAC_PI_2, TAU};
+    let frame = solidcraft_geom::brep::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+    let circle = Curve::Circle { frame, radius: 2.0 };
+    assert_eq!(turned(&circle, [TAU, TAU + FRAC_PI_2]), ([0.0, FRAC_PI_2], -TAU));
+    assert_eq!(turned(&circle, [-TAU - FRAC_PI_2, -TAU]), ([-FRAC_PI_2, 0.0], TAU));
+    let (i, s) = turned(&circle, [5.0, 5.0 + TAU]);
+    assert!(s == -TAU && i[0] >= -TAU && i[1] <= TAU, "{i:?}");
+    assert_eq!(turned(&circle, [0.5, 2.0]), ([0.5, 2.0], 0.0));
+    let line = Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
+    assert_eq!(turned(&line, [7.0, 9.0]), ([7.0, 9.0], 0.0));
+}
