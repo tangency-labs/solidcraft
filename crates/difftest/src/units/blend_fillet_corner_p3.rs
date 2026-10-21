@@ -26,7 +26,7 @@
 //! `sm_FindConcaveEdgeuses` (`blend.fillet_corner_p2`); every patch builder past its state
 //! checks (`MakeAnalyticCornerSurface`, `CreateEndPatch`, `SmSurface::DropCurve`); the
 //! Nx2 adjustments where they change the topology (`MakeFilletEdge`,
-//! `GetRailIndexOfVertexuse`), the big-radius test of blending corners and the `NxN` /
+//! `SplitFilletGeomAtSideEdge` once a vertex drops inside a rail), the big-radius test of blending corners and the `NxN` /
 //! closed Nx1 overrides. The shim does not call upstream on those paths (`-3`; a Rust
 //! side that is not deferred there fails the case) and refuses (`-2`, a rejected case)
 //! the inputs that make upstream dereference null or free the harness's objects. A

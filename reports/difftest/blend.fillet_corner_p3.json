@@ -8801,64 +8801,44 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#2",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#3",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#4",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#5",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#6",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -8877,28 +8857,20 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#9",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#10",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -8909,16 +8881,12 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_012",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#12",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -8993,16 +8961,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_021",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#21",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "deferred": {
@@ -9017,16 +8981,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#23",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9037,40 +8997,28 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_025",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#25",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#26",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#27",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9081,64 +9029,44 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_029",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#29",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_030",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#30",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_031",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#31",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_032",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#32",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_033",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#33",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9161,16 +9089,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_036",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#36",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9181,28 +9105,20 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#38",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_039",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#39",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9213,52 +9129,36 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_041",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#41",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_042",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#42",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_043",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#43",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_044",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#44",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "deferred": {
@@ -9273,16 +9173,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_046",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#46",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9321,52 +9217,36 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_051",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#51",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_052",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#52",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_053",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#53",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_054",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#54",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "max_rel_err": 0.0,
@@ -9405,16 +9285,12 @@
       "values_compared": 363
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "review_plane_oob_059",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_corner_p3/review_plane_oob.json#59",
-      "values_compared": 0
+      "values_compared": 363
     },
     {
       "deferred": {
@@ -13250,8 +13126,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmFilletSolver::SplitFilletGeomAtSideEdge",
+        "unit": "blend.fillet_solver_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0067",
@@ -15445,16 +15321,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10924742201818549850",
-      "values_compared": 0
+      "values_compared": 361
     },
     {
       "max_rel_err": 0.0,
@@ -18519,9 +18391,9 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 390,
+  "cases_deferred": 358,
   "cases_failed": 0,
-  "cases_passed": 560,
+  "cases_passed": 592,
   "cases_rejected": 55,
   "cases_total": 1005,
   "deferred_by_unit": {
@@ -18529,7 +18401,7 @@
     "blend.fillet_corner_p2": 126,
     "blend.fillet_executive_p1": 6,
     "blend.fillet_geom_p5": 13,
-    "blend.fillet_geom_p6": 33,
+    "blend.fillet_solver_p1": 1,
     "intersect.surface_drop_lib_p3": 78,
     "surface.cone_p1": 11,
     "surface.surf_of_extrusion_p2": 12

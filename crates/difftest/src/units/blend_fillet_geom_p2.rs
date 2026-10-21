@@ -590,7 +590,8 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             };
             let (fs, of, nf) = (face(*set)?, face(*f1)?, face(*f2)?);
             rm.fb.fillet_edge_mut(eid).map_err(h)?.set_original_face(fs);
-            let r = rm.fb.update_edge_split_face(eid, of, nf);
+            // the shim refuses runs reaching ShouldSwapFaces (its corners carry no data)
+            let r = rm.fb.update_edge_split_face(&k, eid, of, nf, &mut rm.target, &[]);
             o.push(status_of!(r));
             let index = |f: Option<FaceId>| {
                 f.and_then(|f| rm.target_faces.iter().position(|&x| x == f))

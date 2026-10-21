@@ -38,9 +38,10 @@
 //! corner for its filleted vertex right after its null check), a `RailRail` edge whose
 //! chosen rail curve (the mate edge use's UV curve or the rail's 3D curve, picked as
 //! upstream picks it) is `NULL` (dropped onto unchecked), a `SplitFace` whose edge's
-//! original face is the split face (`ShouldSwapFaces`, unit `blend.fillet_geom_p6`,
-//! then dereferences the edge's curve, curve classification or corner and both faces
-//! unchecked; the Rust side defers there anyway), and, as in
+//! original face is the split face (`ShouldSwapFaces` then dereferences the edge's
+//! curve, curve classification or corner and both faces unchecked; the block's
+//! corners carry no data, and part 6's own difftest compares `ShouldSwapFaces`), and,
+//! as in
 //! `blend.fillet_geom_p1`, surfaces whose constructed v knot vector would make the
 //! surface cache write out of bounds (UB-166).
 

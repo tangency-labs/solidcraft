@@ -974,7 +974,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::CornerEdge { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
-            m.fb.calc_corner_edge_geom(&k, e, &bases, &mut tg.brep)
+            // the shim refuses the part 6 calculators (its corners carry no data)
+            m.fb.calc_corner_edge_geom(&k, e, &[], &bases, &mut tg.brep)
         }
         OpIn::FilletIntFillet { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;

@@ -30,15 +30,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{
-    FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletEdgeuse,
+    FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletEdgeuse,
     FilletErrorType, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId, FilletVertex,
     FilletVertexType, FilletVertexuse,
 };
 use solidcore::blend::fillet_geom::p3::new_solver_fillet_geom;
 use solidcore::blend::fillet_geom::p6::{
-    join_two_fillet_verts_by_curves, move_tsp, FilletCornerView,
+    join_two_fillet_verts_by_curves, move_tsp,
 };
 use solidcore::blend::fillet_solver::p1::{
     FilletExecutiveRef, FilletGeomRef, FilletSolver, OffsetSurfaceSlot,
@@ -930,7 +931,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 struct RustModel {
     k: Kernel,
     solvers: Vec<FilletSolver>,
-    corners: Vec<FilletCornerView>,
+    corners: Vec<FilletCorner>,
     fb: FilletBrep,
     vertices: Vec<VertexId>,
     edges: Vec<EdgeId>,
@@ -970,21 +971,21 @@ fn opt(x: i64, n: usize) -> Option<usize> {
     usize::try_from(x).ok().filter(|&i| i < n)
 }
 
-fn corner_type(code: i64) -> Result<FilletCornerType, HarnessError> {
+/// The derived corner class whose `GetCornerType()` is `SmFilletCornerType` `code`
+/// (the abstract `SM_FCT_UNKNOWN` and `SM_FCT_NxN` have none).
+fn corner_kind(code: i64) -> Result<FilletCornerKind, HarnessError> {
     Ok(match code {
-        0 => FilletCornerType::Unknown,
-        1 => FilletCornerType::Open,
-        2 => FilletCornerType::Degenerate,
-        3 => FilletCornerType::OneByOne,
-        4 => FilletCornerType::TwoByTwo,
-        5 => FilletCornerType::ThreeByTwoMixed,
-        6 => FilletCornerType::FourByThree,
-        7 => FilletCornerType::NByOneClosed,
-        8 => FilletCornerType::NByOne,
-        9 => FilletCornerType::NByTwo,
-        10 => FilletCornerType::NByN,
-        11 => FilletCornerType::NByNConvex,
-        12 => FilletCornerType::NByNConcave,
+        1 => FilletCornerKind::Open,
+        2 => FilletCornerKind::Degenerate,
+        3 => FilletCornerKind::OneByOne,
+        4 => FilletCornerKind::TwoByTwo,
+        5 => FilletCornerKind::ThreeByTwoMixed,
+        6 => FilletCornerKind::FourByThree,
+        7 => FilletCornerKind::NByOneClosed,
+        8 => FilletCornerKind::NByOne,
+        9 => FilletCornerKind::NByTwo,
+        11 => FilletCornerKind::ConvexNByN,
+        12 => FilletCornerKind::ConcaveNByN,
         _ => return Err(harness("bad corner type")),
     })
 }
@@ -1044,13 +1045,17 @@ impl RustModel {
 
         let mut corners = Vec::new();
         for c in &m.corners {
-            corners.push(FilletCornerView {
-                filleted_vertex: u32::try_from(sel(c.vertex, tg.n_v()))
+            // the shim's corner: SmFilletCorner(ctx, v, NULL, NULL, exec, tol, 0.01)
+            corners.push(FilletCorner::new(
+                corner_kind(c.ctype)?,
+                u32::try_from(sel(c.vertex, tg.n_v()))
                     .ok()
                     .map(VertexId::from_index),
-                corner_type: corner_type(c.ctype)?,
-                approx_tol_3d: c.tol,
-            });
+                None,
+                None,
+                c.tol,
+                0.01,
+            ));
         }
         let corner = |c: i64| {
             opt(c, corners.len())
@@ -1454,12 +1459,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let corner_view = |m: &RustModel,
                        e: EdgeId,
                        use_corner: bool|
-     -> Result<Option<FilletCornerView>, HarnessError> {
+     -> Result<Option<FilletCorner>, HarnessError> {
         if !use_corner {
             return Ok(None);
         }
         let c = m.fb.fillet_edge(e).map_err(h)?.fillet_corner();
-        Ok(c.and_then(|c| m.corners.get(c.0 as usize).copied()))
+        Ok(c.and_then(|c| m.corners.get(c.0 as usize).cloned()))
     };
     let mut results: Vec<f64> = Vec::new();
     let res: solidcore::Result<()> = match &i.op {
@@ -1565,7 +1570,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     .map_err(h)?
                     .vertexuse
                     .ok_or_else(|| harness("edge use without vertex use"))?;
-            let r = m.fb.rail_index_of_vertexuse(g, vu);
+            let r = m.fb.rail_index_of_vertexuse(g, Some(vu));
             results.push(r.as_ref().map_or(99.0, |&x| x as f64));
             r.map(|_| ())
         }

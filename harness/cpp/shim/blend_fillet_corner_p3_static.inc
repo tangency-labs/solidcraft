@@ -285,6 +285,28 @@ double p3_check_topo(int64_t kind, SmFilletCorner* c, Model& M)
     return 0.0;
 }
 
+// Whether SmFilletGeom::GetRailVertexuse(r, e) can run for every rail end of g without
+// dereferencing NULL (the rail, its primary edge use, the mates it walks to).
+bool p3_rail_vus_ok(SmFilletGeom* g)
+{
+    for (ULONG r = 0; r < 2; ++r)
+    {
+        SmFilletEdge* rail = g->GetRail(r);
+        if (rail == NULL)
+            return false;
+        SmEdgeuse* eu = rail->GetPrimaryEdgeuse();
+        if (eu == NULL)
+            return false;
+        if (eu->GetOrientation() == SM_OT_OPPOSITE)
+            eu = eu->GetMate();
+        if (eu == NULL || eu->GetMate() == NULL)
+            return false;
+        if (eu->GetVertexuse() == NULL || eu->GetMate()->GetVertexuse() == NULL)
+            return false;
+    }
+    return true;
+}
+
 double p3_check_tangent(int64_t kind, SmFilletCorner* c, Model& M)
 {
     if (kind == 2)
@@ -305,6 +327,7 @@ double p3_check_tangent(int64_t kind, SmFilletCorner* c, Model& M)
         return 0.0;
     SmTArray<SmFilletVertex*>& V = c->*P3CornerPeek::verts();
     double tol = c->*P3CornerPeek::tol();
+    bool close_enough = true;
     for (ULONG ii = 0; ii < V.GetSize(); ++ii)
     {
         SmFilletVertex* v = V[ii];
@@ -334,11 +357,60 @@ double p3_check_tangent(int64_t kind, SmFilletCorner* c, Model& M)
         SmPoint3d a = p3_eval_oob((SmSurface*)t1.m_apUserPointer[0], t1.UVPos(0));
         SmPoint3d b = p3_eval_oob((SmSurface*)t2.m_apUserPointer[0], t2.UVPos(0));
         if (a.DistanceBetween(b) > tol)
-            return P3C_NOT_RUN; // GetRailIndexOfVertex -> GetRailIndexOfVertexuse
+        {
+            close_enough = false;
+            break;
+        }
         a = p3_eval_oob((SmSurface*)t1.m_apUserPointer[1], t1.UVPos(1));
         b = p3_eval_oob((SmSurface*)t2.m_apUserPointer[1], t2.UVPos(1));
         if (a.DistanceBetween(b) > tol)
-            return P3C_NOT_RUN;
+        {
+            close_enough = false;
+            break;
+        }
+    }
+    if (close_enough)
+        return 0.0;
+
+    // The split loop, up to SmFilletSolver::SplitFilletGeomAtSideEdge (whose Rust port is
+    // a stub): a vertex's position drops onto each of its two geometries' rails; a drop
+    // inside the rail splits the geometry. Without a split nothing is removed from the
+    // list, so every vertex is visited.
+    for (ULONG ii = 0; ii < V.GetSize(); ++ii)
+    {
+        SmFilletVertex* v = V[ii];
+        if (v->GetFilletVertexType() != SM_FV_RAIL_X_EDGEUSE)
+            continue;
+        SmTArray<SmFilletGeom*> gs;
+        v->GetFilletGeoms(gs);
+        if (gs.GetSize() != 2)
+            continue;
+        SmPoint3d pos = v->GetPoint();
+        for (ULONG g = 0; g < 2; ++g)
+        {
+            // GetRailIndexOfVertex walks every rail end unchecked; its status is ignored
+            // and a failure leaves lRailIdx uninitialised
+            if (!p3_rail_vus_ok(gs[g]))
+                return P3C_REFUSE;
+            ULONG idx = 0;
+            if (gs[g]->GetRailIndexOfVertex(v, idx) != SM_SUCCESS)
+                return P3C_REFUSE;
+            SmFilletEdge* rail = gs[g]->GetRail(idx);
+            if (rail->GetCurve() == NULL)
+                return P3C_REFUSE;
+            SmExtent1d ivl = rail->GetInterval();
+            SmBoolean ok = FALSE;
+            double param = 0.0, dist = 0.0;
+            // a failed drop leaves bSuccess uninitialised upstream
+            if (rail->GetCurve()->DropPoint(ivl, pos, NULL, SM_BIG_DOUBLE, NULL, ok, param,
+                                            dist, SM_SO_MINIMIZE) != SM_SUCCESS)
+                return P3C_REFUSE;
+            if (!ok)
+                continue;
+            if (ivl.IsValueOnBoundary(param, tol))
+                continue;
+            return P3C_NOT_RUN; // SmFilletSolver::SplitFilletGeomAtSideEdge
+        }
     }
     return 0.0;
 }

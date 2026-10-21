@@ -15,10 +15,8 @@
 //! points and knots), for `rail_index` the index, for the vertex calculators the
 //! vertex's point and fillet status.
 //!
-//! Deferred on the Rust side (unported callees): `rail_index` of a vertex
-//! (`GetRailIndexOfVertexuse`, `blend.fillet_geom_p6`), `make_face` past its rail
-//! checks (`JoinTwoFilletVertsByCurves`, `blend.fillet_geom_p6`), `blending` of a
-//! blending rail (`SmFilletEdge::CalcBlendingRail`, `blend.fillet_geom_p6`) and the
+//! Deferred on the Rust side (unported callees): the face makers' unported callees in
+//! `make_face` (`topology.brep_p3`) and the
 //! unported callees of `sm_SrfSrfIntersection` (`SmSurface::DropCurve`,
 //! `intersect.surface_drop_lib_p3`, ...) where reached. The shim refuses the inputs that would make upstream dereference
 //! what the harness cannot build (a real fillet corner, a solver or rail it needs);
@@ -421,7 +419,9 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         }
         Query::MakeFace { g } => {
             let gid: FilletGeomId = rm.geom(*g)?;
-            let mut brep = Brep::new();
+            // `new (ctx) SmBrep()`: the constructor makes the void infinite region the
+            // face makers put the face in
+            let mut brep = Brep::new_with_infinite_region().map_err(h)?;
             let mut records = std::collections::BTreeMap::new();
             let mut attributes = solidcore::geom::attribute::AttributeStore::default();
             // distinct identities for the face makers' notifications, keyed as the

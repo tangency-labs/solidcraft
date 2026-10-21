@@ -361,6 +361,17 @@ impl ExecutiveAccess<Handle> for Access {
     ) -> SolidResult<()> {
         missing()
     }
+    fn trim_original_surfaces(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &mut Vec<Handle>,
+        _: &mut Vec<Handle>,
+        _: &[ContextMark],
+        _: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        missing()
+    }
     fn calc_corner_geom(
         &mut self,
         _: &mut Kernel,

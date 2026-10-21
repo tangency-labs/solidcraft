@@ -355,8 +355,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_join",
@@ -367,8 +367,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_cliff_join",
@@ -386,16 +386,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "blending_rail",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_geom_p4/cases.json#47 (upstream source/SMLib/src/SmFilletGeom.cpp)",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -406,16 +402,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "rail_index_vertex",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_geom_p4/cases.json#49 (upstream source/SMLib/src/SmFilletGeom.cpp)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -755,8 +747,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_join_negtol",
@@ -767,8 +759,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_join_negtol_big",
@@ -779,8 +771,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_join_usedefault",
@@ -791,8 +783,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_cliff_join_negtol",
@@ -803,8 +795,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_cliff_join_negtol_big",
@@ -815,8 +807,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_face_cliff_join_usedefault",
@@ -824,6 +816,22 @@
       "pass": false,
       "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#27 (upstream source/SMLib/src/SmFilletGeom.cpp)",
       "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "blending_missing_second_rail_g0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#28 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "blending_missing_second_rail_g1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_geom_p4/review.json#29 (upstream source/SMLib/src/SmFilletGeom.cpp)",
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -915,8 +923,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0011",
@@ -1078,16 +1086,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0031",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190359",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -1234,16 +1238,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0050",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190378",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1295,8 +1295,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0057",
@@ -1394,16 +1394,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0069",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190397",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1446,16 +1442,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0075",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190403",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1690,28 +1682,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0105",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190433",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190434",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -1795,8 +1779,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0117",
@@ -1838,16 +1822,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0122",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190450",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1882,16 +1862,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0127",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190455",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2150,16 +2126,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0160",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190488",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2179,8 +2151,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0163",
@@ -2198,16 +2170,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0165",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190493",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2267,8 +2235,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0173",
@@ -2326,16 +2294,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0180",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190508",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2394,21 +2358,17 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190516",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0189",
@@ -2451,8 +2411,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0194",
@@ -2494,16 +2454,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0199",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190527",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2666,16 +2622,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0220",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190548",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2846,16 +2798,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::GetRailIndexOfVertexuse",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0242",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190570",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2931,8 +2879,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0252",
@@ -3199,8 +3147,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0285",
@@ -3259,8 +3207,8 @@
     },
     {
       "deferred": {
-        "symbol": "JoinTwoFilletVertsByCurves",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0292",
@@ -3270,16 +3218,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::CalcBlendingRail",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0293",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207371918134190621",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -3331,12 +3275,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 36,
+  "cases_deferred": 18,
   "cases_failed": 0,
-  "cases_passed": 362,
-  "cases_total": 398,
+  "cases_passed": 382,
+  "cases_total": 400,
   "deferred_by_unit": {
-    "blend.fillet_geom_p6": 36
+    "topology.brep_p3": 18
   },
   "max_rel_err": 0.0,
   "pass": true,

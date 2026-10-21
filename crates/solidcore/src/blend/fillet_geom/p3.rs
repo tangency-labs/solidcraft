@@ -55,11 +55,11 @@
 //!   `FilletSolverOps`, so it returns [`SolidError::Unported`].
 //! - **Unported callees.** `CalcConeFilletGeom` / `CalcTorusFilletGeom`
 //!   (`blend.fillet_solver_p2`) for analytic fillets, `SmFilletEdge::CalcCrossSection`
-//!   (`blend.fillet_geom_p5`) and `sm_MoveTSP` (`blend.fillet_geom_p6`) after it;
+//!   (`blend.fillet_geom_p5`) after it;
 //!   the vertex's `CalcFilletIntFillet` (`blend.fillet_geom_p5`) and, after a failed
 //!   intersection, `SmFilletCorner::RecordFilletError` (`blend.fillet_corner_p2`) in
 //!   the edge's `CalcFilletIntFillet`; the vertex and edge calculators of the
-//!   dispatchers that belong to parts 5 and 6 (those of parts 2 and 4 are called); in
+//!   dispatchers that belong to part 5 (those of parts 2, 4 and 6 are called); in
 //!   `TopologySplit` `MakeRailEdgeuse` and `MakeFilletEdge` (`blend.fillet_geom_p5`),
 //!   `SmFilletExecutive::GetFilletCornerOfVertex` (`blend.fillet_executive_p1`) and
 //!   the fillet corner's vertex list and type (`blend.fillet_corner_p1`). Each stub
@@ -74,6 +74,7 @@
 //!   needs a real `SmFilletExecutive` (it calls `GetFilletCornerOfVertex`), so difftest
 //!   does not run it.
 
+use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_intersector;
 use crate::blend::fillet_solver::p1::{FilletGeomRef, FilletSolver, FilletSolverOps};
@@ -101,6 +102,7 @@ use super::p1::{
 };
 use super::p2::{srf_srf_intersection, SrfSrfCurves, SrfSrfOptions};
 use super::p4::set_edge_curve;
+use super::p6::{corner_of, move_tsp};
 
 const OP: &str = "blend::fillet_geom::p3";
 const OP_MATE: &str = "blend::fillet_geom::p3::FilletBrep::calc_mate_geom";
@@ -149,14 +151,6 @@ fn solver_of<'s>(
         .ok()
         .and_then(|i| solvers.get(i))
         .ok_or_else(|| invalid(op, "fillet solver id not in the solver table"))
-}
-
-/// The corner `id` of the caller's table.
-fn corner_view(corners: &[FilletCornerView], id: FilletCornerId) -> Result<&FilletCornerView> {
-    usize::try_from(id.0)
-        .ok()
-        .and_then(|i| corners.get(i))
-        .ok_or_else(|| invalid(OP_CORNER_EDGE, "fillet corner id not in the corner table"))
 }
 
 /// An offset surface as a [`Surface`] (a copy; its evaluations dispatch to the
@@ -240,12 +234,6 @@ const fn is_b_spline_kind(c: &Curve) -> bool {
             | CurveKind::Hyperbola(_)
             | CurveKind::Parabola(_)
     )
-}
-
-/// `sm_MoveTSP(rTsectPnts, lFrom, lTo)` (unit `blend.fillet_geom_p6`).
-fn move_tsp(order: &mut Vec<VertexuseId>, from: usize, to: usize) -> Result<()> {
-    // UNPORTED(blend.fillet_geom_p6): sm_MoveTSP
-    unported_on((order, from, to), "sm_MoveTSP", "blend.fillet_geom_p6")
 }
 
 impl FilletBrep {
@@ -445,15 +433,15 @@ impl FilletBrep {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for an edge without a fillet corner; those of the type's
-    /// calculator; [`SolidError::Unported`] for the calculators of
-    /// `blend.fillet_geom_p5` and `p6`.
+    /// `SM_ERR_NULL_POINTER` for an edge without a fillet corner;
+    /// [`SolidError::InvalidInput`] for a corner missing from `corners`; those of the
+    /// type's calculator; [`SolidError::Unported`] for the calculators of
+    /// `blend.fillet_geom_p5`.
     pub fn calc_corner_edge_geom(
         &mut self,
         k: &Kernel,
         e: EdgeId,
-        target: &Brep,
-        corners: &[FilletCornerView],
+        corners: &[FilletCorner],
         solvers: &[FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
@@ -483,12 +471,7 @@ impl FilletBrep {
             FilletEdgeType::RailRailInterpolation => {
                 self.calc_rail_rail_interpolation(k, e, Some(corner), solvers, target)
             }
-            // UNPORTED(blend.fillet_geom_p6): SmFilletEdge::CalcEdgeOnEdge
-            FilletEdgeType::OnEdge => unported_on(
-                (k, e, corner),
-                "SmFilletEdge::CalcEdgeOnEdge",
-                "blend.fillet_geom_p6",
-            ),
+            FilletEdgeType::OnEdge => self.calc_edge_on_edge(k, e, target),
             // UNPORTED(blend.fillet_geom_p5): SmFilletEdge::CalcEdgeOnExtendedEdge
             FilletEdgeType::OnExtendEdge => unported_on(
                 (k, e, corner),
@@ -496,12 +479,12 @@ impl FilletBrep {
                 "blend.fillet_geom_p5",
             ),
             FilletEdgeType::FilletEnd => {
-                let view = *corner_view(corners, corner)?;
-                self.calc_fillet_end(k, e, target, Some(&view), solvers)
+                let c = corner_of(corners, corner, OP_CORNER_EDGE)?;
+                self.calc_fillet_end(k, e, target, Some(c), solvers)
             }
             FilletEdgeType::SetbackRail | FilletEdgeType::RailExtension => {
-                let view = *corner_view(corners, corner)?;
-                self.calc_set_back_rail(k, e, target, Some(&view), solvers)
+                let c = corner_of(corners, corner, OP_CORNER_EDGE)?;
+                self.calc_set_back_rail(k, e, target, Some(c), solvers)
             }
             // SM_FE_RAIL, SM_FE_PRECOMPUTED, SM_FE_BLENDING_RAIL, SM_FE_CLIFF_RAIL,
             // SM_FE_SPLIT_FACE, SM_FE_UNKNOWN
@@ -1688,7 +1671,7 @@ mod tests {
         // not made by a fillet corner
         let mut target = Brep::new();
         let err = fb
-            .calc_corner_edge_geom(&k, e, &[], &mut target)
+            .calc_corner_edge_geom(&k, e, &[], &[], &mut target)
             .unwrap_err();
         assert_eq!(code(&err), Some(SM_ERR_NULL_POINTER), "{err:?}");
 
@@ -1702,27 +1685,39 @@ mod tests {
                 Some("blend.fillet_geom_p5"),
             ),
             (FilletEdgeType::OnExtendEdge, Some("blend.fillet_geom_p5")),
-            (FilletEdgeType::OnEdge, Some("blend.fillet_geom_p6")),
-            (FilletEdgeType::FilletEnd, Some("blend.fillet_geom_p6")),
-            (FilletEdgeType::SetbackRail, Some("blend.fillet_geom_p6")),
-            (FilletEdgeType::RailExtension, Some("blend.fillet_geom_p6")),
             (FilletEdgeType::Rail, None),
             (FilletEdgeType::Unknown, None),
         ] {
             fb.fillet_edge_mut(e).unwrap().set_fillet_edge_type(t);
-            let r = fb.calc_corner_edge_geom(&k, e, &[], &mut target);
+            let r = fb.calc_corner_edge_geom(&k, e, &[], &[], &mut target);
             assert_eq!(r.as_ref().err().and_then(unit_of), unit, "{t:?}: {r:?}");
         }
         // CalcRailRailInterpolation (part 2) runs
         fb.fillet_edge_mut(e)
             .unwrap()
             .set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
-        let r = fb.calc_corner_edge_geom(&k, e, &[], &mut target);
+        let r = fb.calc_corner_edge_geom(&k, e, &[], &[], &mut target);
         assert_ne!(
             r.as_ref().err().and_then(unit_of),
             Some("blend.fillet_geom_p2"),
             "{r:?}"
         );
+
+        // the part 6 calculators run: without an original edge (SM_ERR_NULL_POINTER), or
+        // a corner in the table (InvalidInput)
+        for (t, want) in [
+            (FilletEdgeType::OnEdge, Some(SM_ERR_NULL_POINTER)),
+            (FilletEdgeType::FilletEnd, None),
+            (FilletEdgeType::SetbackRail, None),
+            (FilletEdgeType::RailExtension, None),
+        ] {
+            fb.fillet_edge_mut(e).unwrap().set_fillet_edge_type(t);
+            let err = fb
+                .calc_corner_edge_geom(&k, e, &[], &[], &mut target)
+                .unwrap_err();
+            assert!(!err.is_unported(), "{t:?}: {err:?}");
+            assert_eq!(code(&err), want, "{t:?}: {err:?}");
+        }
     }
 
     #[test]

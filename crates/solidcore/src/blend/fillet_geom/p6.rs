@@ -25,7 +25,6 @@
 //! | [`FilletBrep::rail_edgeuse_intersect`]       | `SmFilletGeom::RailEdgeuseIntersect`      |
 //! | [`FilletBrep::trim_original_surfaces`]       | `SmFilletGeom::TrimOriginalSurfaces`      |
 //! | [`FilletBrep::record_fillet_error`]          | `SmFilletGeom::RecordFilletError`         |
-//! | [`FilletCornerView`]                         | `SmFilletCorner::GetFilletedVertex`, `GetCornerType`, `GetThisApproxTol3d` (CO-PORTED from `blend.fillet_corner_p1`) |
 //! | [`FilletBrep::new`](super::p1::FilletBrep::new) (in part 1) | `SmFilletBrep::SmFilletBrep` (CO-PORTED in `blend.fillet_geom_p1`) |
 //!
 //! Deviations:
@@ -34,9 +33,8 @@
 //!   original edges and faces, the vertices' classification objects, the solvers' edge
 //!   uses). A geometry's `GetFilletSolver()` is resolved in the caller's `solvers`
 //!   table (index [`FilletSolverId`]`.0`), as in part 3. `SmFilletCorner*` arguments
-//!   are [`FilletCornerView`]s: the three corner members these functions read
-//!   (co-ported; the corner itself belongs to `blend.fillet_corner_p1`); a fillet
-//!   edge's own corner ([`FilletCornerId`]) is resolved in the caller's `corners`
+//!   are [`FilletCorner`]s (`m_cpVertex` for `GetFilletedVertex`, `corner_type()`,
+//!   `approx_tol_3d` for `GetThisApproxTol3d`); a fillet edge's own corner ([`FilletCornerId`]) is resolved in the caller's `corners`
 //!   table the same way. `SmFilletGeom::GetOffsetSurface` falls back to the geometry's
 //!   [`FilletSolver`] (`FilletSolver::surface`), as part 3 does.
 //! - **Curves.** `SmEdge::SetCurve(pCurve, TRUE)` on a pseudo-B-rep edge is part 1's
@@ -82,6 +80,7 @@
 //! - **Iteration.** No recursion; `JoinTwoFilletVertsByCurves` removes a side edge use
 //!   per step, so it runs at most once per side edge use.
 
+use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_solver::p1::{FilletGeomRef, FilletSolver};
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
@@ -114,13 +113,14 @@ use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::face::p2 as face2;
 use crate::topology::topology_traverser::{collect_faces, Entity, Marks};
-use crate::topology::{vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
+use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
 
 use super::p1::{
     classify_face_point, interpolate_endpts_and_tangents, is_order_correct, set_rail_curve,
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType,
-    FilletGeomId, FilletSolverId, FilletVertexType,
+    FilletGeomId, FilletVertexType,
 };
+use super::p4::solver_of;
 
 const OP_BLENDING: &str = "blend::fillet_geom::p6::FilletBrep::calc_blending_rail";
 const OP_ON_EDGE: &str = "blend::fillet_geom::p6::FilletBrep::calc_edge_on_edge";
@@ -148,36 +148,12 @@ fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::invalid_input(operation, reason)
 }
 
-/// The members of an `SmFilletCorner` that part 6 reads (CO-PORTED from
-/// `blend.fillet_corner_p1`; that unit's porter extends or replaces this view).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FilletCornerView {
-    /// `m_cpVertex` (`GetFilletedVertex`): the target B-rep vertex being filleted.
-    pub filleted_vertex: Option<VertexId>,
-    /// `GetCornerType()`: the derived corner's constant type.
-    pub corner_type: FilletCornerType,
-    /// `m_dThisApproxTol3d` (`GetThisApproxTol3d`).
-    pub approx_tol_3d: f64,
-}
-
-/// The solver `id` of the caller's table.
-fn solver_of<'s>(
-    solvers: &'s [FilletSolver],
-    id: FilletSolverId,
-    op: &'static str,
-) -> Result<&'s FilletSolver> {
-    usize::try_from(id.0)
-        .ok()
-        .and_then(|i| solvers.get(i))
-        .ok_or_else(|| invalid(op, "fillet solver id not in the solver table"))
-}
-
 /// The corner `id` of the caller's table.
-fn corner_of<'c>(
-    corners: &'c [FilletCornerView],
+pub(crate) fn corner_of<'c>(
+    corners: &'c [FilletCorner],
     id: FilletCornerId,
     op: &'static str,
-) -> Result<&'c FilletCornerView> {
+) -> Result<&'c FilletCorner> {
     usize::try_from(id.0)
         .ok()
         .and_then(|i| corners.get(i))
@@ -471,17 +447,6 @@ impl FilletBrep {
         Ok((start, end))
     }
 
-    /// The first `SM_FE_RAIL` edge at fillet vertex `v` (`GetEdges`, cast to fillet
-    /// edges).
-    fn first_rail_at(&self, v: VertexId) -> Result<Option<EdgeId>> {
-        for e in vertex::edges(self.brep(), v, None)? {
-            if self.fillet_edge(e)?.fillet_edge_type() == FilletEdgeType::Rail {
-                return Ok(Some(e));
-            }
-        }
-        Ok(None)
-    }
-
     /// `SmFilletEdge::CalcBlendingRail`: the edge between two rail ends on the original
     /// face of edge `e`: a line, circular arc, parabola (or the failing Hermite) between
     /// the end points along the rails' end tangents, in UV space of the face's surface
@@ -699,7 +664,7 @@ impl FilletBrep {
         let ivl = curve.natural_interval();
         let (new_3d_curve, uv_curve) = if curve_dim == 2 {
             let lifted = surf.lift_curve(k, &uv_domain, &curve, &ivl, tol, false)?;
-            (Curve::from(lifted.curve), curve)
+            (lifted.curve, curve)
         } else {
             // Project 3D curve onto the plane
             // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
@@ -845,14 +810,14 @@ impl FilletBrep {
         k: &Kernel,
         e: EdgeId,
         target: &Brep,
-        corner: Option<&FilletCornerView>,
+        corner: Option<&FilletCorner>,
         solvers: &[FilletSolver],
     ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_END);
         let corner = corner.ok_or_else(nul)?;
 
         // Gather info.
-        let cp_vertex = corner.filleted_vertex;
+        let cp_vertex = corner.vertex;
 
         let (start_fv, end_fv) = self.edge_end_vertices(e, OP_END)?;
         if !self.fillet_vertex(start_fv)?.is_processed()
@@ -956,7 +921,7 @@ impl FilletBrep {
         )?;
 
         // side effect: delete current this->UVTrimCurves
-        set_rail_curve(self.brep_mut(), e, Curve::from(lifted.curve))?;
+        set_rail_curve(self.brep_mut(), e, lifted.curve)?;
         self.set_edgeuse_uv_curve(prim_eu, Some(uv_curve), false, true)?;
         self.geom_mut(fillet_geom1)?
             .add_side_fillet_edgeuse(prim_eu);
@@ -1033,7 +998,7 @@ impl FilletBrep {
         k: &Kernel,
         e: EdgeId,
         target: &Brep,
-        opt_corner: Option<&FilletCornerView>,
+        opt_corner: Option<&FilletCorner>,
         solvers: &[FilletSolver],
     ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_SETBACK);
@@ -1187,7 +1152,7 @@ impl FilletBrep {
         self.set_edgeuse_uv_curve(mate_eu, new_orig_uv_curve, false, true)?;
 
         // for Corner of type = SM_FCR_N_x_2,
-        if let Some(corner) = opt_corner.filter(|c| c.corner_type == FilletCornerType::NByTwo) {
+        if let Some(corner) = opt_corner.filter(|c| c.corner_type() == FilletCornerType::NByTwo) {
             let len = self
                 .brep()
                 .edge(e)?
@@ -1244,7 +1209,7 @@ impl FilletBrep {
         orig_face: FaceId,
         new_face: FaceId,
         target: &mut Brep,
-        corners: &[FilletCornerView],
+        corners: &[FilletCorner],
     ) -> Result<bool> {
         let nul = || SolidError::null_pointer(OP_SWAP);
         let fe = self.fillet_edge(e)?;
@@ -1274,7 +1239,7 @@ impl FilletBrep {
                 }
             } else if let Some(corner) = fe.fillet_corner() {
                 let base_vtx = corner_of(corners, corner, OP_SWAP)?
-                    .filleted_vertex
+                    .vertex
                     .ok_or_else(nul)?;
                 test_pt = target.vertex(base_vtx)?.point;
 
@@ -1572,13 +1537,20 @@ impl FilletBrep {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` (upstream: `lIdx = 0`) when `vu` is at neither rail's ends; those of
-    /// [`FilletBrep::rail_vertexuse`] (a missing rail).
-    pub fn rail_index_of_vertexuse(&self, g: FilletGeomId, vu: VertexuseId) -> Result<usize> {
-        if self.rail_vertexuse(g, 0, 0)? == Some(vu) || self.rail_vertexuse(g, 0, 1)? == Some(vu) {
+    /// `SM_ERR_NULL_POINTER` for a `None` vertex use; `SM_ERR` (upstream: `lIdx = 0`)
+    /// when `vu` is at neither rail's ends; those of [`FilletBrep::rail_vertexuse`] (a
+    /// missing rail).
+    pub fn rail_index_of_vertexuse(
+        &self,
+        g: FilletGeomId,
+        vu: Option<VertexuseId>,
+    ) -> Result<usize> {
+        // NER( pFVU )
+        let vu = Some(vu.ok_or_else(|| SolidError::null_pointer(OP_RAIL_VU))?);
+        if self.rail_vertexuse(g, 0, 0)? == vu || self.rail_vertexuse(g, 0, 1)? == vu {
             return Ok(0);
         }
-        if self.rail_vertexuse(g, 1, 0)? == Some(vu) || self.rail_vertexuse(g, 1, 1)? == Some(vu) {
+        if self.rail_vertexuse(g, 1, 0)? == vu || self.rail_vertexuse(g, 1, 1)? == vu {
             return Ok(1);
         }
         Err(SolidError::sm_err(OP_RAIL_VU))
@@ -2067,7 +2039,7 @@ mod tests {
     use crate::topology::{Edgeuse, Vertexuse, VertexuseOwner};
 
     use super::super::p1::{
-        FilletEdgeuse, FilletGeom, FilletGeomType, FilletVertex, FilletVertexuse,
+        FilletEdgeuse, FilletGeom, FilletGeomType, FilletSolverId, FilletVertex, FilletVertexuse,
     };
 
     fn code(e: &SolidError) -> Option<i32> {
@@ -2273,7 +2245,7 @@ mod tests {
         for rail in 0..2 {
             for end in 0..2 {
                 let vu = fb.rail_vertexuse(g, rail, end).unwrap().unwrap();
-                assert_eq!(fb.rail_index_of_vertexuse(g, vu).unwrap(), rail);
+                assert_eq!(fb.rail_index_of_vertexuse(g, Some(vu)).unwrap(), rail);
             }
         }
 
@@ -2282,7 +2254,7 @@ mod tests {
         let b = vertex(&mut fb, &k, Point3::new(6.0, 5.0, 5.0));
         let (_, eus) = edge_with_uses(&mut fb, a, b, FilletEdgeType::CrossSection);
         let other = fb.brep().edgeuse(eus[0]).unwrap().vertexuse.unwrap();
-        let err = fb.rail_index_of_vertexuse(g, other).unwrap_err();
+        let err = fb.rail_index_of_vertexuse(g, Some(other)).unwrap_err();
         assert_eq!(code(&err), Some(SM_ERR));
     }
 
