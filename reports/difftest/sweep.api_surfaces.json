@@ -579,8 +579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "skin_primitive_cubic_capped",
@@ -591,8 +591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "skin_primitive_linear_capped",
@@ -603,8 +603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "skin_primitive_circle_to_line",
@@ -615,8 +615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "skin_primitive_annular",
@@ -983,8 +983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0036",
@@ -2367,8 +2367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0204",
@@ -2827,8 +2827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0260",
@@ -3547,8 +3547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0348",
@@ -4139,8 +4139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0420",
@@ -5991,8 +5991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0646",
@@ -6279,8 +6279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSkinPrimitive",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0681",
@@ -7268,8 +7268,7 @@
   "cases_passed": 831,
   "cases_total": 882,
   "deferred_by_unit": {
-    "primitive.primitive_creation_p2": 11,
-    "topology.brep_p3": 40
+    "topology.brep_p3": 51
   },
   "max_rel_err": 0.0,
   "pass": true,

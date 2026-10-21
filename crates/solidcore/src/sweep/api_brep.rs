@@ -64,8 +64,6 @@ const OP_TAPER: &str = "sweep::api_brep::create_taper_extrude";
 const OP_LINEAR_REPS: &str = "sweep::api_brep::create_linear_sweep_with_repetitions";
 const OP_ROTATIONAL_REPS: &str = "sweep::api_brep::create_rotational_sweep_with_repetitions";
 
-const UNIT_P2: &str = "primitive.primitive_creation_p2";
-
 /// How the gaps between offset profile curves are filled by a draft sweep or taper
 /// extrusion (`SmOffsetCornerType`).
 pub use crate::curve::composite_curve::OffsetCornerType;
@@ -188,7 +186,7 @@ pub fn create_rotational_sweep(
 /// # Errors
 ///
 /// `InvalidInput` for a `None` curve; the error of a failing curve copy;
-/// [`SolidError::Unported`] otherwise (`SmPrimitiveCreation::CreateTaperExtrude`).
+/// [`SolidError::Unported`] otherwise (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_draft_sweep(
     k: &Kernel,
     curves_to_sweep: &[Option<&Curve>],
@@ -223,11 +221,9 @@ pub fn create_draft_sweep(
     // on the new B-rep once the constructor above lands
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // instantiate with the new B-rep's infinite region when its constructor lands.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateTaperExtrude
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateTaperExtrude",
-        UNIT_P2,
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_taper_extrude;
+    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// The pipe of radius `pipe_radius` swept along `path_curve`
@@ -238,7 +234,7 @@ pub fn create_draft_sweep(
 ///
 /// `InvalidInput` for no path curve or a radius `<= 0` (a NaN radius passes, as
 /// upstream); [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreatePipeSweep`).
+/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_pipe_sweep(
     k: &Kernel,
     pipe_radius: f64,
@@ -263,11 +259,9 @@ pub fn create_pipe_sweep(
     // on the new B-rep once the constructor above lands
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // instantiate with the new B-rep's infinite region when its constructor lands.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreatePipeSweep
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreatePipeSweep",
-        UNIT_P2,
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_pipe_sweep;
+    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// The solid swept by the profile boundary `profile_curves` along the ordered,
@@ -280,7 +274,7 @@ pub fn create_pipe_sweep(
 ///
 /// `InvalidInput` for no profile or path curve or `cap_ends` outside `0..=3`;
 /// [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreateSweepAlongPlanarPath`).
+/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_sweep_along_planar_path(
     k: &Kernel,
     profile_curves: &[&Curve],
@@ -315,11 +309,12 @@ pub fn create_sweep_along_planar_path(
         cap_end,
         move_profile,
     );
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateSweepAlongPlanarPath
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
-        UNIT_P2,
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_sweep_along_planar_path,
+    // which builds every piece in a new B-rep: supply them through PrimitiveCreationAccess
+    // once the B-rep constructor is ported. Upstream has no early exit before that
+    // constructor, so it is this wrapper's first unported call.
+    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// The solid swept by `profile_curves` along `path_curve`, scaled as
@@ -373,7 +368,7 @@ pub fn create_curve_sweep(
 /// # Errors
 ///
 /// `InvalidInput` for no faces or no path curve; [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreateCurveSweepFromFaces`).
+/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_curve_sweep_from_faces(
     k: &Kernel,
     brep: &Brep,
@@ -401,11 +396,9 @@ pub fn create_curve_sweep_from_faces(
     // on the new B-rep once the constructor above lands
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // instantiate with the new B-rep's infinite region when its constructor lands.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateCurveSweepFromFaces
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateCurveSweepFromFaces",
-        UNIT_P2,
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_curve_sweep_from_faces;
+    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// The solid swept by the curves of `edges` of `brep` along `path_curve`
@@ -415,7 +408,7 @@ pub fn create_curve_sweep_from_faces(
 /// # Errors
 ///
 /// `InvalidInput` for no edges or no path curve; [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreateCurveSweepFromEdges`).
+/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_curve_sweep_from_edges(
     k: &Kernel,
     brep: &Brep,
@@ -443,11 +436,9 @@ pub fn create_curve_sweep_from_edges(
     // on the new B-rep once the constructor above lands
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // instantiate with the new B-rep's infinite region when its constructor lands.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateCurveSweepFromEdges
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateCurveSweepFromEdges",
-        UNIT_P2,
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_curve_sweep_from_edges;
+    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// The solid extruded from `curves` to `height` with a draft angle of
@@ -460,7 +451,7 @@ pub fn create_curve_sweep_from_edges(
 ///
 /// `InvalidInput` for no curves or a `None` curve; the error of a failing curve
 /// copy; [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreateTaperExtrude`).
+/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_taper_extrude(
     k: &Kernel,
     curves: &[Option<&Curve>],
@@ -497,11 +488,9 @@ pub fn create_taper_extrude(
     // on the new B-rep once the constructor above lands
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // instantiate with the new B-rep's infinite region when its constructor lands.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateTaperExtrude
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateTaperExtrude",
-        UNIT_P2,
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_taper_extrude;
+    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// The solid swept by `curves_to_sweep` along `sweep_dir` over `sweep_dist`,

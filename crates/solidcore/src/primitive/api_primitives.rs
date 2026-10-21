@@ -48,11 +48,14 @@
 //!   called constructors pass through unchanged.
 //! - Static plane/disc sheets call the p1 port with the caller Kernel and native
 //!   tolerance, then reject a result without faces as `SM_ERR`. New solid B-reps
-//!   defer first at `SmBrep::SmBrep` (`topology.brep_p3`); the available p1
-//!   constructor and primitive operations are documented at those call sites.
+//!   defer first at `SmBrep::SmBrep` (`topology.brep_p3`); the available p1, p2 and p3
+//!   constructors and primitive operations are documented at those call sites (the
+//!   sphere, cone and torus of `primitive.primitive_creation_p2` among them).
 //!   The pyramid still builds its base edges before its p8 construction blocker.
-//!   Blend uses the caller's existing B-rep and the real primitive constructor,
-//!   then defers at `primitive.primitive_creation_p2::CreateBlendPrimitive`.
+//!   Blend uses the caller's existing B-rep and the real primitive constructor, then
+//!   defers at its face (`SmBrep::CreateFaceFromSurface`, `topology.brep_p8`), which
+//!   comes after the edge-use check and the blend surface. `SmBrep::GetInfiniteRegion`
+//!   is ported (`Brep::infinite_region`).
 //! - `SmApiCreateOffsetProfile`, `SmApiCreateSkinPrimitive` and
 //!   `SmApiCreateSkinFromFaces`, also in this file, belong to other units.
 //! - No recursion.
@@ -81,7 +84,6 @@ const OP_CYLINDRICAL_BOX: &str = "primitive::api_primitives::create_cylindrical_
 const OP_SPHERE_NO_POLE: &str = "primitive::api_primitives::create_sphere_no_pole";
 
 const UNIT_BREP_P3: &str = "topology.brep_p3";
-const UNIT_P2: &str = "primitive.primitive_creation_p2";
 const UNIT_BREP_P8: &str = "topology.brep_p8";
 
 /// `SmApiIsPositiveDim`: a finite dimension (radius, length, height) above
@@ -441,7 +443,9 @@ fn partial_sphere(
     // UNPORTED(topology.brep_p3): SmBrep::SmBrep
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // use the new B-rep's infinite region after its constructor is available.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateSphere
+    // Ported: primitive::primitive_creation::p1::PrimitiveCreation::create_partial_sphere
+    // (`primitive.primitive_creation_p2`);
+    // the new target B-rep is required before this call can run.
     Err(SolidError::unported("SmBrep::SmBrep", UNIT_BREP_P3))
 }
 
@@ -503,7 +507,9 @@ fn partial_cone(
     // UNPORTED(topology.brep_p3): SmBrep::SmBrep
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // use the new B-rep's infinite region after its constructor is available.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateCone
+    // Ported: primitive::primitive_creation::p1::PrimitiveCreation::create_partial_cone
+    // (`primitive.primitive_creation_p2`);
+    // the new target B-rep is required before this call can run.
     Err(SolidError::unported("SmBrep::SmBrep", UNIT_BREP_P3))
 }
 
@@ -612,7 +618,9 @@ fn partial_torus(
     // UNPORTED(topology.brep_p3): SmBrep::SmBrep
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // use the new B-rep's infinite region after its constructor is available.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateTorus
+    // Ported: primitive::primitive_creation::p1::PrimitiveCreation::create_partial_torus
+    // (`primitive.primitive_creation_p2`);
+    // the new target B-rep is required before this call can run.
     Err(SolidError::unported("SmBrep::SmBrep", UNIT_BREP_P3))
 }
 
@@ -645,7 +653,7 @@ pub fn create_partial_torus(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmPrimitiveCreation::CreateBlendPrimitive`).
+/// [`SolidError::Unported`] (`SmBrep::CreateFaceFromSurface`).
 pub fn create_blend_primitive(
     brep: &mut Brep,
     edge1: EdgeId,
@@ -657,10 +665,10 @@ pub fn create_blend_primitive(
     let _creation = PrimitiveCreation::new(brep.infinite_region(), 0, false);
     let _ = (edge1, face1, edge2, face2, same_dir_curves);
     // Ported: PrimitiveCreation::new uses the caller's existing B-rep region.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateBlendPrimitive
+    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
     Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateBlendPrimitive",
-        UNIT_P2,
+        "SmBrep::CreateFaceFromSurface",
+        UNIT_BREP_P8,
     ))
 }
 
@@ -751,6 +759,40 @@ mod tests {
         assert!(create_box(o(), 5.0, 10.0, 20.0).is_err_and(|e| e.is_unported()));
         assert!(create_sphere_no_pole(o(), -5.0).is_err_and(|e| e.is_unported()));
         assert!(create_pyramid(o(), 2.0, 3.0).is_err_and(|e| e.is_unported()));
+    }
+
+    #[test]
+    fn ported_constructors_defer_at_the_next_unported_call() {
+        fn deferred_at<T>(r: &Result<T>) -> Option<&'static str> {
+            match r {
+                Err(SolidError::Unported { unit, .. }) => Some(*unit),
+                _ => None,
+            }
+        }
+        let brep_p3 = Some(UNIT_BREP_P3);
+        assert_eq!(deferred_at(&create_sphere(o(), 5.0)), brep_p3);
+        assert_eq!(
+            deferred_at(&create_partial_sphere(o(), 5.0, 0.0, 90.0)),
+            brep_p3
+        );
+        assert_eq!(deferred_at(&create_cone(o(), 5.0, 2.0, 10.0)), brep_p3);
+        assert_eq!(
+            deferred_at(&create_partial_cylinder(o(), 5.0, 10.0, 0.0, 90.0)),
+            brep_p3
+        );
+        assert_eq!(deferred_at(&create_torus(o(), 10.0, 2.0)), brep_p3);
+        assert_eq!(
+            deferred_at(&create_partial_torus(o(), 10.0, 2.0, 0.0, 90.0)),
+            brep_p3
+        );
+        let mut brep = Brep::new();
+        let (edge, face) = (EdgeId::from_index(0), FaceId::from_index(0));
+        assert_eq!(
+            deferred_at(&create_blend_primitive(
+                &mut brep, edge, face, edge, face, true
+            )),
+            Some(UNIT_BREP_P8)
+        );
     }
 
     #[test]

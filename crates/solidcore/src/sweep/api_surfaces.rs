@@ -155,7 +155,7 @@ fn copy_skin_primitive_curves(k: &Kernel, input_curves: &[Option<&Curve>]) -> Re
 /// `InvalidInput` for fewer than two profiles, a degree outside `1..=3`, an empty
 /// profile, profile counts that do not add up to the curve count or a `None` curve;
 /// the error of a failing curve copy; [`SolidError::Unported`] otherwise
-/// (`SmPrimitiveCreation::CreateSkinPrimitive`).
+/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_skin_primitive(
     k: &Kernel,
     curves_in_each_profile: &[usize],
@@ -175,11 +175,9 @@ pub fn create_skin_primitive(
     // on the new B-rep once the constructor above lands
     // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
     // instantiate with the new B-rep's infinite region when its constructor lands.
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateSkinPrimitive
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateSkinPrimitive",
-        "primitive.primitive_creation_p2",
-    ))
+    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_skin_primitive;
+    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
+    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
 }
 
 /// A solid lofted between the matching loops of the face sequence `faces` of

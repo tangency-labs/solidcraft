@@ -1,0 +1,3482 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "partial_sphere_zero_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#0 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:54)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "partial_cone_zero_height",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#1 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:56)",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "partial_torus_zero_minor",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#2 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:58)",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "skin_three_circles_cubic",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#3 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:544)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "skin_three_circles_linear",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#4 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:562)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "skin_circle_then_line_fails",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#5 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:605)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "skin_concentric_loops",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#6 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:642)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "draft_sweep_rectangle",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#7 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:430)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "taper_extrude_square",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#8 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1846)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "pipe_sweep_curved_path",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#9 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1873)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sweep_from_no_edges",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#10",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sweep_from_no_faces",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#11",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "skin_one_profile",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#12",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "skin_no_profiles",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#13",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "partial_cone_axis_below_tolerance",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#14",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "partial_cone_zero_side",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#15",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "partial_cone_zero_turn",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#16",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "full_cone_degenerate_radii",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#17",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "full_sphere_zero_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#18",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "full_torus_zero_minor",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#19",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_two_lines",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/cases.json#20",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0.0, 1e-6, 1e-6, 30.0, 30.0000000000001, 9.156379209174137, -8.265571696094371, 9.187968366457618, 1.0, 0.3822658777827509, 0.0, 0.0, 1.0, -0.307584645643617],
+        "expected_rejection": true,
+        "op": 3
+      },
+      "max_rel_err": 0.0,
+      "name": "ub215_partial_torus_tiny_circle_tiny_turn",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#0",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0.0, 0.01, 1e-6, 0.0, 359.0, -7665.418823876078, 6586.981678642605, 8967.753165417136, 1.0, 0.27316665091502534, 0.0, 0.0, 1.0, 0.4722750374207537],
+        "expected_rejection": true,
+        "op": 3
+      },
+      "max_rel_err": 0.0,
+      "name": "ub215_partial_torus_tiny_circle_far_origin",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#1",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0.0, 1.0, 1.0, 9e-6, 0.0, 90.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        "expected_rejection": true,
+        "op": 1
+      },
+      "max_rel_err": 0.0,
+      "name": "ub215_partial_cone_top_line_9e-6",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#2",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0.0, 0.001, 0.0, 1e-6, -45.0, 314.0, 139.94306325294593, 331.6284794155677, 22.641998033520405, 1.0, 0.28673202905877526, 0.0, 0.0, 1.0, 0.02064721918462098],
+        "expected_rejection": true,
+        "op": 1
+      },
+      "max_rel_err": 0.0,
+      "name": "ub215_partial_cone_apex_top_line_1e-6",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#3",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0.0, 0.00001, 30.0, 390.0000000036, -9.027018926001224e-6, 2.2606184288592225e-6, 4.033056063134217e-6, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0],
+        "expected_rejection": true,
+        "op": 2
+      },
+      "max_rel_err": 0.0,
+      "name": "hang35_near_full_sphere_1e-5",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#4",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0.0, 0.00001, 0.00001, 0.0, 360.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        "expected_rejection": true,
+        "op": 3
+      },
+      "max_rel_err": 0.0,
+      "name": "hang35_full_torus_1e-5",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#5",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_two_identical_lines",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#6",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_line_and_its_reverse",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#7",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 1, 0, 0, 0, 1.0, 0, 180, 1, 0, 0, 0, 1.0, 0, 180],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_two_identical_arcs",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#8",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, -1, 0, 0, 0, 0, 0, 0.00003, 0, 0, 0, 0.00003, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_line_back_through_the_last_mid",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#9",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_second_pass_line_and_reverse_apart_down",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#10",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0.00003, 0, 0, 0, 0, 0, 0, 0.00003, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_second_pass_short_link_up",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#11",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [1.0, 100.0, -24.89625914511591, 3.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.000049999999999999996, 0.0, 0.0, 0.0, 0.000049999999999999996, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#12",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, -1, 0, 1, 0, 0, 0, 1, 0, 180, 0, 1, 0, 0, -1, 0, 0, 0, -1, 0, 0, 1, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_second_pass_half_circle_both_chords_down",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#13",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, -24.9, 2, 0, 0, -1, 0, 0, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0, 0, 100, 0.0001, 0, 0, 100, 0.0001, 0, 0, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub50_taper_end_cap_sliver_down",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#14",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0, 43, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub247_taper_start_cap_tail_into_square_fuzz00880",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#15",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 1, 0, 0, 1, 0, 0, 0, 10, 0, 1.001, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub247_taper_start_cap_tail_short_of_corner_up",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#16",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 1, 0, 2, 2, 0, 0, 2, 2, 0, 1, 2, 0, 0, 1, 2, 0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub247_taper_start_cap_two_squares_at_a_corner",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#17",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.3, 0.6, 0],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub247_taper_start_cap_spike_from_corner_down",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#18",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0.5, 0, 0, 0.5, 180, 360],
+        "expected_rejection": true,
+        "op": 8
+      },
+      "max_rel_err": 0.0,
+      "name": "ub247_taper_start_cap_half_circle_across_a_side",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "guarded native crash or hang (fixtures README)",
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/guarded.json#19",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_side_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#0",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_side_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#1",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_side_normal_computed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#2",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_reversed_side_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#3",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_reversed_side_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#4",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_reversed_side_normal_computed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#5",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_top_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#6",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_top_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#7",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_top_normal_computed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#8",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_first_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#9",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_first_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#10",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_first_normal_computed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#11",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_last_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#12",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_last_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#13",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_repeated_last_normal_computed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#14",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "line_back_2_5e-5_off_the_last_mid_start_cap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#15",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_halves_of_a_circle",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#16",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "line_and_reverse_chained_apart_normal_computed",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#17",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "second_pass_short_link_normal_computed_start_cap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#18",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "line_and_reverse_joined_reversed_normal_computed_start_cap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#19",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "half_circle_and_its_chord",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#20",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review2_half_circle_both_chords_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#21",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review2_half_circle_both_chords_computed_normal",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#22",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review2_line_and_reverse_apart_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#23",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review2_low_triangle_end_cap_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#24",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review2_needle_end_cap_normal_down",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#25",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review2_sliver_end_cap_normal_up",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#26",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review3_start_cap_bowtie",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#27",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review3_start_cap_tail_into_open_c",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#28",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review3_start_cap_squares_apart",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#29",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review3_start_cap_square_off_corner",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/primitive.primitive_creation_p2/review_duplicate_curves.json#30",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233754",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233755",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233756",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233757",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233758",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233759",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233760",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233761",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233762",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233763",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233764",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233765",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233766",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233767",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233768",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233769",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233770",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233771",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233772",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233773",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233774",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233775",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233776",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233777",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233778",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233779",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233780",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFaceWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233781",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233782",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233783",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233784",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233785",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233786",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233787",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233788",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233789",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233790",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233791",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233792",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233793",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233794",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFaceWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233795",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233796",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233797",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233798",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233799",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFaceWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233800",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233801",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233802",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233803",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233804",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233805",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233806",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233807",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233808",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233809",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233810",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233811",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233812",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233813",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233814",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233815",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233816",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233817",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233818",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233819",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233820",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233821",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233822",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233823",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233824",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233825",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233826",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233827",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233828",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233829",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233830",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233831",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233832",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233833",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233834",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233835",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233836",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233837",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233838",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233839",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233840",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233841",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233842",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233843",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233844",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233845",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233846",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233847",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233848",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233849",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233850",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233851",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233852",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233853",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233854",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233855",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233856",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233857",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233858",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233859",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233860",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233861",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233862",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233863",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233864",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233865",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233866",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233867",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233868",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233869",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233870",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233871",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233872",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233873",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233874",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233875",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233876",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233877",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233878",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233879",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233880",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233881",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233882",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233883",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233884",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233885",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233886",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233887",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233888",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233889",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233890",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233891",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233892",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233893",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233894",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233895",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233896",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233897",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233898",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233899",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233900",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233901",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233902",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233903",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233904",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFaceWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233905",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233906",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233907",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233908",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233909",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233910",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233911",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233912",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233913",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233914",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233915",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233916",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233917",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233918",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233919",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233920",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233921",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233922",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233923",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233924",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233925",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233926",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233927",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233928",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233929",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233930",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233931",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233932",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233933",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233934",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233935",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233936",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233937",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233938",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233939",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233940",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233941",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233942",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233943",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233944",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233945",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233946",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233947",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233948",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233949",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233950",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233951",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233952",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233953",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233954",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233955",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233956",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233957",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233958",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233959",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233960",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233961",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233962",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233963",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233964",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233965",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233966",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233967",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233968",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233969",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233970",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233971",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233972",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233973",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233974",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233975",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233976",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233977",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233978",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreatePlanarFacesWith3DCurves",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233979",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233980",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233981",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233982",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233983",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233984",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233985",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233986",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233987",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233988",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233989",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233990",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233991",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233992",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233993",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233994",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233995",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233996",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233997",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108233998",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108233999",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108234000",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108234001",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108234002",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108234003",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108234004",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11582637188108234005",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108234006",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFacesFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108234007",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108234008",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11582637188108234009",
+      "values_compared": 0
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 179,
+  "cases_failed": 0,
+  "cases_passed": 129,
+  "cases_rejected": 20,
+  "cases_total": 328,
+  "deferred_by_unit": {
+    "topology.brep_p1": 20,
+    "topology.brep_p3": 81,
+    "topology.brep_p8": 78
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "primitive.primitive_creation_p2"
+}

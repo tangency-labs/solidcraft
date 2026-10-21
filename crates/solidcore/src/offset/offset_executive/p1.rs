@@ -806,10 +806,13 @@ impl OffsetExecutive {
             let _curve = edge::create_trimmed_nurbs_curve(kernel, original, edge)?;
             self.required_offset_brep()?;
             // cpp:3092: offset distance, approximation tolerance, FALSE, FALSE.
-            // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreatePipeSweep
+            // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_pipe_sweep,
+            // which needs a PrimitiveCreationAccess over the offset B-rep. Its first B-rep
+            // edit (p3's curve sweep) is the face construction below.
+            // UNPORTED(topology.brep_p8): SmBrep::CreateFacesFromSurface
             return Err(SolidError::unported(
-                "SmPrimitiveCreation::CreatePipeSweep",
-                "primitive.primitive_creation_p2",
+                "SmBrep::CreateFacesFromSurface",
+                "topology.brep_p8",
             ));
         }
         Ok(())

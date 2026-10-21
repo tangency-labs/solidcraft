@@ -1,8 +1,11 @@
 # solidcore status
 
+Last updated: 2026-10-21, PR #250 second review (`primitive.primitive_creation_p2` partial: 129 bit-identical passes, 179 deferred, 20 guarded rejections). Per-unit state and evidence are in `plan/modules.toml` and `reports/difftest/`.
 Last updated: 2026-10-21, PR #233 dependency integration (`primitive.primitive_creation_p3` partial: 285 exact passes, 10 deferred, 1 rejected native fixture). Per-unit state and evidence are in `plan/modules.toml` and `reports/difftest/`.
 
-Latest port: `primitive.primitive_creation_p3` ([PR #233](https://github.com/tangency-labs/solidcore/pull/233)) implements all eight owned functions through `PrimitiveAccess`/`SweepAccess`. Native comparisons certify the ruled-surface helper and early/empty entry paths; successful construction and topology tails await dependencies and a concrete adapter. See the final validation entry below.
+Latest port: `primitive.primitive_creation_p2` ([PR #250](https://github.com/tangency-labs/solidcore/pull/250)) implements all twelve owned functions through `PrimitiveCreationAccess`, stacked on #233. Native comparisons certify the entry checks and the state they leave; construction tails await the B-rep units. Building the harness found UB-215, HANG-35 and WR-191. See the final validation entry below.
+
+Previous port: `primitive.primitive_creation_p3` ([PR #233](https://github.com/tangency-labs/solidcore/pull/233)) implements all eight owned functions through `PrimitiveAccess`/`SweepAccess`. Native comparisons certify the ruled-surface helper and early/empty entry paths; successful construction and topology tails await dependencies and a concrete adapter.
 
 Previous port integration: `sweep.topology_sweep` ([PR #222](https://github.com/tangency-labs/solidcore/pull/222)) implements the complete sweep orchestration through an explicit `SweepAccess` service boundary. The 568-case gate compares maps, stitch-callback decisions, options and edge-profile tags; topology creation and whole-B-rep/HCR/merge/stitch paths await dependencies and are not claimed as differential coverage. Safety regression tests cover failed traversal progress, temporary ownership, context restoration and consuming union across repetitions. Review integration wires available B-rep/shell queries, copying, face construction and binormal evaluation, corrects the stitch owner to `heal.stitch_p2`, and converts edge/vertex tolerances through the owning kernel. A concrete production access adapter remains integration work, tracked in [issue #255](https://github.com/tangency-labs/solidcore/issues/255); see `plan/findings.md`.
 
@@ -1175,7 +1178,25 @@ and maximum relative error zero. P3 sensitivity detects 284/284 comparisons.
 The 300-mutation harness run executes 78 cases, rejects 163 and classifies 59
 as malformed: zero differences, crashes, panics or timeouts. These results do
 not certify the deferred construction or production-adapter paths.
+PR #250 (`primitive.primitive_creation_p2`): twelve owned functions implemented
+through `PrimitiveCreationAccess` (extends p3's `PrimitiveAccess`); final
+differential gate 283 cases, 127 exact passes (entry checks and the state they
+leave), 150 construction deferrals (`topology.brep_p3` 56, `topology.brep_p8` 75,
+`topology.brep_p2` 19), 6 guarded rejections. Building the harness found three
+upstream issues with isolated native probes: UB-215 (`SweepEdgeHigh` uses a curve
+that `MakeFaceWithCurves` freed), HANG-35 (small closed shells take minutes to place
+in their region) and WR-191 (a failed `ManifoldBoolean` leaves boolean mode on).
+The FFI guards reject the first two and the shim clears the third before each case.
+All six touched units pass with their remaining deferrals after merging #233 `c33cc6d3`
+and main `fb58ea76` (p1 689/75/9, p3 284/8/1, offset executive 687/5/1, topology sweep
+554/14). Formatting, workspace/native Clippy, 1,464 kernel tests, wasm32 and the three
+native FFI guard tests pass. Perturbation detects all 127 comparable p2 cases. The
+1,000-mutation campaign has 282 executed, 511 rejected and 207 malformed cases, with
+zero differences/crashes/panics/timeouts. Nine planted faults are caught (all by the
+kernel tests, six also by the difftest). Details in the fixture README and
+`plan/findings.md`.
 
+The full `--green --no-report` gate completes with 226 units: 114 passed, 112 partial, 0 failed.
 ### PR #213 review refresh (2026-10-20)
 
 Merged canonical main `95b823ed`, retaining both sides of the findings conflict.
