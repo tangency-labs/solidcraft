@@ -572,6 +572,28 @@ mod smlib {
     }
 
     #[test]
+    fn draft_tilts_a_side_and_keeps_its_name() {
+        let b = cube();
+        let side = Vec3::new(40.0, 15.0, 10.0);
+        let deg = std::f64::consts::PI / 180.0;
+        let r = offset_backend::draft(&b, &[side], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap();
+        // The side leans in 20 tan 5 deg at the top: a wedge of 20 x 20 tan 5 deg / 2 x 30 comes off.
+        let wedge = 0.5 * 20.0 * 20.0 * (5.0 * deg).tan() * 30.0;
+        assert!((volume(&r) - (24000.0 - wedge)).abs() < 1e-3, "{}", volume(&r));
+        let h = verified(&r, &b, Reach { made: 0.0, moved: 2.0 });
+        assert_eq!(h.faces.len(), 6);
+        let tilted = with(h, &[face(face_at(&b, side))]);
+        assert_eq!(tilted.len(), 1, "{h:?}");
+        assert_eq!(h.faces[tilted[0]].change, Change::Modified);
+        // A round wall isn't flat; the top isn't parallel to the pull.
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+        let e = offset_backend::draft(&rod, &[Vec3::new(5.0, 0.0, 5.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
+        assert!(e.to_string().contains("not supported yet"), "{e}");
+        let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
+        assert!(e.to_string().contains("not supported yet"), "{e}");
+    }
+
+    #[test]
     fn thicken_offsets_the_surface() {
         let s = crate::patch_region(&Plane::XY, &Region2 { outer: square(0.0, 0.0, 10.0, 10.0), holes: vec![] }).unwrap();
         let t = offset_backend::thicken(&s, 2.0, false).unwrap();

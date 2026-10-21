@@ -614,6 +614,28 @@ mod smlib {
         assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{v}");
     }
 
+    /// A block touching itself along a line: a through hole tangent to its side from inside, and
+    /// a blind hole tangent to its side (the side then on both sides of the line). SMLib's
+    /// result uses the tangent line four times; it comes back as one solid whose edges each bound
+    /// two faces, of the block's volume less the hole's, every face and edge's history verified
+    /// against the geometry.
+    #[test]
+    fn holes_tangent_to_the_side_come_back_as_one_solid() {
+        let a = boxed(0.0, 0.0, 0.0, 30.0, 20.0, 10.0);
+        for (name, z0, depth) in [("through", -1.0, 12.0), ("blind", 2.0, 9.0)] {
+            let b = crate::cylinder(Vec3::new(10.0, 15.0, z0), Vec3::Z, 5.0, depth).unwrap();
+            let r = through_smlib(&a, &b, BoolOp::Cut);
+            assert_eq!(r.solid.boundaries().len(), 1, "{name}");
+            let record = crate::brep_record(&r).unwrap();
+            assert!(record.edges.iter().all(|e| e.uses.len() == 2), "{name}");
+            let hole = std::f64::consts::PI * 25.0 * (10.0 - z0.max(0.0));
+            let v = crate::measure(&r).unwrap().volume;
+            assert!((v - (6000.0 - hole)).abs() < 1e-4 * 6000.0, "{name}: {v}");
+            assert!(r.validity().is_empty(), "{name}: {:?}", r.validity());
+            verified(&r, &[&a, &b], 0.02);
+        }
+    }
+
     #[test]
     fn disjoint_intersection_is_empty() {
         let a = boxed(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);

@@ -251,6 +251,10 @@ fn offsets(offset: &Body) -> Option<History> {
 /// lean in (positive angle) going along `pull`.
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
     b.require_brep("draft")?;
+    #[cfg(feature = "smlib")]
+    if crate::backend()? == crate::Backend::Smlib {
+        return crate::offset_backend::draft(b, faces, neutral, pull, angle);
+    }
     if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));
     }

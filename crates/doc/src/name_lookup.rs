@@ -241,6 +241,76 @@ impl FaceHit {
         }
         best.map(|t| p + d * t)
     }
+
+    /// A point that picks the face found again by itself: [`point`](Self::point) when the
+    /// reference's point still lies on the face clear of its edges; else the point of the face
+    /// nearest `p` that keeps clear of every edge of it. The nearest point of a face the
+    /// reference's point no longer lies on is on the face's boundary (a parameter moved the face
+    /// away from the pick), where a pick by point finds the face beside it as well (#2531).
+    pub fn pick_point(&self, st: &ModelState, p: Vec3) -> Vec3 {
+        let Some(b) = st.bodies.get(self.body) else { return self.point };
+        let m = b.mesh();
+        // Clear of the edges by a few pick tolerances, or by half the face's roomiest triangle
+        // on a face narrower than that.
+        let Some(margin) = roomiest_inradius(&m, self.face).map(|r| (4.0 * (b.body.size() * 1e-3).max(1e-3)).min(r * 0.5)) else {
+            return self.point;
+        };
+        if self.on_point && edge_clearance(&m, self.face, self.point) >= margin {
+            return self.point;
+        }
+        inside_nearest(&m, self.face, p, margin).unwrap_or(self.point)
+    }
+}
+
+/// The incentre and inradius of triangle abc (`None`: degenerate).
+fn incircle(a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f64)> {
+    // The incentre weighs each corner by the side opposite it; the inradius is area / half the perimeter.
+    let (la, lb, lc) = (b.dist(c), c.dist(a), a.dist(b));
+    let perimeter = la + lb + lc;
+    let radius = (b - a).cross(c - a).len() / perimeter;
+    let centre = (a * la + b * lb + c * lc) / perimeter;
+    (radius.is_finite() && radius > 0.0 && centre.is_finite()).then_some((centre, radius))
+}
+
+/// The triangles of face `face` of a mesh.
+fn face_triangles(m: &Mesh, face: usize) -> impl Iterator<Item = [Vec3; 3]> + '_ {
+    m.triangles.iter().zip(&m.tri_face).filter(move |(_, f)| **f as usize == face).filter_map(|(t, _)| m.tri(t))
+}
+
+/// The greatest inradius of the triangles of face `face` of a mesh (`None`: it has none).
+fn roomiest_inradius(m: &Mesh, face: usize) -> Option<f64> {
+    face_triangles(m, face).filter_map(|[a, b, c]| incircle(a, b, c)).map(|(_, r)| r).reduce(f64::max)
+}
+
+/// How far `q` is from the nearest edge bounding face `face` of a mesh (infinite: it has none).
+fn edge_clearance(m: &Mesh, face: usize, q: Vec3) -> f64 {
+    m.edges
+        .iter()
+        .zip(&m.edge_faces)
+        .filter(|(_, fs)| fs.iter().any(|f| *f as usize == face))
+        .flat_map(|(e, _)| e.windows(2).map(|w| q.dist_to_segment(w[0], w[1])))
+        .filter(|d| d.is_finite())
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// The point of face `face` of a mesh nearest `p` among the points at least `margin` inside one
+/// of its triangles (each triangle shrunk about its incentre by `margin`): such a point is at
+/// least `margin` from every edge of the face, which runs along the sides of its triangles.
+/// `None`: no triangle of the face is roomier than `margin`.
+fn inside_nearest(m: &Mesh, face: usize, p: Vec3, margin: f64) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+    for [a, b, c] in face_triangles(m, face) {
+        let Some((centre, radius)) = incircle(a, b, c).filter(|(_, r)| *r > margin) else { continue };
+        // Shrunk about the incentre so each side moves in by `margin`.
+        let s = (radius - margin) / radius;
+        let shrink = |v: Vec3| centre + (v - centre) * s;
+        let q = closest(p, shrink(a), shrink(b), shrink(c));
+        let d = q.dist(p);
+        if d.is_finite() && best.is_none_or(|(old, _)| d < old) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
 }
 
 impl EdgeHit {
