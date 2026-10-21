@@ -893,6 +893,7 @@ fn the_sections_messages_are_in_every_catalog() {
         ("de", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json"))),
         ("ja", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json"))),
         ("ko", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json"))),
+        ("nb", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json"))),
         ("pl", include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json"))),
         ("ru", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json"))),
         ("zh", include_str!(concat!(env!("OUT_DIR"), "/locales/zh.json"))),
@@ -902,8 +903,9 @@ fn the_sections_messages_are_in_every_catalog() {
             let (Some(en), Some(here)) = (english.get(*id), catalog.get(*id)) else {
                 panic!("{lang}: missing message {id} (English: {})", english.contains_key(*id));
             };
-            // Danish uses the same established names for these colour-vision modes.
-            let shared_name = lang == "da" && ["ui.colour_vision_deutan", "ui.colour_vision_protan", "ui.colour_vision_tritan"].contains(id);
+            // Danish and Norwegian use the same established names for these colour-vision modes.
+            let shared_name =
+                matches!(lang, "da" | "nb") && ["ui.colour_vision_deutan", "ui.colour_vision_protan", "ui.colour_vision_tritan"].contains(id);
             assert!(lang == "de" || shared_name || here != en, "{lang}: {id} is the English text {en}");
         }
     }

@@ -46,6 +46,7 @@ static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(en
 static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
 static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
 static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
+static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
 static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
 static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json")));
 static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
@@ -75,6 +76,7 @@ pub const LOCALES: &[&Catalog] = &[
     &JAPANESE,
     &KOREAN,
     &MALAY,
+    &NORWEGIAN,
     &DUTCH,
     &POLISH,
     &PORTUGUESE_BR,
@@ -446,6 +448,7 @@ mod tests {
         let cases = [
             ("cs", "Příruba", "Zebra analýza", "Studie pohybu"),
             ("da", "Flange", "Zebraanalyse", "Bevægelsesanalyse"),
+            ("nb", "Flens", "Zebraanalyse", "Bevegelsesanalyse"),
             ("zh", "法兰", "斑马纹分析", "运动研究"),
             ("ja", "フランジ", "ゼブラ解析", "モーション スタディ"),
             ("de", "Flansch", "Zebra-Analyse", "Bewegungsuntersuchung"),
