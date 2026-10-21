@@ -54,6 +54,24 @@ the far end smaller. For example, a 10 × 10 mm square extruded 10 mm with `tape
 has an approximately 11.75 × 11.75 mm far face; with `taper: "-5 deg"`, it is approximately
 8.25 × 8.25 mm.
 
+A Join, Cut or Intersect changes the bodies listed under **Targets**, just under Operation in the
+Extrude dialog (a New Body has none). The list starts with the bodies the extrude would change on
+its own, leaving out hidden ones: for a Join from a body's face or a sketch on one, that body; for
+a Cut or Intersect in a component with no bodies of its own, every body; otherwise the bodies of
+the active component. A component with no bodies of its own works on those of the components
+inside it, placed where it is (an opened STEP assembly's parts); a Join lists them only when one
+component holds them all. Automatic operation decides from that list, and with nothing listed it
+makes a new body.
+
+Showing or hiding bodies while the dialog is open updates the list, until you edit it: the × on a
+body's row takes it out, and clicking bodies with Targets active adds or removes them. The listed
+bodies are saved as the extrude's `targets`, so showing or hiding bodies later never changes the
+model.
+
+Editing an extrude shows its saved targets. One saved without `targets` reads **All bodies of the
+component** and keeps changing every body of the active component it meets, hidden or shown; one
+saved with `targets: ["*"]` reads **All bodies** and changes every body in the design.
+
 A taper slopes the sides of any profile, sketch text included: lines, arcs and spline or conic
 curves move in or out together, and a flat tip shorter than the taper closes to a point. On
 spline and conic sides the slope is approximate: the moved outline is a curve of the same kind

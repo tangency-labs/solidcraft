@@ -74,7 +74,7 @@ fn face_off_the_profile_plane_turns_the_extent_to_that_face() {
     let d = dialog(&h);
     assert!(matches!(to_object(d), Some(Sel::Face { .. })));
     assert_eq!(d.inputs[0].items.len(), 1, "the profile stays the only profile");
-    assert_eq!(d.active, 1, "the To Object input is active");
+    assert_eq!(d.inputs.get(d.active).map(|i| i.label), Some("To Object"), "the To Object input is active");
     assert_eq!(distance(d), "20 mm", "the length is the target's");
     let commands = apply_commands(&h.app, d).unwrap();
     let params = &commands[0].1;
