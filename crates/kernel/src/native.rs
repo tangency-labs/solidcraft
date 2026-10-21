@@ -263,6 +263,11 @@ mod tests {
             })
             .collect();
         let actual = serde_json::json!(records);
+        // An intended change to the wire records rewrites the fixture with NATIVE_BREP_BLESS=1.
+        if std::env::var_os("NATIVE_BREP_BLESS").is_some() {
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/native/fixtures/box-fillet-v5.json");
+            std::fs::write(path, serde_json::to_string_pretty(&actual).unwrap() + "\n").unwrap();
+        }
         let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v5.json")).unwrap();
         compare_wire(&expected, &actual);
     }
