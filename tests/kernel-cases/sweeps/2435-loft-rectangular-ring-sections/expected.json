@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2435",
+  "tangency-labs/solidcraft#2447"
+ ],
+ "what": "a loft between two rectangular ring sections (a rectangle with a rectangular hole), 24 mm apart, tapering outer 40 x 30 to 28 x 20 and hole 20 x 14 to 12 x 6",
+ "source": "analytic",
+ "method": "outer and hole are ruled frustums of rectangles; the section area is quadratic in height so V = h/6 (A0 + 4 Am + A1) is exact for each: outer 24/6 (1200 + 4 34 25 + 560) = 20640, hole 24/6 (280 + 4 16 10 + 72) = 3968, V = 16672. Faces: 4 outer walls, 4 hole walls, 2 caps = 10.",
+ "body_count": 1,
+ "volume_mm3": 16672.0,
+ "faces": 10
+}
