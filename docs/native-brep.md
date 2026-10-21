@@ -126,7 +126,7 @@ Natural normals are ∂S/∂u × ∂S/∂v.
 | `plane` {origin, u_axis, v_axis} | origin + u u_axis + v v_axis | unbounded | unbounded |
 | `plane_through` {origin, u_point, v_point} | origin + u (u_point − origin) + v (v_point − origin) | unbounded | unbounded |
 | `cylinder` {frame, radius} | origin + v z + r (cos u x + sin u y) | angle, periodic | height, unbounded |
-| `cone` {frame, radius_at_origin, half_angle} | origin + v z + r(v) (cos u x + sin u y), r(v) = radius_at_origin + v tan(half_angle) | angle, periodic | height, from the apex up |
+| `cone` {frame, radius_at_origin, half_angle} | origin + v z + r(v) (cos u x + sin u y), r(v) = radius_at_origin + v tan(half_angle) | angle, periodic | height, on the side of the apex where r(v) ≥ 0 (a negative half angle narrows along z) |
 | `sphere` {frame, radius} | origin + r (cos v (cos u x + sin u y) + sin v z) | longitude, periodic | latitude, [−π/2, π/2] |
 | `torus` {frame, major_radius, minor_radius} | origin + (R + r cos v)(cos u x + sin u y) + r sin v z | longitude, periodic | meridian angle, periodic |
 | `spline` {u_knots, v_knots, points} | tensor-product B-spline, `points[i][j]` with i along u | u knot domain | v knot domain |
@@ -145,7 +145,7 @@ natural normal.
 An edge interval and each side of a face domain are finite with min < max. In a
 periodic direction they may start anywhere and run up to one turn (2π), across
 the seam. Otherwise they lie inside the natural range: a spline's knot domain, a
-polyline's [0, n − 1], a sphere's latitudes, a cone above its apex.
+polyline's [0, n − 1], a sphere's latitudes, a cone on its open side of the apex.
 
 ### Pcurves
 

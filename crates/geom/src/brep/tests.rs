@@ -322,6 +322,13 @@ fn one_defect_fixtures_are_refused() {
             b.vertices.push(Vertex { point: [9.; 3], tolerance: 1e-7 });
             b
         }),
+        ("shell twice in a region", "shell listed twice in a region", {
+            // The void lists its one shell twice: still within the shell count.
+            let mut b = hollow();
+            let void = b.regions.last_mut().unwrap();
+            void.shells.push(void.shells[0]);
+            b
+        }),
         ("void infinite region", "the infinite region is a void", {
             let mut b = sheet();
             b.regions[0].void = true;
@@ -472,9 +479,17 @@ fn analytic_records_are_unbounded_with_independent_frames() {
     let surfaces = [
         Surface::Cylinder { frame: f.clone(), radius: 2. },
         Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: 0.2 },
+        Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: -0.2 },
         Surface::Sphere { frame: f.clone(), radius: 2. },
         Surface::Torus { frame: f.clone(), major_radius: 4., minor_radius: 1. },
     ];
+    // A cone narrowing along z (a negative half angle, as SMLib makes them) lies below its apex.
+    let apex = 2. / 0.2f64.tan();
+    let narrowing = Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: -0.2 };
+    assert_eq!(surface_natural(&narrowing)[1], Natural::Range(f64::NEG_INFINITY, apex));
+    for flat in [0., 1e-13, -1e-13, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2] {
+        assert!(surface(&Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: flat }, 0, &mut Budget(0)).is_err());
+    }
     for s in surfaces {
         surface(&s, 0, &mut Budget(0)).unwrap();
         let encoded = serde_json::to_string(&s).unwrap();
