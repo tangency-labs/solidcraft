@@ -347,3 +347,27 @@ fn smlib_spheres_cut_beside_or_across_their_seam_decode_with_their_volume() {
     let ours = crate::measure(&crate::native::body_from_smlib(&cut).unwrap()).unwrap().volume;
     assert!((ours - exact).abs() < 1e-3 * exact, "bored: decoded volume {ours}, exact {exact}");
 }
+
+/// SMLib's torus is one face bounded by its two seam circles, each used both ways: the display
+/// plan treats the closed profile as periodic, so the torus meshes and, beside a sphere bounded
+/// by its seam alone (which only the plan meshes), the body keeps both (the sphere was lost).
+/// The decode never meshes the body (it took half a second, meshing a torus to orient it).
+#[cfg(feature = "smlib")]
+#[test]
+fn smlib_torus_decodes_without_meshing_and_plans_with_a_sphere_beside_it() {
+    use solidcraft_smlib::{BooleanOp, Brep as S};
+    use std::f64::consts::PI;
+    let ring = S::make_torus([0., 30., 15.], 7.5, 2.5).unwrap();
+    let ball = S::make_sphere([2.5, 15., 7.5], 2.5).unwrap();
+    let (torus, sphere) = (2. * PI * PI * 7.5 * 2.5 * 2.5, 4. / 3. * PI * 2.5 * 2.5 * 2.5);
+    let both = ring.boolean(&ball, BooleanOp::Union).unwrap().unwrap();
+    for (name, s, exact) in [("torus", ring, torus), ("torus and sphere", both, torus + sphere)] {
+        crate::body::ORIENTED.with(|n| n.set(0));
+        let body = crate::native::body_from_smlib(&s).unwrap();
+        assert_eq!(crate::body::ORIENTED.with(|n| n.get()), 0, "{name}: the decode meshed the body to orient it");
+        let plan = body.display_plan(0.05).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(plan.faces.len(), body.face_count(), "{name}");
+        let ours = crate::measure(&body).unwrap().volume;
+        assert!((ours - exact).abs() < 1e-3 * exact, "{name}: decoded volume {ours}, exact {exact}");
+    }
+}
