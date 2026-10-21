@@ -20,6 +20,9 @@
 //! drawing and the compile-time false IO experiment are omitted. No recursion;
 //! connected-component extraction is bounded by the initial face count, with an
 //! error if removal fails to make progress.
+//! `PiecewiseMerge` ends on an error of its first `IntersectInsertRelate` (SolidCraft
+//! fix, tangency-labs/smlib af8db37, UB-242), where upstream ignores the status and
+//! goes on with half-imprinted B-reps.
 //! `BooleanLists` slices surface copies to base `SmSurface` upstream (WR-196); the missing
 //! base-only constructor branch is deferred to partial `surface.surface_p1`.
 //! Component-copy notifications use caller-owned records/attributes through
@@ -392,7 +395,8 @@ pub trait PiecewiseAccess: BooleanDriver {
     fn set_operands(&mut self, primary: Option<Self::Operand>, other: Option<Self::Operand>);
     /// `GetSurfaces`, in B-rep list order.
     fn surfaces(&self, brep: Self::Operand) -> Result<Vec<Self::Surface>>;
-    /// `IntersectInsertRelate()`, whose ordinary status upstream ignores.
+    /// `IntersectInsertRelate()`. Its error ends the merge (SolidCraft fix
+    /// tangency-labs/smlib af8db37; upstream ignores the status).
     fn intersect_insert_relate(&mut self, k: &mut Kernel) -> Result<()>;
     /// `m_pBToO->RemoveAll(); m_pOToB->RemoveAll()`.
     fn clear_relationships(&mut self) -> Result<()>;
@@ -447,7 +451,10 @@ where
     let original_other = original_other.ok_or_else(|| SolidError::null_pointer(OP))?;
     // The first surface query is observable even though upstream overwrites it.
     let _ = driver.surfaces(original_other)?;
-    ignored(driver.intersect_insert_relate(k))?;
+    // SER: a failed IntersectInsertRelate (a failed imprint leaves both B-reps
+    // half edited) ends the merge (SolidCraft change, tangency-labs/smlib af8db37;
+    // upstream ignores its status).
+    driver.intersect_insert_relate(k)?;
     let surfaces = driver.surfaces(original_other)?;
     driver.clear_relationships()?;
     if let Some(pairs) = skip_pairs {
@@ -918,6 +925,74 @@ mod tests {
             let b = b.take().unwrap();
             Ok(Some(a - b))
         }
+    }
+
+    /// Only the calls before and at `IntersectInsertRelate` are reachable: it fails.
+    impl PiecewiseAccess for Trace {
+        type Surface = i64;
+        fn operands(&self) -> (Option<i64>, Option<i64>) {
+            (Some(1), Some(2))
+        }
+        fn set_operands(&mut self, _primary: Option<i64>, _other: Option<i64>) {
+            unreachable!("set_operands after a failed IntersectInsertRelate")
+        }
+        fn surfaces(&self, _brep: i64) -> Result<Vec<i64>> {
+            Ok(vec![7])
+        }
+        fn intersect_insert_relate(&mut self, _k: &mut Kernel) -> Result<()> {
+            self.pairs.push((None, None));
+            Err(SolidError::sm_err("test::imprint"))
+        }
+        fn clear_relationships(&mut self) -> Result<()> {
+            unreachable!("clear_relationships after a failed IntersectInsertRelate")
+        }
+        fn set_subset(&mut self, _surfaces: &[i64]) {
+            unreachable!("set_subset after a failed IntersectInsertRelate")
+        }
+        fn surface_map(&mut self, _surface: i64, _only_if_missing: bool) -> Result<()> {
+            unreachable!("surface_map after a failed IntersectInsertRelate")
+        }
+        fn surface_map_users(&self, _surface: i64) -> Result<Option<Vec<i64>>> {
+            unreachable!("surface_map_users after a failed IntersectInsertRelate")
+        }
+        fn new_face_brep(&mut self, _k: &mut Kernel, _source: i64) -> Result<i64> {
+            unreachable!("new_face_brep after a failed IntersectInsertRelate")
+        }
+        fn manifold_flag(&self) -> bool {
+            unreachable!("manifold_flag after a failed IntersectInsertRelate")
+        }
+        fn set_controls(&mut self, _manifold: bool, _wires: bool, _lamina: u64) {
+            unreachable!("set_controls after a failed IntersectInsertRelate")
+        }
+        fn process_wires(&mut self, _k: &mut Kernel, _lock: &MarkLock) -> Result<()> {
+            unreachable!("process_wires after a failed IntersectInsertRelate")
+        }
+        fn release_marks(&mut self, _k: &mut Kernel, _lock: &mut MarkLock) -> Result<()> {
+            unreachable!("release_marks after a failed IntersectInsertRelate")
+        }
+        fn register_empty_ssi(&mut self, _skip: i64, _user: i64) -> Result<()> {
+            unreachable!("register_empty_ssi after a failed IntersectInsertRelate")
+        }
+        fn clear_existing_ssi(&mut self) -> Result<()> {
+            unreachable!("clear_existing_ssi after a failed IntersectInsertRelate")
+        }
+        fn notify_pre_edit(&mut self, _k: &mut Kernel, _primary: i64) -> Result<()> {
+            unreachable!("notify_pre_edit after a failed IntersectInsertRelate")
+        }
+        fn delete_other(&mut self, _k: &mut Kernel) -> Result<()> {
+            unreachable!("delete_other after a failed IntersectInsertRelate")
+        }
+    }
+
+    #[test]
+    fn piecewise_merge_ends_on_a_failed_intersect_insert_relate() {
+        // af8db37 (#372): a failed imprint leaves both B-reps half edited; the merge
+        // went on to relate, classify and merge them
+        let mut k = Kernel::default();
+        let mut driver = Trace::default();
+        let error = piecewise_merge(&mut k, &mut driver, None, false, false).unwrap_err();
+        assert!(matches!(error, SolidError::Upstream { .. }), "{error:?}");
+        assert_eq!(driver.pairs, [(None, None)]);
     }
     #[test]
     fn surface_list_requires_native_empty_brep_constructor_before_surface_copy() {

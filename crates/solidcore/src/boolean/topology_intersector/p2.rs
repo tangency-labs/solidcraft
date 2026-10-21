@@ -53,6 +53,11 @@
 //! - **Deleted curves.** `IntersectTopology` and `IntersectInsertRelate` return the
 //!   curve handles deleted (by `SplitIntersectingProtoEdges`, the resolution, the
 //!   imprint and the manager's destructor), as [`p1`](super::p1) does.
+//! - **A failed imprint** (SolidCraft fix, tangency-labs/smlib af8db37, UB-242).
+//!   Upstream's `IntersectInsertRelate` reports a failure of `ImprintIntersections`
+//!   and then overwrites its status with that of `SetRelationships`, so the boolean
+//!   goes on with both B-reps half imprinted (upstream: reads of freed vertex uses).
+//!   The port deletes the manager and returns the imprint's error.
 //! - **Statuses upstream ignores** (`SmBrep` edits whose status is unchecked,
 //!   `RemoveRelationship` in `DeleteFaces` / `FixGaps`, bounding boxes, `DropPoint`,
 //!   `SimpleCoincidenceChecker`, `CalculateUVDomainFromUVTrimCurves`, `Relate` in
@@ -1181,15 +1186,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
     /// `IntersectInsertRelate()`: makes the proto topology manager (capture distance
     /// 0.01, at least 2000 times the approximation tolerance), intersects the
-    /// topology, resolves and imprints the intersections (a failing imprint only
-    /// warns), sets the relationships and deletes the manager. `ti` is the handle the
-    /// manager stores for this intersector. Returns the curve handles deleted.
+    /// topology, resolves and imprints the intersections, sets the relationships and
+    /// deletes the manager. `ti` is the handle the manager stores for this
+    /// intersector. Returns the curve handles deleted.
     ///
     /// # Errors
     ///
     /// Those of the manager's construction, `IntersectTopology` and
     /// `ResolveIntersections` (the manager then stays installed, as upstream leaks
-    /// it); [`SolidError::Unported`] / [`SolidError::InvalidInput`] from the imprint;
+    /// it); every error of the imprint, after deleting the manager (SolidCraft fix
+    /// af8db37: upstream goes on with the half-imprinted B-reps);
     /// [`SolidError::InvalidInput`] without both B-reps, and when the manager's
     /// destructor would read a freed proto edge (UB-175; the manager is still
     /// destroyed and every other effect has happened).
@@ -1228,10 +1234,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Resolve Intersections; if that didn't work, quit before we mess up the Breps.
         deleted.extend(self.resolve_intersections(k, brep)?);
 
-        // Imprint Intersections, now we'll modify the Breps (SE_MSG: a problem only
-        // informs the public)
-        if let Some(d) = ignore_soft(self.imprint_intersections(k, brep))? {
-            deleted.extend(d);
+        // Imprint Intersections, now we'll modify the Breps. If that didn't work, the
+        // Breps are partly imprinted and no longer consistent: stop here, so that no
+        // caller goes on to relate, classify or measure them (SolidCraft change,
+        // tangency-labs/smlib af8db37; upstream only warns and overwrites the status).
+        match self.imprint_intersections(k, brep) {
+            Ok(d) => deleted.extend(d),
+            Err(e) => {
+                if let Some(mut mgr) = self.proto_topo_mgr.take() {
+                    let _ = mgr.destroy();
+                }
+                return Err(e);
+            }
         }
 
         // Set relationship maps.
