@@ -690,6 +690,145 @@ mod run {
         }
     }
 
+    /// Where `s` holds material along the vertical line through (x, y): one z interval, since
+    /// every fuzz primitive (box, axis-aligned cylinder, sphere, torus about +Z) is convex along
+    /// z. `None` off it; `Err` for a primitive this can't do (a slanted axis).
+    fn z_span(s: &Shape, x: f64, y: f64) -> Result<Option<(f64, f64)>, ()> {
+        let half = |r2: f64| (r2 >= 0.0).then(|| r2.sqrt());
+        Ok(match *s {
+            Shape::Box { a, b } => (x >= a[0] && x <= b[0] && y >= a[1] && y <= b[1]).then_some((a[2], b[2])),
+            Shape::Sphere { center: c, radius: r } => half(r * r - (x - c[0]).powi(2) - (y - c[1]).powi(2)).map(|h| (c[2] - h, c[2] + h)),
+            Shape::Torus { center: c, major, minor } => {
+                let rho = ((x - c[0]).powi(2) + (y - c[1]).powi(2)).sqrt();
+                half(minor * minor - (rho - major).powi(2)).map(|h| (c[2] - h, c[2] + h))
+            }
+            Shape::Cylinder { base: c, axis, radius: r, height: h } => match axis {
+                [0.0, 0.0, 1.0] => half(r * r - (x - c[0]).powi(2) - (y - c[1]).powi(2)).map(|_| (c[2], c[2] + h)),
+                [1.0, 0.0, 0.0] => {
+                    if x < c[0] || x > c[0] + h {
+                        None
+                    } else {
+                        half(r * r - (y - c[1]).powi(2)).map(|d| (c[2] - d, c[2] + d))
+                    }
+                }
+                [0.0, 1.0, 0.0] => {
+                    if y < c[1] || y > c[1] + h {
+                        None
+                    } else {
+                        half(r * r - (x - c[0]).powi(2)).map(|d| (c[2] - d, c[2] + d))
+                    }
+                }
+                _ => return Err(()),
+            },
+        })
+    }
+
+    /// The xy box a primitive covers.
+    fn xy_bounds(s: &Shape) -> [f64; 4] {
+        match *s {
+            Shape::Box { a, b } => [a[0], b[0], a[1], b[1]],
+            Shape::Sphere { center: c, radius: r } => [c[0] - r, c[0] + r, c[1] - r, c[1] + r],
+            Shape::Torus { center: c, major, minor } => {
+                let r = major + minor;
+                [c[0] - r, c[0] + r, c[1] - r, c[1] + r]
+            }
+            Shape::Cylinder { base: c, axis, radius: r, height: h } => {
+                let lo = |i: usize| c[i] - if axis[i] > 0.5 { 0.0 } else { r };
+                let hi = |i: usize| c[i] + if axis[i] > 0.5 { h } else { r };
+                [lo(0), hi(0), lo(1), hi(1)]
+            }
+        }
+    }
+
+    /// Cells per side of the reference integration's grid (about; see [`axis_cells`]).
+    const GRID: usize = 1600;
+
+    /// Where a primitive's material starts or stops changing smoothly along x (`i` = 0) or y
+    /// (`i` = 1): box faces, a cylinder's ends, and where a round outline turns.
+    fn breaks(s: &Shape, i: usize) -> Vec<f64> {
+        match *s {
+            Shape::Box { a, b } => vec![a[i], b[i]],
+            Shape::Sphere { center: c, radius: r } => vec![c[i] - r, c[i], c[i] + r],
+            Shape::Torus { center: c, major, minor } => {
+                let (o, n) = (major + minor, major - minor);
+                vec![c[i] - o, c[i] - n, c[i], c[i] + n, c[i] + o]
+            }
+            Shape::Cylinder { base: c, axis, radius: r, height: h } => {
+                if axis[i] > 0.5 {
+                    vec![c[i], c[i] + h]
+                } else {
+                    vec![c[i] - r, c[i], c[i] + r]
+                }
+            }
+        }
+    }
+
+    /// Midpoints and widths of cells along one axis over `lo..hi`, about `n` of them, with every
+    /// break a cell boundary, so straight faces fall on cell edges and leave no error.
+    fn axis_cells(lo: f64, hi: f64, mut cuts: Vec<f64>, n: usize) -> Vec<(f64, f64)> {
+        cuts.retain(|x| *x > lo && *x < hi);
+        cuts.extend([lo, hi]);
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup();
+        let step = (hi - lo) / n as f64;
+        let mut cells = Vec::new();
+        for w in cuts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let k = ((b - a) / step).ceil().max(1.0) as usize;
+            let d = (b - a) / k as f64;
+            cells.extend((0..k).map(|j| (a + (j as f64 + 0.5) * d, d)));
+        }
+        cells
+    }
+
+    /// The volume of `a op b` on a grid of about `n` × `n` cells (see [`reference_volume`]).
+    fn grid_volume(a: &Shape, b: &Shape, op: BoolOp, n: usize) -> Option<f64> {
+        let (ba, bb) = (xy_bounds(a), xy_bounds(b));
+        let r = [ba[0].min(bb[0]), ba[1].max(bb[1]), ba[2].min(bb[2]), ba[3].max(bb[3])];
+        let cut = |i: usize| [breaks(a, i), breaks(b, i)].concat();
+        let (xs, ys) = (axis_cells(r[0], r[1], cut(0), n), axis_cells(r[2], r[3], cut(1), n));
+        let len = |s: Option<(f64, f64)>| s.map_or(0.0, |(lo, hi)| (hi - lo).max(0.0));
+        let mut v = 0.0;
+        for &(x, dx) in &xs {
+            for &(y, dy) in &ys {
+                let (p, q) = (z_span(a, x, y).ok()?, z_span(b, x, y).ok()?);
+                let both = match (p, q) {
+                    (Some(p), Some(q)) => len(Some((p.0.max(q.0), p.1.min(q.1)))),
+                    _ => 0.0,
+                };
+                v += dx
+                    * dy
+                    * match op {
+                        BoolOp::Union => len(p) + len(q) - both,
+                        BoolOp::Intersect => both,
+                        BoolOp::Cut => len(p) - both,
+                    };
+            }
+        }
+        Some(v)
+    }
+
+    /// The volume of `a op b` from the primitives' own definitions, by no kernel, and how far it
+    /// may be off: along each vertical line both operands are exact z intervals, combined
+    /// exactly, integrated over a grid whose cell edges include every straight face. What error
+    /// is left comes from curved outlines; the grid at half the resolution bounds it. `None`
+    /// for a primitive [`z_span`] can't do.
+    fn reference_volume(a: &Shape, b: &Shape, op: BoolOp) -> Option<(f64, f64)> {
+        let fine = grid_volume(a, b, op, GRID)?;
+        let coarse = grid_volume(a, b, op, GRID / 2)?;
+        Some((fine, (fine - coarse).abs()))
+    }
+
+    /// Which kernel's volume is off the reference by more than [`VOLUME_REL`].
+    fn graded(o: &Outcome, reference: Option<(f64, f64)>) -> Option<bool> {
+        let (r, uncertain) = reference?;
+        if o.error.is_some() {
+            return None;
+        }
+        let v = if o.empty { 0.0 } else { o.volume };
+        Some((v - r).abs() <= (VOLUME_REL * r.abs()).max(3.0 * uncertain).max(1e-6))
+    }
+
     /// How far a measured volume lies from the analytic one, relative; `None` when it made none.
     fn off(o: &Outcome, analytic: f64) -> Option<f64> {
         if o.error.is_some() {
@@ -751,6 +890,7 @@ mod run {
         let mut rows = Vec::new();
         let mut md = String::new();
         let mut tally = std::collections::BTreeMap::<&str, usize>::new();
+        let mut grades = std::collections::BTreeMap::<(&str, &str), usize>::new();
         let (mut truck_ms, mut smlib_ms, mut import_ms, mut export_ms) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let (mut truck_fail, mut smlib_fail, mut export_fail) = (0usize, 0usize, 0usize);
         let (mut analytic_ops, mut truck_exact, mut smlib_exact) = (0usize, 0usize, 0usize);
@@ -761,6 +901,28 @@ mod run {
                 let (what, class) = verdict(&t, &s);
                 *tally.entry(class).or_default() += 1;
                 let want = analytic.and_then(|v| v.get(k).copied());
+                // Rows without an analytic volume (the seeds): a reference from the primitives'
+                // definitions, each kernel graded against it.
+                let reference = if want.is_none() { reference_volume(a, b, op) } else { None };
+                let grade = |o: &Outcome| match graded(o, reference) {
+                    Some(true) => "ok",
+                    Some(false) => "WRONG",
+                    None => "-",
+                };
+                let (gt, gs) = (grade(&t), grade(&s));
+                if reference.is_some() {
+                    *grades.entry(("truck", gt)).or_default() += 1;
+                    *grades.entry(("SMLib", gs)).or_default() += 1;
+                }
+                let what = if gt == "WRONG" || gs == "WRONG" {
+                    format!(
+                        "{what}; volume vs reference {:.3} ± {:.3}: truck {gt}, SMLib {gs}",
+                        reference.map_or(f64::NAN, |r| r.0),
+                        reference.map_or(f64::NAN, |r| r.1)
+                    )
+                } else {
+                    what
+                };
                 if let Some(w) = want {
                     analytic_ops += 1;
                     truck_exact += usize::from(off(&t, w).is_some_and(|d| d <= VOLUME_REL));
@@ -795,6 +957,8 @@ mod run {
                     "case": name, "a": a, "b": b, "op": op_name(op), "analytic": want,
                     "truck": outcome_json(&t), "smlib": outcome_json(&s),
                     "verdict": class, "detail": what,
+                    "reference_volume": reference.map(|r| r.0), "reference_uncertainty": reference.map(|r| r.1),
+                    "truck_volume_grade": gt, "smlib_volume_grade": gs,
                 }));
             }
         }
@@ -837,6 +1001,14 @@ mod run {
         let mut report = String::new();
         let _ = writeln!(report, "# Booleans: truck and SMLib side by side\n");
         let _ = writeln!(report, "{} cases × 3 operations: {}.\n", cases.len(), summary.join(", "));
+        let grade_text: Vec<String> = grades.iter().map(|((k, g), n)| format!("{k} {g} {n}")).collect();
+        let _ = writeln!(
+            report,
+            "Rows without an analytic volume, against a reference from the primitives' definitions (exact z \
+             intervals on a grid of about {GRID}² cells with every straight face on a cell edge; within \
+             {VOLUME_REL:e} relative or 3× the grid's own error bound): {}.\n",
+            grade_text.join(", ")
+        );
         let _ = writeln!(
             report,
             "Failed: truck {truck_fail}/{ops}, SMLib {smlib_fail}/{ops}; SMLib results that don't export back to truck \
@@ -874,11 +1046,11 @@ mod run {
         report.push_str(&md);
 
         std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-        let json = json!({ "cases": cases.len(), "tally": tally, "rows": rows, "sequence": seq_json });
+        let json = json!({ "cases": cases.len(), "tally": tally, "reference_grades": grades.iter().map(|((k, g), n)| json!({"kernel": k, "grade": g, "count": n})).collect::<Vec<_>>(), "rows": rows, "sequence": seq_json });
         let text = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
         std::fs::write(out.join("smlib-booleans.json"), text).map_err(|e| e.to_string())?;
         std::fs::write(out.join("smlib-booleans.md"), &report).map_err(|e| e.to_string())?;
-        println!("{} cases × 3: {} ({})", cases.len(), summary.join(", "), out.display());
+        println!("{} cases × 3: {}; against the reference: {} ({})", cases.len(), summary.join(", "), grade_text.join(", "), out.display());
         Ok(())
     }
 }
