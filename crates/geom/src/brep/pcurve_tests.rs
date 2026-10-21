@@ -528,6 +528,36 @@ fn edges_on_a_spline_winding_several_turns_stay_on_their_turn() {
     }
 }
 
+/// A curve that is smooth through a knot of full multiplicity (one smooth curve with the knot
+/// inserted three times, as SMLib's intersection curves come) gets a pcurve with one tangent
+/// there. Two pieces fitted apart meet at an angle in (u, v) (a tenth of a degree here, over the
+/// degree SMLib's check allows on a real thread), sharp where u runs hundreds of times as fast as
+/// v.
+#[test]
+fn a_smooth_curve_through_a_full_knot_gets_a_pcurve_with_a_tangent_there() {
+    let (surface, _) = thread_flank();
+    let s = SurfaceEval::new(&surface).unwrap();
+    // Along the flank as it winds, a third of a turn (u = t), weaving a little across it.
+    let [a, b] = [0.40625, 0.4234375];
+    let ts: Vec<f64> = (0..=12).map(|i| a + (b - a) * i as f64 / 12.).collect();
+    let v = |t: f64| 0.5 + 0.02 * (3. * TAU * (t - a) / (b - a)).sin();
+    let on: Vec<[f64; 3]> = ts.iter().map(|&t| s.point([t, v(t)]).unwrap()).map(|p| [p.x, p.y, p.z]).collect();
+    let c = crate::bspline::CurveN::interpolate(&ts, &on, 3).unwrap();
+    let k = 0.4167;
+    let (mut knots, mut ctrl) = (c.knots, c.ctrl.iter().map(|p| crate::bspline::HPoint::weighted(Vec3::from(*p), 1.)).collect::<Vec<_>>());
+    for _ in 0..3 {
+        (knots, ctrl) = crate::bspline::insert_knot(3, &knots, &ctrl, k).unwrap();
+    }
+    let weave = Curve::Spline { knots, points: ctrl.iter().map(|h| h.project().unwrap()).map(|p| [p.x, p.y, p.z]).collect() };
+    let pc = &pcurves(&surface, &one(&weave, [a, b]), 1e-3).unwrap()[0][0];
+    assert!(lift_error(&surface, &weave, [a, b], pc) <= 1e-3);
+    let h = 1e-7;
+    let (l, m, r) = (pc.eval(k - h).unwrap(), pc.eval(k).unwrap(), pc.eval(k + h).unwrap());
+    let (dl, dr) = ([m[0] - l[0], m[1] - l[1]], [r[0] - m[0], r[1] - m[1]]);
+    let cos = (dl[0] * dr[0] + dl[1] * dr[1]) / (dl[0].hypot(dl[1]) * dr[0].hypot(dr[1]));
+    assert!(cos > 1. - 1e-6, "the pcurve turns by {} degrees at the knot", cos.min(1.).acos().to_degrees());
+}
+
 /// Hostile records give errors, never a panic.
 #[test]
 fn hostile_records_give_errors() {

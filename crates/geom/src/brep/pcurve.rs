@@ -323,7 +323,7 @@ impl On {
         let reach = 0.25 * tol;
         // Interior knots: where the curve's own parameterisation is less smooth (a pcurve is no
         // smoother than its curve), else even.
-        let mut inner = breaks(record, t0, t1);
+        let mut inner = breaks(record, Some(curve), t0, t1);
         if inner.len() + 1 > MAX_SPANS / 4 {
             return Err(Error::TooLarge(format!("a pcurve of a curve with {} knots", inner.len())));
         }
@@ -499,7 +499,12 @@ impl On {
 /// The interior parameters where `curve` is less than twice continuously differentiable, with
 /// the knot multiplicity a cubic needs there: a spline's knots by their multiplicity, and the
 /// vertices of a polyline or an intersection curve's leader polyline (its parameter turns there).
-fn breaks(curve: &Curve, t0: f64, t1: f64) -> Vec<(f64, usize)> {
+/// A knot that leaves a spline only continuous by its multiplicity, where the spline's
+/// derivative is the same either side (`eval`, the curve's own evaluator), is once
+/// differentiable and gets a pcurve with a tangent there: two pieces fitted apart would meet at
+/// an angle, sharp in (u, v) where the surface's parameters run at very different speeds (a
+/// thread's flank, hundreds of mm per unit along the helix and one across it).
+fn breaks(curve: &Curve, eval: Option<&CurveEval>, t0: f64, t1: f64) -> Vec<(f64, usize)> {
     let spline = |knots: &[f64], count: usize| -> Vec<(f64, usize)> {
         let degree = knots.len().saturating_sub(count + 1);
         let mut out: Vec<(f64, usize)> = Vec::new();
@@ -509,7 +514,15 @@ fn breaks(curve: &Curve, t0: f64, t1: f64) -> Vec<(f64, usize)> {
                 _ => out.push((k, 1)),
             }
         }
-        out.into_iter().map(|(k, m)| (k, (3 - degree.saturating_sub(m).min(2)).clamp(1, 3))).collect()
+        out.into_iter()
+            .map(|(k, m)| {
+                let mut smooth = degree.saturating_sub(m);
+                if m == degree && eval.is_some_and(|e| differentiable_at(e, k)) {
+                    smooth = 1;
+                }
+                (k, (3 - smooth.min(2)).clamp(1, 3))
+            })
+            .collect()
     };
     let corners = |n: usize| (1..n.saturating_sub(1)).map(|i| (i as f64, 3)).filter(|k| k.0 > t0 && k.0 < t1).collect();
     match curve {
@@ -519,9 +532,21 @@ fn breaks(curve: &Curve, t0: f64, t1: f64) -> Vec<(f64, usize)> {
         Curve::RationalSpline { knots, homogeneous } => spline(knots, homogeneous.len()),
         Curve::SurfaceIntersection { leader, .. } => match &**leader {
             Curve::Polyline { points } => corners(points.len()),
-            other => breaks(other, t0, t1),
+            other => breaks(other, None, t0, t1),
         },
     }
+}
+
+/// Relative difference of a spline's derivatives either side of a knot within which it is
+/// differentiable there (rounding of derivatives made equal).
+const SAME_DERIVATIVE: f64 = 1e-9;
+
+/// Whether the spline `eval` has one derivative at its knot `k` (the same from either side).
+fn differentiable_at(eval: &CurveEval, k: f64) -> bool {
+    let CurveEval::Spline(c) = eval else { return false };
+    let Some((l, r)) = c.sides(k) else { return false };
+    let size = l.len().max(r.len());
+    size > 0.0 && (l - r).len() <= SAME_DERIVATIVE * size
 }
 
 /// Signed area in (u, v) of the loop with its uses moved by `shift` along `d`.
