@@ -1631,6 +1631,16 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB.
 - **Rust port:** proto edges are arena ids that are never freed, so the repeat reads a deleted-edge slot and finds no group; nothing is read after free.
 
+#### UB-239. `SmProtoTopologyManager::SplitIntersectingProtoEdges` deletes a combined-away proto edge that proto faces and other proto edges still list
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp:6833` (`SplitIntersectingProtoEdges`, def. `:6656`: `CombineProtoEdge`, then `RemoveProtoEdge` and `delete pPE2ToCombine`); `:4346` `SmProtoTopologyManager::RemoveProtoEdge` unlists the edge from `m_sPEs` and its end proto vertices only; the stale entry is read in `GlueCoincidentBrepVertices` (`:5854`, the `GetCoincProtoEdges` walk at `:6245`).
+- **What happens:** The proto edge combined away stays in the coincident-proto-edge lists of the proto faces it bounded, and in the overlapping lists of other proto edges. `GlueCoincidentBrepVertices` then walks those proto-face lists and reads the freed proto edge (a comment there already notes that the proto faces would need updating).
+- **Trigger:** the inward shell of a 20 mm cube with a 10 mm wall (ASan heap-use-after-free; tangency-labs/solidcore#369).
+- **How found:** ASan run of the SolidCraft C API (tangency-labs/smlib `capi/`).
+- **Confirmed:** yes (ASan, in the fork's C API tests); not reproduced in the solidcore difftest.
+- **Severity:** crash/UB (use-after-free).
+- **Fix:** tangency-labs/smlib 93efd6d. `RemoveProtoEdge` drops every reference the listed proto faces and proto edges hold to the edge. `SplitIntersectingProtoEdges` first adds the surviving proto edge to the proto faces the removed one bounded. With the fix the shell above fails with `SM_ERR_NULL_POINTER` instead.
+- **Rust port:** carries the fix at the library deletes rather than inside `RemoveProtoEdge` (`ProtoTopologyManager::forget_proto_edge` before the delete in `SplitIntersectingProtoEdges`, `ResolveOverlappingProtoEdges` and `RemoveEdgeDefinition`; `hand_over_coincident_proto_edge`; test `a_forgotten_proto_edge_leaves_every_face_and_overlap_list`). The difftest's script ops unlist or delete a proto edge on their own and dump the lists; there the port keeps upstream's lists, so they compare with the pinned C++. Without the fix nothing is freed (arena ids): the stale id names a deleted slot and the later passes fail with `InvalidInput`.
+
 #### UB-169. `SmHCR(.., crViewVector, ..)` builds the view transform from uninitialised vectors for a zero view vector
 - **Location:** `source/SMLib/src/SmHCR.cpp:144` `SmHCR::SmHCR` (view-vector constructor).
 - **What happens:** The status of `MakeUnitOrthoVectors` is ignored. When the view vector cannot be unitized (squared length below `SM_EFF_ZERO_SQ`), or when its squared length overflows to infinity (`Unitize` then yields `(0, 0, 0)`, both arbitrary-axis crosses are zero and `SER(SM_ERR)` returns, `SmVector3d.cpp:199-205`), `sPerp1` and `sPerp2` (`SmVector3d() = default`) stay uninitialised and `SetSTEPCanonical` reads them.

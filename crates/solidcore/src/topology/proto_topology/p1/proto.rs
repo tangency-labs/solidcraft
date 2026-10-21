@@ -2253,6 +2253,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.delete_proto_edge(pe)
     }
 
+    /// Drops every reference the listed proto faces (coincident proto edges) and
+    /// proto edges (overlapping proto edges) hold to `pe`, before it is deleted.
+    ///
+    /// SolidCraft fix tangency-labs/smlib 93efd6d (UB-239), which does this in
+    /// `RemoveProtoEdge` because every library caller deletes the edge next. Upstream
+    /// keeps the references, and later passes over those lists
+    /// (`GlueCoincidentBrepVertices`, `Resolve`) read the edge after the free. The port
+    /// calls it at those library deletes, so `remove_proto_edge` and
+    /// `delete_proto_edge_object` stay upstream's on their own.
+    pub fn forget_proto_edge(&mut self, pe: ProtoEdgeId) {
+        for pf in self.pfs.clone() {
+            if let Some(face) = self.proto_face_mut(pf) {
+                face.coinc_proto_edges_mut().retain(|&x| x != pe);
+            }
+        }
+        for other in self.pes.clone() {
+            if let Some(edge) = self.proto_edge_mut(other) {
+                edge.overlapping_pes.retain(|&x| x != pe);
+            }
+        }
+    }
+
     /// Deletes the proto vertex `pv` (`delete pPV`, `~SmProtoVertex`).
     pub fn delete_proto_vertex_object(&mut self, pv: ProtoVertexId) {
         self.delete_proto_vertex(pv);
@@ -3047,6 +3069,21 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(())
     }
 
+    /// Adds `survivor` to the coincident proto edges of every listed proto face that
+    /// has `removed` there and not `survivor` yet: the faces bounded by a proto edge
+    /// combined away are bounded by the one it was combined into (SolidCraft change,
+    /// tangency-labs/smlib 93efd6d, in `SplitIntersectingProtoEdges`).
+    pub fn hand_over_coincident_proto_edge(&mut self, survivor: ProtoEdgeId, removed: ProtoEdgeId) {
+        for pf in self.pfs.clone() {
+            if let Some(face) = self.proto_face_mut(pf) {
+                let list = face.coinc_proto_edges_mut();
+                if list.contains(&removed) && !list.contains(&survivor) {
+                    list.push(survivor);
+                }
+            }
+        }
+    }
+
     /// The proto edges with a definition from the same source objects as the
     /// interval pair's midpoints that overlaps `interval1` over a segment
     /// (`CheckOverlappingProtoEdges`; upstream appends them to `rOverlappingPEs`).
@@ -3308,5 +3345,64 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct H(usize, ClassObjectKind);
+
+    impl ClassObject for H {
+        fn class_kind(&self) -> ClassObjectKind {
+            self.1
+        }
+    }
+
+    fn manager(k: &Kernel) -> ProtoTopologyManager<H> {
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        ProtoTopologyManager::new(k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap()
+    }
+
+    #[test]
+    fn a_forgotten_proto_edge_leaves_every_face_and_overlap_list() {
+        // 93efd6d (#369): SplitIntersectingProtoEdges deleted a combined-away proto
+        // edge that proto faces and other proto edges still listed
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let ivl = Extent1d::from_raw(0.0, 1.0);
+        let [kept, gone, other] = [(); 3].map(|()| m.new_proto_edge(&k, None, None, ivl).unwrap());
+        for pe in [kept, gone, other] {
+            m.add_proto_edge(pe);
+        }
+        let f1 = m.new_proto_face(None, None, &[gone, other, gone]).unwrap();
+        let f2 = m.new_proto_face(None, None, &[kept, gone]).unwrap();
+        m.add_proto_face(f1);
+        m.add_proto_face(f2);
+        m.proto_edge_mut(other).unwrap().add_overlapping_pe(gone);
+        m.proto_edge_mut(kept).unwrap().add_overlapping_pe(gone);
+        m.proto_edge_mut(kept).unwrap().add_overlapping_pe(other);
+        let coinc = |m: &ProtoTopologyManager<H>, pf| {
+            m.proto_face(pf).unwrap().coinc_proto_edges().to_vec()
+        };
+
+        // the faces gone bounded are bounded by kept, once
+        m.hand_over_coincident_proto_edge(kept, gone);
+        assert_eq!(coinc(&m, f1), vec![gone, other, gone, kept]);
+        assert_eq!(coinc(&m, f2), vec![kept, gone]);
+        // unlisting alone keeps upstream's lists
+        m.remove_proto_edge(gone).unwrap();
+        assert_eq!(coinc(&m, f2), vec![kept, gone]);
+        assert_eq!(m.proto_edges(), &[kept, other]);
+        // the library's delete drops every reference first
+        m.forget_proto_edge(gone);
+        let _ = m.delete_proto_edge_object(gone);
+        assert_eq!(coinc(&m, f1), vec![other, kept]);
+        assert_eq!(coinc(&m, f2), vec![kept]);
+        assert!(m.proto_edge(other).unwrap().overlapping_pes().is_empty());
+        assert_eq!(m.proto_edge(kept).unwrap().overlapping_pes(), &[other]);
     }
 }

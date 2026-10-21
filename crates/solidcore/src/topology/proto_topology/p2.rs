@@ -1470,6 +1470,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         if remove_owner_if_empty && o.num_edge_definitions() < 1 {
             ignore_soft(self.remove_proto_edge(owner))?;
+            // SolidCraft fix 93efd6d (UB-239): drop the references to it first
+            self.forget_proto_edge(owner);
             let _ = self.delete_proto_edge_object(owner);
         }
         Ok(())
