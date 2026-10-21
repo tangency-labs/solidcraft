@@ -4815,8 +4815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_Mouse.smb_1",
@@ -4827,8 +4827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_Mouse.smb_2",
@@ -4855,8 +4855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_box_with_large_fillet.smb_1",
@@ -4867,8 +4867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "region_order_gather_box_with_large_fillet.smb_2",
@@ -7365,8 +7365,9 @@
   "cases_passed": 896,
   "cases_total": 911,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 4,
-    "query.brep": 11
+    "curve.crv_on_surf": 2,
+    "query.brep": 11,
+    "topology.edge": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

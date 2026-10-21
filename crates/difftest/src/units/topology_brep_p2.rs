@@ -965,6 +965,18 @@ fn merge_rust(
                 SolidError::Upstream { code, .. } => {
                     Ok(Output::new().values("out", vec![0.0, f64::from(code), 0.0, 0.0]))
                 }
+                // CurveOnClassify reached the face's topology through `MergeObjects`, which
+                // resolves only the case's curves: `merge_curves_on_surface` holds the
+                // B-rep mutably, so no adapter can hand the classification its topology
+                // (ClassGeometry::topology_entity) yet
+                SolidError::InvalidInput { operation, .. }
+                    if operation.starts_with("intersect::point_class") =>
+                {
+                    Ok(Output::deferred(
+                        "topology.brep_p2",
+                        "MergeCurvesOnSurface: topology handles of the merged B-rep",
+                    ))
+                }
                 other => Err(harness(format!("rust: {other}"))),
             },
         },

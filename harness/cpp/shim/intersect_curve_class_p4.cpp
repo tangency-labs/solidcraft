@@ -20,7 +20,8 @@
 // not its classification, a classification without face (UB-124: GetUpwardFaceuse / GetSurface
 // on NULL) and, when the end is on an edge of a face with a surface, a NULL classification or
 // edge curve (both are evaluated); for GetLoopCrossings over loops a classification without
-// curve (UB-124: GetNaturalInterval on NULL). Geometry objects live for the whole process (never
+// curve (UB-124: GetNaturalInterval on NULL) or without intervals (GetPointClassifiesConnectedTo
+// reads m_pData[0]). Geometry objects live for the whole process (never
 // deleted); the B-rep is deleted at the end of the run.
 
 #include "sc_shim.h"
@@ -884,6 +885,11 @@ int32_t run(Rd& rd, std::vector<double>& o)
             }
             // UB-124: the classification curve's GetNaturalInterval() before its NULL check
             if (rd.bad || (n > 0 && cc.GetCurve() == NULL))
+                return SC_ERR_ARG;
+            // GetPointClassifiesConnectedTo reads m_pData[0]: an empty classification (left by
+            // a squeeze of its only interval, or never sized) reads a removed or missing
+            // interval
+            if (n > 0 && size == 0)
                 return SC_ERR_ARG;
             SmTArray<ULONG> counts;
             SmTArray<SmTouchData> raw, done;

@@ -210,7 +210,7 @@
       "values_compared": 39
     },
     {
-      "max_rel_err": 2.1419601097972088e-16,
+      "max_rel_err": 0.0,
       "name": "arc_to_region",
       "outcome": "pass",
       "pass": true,
@@ -24272,7 +24272,7 @@
   "cases_passed": 3033,
   "cases_total": 3033,
   "deferred_by_unit": {},
-  "max_rel_err": 2.1419601097972088e-16,
+  "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,

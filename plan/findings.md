@@ -12301,6 +12301,20 @@ mechanical:
 
 `SmCurveInterval::GetMinUV` / `GetMaxUV` are wired (no case reaches them yet).
 
+**Resolved (wire/curve-class-p4, PR #365):** both back-edges are now wired.
+
+- The 4 `ConnectIntervals` disagreements are upstream undefined behaviour, not a port
+  bug. Each case squeezes the only interval out of a classification (`ConnectIntervals`
+  removes it, leaving size 0) and then runs `GetLoopCrossings` over loops, whose
+  `GetPointClassifiesConnectedTo` reads `m_pData[0]` of the empty classification.
+  Upstream reads a stale or missing interval there, while Rust reports `InvalidInput`.
+  The p4 shim now rejects `GetLoopCrossings` over loops on an empty classification.
+- `merge_plane10_line` defers as `topology.brep_p2`
+  (`MergeCurvesOnSurface: topology handles of the merged B-rep`), because the brep_p2
+  runner's `MergeObjects` resolves only the case curves.
+  `merge_curves_on_surface` holds the B-rep as `&mut`, so no `ClassGeometry` adapter can
+  lend it to `topology_entity` without a change to brep_p2's objects trait.
+
 ## topology.edge — inexact geometry import reporting (issue #294, PR #356)
 
 The edge adapter imports analytic curves other than lines, and analytic surfaces

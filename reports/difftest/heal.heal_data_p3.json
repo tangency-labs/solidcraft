@@ -626,6 +626,42 @@
       "values_compared": 0
     },
     {
+      "max_rel_err": 0.0,
+      "name": "fuzz06650_seed_degen_faces_twice_swap",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/fuzz_regressions.json#0",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz14730_seed_degen_faces_twice",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/fuzz_regressions.json#1",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz07609_readd_live_edge_before_fix_degen_edges",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/heal.heal_data_p3/fuzz_regressions.json#2",
+      "values_compared": 15
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "fuzz07609_remove_then_readd_edge_is_valid",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/heal.heal_data_p3/fuzz_regressions.json#3",
+      "values_compared": 0
+    },
+    {
       "deferred": {
         "symbol": "SmFace::GetTolerance",
         "unit": "topology.face_p2"
@@ -1082,16 +1118,12 @@
       "values_compared": 2802
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572284",
-      "values_compared": 0
+      "values_compared": 2837
     },
     {
       "max_rel_err": 0.0,
@@ -1330,16 +1362,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0032",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572310",
-      "values_compared": 0
+      "values_compared": 3785
     },
     {
       "max_rel_err": 0.0,
@@ -1562,16 +1590,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0056",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572334",
-      "values_compared": 0
+      "values_compared": 2847
     },
     {
       "max_rel_err": 0.0,
@@ -2046,16 +2070,12 @@
       "values_compared": 2973
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0112",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572390",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "deferred": {
@@ -2367,8 +2387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -2422,28 +2442,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0153",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572431",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0154",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572432",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "max_rel_err": 0.0,
@@ -2462,16 +2474,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0157",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572435",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "max_rel_err": 0.0,
@@ -2618,16 +2626,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0175",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572453",
-      "values_compared": 0
+      "values_compared": 2837
     },
     {
       "max_rel_err": 0.0,
@@ -2762,16 +2766,12 @@
       "values_compared": 2954
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0190",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572468",
-      "values_compared": 0
+      "values_compared": 2865
     },
     {
       "max_rel_err": 0.0,
@@ -2814,16 +2814,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0195",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572473",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "deferred": {
@@ -3062,16 +3058,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0220",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572498",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "max_rel_err": 0.0,
@@ -3170,16 +3162,12 @@
       "values_compared": 3444
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0231",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572509",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "max_rel_err": 0.0,
@@ -3243,8 +3231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -3498,16 +3486,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0267",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572545",
-      "values_compared": 0
+      "values_compared": 2957
     },
     {
       "deferred": {
@@ -3523,8 +3507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0269",
@@ -3555,8 +3539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0272",
@@ -3990,16 +3974,12 @@
       "values_compared": 2747
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0317",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572595",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "max_rel_err": 0.0,
@@ -4018,16 +3998,12 @@
       "values_compared": 2985
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0320",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8971100046885572598",
-      "values_compared": 0
+      "values_compared": 3413
     },
     {
       "max_rel_err": 0.0,
@@ -4155,8 +4131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0335",
@@ -4375,13 +4351,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 145,
+  "cases_deferred": 131,
   "cases_failed": 0,
-  "cases_passed": 329,
-  "cases_total": 474,
+  "cases_passed": 347,
+  "cases_total": 478,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 20,
+    "query.brep": 1,
     "surface.surface_p2": 2,
+    "topology.edge": 5,
     "topology.face_p2": 123
   },
   "max_rel_err": 0.0,

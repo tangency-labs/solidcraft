@@ -3,6 +3,46 @@
   "cases": [
     {
       "max_rel_err": 0.0,
+      "name": "fuzz06628_squeeze_vertex_of_own_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p2/fuzz_regressions.json#0",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz08367_squeeze_vertex_of_own_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p2/fuzz_regressions.json#1",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz19033_squeeze_vertex_of_own_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p2/fuzz_regressions.json#2",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz19955_squeeze_vertex_of_own_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p2/fuzz_regressions.json#3",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "fuzz23628_squeeze_vertex_of_own_brep",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.topology_intersector_p2/fuzz_regressions.json#4",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "loop_crossings_sheet_line",
       "outcome": "pass",
       "pass": true,
@@ -7955,8 +7995,8 @@
   "cases_both_errored": 2,
   "cases_deferred": 177,
   "cases_failed": 0,
-  "cases_passed": 728,
-  "cases_total": 905,
+  "cases_passed": 733,
+  "cases_total": 910,
   "deferred_by_unit": {
     "query.brep": 47,
     "topology.brep_p1": 4,

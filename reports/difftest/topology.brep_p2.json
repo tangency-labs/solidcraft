@@ -403,8 +403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "MergeCurvesOnSurface: topology handles of the merged B-rep",
+        "unit": "topology.brep_p2"
       },
       "max_rel_err": 0.0,
       "name": "merge_plane10_line",
@@ -14616,10 +14616,10 @@
   "cases_passed": 1475,
   "cases_total": 1709,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 1,
     "intersect.surface_drop_lib_p3": 85,
     "query.brep": 93,
     "surface.surface_cache_p1": 20,
+    "topology.brep_p2": 1,
     "topology.face_p2": 19,
     "topology.face_p3": 16
   },

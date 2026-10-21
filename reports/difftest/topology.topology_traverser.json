@@ -6916,8 +6916,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op7_00",
@@ -7317,8 +7317,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0001",
@@ -7337,8 +7337,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -7414,8 +7414,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0012",
@@ -7456,8 +7456,8 @@
   "cases_passed": 895,
   "cases_total": 909,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 4,
-    "intersect.surface_drop_lib_p3": 10
+    "intersect.surface_drop_lib_p3": 10,
+    "topology.edge": 4
   },
   "max_rel_err": 0.0,
   "pass": true,
