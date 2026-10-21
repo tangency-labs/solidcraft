@@ -1,0 +1,112 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 10
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 3,
+    "operation": "new",
+    "body_name": "Coin"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      3
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 10
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 15
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "profiles": [
+     {
+      "point": [
+       12,
+       0
+      ]
+     }
+    ],
+    "distance": 3,
+    "operation": "join",
+    "targets": [
+     "Coin"
+    ]
+   }
+  }
+ ]
+}

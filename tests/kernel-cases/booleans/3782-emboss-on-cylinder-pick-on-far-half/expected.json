@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3782",
+    "tangency-labs/solidcraft#3425"
+  ],
+  "what": "emboss on a cylinder with the face pick on the half of the wall opposite the sketch",
+  "source": "invariants",
+  "method": "the cylinder wall is one logical face, so a pick anywhere on it (between the caps) must be accepted: the emboss succeeds with one valid closed solid. No volume is graded (the badge's shape on a curved wall is not fixed by the issue)",
+  "body_count": 1
+}

@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#4008"
+  ],
+  "what": "symmetric 180 deg revolve cut about a vertical edge of a block, the tool's end faces lying in the block's side face",
+  "source": "analytic",
+  "method": "block 60x20x25; the tool (rectangle 2.6..9.6 from the axis, 21 tall) turned +-90 deg about the block's back-left vertical edge; only the quarter inside the block (x>0, y<20) is material: V = 60*20*25 - pi(9.6^2-2.6^2)*21/4",
+  "body_count": 1,
+  "volume_mm3": 28591.4669
+}

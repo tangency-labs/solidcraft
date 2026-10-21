@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3652"
+  ],
+  "what": "mirror a Mirror feature (the first mirror's hole) about a second plane: 'Mirror1 cannot be patterned or mirrored yet'",
+  "source": "analytic",
+  "method": "plate 100x60x10 with a through hole r=3 at (20,10). Mirror1 (about YZ) adds the hole at (-20,10); mirroring Mirror1 about XZ reflects the hole it made to (-20,-10). Three holes, no overlaps: V = 60000 - 3*pi*9*10 = 59151.77",
+  "body_count": 1,
+  "volume_mm3": 59151.77
+}
