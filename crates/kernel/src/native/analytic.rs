@@ -30,7 +30,11 @@ pub(super) fn revolved(profile: mt::Curve, origin: mt::Point3, axis: mt::Vector3
 
 /// An unbounded analytic surface as a truck revolution, its profile over `height` (the face's
 /// v range) for a cylinder or cone, and the whole meridian for a sphere or torus. Truck's
-/// revolution has its own (u, v); the record's loops, not its parameters, bound the face.
+/// revolution has its own (u, v); the record's loops, not its parameters, bound the face. The
+/// profile runs against the record's v so the revolution's (profile, angle) has the record's
+/// natural normal unswapped, as truck's own revolutions are: the tessellator meets a cone's
+/// apex or a sphere's pole at the profile's end, where it places it right (swapped, a drilled
+/// hole's tip came out 41 % too large).
 pub(super) fn load_analytic(surface: b::Surface, height: [f64; 2]) -> Result<mt::Surface> {
     use std::f64::consts::{FRAC_PI_2, TAU};
     let axis = |f: &b::Frame| v(f.x_axis).cross(v(f.y_axis));
@@ -38,22 +42,22 @@ pub(super) fn load_analytic(surface: b::Surface, height: [f64; 2]) -> Result<mt:
         b::Surface::Cylinder { frame, radius } => {
             let z = axis(&frame);
             let at = |h| p(frame.origin) + v(frame.x_axis) * radius + z * h;
-            revolved(mt::Curve::Line(mt::Line(at(height[0]), at(height[1]))), p(frame.origin), z, true)
+            revolved(mt::Curve::Line(mt::Line(at(height[1]), at(height[0]))), p(frame.origin), z, false)
         }
         b::Surface::Cone { frame, radius_at_origin, half_angle } => {
             let z = axis(&frame);
             let at = |h| p(frame.origin) + v(frame.x_axis) * (radius_at_origin + h * half_angle.tan()) + z * h;
-            revolved(mt::Curve::Line(mt::Line(at(height[0]), at(height[1]))), p(frame.origin), z, true)
+            revolved(mt::Curve::Line(mt::Line(at(height[1]), at(height[0]))), p(frame.origin), z, false)
         }
         b::Surface::Sphere { frame, radius } => {
             let z = axis(&frame);
             let meridian = b::Frame { origin: frame.origin, x_axis: frame.x_axis, y_axis: vector(z) };
-            revolved(arc(&meridian, [radius; 2], [-FRAC_PI_2, FRAC_PI_2])?, p(frame.origin), z, true)
+            revolved(arc(&meridian, [radius; 2], [-FRAC_PI_2, FRAC_PI_2])?.inverse(), p(frame.origin), z, false)
         }
         b::Surface::Torus { frame, major_radius, minor_radius } => {
             let z = axis(&frame);
             let profile = b::Frame { origin: point(p(frame.origin) + v(frame.x_axis) * major_radius), x_axis: frame.x_axis, y_axis: vector(z) };
-            revolved(arc(&profile, [minor_radius; 2], [0., TAU])?, p(frame.origin), z, true)
+            revolved(arc(&profile, [minor_radius; 2], [0., TAU])?.inverse(), p(frame.origin), z, false)
         }
         _ => return Err(invalid("expected analytic surface")),
     })

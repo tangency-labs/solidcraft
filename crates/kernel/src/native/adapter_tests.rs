@@ -70,9 +70,10 @@ fn analytic_records_decode_as_their_mathematical_loci_and_normals() {
         (b::Surface::Torus { frame, major_radius: 4., minor_radius: 1. }, [0., TAU], 0., [6., 2., 3.], [1., 0., 0.]),
     ];
     for (record, height, parameter, expected, normal) in cases {
+        // Truck's revolution as truck makes its own: (u, v) = (the profile's parameter, the angle).
         let surface = load_surface(record, [[0., TAU], height]).unwrap();
-        assert!(surface.subs(0., parameter).distance(p(expected)) < 1e-10);
-        assert!(surface.normal(0., parameter).normalize().dot(v(normal).normalize()) > 1. - 1e-10);
+        assert!(surface.subs(parameter, 0.).distance(p(expected)) < 1e-10);
+        assert!(surface.normal(parameter, 0.).normalize().dot(v(normal).normalize()) > 1. - 1e-10);
     }
 }
 
