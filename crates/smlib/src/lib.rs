@@ -16,6 +16,7 @@ use std::sync::Once;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 mod ffi;
+pub mod history;
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]

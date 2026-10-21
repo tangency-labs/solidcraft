@@ -4418,6 +4418,7 @@ version = "0.18.1"
 dependencies = [
  "cc",
  "log",
+ "solidcraft-geom",
 ]
 
 [[package]]
