@@ -1,0 +1,565 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Disk"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 60
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 5,
+    "body_name": "Disk"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      3.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B0"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      47.0,
+      -1.5
+     ],
+     [
+      53.0,
+      -1.5
+     ],
+     [
+      53.0,
+      1.5
+     ],
+     [
+      47.0,
+      1.5
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      8.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B1"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      47.221454704,
+      -1.878745869
+     ],
+     [
+      53.170123872,
+      -1.095588715
+     ],
+     [
+      52.778545296,
+      1.878745869
+     ],
+     [
+      46.829876128,
+      1.095588715
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      13.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B2"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      47.490451089,
+      -2.225345875
+     ],
+     [
+      53.286006047,
+      -0.672431604
+     ],
+     [
+      52.509548911,
+      2.225345875
+     ],
+     [
+      46.713993953,
+      0.672431604
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      18.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B3"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      47.802386551,
+      -2.533869596
+     ],
+     [
+      53.345663746,
+      -0.237769002
+     ],
+     [
+      52.197613449,
+      2.533869596
+     ],
+     [
+      46.654336254,
+      0.237769002
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      23.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B4"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      48.151923789,
+      -2.799038106
+     ],
+     [
+      53.348076211,
+      0.200961894
+     ],
+     [
+      51.848076211,
+      2.799038106
+     ],
+     [
+      46.651923789,
+      -0.200961894
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      28.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B5"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      48.533082123,
+      -3.016314297
+     ],
+     [
+      53.293202164,
+      0.636254277
+     ],
+     [
+      51.466917877,
+      3.016314297
+     ],
+     [
+      46.706797836,
+      -0.636254277
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      33.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B6"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      48.939339828,
+      -3.181980515
+     ],
+     [
+      53.181980515,
+      1.060660172
+     ],
+     [
+      51.060660172,
+      3.181980515
+     ],
+     [
+      46.818019485,
+      -1.060660172
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      38.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B7"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      49.363745723,
+      -3.293202164
+     ],
+     [
+      53.016314297,
+      1.466917877
+     ],
+     [
+      50.636254277,
+      3.293202164
+     ],
+     [
+      46.983685703,
+      -1.466917877
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      43.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "B8"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      49.799038106,
+      -3.348076211
+     ],
+     [
+      52.799038106,
+      1.848076211
+     ],
+     [
+      50.200961894,
+      3.348076211
+     ],
+     [
+      47.200961894,
+      -1.848076211
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B0"
+     },
+     {
+      "sketch": "B1"
+     },
+     {
+      "sketch": "B2"
+     },
+     {
+      "sketch": "B3"
+     },
+     {
+      "sketch": "B4"
+     },
+     {
+      "sketch": "B5"
+     },
+     {
+      "sketch": "B6"
+     },
+     {
+      "sketch": "B7"
+     },
+     {
+      "sketch": "B8"
+     }
+    ],
+    "operation": "join",
+    "name": "Blade",
+    "targets": [
+     "Disk"
+    ]
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "Blade"
+    ],
+    "axis": "Z",
+    "count": 36
+   }
+  }
+ ]
+}
