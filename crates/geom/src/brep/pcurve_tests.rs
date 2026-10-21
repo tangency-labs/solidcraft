@@ -486,6 +486,48 @@ fn intersection_curves_lie_on_both_surfaces() {
     }
 }
 
+/// A thread flank as a screw sweep leaves it: a spline strip winding twenty turns of pitch 1 about
+/// z, rising from radius 3 to radius 4 by half the pitch, so one turn lies 0.89 mm from the next,
+/// and its v = ½ line (its rows' midpoints on its u knots, so it lies on the strip).
+fn thread_flank() -> (Surface, Curve) {
+    const TURNS: usize = 20;
+    const PER_TURN: usize = 8;
+    let n = TURNS * PER_TURN + 1;
+    let helix = |r: f64, rise: f64| -> Vec<[f64; 3]> {
+        (0..n)
+            .map(|i| {
+                let a = TAU * i as f64 / PER_TURN as f64;
+                [r * a.cos(), r * a.sin(), a / TAU + rise]
+            })
+            .collect()
+    };
+    let (inner, outer) = (helix(3., 0.), helix(4., 0.5));
+    let mut u_knots = vec![0.; 4];
+    u_knots.extend((1..n - 3).map(|k| k as f64 / (n - 3) as f64));
+    u_knots.extend([1.; 4]);
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: vec![0., 0., 1., 1.],
+        points: inner.iter().zip(&outer).map(|(a, b)| vec![*a, *b]).collect(),
+    };
+    let middle = Curve::Spline { knots: u_knots, points: inner.iter().zip(&outer).map(|(a, b)| [0, 1, 2].map(|k| 0.5 * (a[k] + b[k]))).collect() };
+    (surface, middle)
+}
+
+/// Edges along a surface winding several turns (the flank's middle line, from mid-turn to
+/// mid-turn, and a short run of it) get pcurves on their own turn, never the next one.
+#[test]
+fn edges_on_a_spline_winding_several_turns_stay_on_their_turn() {
+    let (surface, middle) = thread_flank();
+    for interval in [[0., 1.], [0.0625, 0.9375], [0.40625, 0.4375]] {
+        for tol in [1e-3, 1e-6] {
+            let pc = &pcurves(&surface, &one(&middle, interval), tol).unwrap()[0][0];
+            let e = lift_error(&surface, &middle, interval, pc);
+            assert!(e <= tol, "{interval:?} at {tol}: {e}");
+        }
+    }
+}
+
 /// Hostile records give errors, never a panic.
 #[test]
 fn hostile_records_give_errors() {

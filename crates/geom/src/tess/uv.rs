@@ -170,7 +170,8 @@ fn newton(s: &EvalSurface, dom: &Domain, p: Vec3, start: [f64; 2]) -> Option<([f
 }
 
 /// Parameters of `p` (a point on the surface within `accept`), from `hint` when that
-/// converges, else from the best starts of a grid over the surface's domain.
+/// converges, else from the best starts of a grid over the surface's domain, as fine as its
+/// knot spans ([`starts_along`]).
 pub fn project(s: &EvalSurface, dom: &Domain, p: Vec3, hint: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
     if let EvalSurface::Plane { origin, du, dv } = s {
         let r = p - *origin;
@@ -192,14 +193,19 @@ pub fn project(s: &EvalSurface, dom: &Domain, p: Vec3, hint: Option<[f64; 2]>, a
         }
         best = Some((uv, d));
     }
-    let (ur, vr) = (dom.range[0]?, dom.range[1]?);
-    const N: usize = 16;
-    let mut starts: Vec<(f64, [f64; 2])> = Vec::with_capacity((N + 1) * (N + 1));
-    for i in 0..=N {
-        for j in 0..=N {
-            let uv = [ur.0 + (ur.1 - ur.0) * i as f64 / N as f64, vr.0 + (vr.1 - vr.0) * j as f64 / N as f64];
-            if let Some((q, _, _)) = s.derivs(uv[0], uv[1]) {
-                starts.push(((q - p).len2(), uv));
+    let (mut us, mut vs) = (starts_along(s, 0, dom.range[0]?), starts_along(s, 1, dom.range[1]?));
+    // Thin the longer list (every other start, its ends kept) until the grid fits.
+    while us.len().saturating_mul(vs.len()) > MAX_STARTS {
+        let longer = if us.len() >= vs.len() { &mut us } else { &mut vs };
+        let last = longer.last().copied();
+        *longer = longer.iter().step_by(2).copied().chain(last).collect();
+        longer.dedup();
+    }
+    let mut starts: Vec<(f64, [f64; 2])> = Vec::with_capacity(us.len() * vs.len());
+    for &u in &us {
+        for &v in &vs {
+            if let Some((q, _, _)) = s.derivs(u, v) {
+                starts.push(((q - p).len2(), [u, v]));
             }
         }
     }
@@ -212,6 +218,42 @@ pub fn project(s: &EvalSurface, dom: &Domain, p: Vec3, hint: Option<[f64; 2]>, a
         }
     }
     best.filter(|(_, d)| *d <= accept).map(|(uv, _)| uv)
+}
+
+/// Evenly spaced starts along each direction of [`project`]'s search of the whole surface.
+const EVEN_STARTS: usize = 16;
+/// Starts per knot span of a direction where the surface has its own knots.
+const SPAN_STARTS: usize = 2;
+/// Most points of the surface the search measures.
+const MAX_STARTS: usize = 1 << 14;
+
+/// The parameters along direction `d` (over `range`) that [`project`] starts from when it has no
+/// hint: even steps across the range, and where the surface has its own knots along `d` (a
+/// spline's, a revolution's profile's) each span's start and points inside it, so a surface that
+/// winds several turns along `d` (a thread's flank, one turn every few spans) is searched on
+/// every turn and a point is never taken to the turn beside its own.
+fn starts_along(s: &EvalSurface, d: usize, (a, b): (f64, f64)) -> Vec<f64> {
+    let knots = match s {
+        EvalSurface::Plane { .. } => None,
+        EvalSurface::Nurbs { knots, .. } => knots.get(d),
+        EvalSurface::Revolved { profile, swap, .. } => (usize::from(*swap) == d).then_some(&profile.knots),
+    };
+    let (lo, hi) = (a.min(b), a.max(b));
+    let mut out: Vec<f64> = (0..=EVEN_STARTS).map(|k| a + (b - a) * k as f64 / EVEN_STARTS as f64).collect();
+    if let Some(knots) = knots {
+        let inside = knots.iter().copied().filter(|k| *k > lo && *k < hi);
+        let mut ends: Vec<f64> = std::iter::once(lo).chain(inside).chain(std::iter::once(hi)).collect();
+        ends.dedup();
+        for w in ends.windows(2).take(MAX_STARTS) {
+            let (Some(&k0), Some(&k1)) = (w.first(), w.get(1)) else { continue };
+            out.extend((0..SPAN_STARTS).map(|j| k0 + (k1 - k0) * (j as f64 + 0.5) / SPAN_STARTS as f64));
+            out.push(k0);
+        }
+    }
+    out.retain(|x| x.is_finite());
+    out.sort_by(f64::total_cmp);
+    out.dedup();
+    out
 }
 
 /// `x` moved by whole periods to lie within half a period of `near`.
