@@ -5,8 +5,8 @@
 //! areas). Each case is a test like any rig case, graded against its own `expected.json`. On top,
 //! `tests/kernel-cases/ladder/golden.json` records per case and kernel the status, the commands'
 //! time and what the kernel made (counts, volume, area): the run compares with it and flags
-//! slowdowns and changes. `--record REASON` re-measures the golden (one case at a time unless
-//! `--jobs` says otherwise, so the times are not shared with other cases) and re-sorts each tier
+//! slowdowns and changes; cases run one at a time unless `--jobs` says otherwise, so the times are
+//! not shared with other cases. `--record REASON` re-measures the golden and re-sorts each tier
 //! by the first kernel's time, fastest first; both files are committed.
 //!
 //! The report, `docs/kernel-ladder.md`, gives per tier and kernel the counts per status and the
@@ -264,7 +264,9 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
         Some(Some(r)) => Some(r.to_string()),
     };
     let mut o = options(rest)?;
-    if reason.is_some() && !rest.contains(&"--jobs") {
+    // Times are compared with the golden: cases run one at a time unless --jobs says otherwise,
+    // so they don't share the machine with each other.
+    if !rest.contains(&"--jobs") {
         o.jobs = 1;
     }
     let manifest = read(&manifest_path());

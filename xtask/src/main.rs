@@ -54,8 +54,8 @@ commands:
                   every result as JSON too)
                   --ladder [--record REASON]: the complexity ladder instead
                   (tests/kernel-cases/ladder/ladder.json, tiers in order), graded and compared
-                  with its timing golden, into docs/kernel-ladder.md; --record re-measures the
-                  golden one case at a time and re-sorts each tier by time
+                  with its timing golden (one case at a time unless --jobs), into
+                  docs/kernel-ladder.md; --record re-measures the golden and re-sorts each tier by time
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;
