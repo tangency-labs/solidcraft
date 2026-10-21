@@ -98,8 +98,31 @@ pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
 /// 9e-7 where the record as given is exact to 1e-7.
 #[cfg(feature = "smlib")]
 pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
-    let record = brep_record(body)?;
+    let record = tolerant_record(body)?;
     solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
+}
+
+/// [`brep_record`] for another kernel: where an edge lies a little farther from a face it bounds
+/// than the body's working tolerance (truck's offsets leave edges some 3e-5 mm off their faces),
+/// the record takes a tolerance ten, then a hundred times as large for the body, its edges and
+/// vertices, as the kernel it goes to works to tolerances (SMLib's own are far larger). Past
+/// that it is refused.
+#[cfg(feature = "smlib")]
+fn tolerant_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
+    guard("B-rep record", || {
+        if body.mesh.is_some() {
+            return Err(invalid("mesh bodies are source blobs, not B-rep"));
+        }
+        let working = crate::fill::face_tolerance(body);
+        let mut last = None;
+        for factor in [1.0, 10.0, 100.0] {
+            match adapter::encode_within(body, working * factor)? {
+                Ok(record) => return Ok(record),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| invalid("no record")))
+    })
 }
 
 /// The truck solid of a schema 4 record, as a saved body's is built: tests compare records
@@ -181,7 +204,7 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
 #[cfg(feature = "smlib")]
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
     use solidcraft_smlib::{Brep, CheckLevel};
-    let record = brep_record(body)?;
+    let record = tolerant_record(body)?;
     let import = |trusted: bool| Brep::from_record(&record, trusted).map_err(|e| KernelError::Failed(format!("SMLib: {e}")));
     let valid = |b: &Brep| b.check(CheckLevel::All).is_ok_and(|c| c.is_valid());
     // A record SMLib's check refuses as given (a gap a little over the record's tolerance, a

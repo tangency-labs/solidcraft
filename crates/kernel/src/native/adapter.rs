@@ -97,8 +97,14 @@ fn working_tolerance(body: &Body) -> f64 {
 /// The record of `body`'s solid. Each face's pcurves come from the records written for it
 /// (`brep::pcurve`, the routine every backend shares), within the body's working tolerance.
 pub(super) fn encode(body: &Body) -> Result<b::Brep> {
+    encode_within(body, working_tolerance(body))?
+}
+
+/// The record of `body`'s solid with `tolerance` for the body, its edges and vertices.
+/// `Ok(Err(_))`: some edge lies farther than that from a face it bounds, so no pcurve fits it
+/// within the tolerance.
+pub(super) fn encode_within(body: &Body, tolerance: f64) -> Result<Result<b::Brep>> {
     let solid = &body.solid;
-    let tolerance = working_tolerance(body);
     let shells = solid.boundaries();
     let regions = regions(body)?;
 
@@ -140,7 +146,10 @@ pub(super) fn encode(body: &Body) -> Result<b::Brep> {
                     uses.get_mut(i).ok_or_else(|| invalid("edge use"))?.push(at);
                 }
             }
-            faces.push(face_record(face, wires, &edge_index, &edges, tolerance)?);
+            match face_record(face, wires, &edge_index, &edges, tolerance)? {
+                Ok(f) => faces.push(f),
+                Err(e) => return Ok(Err(e)),
+            }
         }
         shell_records.push(b::Shell::Faces { faces: oriented, wires: Vec::new() });
     }
@@ -163,7 +172,7 @@ pub(super) fn encode(body: &Body) -> Result<b::Brep> {
     let result = b::Brep { version: b::VERSION, tolerance, regions, shells: shell_records, faces, edges: edge_records, vertices };
     result.validate().map_err(invalid)?;
     compatible(&result, Producer::Own)?;
-    Ok(result)
+    Ok(Ok(result))
 }
 
 /// A face's record: its surface, its loops as truck holds them (relative to the surface) and
@@ -174,7 +183,7 @@ fn face_record(
     edge_index: &HashMap<mt::EdgeID, usize>,
     edges: &[(mt::Edge, b::Curve, [f64; 2])],
     tolerance: f64,
-) -> Result<b::Face> {
+) -> Result<Result<b::Face>> {
     let surface = save_surface(&face.surface(), 0)?;
     let mut uses = Vec::with_capacity(wires.len());
     for wire in wires {
@@ -188,7 +197,10 @@ fn face_record(
             .collect::<Result<Vec<_>>>()?;
         uses.push(l);
     }
-    let curves = b::pcurve::pcurves(&surface, &uses, tolerance).map_err(pcurve_error)?;
+    let curves = match b::pcurve::pcurves(&surface, &uses, tolerance) {
+        Ok(c) => c,
+        Err(e) => return Ok(Err(pcurve_error(e))),
+    };
     let loops = uses
         .iter()
         .zip(curves)
@@ -197,7 +209,7 @@ fn face_record(
         })
         .collect::<Vec<_>>();
     let domain = domain(&surface, &loops)?;
-    Ok(b::Face { surface, domain, loops })
+    Ok(Ok(b::Face { surface, domain, loops }))
 }
 
 /// `face`'s record on its own, its edges numbered in first appearance: what [`encode`] writes
@@ -214,7 +226,7 @@ pub(super) fn face_alone(face: &mt::Face, tolerance: f64) -> Result<b::Face> {
             slot.insert(edges.len() - 1);
         }
     }
-    face_record(face, wires, &edge_index, &edges, tolerance)
+    face_record(face, wires, &edge_index, &edges, tolerance)?
 }
 
 /// The kernel's error for the pcurve routine's.
