@@ -218,7 +218,7 @@ const NOTE_DETAILS_UPDATED: &str =
 const NOTE_DETAILS_KEPT: &str = "Screenshot captured locally. Your edited technical details were kept: check that they still match the current view.";
 
 /// What the drafts say about attaching the design: GitHub takes no `.solidcraft` file (#4019).
-const ATTACH_DESIGN: &str = "To share the design, attach it as a .zip: GitHub does not accept .solidcraft files. Use Save design to attach (.zip), or rename name.solidcraft to name.solidcraft.zip. Only attach it if the design can be shared publicly.";
+const ATTACH_DESIGN: &str = "To share the design, attach it as a .zip: GitHub does not accept .solidcraft files. Use Save design (.zip), or rename name.solidcraft to name.solidcraft.zip. Only attach it if the design can be shared publicly.";
 
 struct Pending {
     token: u64,

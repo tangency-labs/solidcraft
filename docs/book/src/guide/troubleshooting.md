@@ -58,7 +58,7 @@ reads them, so you can leave them alone.
   with File > Open.
 - The **`crashes`** folder holds crash reports. Please attach the newest one to a bug report.
   GitHub does not accept `.solidcraft` files: attach a design as a `.zip` instead (Help >
-  Crash Reports… > Report…, then **Save design to attach (.zip)…**, or rename
+  Crash Reports… > Report…, then **Save design (.zip)…**, or rename
   `name.solidcraft` to `name.solidcraft.zip`), and only if it can be shared publicly.
 
 From 0.10.2, SolidCraft also checks the settings files at start. A file it can't read is renamed

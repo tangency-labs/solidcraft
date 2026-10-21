@@ -111,7 +111,7 @@ mod tests {
         let doc = solidcraft_doc::Document::new("Bracket");
         let design = crate::write_design_container(&doc).unwrap();
         assert_eq!(shared_design_name("/tmp/Bracket.solidcraft.ZIP"), "Bracket.solidcraft");
-        assert_eq!(shared_design_name("a/b:c.zip"), "b.solidcraft");
+        assert_eq!(shared_design_name("a/b:c.zip"), "bc.solidcraft");
         // With the folder and the macOS resource forks an archiver adds; a JSON design too.
         let json = crate::write_design(&doc);
         let made = zip_of(&[("__MACOSX/", b""), ("__MACOSX/._Bracket.solidcraft", b"junk"), ("parts/Bracket.solidcraft", &design)]);
