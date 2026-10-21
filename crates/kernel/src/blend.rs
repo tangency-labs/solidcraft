@@ -13,6 +13,7 @@ use solidcraft_geom::{Aabb3, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::body::{Body, Solid, from_p3, p3, v3};
+use crate::history::BodyHistory;
 use crate::history::{FaceOrigin, History};
 use crate::record::{self, Rebuild};
 use crate::{KernelError, Result, guard};

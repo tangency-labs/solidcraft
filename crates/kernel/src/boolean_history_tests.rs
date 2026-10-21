@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::body::Body;
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, History, Side};
 use crate::{BoolOp, boolean, box_solid};
 

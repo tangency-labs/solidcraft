@@ -13,6 +13,7 @@ use solidcraft_geom::{Plane, Vec3};
 
 use crate::body::{Body, from_p3};
 use crate::boolean_record as recorded;
+use crate::history::BodyHistory;
 use crate::history::History;
 use crate::splitface::{SplitTool, split_any};
 use crate::{BoolOp, FaceSurface, Result, face_surface};

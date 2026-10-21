@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 mod curve2;
 pub mod envelope;
+pub mod history;
 pub use curve2::Curve2;
 
 pub const VERSION: u32 = 3;

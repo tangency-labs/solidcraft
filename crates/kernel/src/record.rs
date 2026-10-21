@@ -68,23 +68,7 @@ pub(crate) fn region(origins: BTreeSet<FaceOrigin>, whole: bool) -> FaceProv {
     FaceProv { origins: origins.into_iter().collect(), change }
 }
 
-/// Faces of one origin that is under other faces too, and that still say Kept or Modified,
-/// are Split (also where histories are put side by side: pieces of one body can share a
-/// source).
-pub(crate) fn mark_shared_split(faces: &mut [FaceProv]) {
-    let mut uses: HashMap<FaceOrigin, usize> = HashMap::new();
-    for o in faces.iter().flat_map(|f| &f.origins) {
-        *uses.entry(*o).or_default() += 1;
-    }
-    for f in faces.iter_mut() {
-        if matches!(f.change, Change::Kept | Change::Modified)
-            && let [o] = f.origins.as_slice()
-            && uses.get(o).copied().unwrap_or(0) > 1
-        {
-            f.change = Change::Split;
-        }
-    }
-}
+pub(crate) use solidcraft_geom::brep::history::mark_shared_split;
 
 /// The index of each of `solid`'s edges by identity, in its edge order.
 pub(crate) fn edge_index(solid: &crate::body::Solid) -> HashMap<mt::EdgeID, usize> {
