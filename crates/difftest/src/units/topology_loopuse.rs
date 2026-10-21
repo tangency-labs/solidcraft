@@ -81,6 +81,10 @@ const UNKNOWN_TYPE: f64 = 16999.0;
 /// B-reps) beyond the fixtures and the generated ones.
 const EXTRA_GENERATED: usize = 600;
 
+/// Times a generated case's B-rep is drawn again, at most, when it lacks the loopuse or
+/// loop its op selects (a wire or an edge network has neither).
+const BREP_DRAWS: usize = 8;
+
 /// A target selector: an `SmTopoTypes.h` code and a selector of that kind.
 type TargetIn = (i64, i64);
 
@@ -944,21 +948,54 @@ fn gen_op(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_inputs(rng: &mut Rng) -> Inputs {
-    let brep = if rng.chance(0.5) {
+fn gen_body(rng: &mut Rng) -> BrepIn {
+    if rng.chance(0.5) {
         BrepIn::File {
             file: (*rng.choose(&FILES).unwrap_or(&"Mouse.smb")).to_string(),
             rebuild: rng.chance(0.2),
         }
     } else {
         gen_brep(rng)
-    };
-    Inputs {
+    }
+}
+
+fn gen_inputs(rng: &mut Rng) -> Inputs {
+    let brep = gen_body(rng);
+    let mut i = Inputs {
         brep,
         validate_only: rng.chance(0.1),
         init_gaps: rng.chance(0.2),
         op: gen_op(rng),
+    };
+    // A B-rep without the loopuse or loop the op selects compares only the same refusal
+    // on both sides: draw another. One that doesn't build, or no draw with the kind, keeps
+    // the case as it is, so its error stays visible.
+    for _ in 0..BREP_DRAWS {
+        if !lacks_kind(&i) {
+            break;
+        }
+        i.brep = gen_body(rng);
     }
+    i
+}
+
+/// Whether `op` selects a loop (else a loopuse), as [`resolve`] requires one.
+fn selects_loop(op: &OpIn) -> bool {
+    match op {
+        OpIn::LoopQuery { .. } | OpIn::LoopConnected { .. } | OpIn::UvCorners { .. } | OpIn::Flip { .. } => true,
+        OpIn::Closed3d { of_loop, .. } => *of_loop,
+        _ => false,
+    }
+}
+
+/// Whether `i`'s B-rep builds but has none of the loops or loopuses its op selects.
+fn lacks_kind(i: &Inputs) -> bool {
+    let counts = path_of(Some(&i.brep)).ok().zip(brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps).ok());
+    let Some(c) = counts.and_then(|(path, block)| graph_of(&path, &block).ok()).and_then(|g| ffi1::counts(&g.0)) else {
+        return false;
+    };
+    let [_, _, _, _, n_lu, n_l, ..] = c;
+    if selects_loop(&i.op) { n_l == 0 } else { n_lu == 0 }
 }
 
 impl UnitDiff for Runner {
@@ -998,6 +1035,21 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `selects_loop` names the kind `resolve` refuses an op without, for every op drawn.
+    #[test]
+    fn selects_loop_matches_resolve() {
+        let mut rng = Rng::new(7);
+        let b = Brep::new();
+        // Counts in the export's order; the loopuses (slot 4) or the loops (slot 5) empty.
+        let loopuses_only = [1, 1, 2, 2, 3, 0, 6, 3, 6, 3];
+        let loops_only = [1, 1, 2, 2, 0, 3, 6, 3, 6, 3];
+        for _ in 0..2000 {
+            let op = gen_op(&mut rng);
+            assert_eq!(resolve(&op, loopuses_only, &b).is_none(), selects_loop(&op), "{op:?}");
+            assert_eq!(resolve(&op, loops_only, &b).is_none(), !selects_loop(&op), "{op:?}");
+        }
+    }
 
     #[test]
     fn inputs_round_trip() {

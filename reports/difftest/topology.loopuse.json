@@ -67070,7 +67070,6 @@
       "values_compared": 8
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
@@ -67167,7 +67166,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0012",
       "outcome": "pass",
@@ -67208,7 +67206,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00001",
       "outcome": "pass",
@@ -67233,7 +67230,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00004",
       "outcome": "pass",
@@ -67247,7 +67243,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67255,10 +67251,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00007",
       "outcome": "pass",
@@ -67272,7 +67267,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67280,7 +67275,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67312,7 +67307,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67363,7 +67358,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00020",
       "outcome": "pass",
@@ -67377,7 +67371,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67433,7 +67427,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67481,7 +67475,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67489,7 +67483,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67497,7 +67491,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67513,7 +67507,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67548,7 +67542,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00043",
       "outcome": "pass",
@@ -67586,7 +67579,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67610,7 +67603,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67690,7 +67683,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67733,7 +67726,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00066",
       "outcome": "pass",
@@ -67763,7 +67755,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67774,7 +67766,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00071",
       "outcome": "pass",
@@ -67796,7 +67787,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67836,7 +67827,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67868,7 +67859,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -67900,7 +67891,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -67975,7 +67966,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00096",
       "outcome": "pass",
@@ -67984,7 +67974,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00097",
       "outcome": "pass",
@@ -68009,7 +67998,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00100",
       "outcome": "pass",
@@ -68031,7 +68019,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68050,7 +68038,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00105",
       "outcome": "pass",
@@ -68072,7 +68059,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68123,15 +68110,18 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
       "max_rel_err": 0.0,
       "name": "extra00114",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00115",
       "outcome": "pass",
@@ -68148,14 +68138,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::DropCurve",
-        "unit": "intersect.surface_drop_lib_p3"
-      },
       "max_rel_err": 0.0,
       "name": "extra00117",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68165,7 +68151,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68173,7 +68159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68205,10 +68191,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00124",
       "outcome": "pass",
@@ -68249,14 +68234,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00129",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68277,14 +68258,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
-      },
       "max_rel_err": 0.0,
       "name": "extra00132",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68329,7 +68306,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00138",
       "outcome": "pass",
@@ -68343,7 +68319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68351,7 +68327,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68359,7 +68335,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68367,7 +68343,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68402,13 +68378,12 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00147",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68419,14 +68394,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
-      },
       "max_rel_err": 0.0,
       "name": "extra00149",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68436,7 +68407,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68444,7 +68415,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68460,7 +68431,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68468,7 +68439,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68492,7 +68463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68519,7 +68490,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00161",
       "outcome": "pass",
@@ -68533,7 +68503,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68552,7 +68522,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00165",
       "outcome": "pass",
@@ -68590,7 +68559,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68673,7 +68642,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00180",
       "outcome": "pass",
@@ -68714,13 +68682,12 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00185",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68752,7 +68719,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68760,19 +68727,17 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00191",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00192",
       "outcome": "pass",
@@ -68866,7 +68831,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -68874,10 +68839,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00205",
       "outcome": "pass",
@@ -68910,7 +68874,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00209",
       "outcome": "pass",
@@ -68919,13 +68882,12 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00210",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68949,19 +68911,15 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -68972,14 +68930,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SurfaceKind::SurfOfExtrusion",
-        "unit": "surface.surf_of_extrusion_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00216",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68992,10 +68946,14 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
+        "unit": "surface.surface_p2"
+      },
       "max_rel_err": 0.0,
       "name": "extra00218",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69008,7 +68966,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00220",
       "outcome": "pass",
@@ -69022,7 +68979,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69046,7 +69003,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69062,7 +69019,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69070,10 +69027,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00228",
       "outcome": "pass",
@@ -69095,7 +69051,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69103,7 +69059,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69111,7 +69067,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69130,13 +69086,12 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00235",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69163,14 +69118,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00239",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69180,10 +69131,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00241",
       "outcome": "pass",
@@ -69197,7 +69147,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 5
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69229,7 +69179,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69245,7 +69195,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69264,7 +69214,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00251",
       "outcome": "pass",
@@ -69294,7 +69243,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69305,7 +69254,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00256",
       "outcome": "pass",
@@ -69319,7 +69267,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69351,7 +69299,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69383,7 +69331,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69415,7 +69363,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69463,10 +69411,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00276",
       "outcome": "pass",
@@ -69520,7 +69467,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69563,7 +69510,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00288",
       "outcome": "pass",
@@ -69585,7 +69531,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69596,7 +69542,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00292",
       "outcome": "pass",
@@ -69621,7 +69566,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00295",
       "outcome": "pass",
@@ -69630,7 +69574,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00296",
       "outcome": "pass",
@@ -69652,13 +69595,17 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
+      "deferred": {
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
+      },
       "max_rel_err": 0.0,
       "name": "extra00299",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69684,7 +69631,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69724,7 +69671,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69732,7 +69679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69743,7 +69690,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00310",
       "outcome": "pass",
@@ -69757,7 +69703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69816,7 +69762,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00319",
       "outcome": "pass",
@@ -69830,10 +69775,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00321",
       "outcome": "pass",
@@ -69858,7 +69802,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00324",
       "outcome": "pass",
@@ -69880,7 +69823,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69896,7 +69839,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69920,7 +69863,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69944,7 +69887,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -69960,7 +69903,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -69992,10 +69935,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00341",
       "outcome": "pass",
@@ -70025,7 +69967,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70041,7 +69983,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70049,7 +69991,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70089,10 +70031,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00353",
       "outcome": "pass",
@@ -70146,10 +70087,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00360",
       "outcome": "pass",
@@ -70182,14 +70122,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::DropCurve",
-        "unit": "intersect.surface_drop_lib_p3"
-      },
       "max_rel_err": 0.0,
       "name": "extra00364",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70202,13 +70138,12 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00366",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70216,7 +70151,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70248,7 +70183,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70264,7 +70199,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70280,7 +70215,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70304,7 +70239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70312,10 +70247,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00380",
       "outcome": "pass",
@@ -70329,7 +70263,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70337,7 +70271,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70377,7 +70311,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70420,7 +70354,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00393",
       "outcome": "pass",
@@ -70442,7 +70375,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70490,7 +70423,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70514,7 +70447,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70522,7 +70455,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70530,7 +70463,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70565,7 +70498,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00411",
       "outcome": "pass",
@@ -70587,7 +70519,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -70598,19 +70530,14 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00415",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00416",
       "outcome": "pass",
@@ -70659,7 +70586,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00422",
       "outcome": "pass",
@@ -70692,7 +70618,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00426",
       "outcome": "pass",
@@ -70813,11 +70738,14 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
       "max_rel_err": 0.0,
       "name": "extra00441",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70867,7 +70795,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -70891,17 +70819,13 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SurfaceKind::Cone (SmCone dispatch)",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00451",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70914,7 +70838,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00453",
       "outcome": "pass",
@@ -70960,7 +70883,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71008,17 +70931,13 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::DropCurve",
-        "unit": "intersect.surface_drop_lib_p3"
-      },
       "max_rel_err": 0.0,
       "name": "extra00465",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71028,7 +70947,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71052,7 +70971,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71060,7 +70979,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71068,10 +70987,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00472",
       "outcome": "pass",
@@ -71096,7 +71014,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00475",
       "outcome": "pass",
@@ -71145,7 +71062,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00481",
       "outcome": "pass",
@@ -71175,10 +71091,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00485",
       "outcome": "pass",
@@ -71240,7 +71155,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71264,7 +71179,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71296,7 +71211,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71304,10 +71219,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00501",
       "outcome": "pass",
@@ -71324,7 +71238,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00503",
       "outcome": "pass",
@@ -71346,7 +71259,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71365,10 +71278,14 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
+      },
       "max_rel_err": 0.0,
       "name": "extra00508",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71386,7 +71303,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71405,11 +71322,14 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "SurfaceKind::SurfOfExtrusion",
+        "unit": "surface.surf_of_extrusion_p2"
+      },
       "max_rel_err": 0.0,
       "name": "extra00513",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71459,7 +71379,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71467,7 +71387,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71483,7 +71403,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71518,16 +71438,14 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00527",
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00528",
       "outcome": "pass",
@@ -71536,7 +71454,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00529",
       "outcome": "pass",
@@ -71574,7 +71491,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71646,7 +71563,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71657,7 +71574,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00544",
       "outcome": "pass",
@@ -71695,7 +71611,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71703,7 +71619,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71711,7 +71627,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71719,7 +71635,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71743,7 +71659,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71762,10 +71678,14 @@
       "values_compared": 2
     },
     {
+      "deferred": {
+        "symbol": "SurfaceKind::Sphere (SmSphere dispatch)",
+        "unit": "surface.surface_p2"
+      },
       "max_rel_err": 0.0,
       "name": "extra00557",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71783,7 +71703,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71791,7 +71711,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71842,11 +71762,14 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
       "max_rel_err": 0.0,
       "name": "extra00567",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71875,10 +71798,14 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
       "max_rel_err": 0.0,
       "name": "extra00571",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71904,10 +71831,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00575",
       "outcome": "pass",
@@ -71921,7 +71847,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -71953,7 +71879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -71969,10 +71895,9 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00583",
       "outcome": "pass",
@@ -71994,7 +71919,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -72013,22 +71938,22 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::DropCurve",
-        "unit": "intersect.surface_drop_lib_p3"
-      },
       "max_rel_err": 0.0,
       "name": "extra00588",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmBrep::MakeTopologyFromData",
+        "unit": "topology.brep_p10"
+      },
       "max_rel_err": 0.0,
       "name": "extra00589",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72046,7 +71971,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
@@ -72054,7 +71979,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=269157856",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -72065,14 +71990,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeTopologyFromData",
-        "unit": "topology.brep_p10"
-      },
       "max_rel_err": 0.0,
       "name": "extra00594",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72093,7 +72014,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00597",
       "outcome": "pass",
@@ -72102,7 +72022,6 @@
       "values_compared": 0
     },
     {
-      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "extra00598",
       "outcome": "pass",
@@ -72119,15 +72038,15 @@
       "values_compared": 0
     }
   ],
-  "cases_both_errored": 333,
-  "cases_deferred": 238,
+  "cases_both_errored": 264,
+  "cases_deferred": 235,
   "cases_failed": 0,
-  "cases_passed": 8616,
+  "cases_passed": 8619,
   "cases_total": 8854,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p3": 48,
+    "intersect.surface_drop_lib_p3": 46,
     "surface.surf_of_extrusion_p2": 33,
-    "surface.surface_p2": 70,
+    "surface.surface_p2": 69,
     "topology.brep_p10": 87
   },
   "max_rel_err": 0.0,

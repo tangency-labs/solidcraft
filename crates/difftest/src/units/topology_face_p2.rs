@@ -89,6 +89,10 @@ const NULL_DEREF: f64 = -2.0;
 /// Generated cases beyond the default `--seeds` (the B-rep ops are cheap).
 const EXTRA_GENERATED: usize = 1500;
 
+/// Times a generated case's B-rep is drawn again, at most, when it lacks the entity kind its
+/// op selects (a wire or an edge network for a face op).
+const BREP_DRAWS: usize = 8;
+
 // ---- inputs -----------------------------------------------------------------------------
 
 /// A B-spline curve: `dim`, control points `[x y z w]` (`w = NOW` non-rational, `z =
@@ -2209,12 +2213,31 @@ fn gen_op(rng: &mut Rng) -> OpIn {
 fn gen_inputs(rng: &mut Rng) -> Inputs {
     let op = gen_op(rng);
     let brep = op.is_brep().then(|| gen_brep(rng));
-    Inputs {
+    let mut i = Inputs {
         brep,
         validate_only: rng.chance(0.1),
         init_gaps: rng.chance(0.7),
         op,
+    };
+    // A B-rep without the entity kind the op selects compares only the same refusal on
+    // both sides: draw another. One that doesn't build, or no draw with the kind, keeps
+    // the case as it is, so its error stays visible.
+    for _ in 0..BREP_DRAWS {
+        if !lacks_kind(&i) {
+            break;
+        }
+        i.brep = Some(gen_brep(rng));
     }
+    i
+}
+
+/// Whether `i`'s B-rep builds but has none of the entity kind its op selects.
+fn lacks_kind(i: &Inputs) -> bool {
+    i.brep.is_some()
+        && export(i)
+            .ok()
+            .and_then(|ex| ffi::counts(&ex))
+            .is_some_and(|c| resolve(&i.op, &counts_of(c)).is_err())
 }
 
 impl UnitDiff for Runner {
