@@ -131,6 +131,18 @@ fn records_truck_cannot_hold_are_refused() {
     assert!(decode(vertex_loop).is_err());
 }
 
+/// Truck builds edges and faces unchecked: a record whose geometry misses its topology is
+/// refused before it gets there.
+#[test]
+fn records_whose_geometry_misses_their_topology_are_refused() {
+    let cube = crate::box_solid(Vec3::ZERO, Vec3::new(4., 3., 1.)).unwrap();
+    let mut moved = encode(&cube).unwrap();
+    moved.vertices[0].point[0] += 0.1;
+    moved.validate().unwrap();
+    let error = decode(moved).err().unwrap().to_string();
+    assert!(error.contains("misses its"), "{error}");
+}
+
 #[test]
 fn intersections_and_revolutions_reload_exactly() {
     let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 5., 40.).unwrap();

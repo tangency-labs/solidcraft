@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_geom::brep::history::{Change, EdgeOrigin, FaceOrigin};
+use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
 
 fn face(operand: usize, face: usize) -> FaceOrigin {
     FaceOrigin::Face { operand, face }
@@ -83,6 +83,22 @@ fn bad_orders_are_errors() {
     // A result order that isn't a permutation.
     assert!(raw.history(&[ok.clone(), ok.clone()], &Order { faces: vec![0, 0, 1], edges: vec![] }).is_err());
     assert!(raw.history(&[ok.clone(), ok.clone()], &Order { faces: vec![0, 1, 3], edges: vec![] }).is_err());
+}
+
+/// A box with its edge 0 (between faces 4 and 5) filleted, as SMLib reports it: the fillet face
+/// (6) has no tag; it lies between faces from 4 and 5 and two end faces.
+#[test]
+fn a_fillet_face_comes_from_its_edge() {
+    let kept = |i: usize| FaceProv { origins: vec![face(0, i)], change: Change::Modified };
+    let mut faces: Vec<FaceProv> = (0..6).map(kept).collect();
+    faces.push(FaceProv { origins: vec![], change: Change::Generated });
+    let edge = |a: usize, b: usize| EdgeProv { faces: vec![a, b], origins: vec![] };
+    let mut h = History { operands: 1, faces, edges: vec![edge(4, 6), edge(5, 6), edge(0, 6), edge(2, 6), edge(0, 4)] };
+    // The operand's own edges: edge 0 between faces 4 and 5, edge 1 between 0 and 4.
+    let operand = vec![edge(4, 5), edge(0, 4)];
+    blends(&mut h, &operand, &[0, 1]);
+    assert_eq!(h.faces[6].origins, vec![FaceOrigin::Edge { operand: 0, edge: 0 }]);
+    assert!(h.faces[..6].iter().all(|f| f.origins.len() == 1));
 }
 
 #[cfg(feature = "native")]
