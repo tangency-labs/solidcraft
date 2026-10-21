@@ -330,15 +330,20 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     }
     // Match the evaluator's implicit participants: a grouped cut from an empty
     // assembly component considers every body; otherwise keep the active scope.
-    // Explicit participants override either default.
+    // Explicit targets, else participants, override either default.
     // A component with no body of its own works on those of the components inside it (#3223).
-    // The participants only pick the scope here; the feature itself refuses a list of the
-    // wrong type (`add_feature`), so a wrong type cannot make this cut anything. This preview
-    // cannot fail, so it reads the list leniently.
-    let parts = string_list_or_default(p, "participants");
+    // The targets and participants only pick the scope here; the feature itself refuses a list
+    // of the wrong type (`add_feature`), so a wrong type cannot make this cut anything. This
+    // preview cannot fail, so it reads the lists leniently.
+    let parts = match string_list_or_default(p, "targets") {
+        targets if targets.is_empty() => string_list_or_default(p, "participants"),
+        targets => targets,
+    };
     let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
     let mut bodies: Vec<_> = if !parts.is_empty() {
-        st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
+        // `*` alone is every body, as the evaluator reads it.
+        let every = parts.len() == 1 && parts.first().is_some_and(|t| t == "*");
+        st.bodies.iter().filter(|b| every || parts.contains(&b.name)).collect()
     } else if implicit_all {
         st.bodies.iter().collect()
     } else {
@@ -1181,6 +1186,22 @@ fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Result<Vec<Str
     scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
     let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component)?;
     Ok(own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect())
+}
+
+/// The body a Join takes without targets: the picked face's, or the one its sketch lies on.
+pub fn join_face_body(s: &Session, p: &Value) -> Option<String> {
+    if let Some(body) = str_(p, "face_body") {
+        return Some(body.to_string());
+    }
+    if p.get("face").is_some() || p.get("faces").is_some() {
+        return None;
+    }
+    sketch_face_body(s, feature_sketch(s, p, "solid.extrude").ok()?)
+}
+
+/// The bodies the active component works on when a feature names none ([`active_scope`]).
+pub fn scope_bodies(s: &Session) -> Vec<String> {
+    active_scope(s, &s.model.state()).into_iter().map(|b| b.name.clone()).collect()
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
