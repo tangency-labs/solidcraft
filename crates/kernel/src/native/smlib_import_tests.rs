@@ -27,12 +27,14 @@ fn primitives_keep_their_analytic_volume() {
     assert!(solid && (got - 28.0 * PI).abs() <= 1e-6 * 28.0 * PI, "tilted cylinder: SMLib volume {got}, manifold {solid}");
 }
 
-/// Truck holds spheres and tori as revolutions (`PlacedRevolution`), which the SMLib import does
-/// not carry yet: a clear error, never a wrong body.
+/// Truck holds spheres and tori as revolutions (`PlacedRevolution`); they go to SMLib as their
+/// exact rational B-spline surfaces.
 #[test]
-fn revolutions_are_refused_for_now() {
-    for (name, body) in [("sphere", sphere(v(0., 0., 0.), 5.0).unwrap()), ("torus", torus(v(0., 0., 0.), 10.0, 2.0).unwrap())] {
-        let e = super::smlib_body(&body).err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(e.contains("not supported yet: revolved surfaces"), "{name}: {e}");
-    }
+fn revolutions_keep_their_analytic_volume() {
+    let (got, solid) = in_smlib(&sphere(v(1., 2., 3.), 5.0).unwrap()).unwrap();
+    let ball = 4.0 / 3.0 * PI * 125.0;
+    assert!(solid && (got - ball).abs() <= 1e-6 * ball, "sphere: SMLib volume {got}, manifold {solid}");
+    let (got, solid) = in_smlib(&torus(v(0., 0., 0.), 10.0, 2.0).unwrap()).unwrap();
+    let ring = 2.0 * PI * PI * 10.0 * 4.0;
+    assert!(solid && (got - ring).abs() <= 1e-6 * ring, "torus: SMLib volume {got}, manifold {solid}");
 }
