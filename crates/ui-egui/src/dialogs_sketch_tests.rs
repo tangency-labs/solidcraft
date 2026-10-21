@@ -397,8 +397,16 @@ fn apply_keeps_the_panel_open_after_asynchronous_evaluation() {
     d.repeat_after_apply = true;
     h.app.dialog = Some(d);
     let (finish, done) = std::sync::mpsc::channel();
-    h.app.applying =
-        Some(Applying { done, ready: None, started: crate::now_ms(), cmds, seen: true, progress: Default::default(), quality: Default::default() });
+    h.app.applying = Some(Applying {
+        done,
+        ready: None,
+        started: crate::now_ms(),
+        cmds,
+        seen: true,
+        progress: Default::default(),
+        quality: Default::default(),
+        design: crate::dialogs::Design::of(&h.app.session),
+    });
     let undo = h.app.session.undo.len();
     h.frames(2);
     assert_eq!(h.app.session.undo.len(), undo);

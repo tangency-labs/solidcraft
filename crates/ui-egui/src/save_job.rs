@@ -91,7 +91,7 @@ mod tests {
         let (_save_finish, save_done) = std::sync::mpsc::channel();
         h.app.saving = Some(super::Saving { command: "file.save", done: save_done });
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
-        assert!(crate::dialogs::begin_applying(&h.app, &dialog).is_none());
+        assert!(crate::dialogs::begin_applying(&mut h.app, &dialog).is_none());
         assert!(crate::dialogs::run_dialog(&mut h.app, &dialog).unwrap_err().contains("file operation"));
         let (finish, done) = std::sync::mpsc::channel();
         h.app.applying = Some(crate::dialogs::Applying {
@@ -102,6 +102,7 @@ mod tests {
             cmds,
             progress: Default::default(),
             quality: Default::default(),
+            design: crate::dialogs::Design::of(&h.app.session),
         });
         finish.send(Ok(prepared)).ok().unwrap();
         // Run just the dialog, without the normal frame's save polling.
