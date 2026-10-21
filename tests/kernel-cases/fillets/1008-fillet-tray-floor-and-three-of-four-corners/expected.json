@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1008"
+ ],
+ "what": "an R10 round on the four inside floor edges and three of the four inside vertical corners of an open tray, so one corner keeps a sharp vertical edge where two floor rounds meet (rebuilt from the report's edge picks: the original design is not in the report)",
+ "source": "analytic",
+ "method": "Tray 100x100x50, cavity 90x90 from z=5 up through the open top (walls and floor 5 mm): V0 = 500000 - 90*90*45 = 135500. Rounding concave edges adds material. Let P be the cavity's plan outline after the vertical rounds: the 90x90 square with three corners rounded R10 (one corner sharp), area 8100 - 3 (1-pi/4) 100 = 8035.6194. The floor round is a rolling ball of R10 along the outline, so over a point at plan distance d from the outline (d<10) the floor rises by g(d) = 10 - sqrt(100 - (10-d)^2); at the sharp corner the two rounds meet in a mitre, which is g of the distance to the nearest wall, the same rule; at a rounded corner the torus degenerates to the ball's sphere. Co-area: the integral of g(d) over P = integral over t in [0,10] of g(t) L(t) dt, with L(t) the perimeter of the outline pulled in by t, L(t) = L0 - 2 pi t for a convex outline (L0 = 360 - 3 (20 - 5 pi) = 347.1239). Integral of g = (1-pi/4) 100 = 21.4602; integral of t g = 1000 (5/6 - pi/4) = 47.9352 (first moment of the square minus quarter disc). Added by the floor rounds = 347.1239*21.4602 - 2 pi 47.9352 = 7148.1569. Cavity after = 45 * 8035.6194 - 7148.1569 = 354454.7183; V = 500000 - that = 145545.2817 mm3 (a grid sum over the plan agrees to 2e-4).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 145545.2817,
+ "bbox": {
+  "min": [
+   0,
+   -100,
+   0
+  ],
+  "max": [
+   100,
+   0,
+   50
+  ]
+ }
+}
