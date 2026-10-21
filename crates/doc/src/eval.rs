@@ -68,6 +68,9 @@ pub struct ModelBody {
     /// [`kernel::measure`] of `body` (with the body it was measured on), worked out once and
     /// shared by clones: inspecting a design again measures only the bodies that changed.
     measured: Arc<OnceLock<(Body, kernel::Result<kernel::BodyMeasure>)>>,
+    /// [`Body::is_surface`] of `body` (with the body it was measured on), worked out once and
+    /// shared by clones.
+    surface: Arc<OnceLock<(Body, bool)>>,
 }
 
 impl ModelBody {
@@ -93,6 +96,16 @@ impl ModelBody {
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
             measured: Arc::new(OnceLock::new()),
+            surface: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
+    pub fn is_surface(&self) -> bool {
+        match self.surface.get_or_init(|| (self.body.clone(), self.body.is_surface())) {
+            (measured, s) if measured.same(&self.body) => *s,
+            // The body was replaced in this cell's holder since: look again.
+            _ => self.body.is_surface(),
         }
     }
 
