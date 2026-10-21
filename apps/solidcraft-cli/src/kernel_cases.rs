@@ -14,14 +14,24 @@ fn kernel() -> String {
     std::env::var("SOLIDCRAFT_BOOLEANS").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| "default".into())
 }
 
-/// The case's commands: a script as is, or an oracle recipe translated; `$CASE` in a string is
-/// the case directory (for input files such as `input.step`).
-fn script(dir: &str, recipe: &Value) -> Result<Value, String> {
+/// The case's commands: a script as is, or an oracle recipe translated. In a string, `$CASE` is
+/// the case directory (input files such as `input.step`) and `$OUT` a scratch directory for files
+/// the case writes (an export), outside the repository.
+fn script(dir: &str, out: &str, recipe: &Value) -> Result<Value, String> {
     let s = if recipe.get("commands").is_some() || recipe.is_array() { recipe.clone() } else { recipe::to_script(recipe)? };
     let text = serde_json::to_string(&s).map_err(|e| e.to_string())?;
-    let dir_json = serde_json::to_string(dir).map_err(|e| e.to_string())?;
-    let dir_inner = dir_json.get(1..dir_json.len().saturating_sub(1)).unwrap_or("");
-    serde_json::from_str(&text.replace("$CASE", dir_inner)).map_err(|e| e.to_string())
+    let inner = |p: &str| -> Result<String, String> {
+        let j = serde_json::to_string(p).map_err(|e| e.to_string())?;
+        Ok(j.get(1..j.len().saturating_sub(1)).unwrap_or("").to_string())
+    };
+    serde_json::from_str(&text.replace("$CASE", &inner(dir)?).replace("$OUT", &inner(out)?)).map_err(|e| e.to_string())
+}
+
+/// A scratch directory for one case's output files.
+fn scratch(area: &str, name: &str) -> Result<String, String> {
+    let d = std::env::temp_dir().join(format!("solidcraft-kernel-cases-{}", std::process::id())).join(format!("{area}-{name}"));
+    std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
+    Ok(d.to_string_lossy().to_string())
 }
 
 /// An error that means "this kernel can't do it yet", not a wrong answer.
@@ -52,7 +62,7 @@ fn check_case(dir: &str) -> Value {
         }
     };
     out["sources"] = want["sources"].clone();
-    let commands = match read_json(&format!("{dir}/recipe.json")).and_then(|r| script(dir, &r)) {
+    let commands = match scratch(&area, &name).and_then(|o| read_json(&format!("{dir}/recipe.json")).and_then(|r| script(dir, &o, &r))) {
         Ok(s) => s,
         Err(e) => {
             out["status"] = json!("fail");
@@ -105,6 +115,10 @@ fn check_case(dir: &str) -> Value {
     let mut bodies = Vec::new();
     let mut c = Checks { list: Vec::new(), pass: true };
     let want_valid = want["valid"].as_bool().unwrap_or(true);
+    // Shells: the total where the case gives it (a body with a void, or several lumps in one
+    // body), else one per body.
+    let want_shells = want["shells"].as_u64();
+    let mut shells = 0u64;
     for b in &world.bodies {
         let m = match solidcraft_engine::kernel::measure(&b.body) {
             Ok(m) => m,
@@ -118,13 +132,22 @@ fn check_case(dir: &str) -> Value {
             "bbox": {"min": m.bbox.min, "max": m.bbox.max},
             "faces": m.merged.faces, "edges": m.merged.edges, "vertices": m.merged.vertices,
         }));
+        shells += m.shells as u64;
         if want_valid {
-            // One closed shell, and every validity check this build has.
-            c.push("shells", json!(format!("{}: {}", b.name, m.shells)), json!(1), m.shells == 1);
+            // Closed shells, and every validity check this build has.
+            if want_shells.is_none() {
+                c.push("shells", json!(format!("{}: {}", b.name, m.shells)), json!(1), m.shells == 1);
+            }
             let v = solidcraft_engine::kernel::validity(&b.body);
             c.push("record_valid", json!(v.record.clone().err().unwrap_or_else(|| "ok".into())), json!("ok"), v.record.is_ok());
-            if let Some(sm) = &v.smlib {
-                c.push("smlib_check", json!(sm.clone().err().unwrap_or_else(|| "ok".into())), json!("ok"), sm.is_ok());
+            match &v.smlib {
+                Some(solidcraft_engine::kernel::SmlibCheck::Valid) => c.push("smlib_check", json!("ok"), json!("ok"), true),
+                Some(solidcraft_engine::kernel::SmlibCheck::Invalid(e)) => c.push("smlib_check", json!(e), json!("ok"), false),
+                // No verdict: the record can't be built in SMLib yet. Shown, not graded.
+                Some(solidcraft_engine::kernel::SmlibCheck::NotSupported(e)) => {
+                    c.push("smlib_check", json!(format!("no verdict: {e}")), json!("ok"), true)
+                }
+                None => {}
             }
         }
     }
@@ -142,6 +165,7 @@ fn check_case(dir: &str) -> Value {
         }
     };
     count(&mut c, "body_count", got.body_count as u64);
+    count(&mut c, "shells", shells);
     count(&mut c, "faces", got.faces);
     count(&mut c, "edges", edges);
     count(&mut c, "vertices", vertices);

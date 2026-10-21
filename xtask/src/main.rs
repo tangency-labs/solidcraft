@@ -46,10 +46,11 @@ commands:
                   replay the reference tests (tests/oracle/*/recipe.json), compare with each
                   case's expected.json and write docs/oracle.md (--cli: a solidcraft-cli
                   already built, instead of cargo run --release)
-  kernel-cases [--kernel default|smlib|both] [--area AREA] [--cli BIN] [--timeout S] [--jobs N]
+  kernel-cases [--kernel default|smlib|both] [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--results FILE]
                   the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ (one
                   process each, killed after --timeout, default 180 s) with each kernel asked for,
-                  grade it against the case's own answer and write docs/kernel-cases.md
+                  grade it against the case's own answer and write docs/kernel-cases.md (--results:
+                  every result as JSON too)
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;

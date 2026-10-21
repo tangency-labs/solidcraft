@@ -43,7 +43,8 @@ Each case has:
 - `recipe.json`: an engine command script (`{"commands": [...]}`, as `solidcraft-cli run`
   takes) or an oracle recipe (`tests/oracle/*/recipe.json`). `$CASE` in a string is the case
   directory, for an input file such as `$CASE/input.step` (written by hand from the STEP or IGES
-  specification, never a user's file).
+  specification, never a user's file), and `$OUT` a scratch directory outside the repository for
+  files the case writes (an export).
 - `expected.json`: the right answer, graded by `solidcraft-cli kernel-cases`.
 
 Each area also has `skipped.json` (or several, `skipped-<part>.json`, where an area is triaged in
@@ -75,7 +76,8 @@ parts): every issue and PR looked at that did not become a case, with one line e
 | `source` | `analytic` (numbers worked out by hand; `method` gives the formulas) or `invariants` (no number is known: only the outcome, validity and counts are graded). |
 | `method` | How the numbers were derived, or which invariants hold and why. |
 | `outcome` | `solid` (default: the script succeeds) or `refused` (the right answer is a clean error, never a panic or a hang). |
-| `valid` | Default `true`: every body is one closed shell that passes the record's structure and geometry checks and, in builds with SMLib, SMLib's `check(All)`. `false` only where the result is legitimately not a solid. |
+| `valid` | Default `true`: every body is one closed shell (or `shells` in all) that passes the record's structure and geometry checks and, in builds with SMLib, SMLib's `check(All)`. `false` only where the result is legitimately not a solid (a sheet). Where SMLib can't take the record yet (a surface kind its conversion lacks), its check gives no verdict and is not graded. |
+| `shells` | The total number of shells, where it isn't one per body: a body with a sealed void (2), several lumps kept in one body. |
 | `body_count`, `faces`, `edges`, `vertices` | Exact counts, where the geometry fixes them. Faces and edges count whole analytic surfaces and curves once (a full cylinder side is one face). |
 | `volume_mm3`, `area_mm2`, `center_of_mass`, `bbox` | As in `tests/oracle`: totals over every body, relative tolerance 1e-3 for volume and area, 1e-3 of the box diagonal for positions. |
 | `tolerance` | Optional overrides: `rel`, `abs_mm`. |

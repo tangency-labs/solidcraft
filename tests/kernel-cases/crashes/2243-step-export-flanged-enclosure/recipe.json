@@ -1103,7 +1103,7 @@
   {
    "command": "file.export",
    "params": {
-    "path": "/tmp/kernel-case-2243.step",
+    "path": "$OUT/kernel-case-2243.step",
     "format": "step"
    }
   },
