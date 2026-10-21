@@ -1749,3 +1749,83 @@ fn duplicate_and_excess_profile_picks_are_refused_quickly() {
     // One pick of the profile still builds.
     run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Bottom", "profiles": [0]}, {"sketch": "Top"}]}));
 }
+
+#[test]
+fn coil_from_a_sketch_profile_sweeps_its_plane() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    // A 1 x 1 mm square, 10..11 mm from the Z axis, on a plane through the axis.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    // Pappus for a screw sweep: V = 2 pi n A r_centroid.
+    assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * 1.0 * 10.5) < 1e-3, "{}", volume(&mut s));
+    let m = measure(&mut s);
+    let b = &m["bodies"][0]["bbox"];
+    assert!((b["min"][2].as_f64().unwrap_or(f64::NAN) + 0.5).abs() < 1e-6, "{m}");
+    assert!((b["max"][2].as_f64().unwrap_or(f64::NAN) - 24.5).abs() < 1e-6, "{m}");
+}
+
+#[test]
+fn coil_from_a_sketch_cuts_a_thread_groove() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Groove"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.coil", json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 1.0 * 18.5) < 1e-3, "{removed}");
+    assert_eq!(measure(&mut s)["body_count"], 1);
+}
+
+fn clockwise_coil_bbox(clockwise: bool) -> Value {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise}));
+    measure(&mut s)["bodies"][0]["bbox"].clone()
+}
+
+#[test]
+fn a_sketch_coil_clockwise_is_the_mirror_image() {
+    let right = clockwise_coil_bbox(false);
+    let left = clockwise_coil_bbox(true);
+    let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
+    assert!((at(&right, "min", 0) + at(&left, "max", 0)).abs() < 1e-6, "{right} {left}");
+    assert!((at(&right, "max", 0) + at(&left, "min", 0)).abs() < 1e-6, "{right} {left}");
+    for i in 1..3 {
+        assert!((at(&right, "min", i) - at(&left, "min", i)).abs() < 1e-6, "{right} {left}");
+        assert!((at(&right, "max", i) - at(&left, "max", i)).abs() < 1e-6, "{right} {left}");
+    }
+}
+
+#[test]
+fn a_sketch_coil_refuses_profiles_it_cannot_sweep() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Holed"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -2], "p1": [14, 2]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [11, -1], "p1": [13, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.coil", &json!({"sketch": "Holed", "revolutions": 3, "pitch": 8})).unwrap_err().to_string();
+    assert!(e.contains("without holes"), "{e}");
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Two"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [12, -0.5], "p1": [13, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.coil", &json!({"sketch": "Two", "revolutions": 3, "pitch": 8})).unwrap_err().to_string();
+    assert!(e.contains("one closed profile"), "{e}");
+
+    // The kernel refuses a pitch no larger than the profile's axial extent.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).is_err(), "runs into itself");
+}

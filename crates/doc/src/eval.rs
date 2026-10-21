@@ -4860,21 +4860,45 @@ fn feature_tools_with_constructor(
             position,
             start_angle,
             clockwise,
-            sketch: _,
-            profiles: _,
+            sketch,
+            profiles,
             ..
         } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            let p = val(vals, pitch, Kind::Length)?;
+            let n = val(vals, turns, Kind::Unitless)?;
+            if sketch.is_some() && (diameter.is_some() || section_size.is_some() || start_angle.is_some()) {
+                return Err(DocError::Invalid(
+                    "a coil with a `sketch` cannot also set `diameter`, `section_size` or `start_angle`".into(),
+                ));
+            }
+            if sketch.is_none() && !matches!(profiles, ProfileSel::All) {
+                return Err(DocError::Invalid("a coil's `profiles` need a `sketch`".into()));
+            }
+            if let Some(sk) = sketch {
+                let ss = st
+                    .sketch(sk.0)
+                    .ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
+                let regions = select_profiles(ss, profiles)?;
+                if regions.iter().any(|r| !r.holes.is_empty()) {
+                    return Err(DocError::Invalid("a coil from a sketch takes a profile without holes".into()));
+                }
+                let [region] = &regions[..] else {
+                    return Err(DocError::Invalid(format!(
+                        "a coil from a sketch takes one closed profile (the sketch has {})",
+                        regions.len()
+                    )));
+                };
+                let axis = if *clockwise { k * -1.0 } else { k };
+                // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+                let pitch = if *clockwise { -p } else { p };
+                return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
+            }
             let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
             let section_size =
                 section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
-            let (d, p, n, s) = (
-                val(vals, diameter, Kind::Length)?,
-                val(vals, pitch, Kind::Length)?,
-                val(vals, turns, Kind::Unitless)?,
-                val(vals, section_size, Kind::Length)?,
-            );
+            let (d, s) = (val(vals, diameter, Kind::Length)?, val(vals, section_size, Kind::Length)?);
             if !(d > 0.0 && s > 0.0 && n > 0.0) {
                 return Err(DocError::Invalid("the coil diameter, section size and revolutions must be positive".into()));
             }
