@@ -48,6 +48,9 @@ on:
   # only (other labels are skipped, see the top of this file).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # The kernel-smlib branch (ADR 0002) runs no CI for now (owner, 2026-10-21). Drop this
+    # line before the branch merges back into main.
+    branches-ignore: [kernel-smlib]
   # The merge queue: each queued group runs the full suite before it lands on main.
   merge_group:
   push:

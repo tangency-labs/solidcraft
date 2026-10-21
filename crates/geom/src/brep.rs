@@ -3,7 +3,9 @@
 //! Validation checks structure and resource budgets, not geometric equivalence or trust.
 use serde::{Deserialize, Serialize};
 
+mod curve2;
 pub mod envelope;
+pub use curve2::Curve2;
 
 pub const VERSION: u32 = 3;
 pub const MAX_ITEMS: usize = 1_000_000;
