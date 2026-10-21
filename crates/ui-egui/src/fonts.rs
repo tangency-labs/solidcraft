@@ -641,7 +641,7 @@ fn scan_dir_for_font(dir: &std::path::Path, depth_remaining: usize, matches: fn(
 }
 
 /// [`scan_dir_for_font`] that also skips a font whose bytes `accept` refuses.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn scan_dir_for_font_where(dir: &std::path::Path, depth_remaining: usize, matches: fn(&str) -> bool, accept: fn(&[u8]) -> bool) -> Option<Vec<u8>> {
     if depth_remaining == 0 {
         return None;
@@ -913,16 +913,24 @@ fn find_system_chinese_font() -> Option<Vec<u8>> {
             return Some(bytes);
         }
     }
-    find_chinese_font_in(&chinese_font_dirs())
+    // The system folders are a desktop list (Android has no such call yet).
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        find_chinese_font_in(&chinese_font_dirs())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
 }
 
 /// A character only fonts covering simplified Chinese draw: 设 (as in 设置, "settings"), boxed in
 /// the report of #3376. Japanese fonts (Meiryo, Yu Gothic, BIZ UDPGothic, IPA) lack it.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 const SIMPLIFIED_CHINESE_PROBE: char = '设';
 
 /// Whether the font's first face draws simplified Chinese (see [`SIMPLIFIED_CHINESE_PROBE`]).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn draws_simplified_chinese(bytes: &[u8]) -> bool {
     ttf_parser::Face::parse(bytes, 0).is_ok_and(|face| face.glyph_index(SIMPLIFIED_CHINESE_PROBE).is_some())
 }
@@ -930,7 +938,7 @@ fn draws_simplified_chinese(bytes: &[u8]) -> bool {
 /// The system and per-user font folders searched for a Chinese font when no candidate path has
 /// one, on every desktop system (#3376: Linux and Windows searched only the fixed paths, so a
 /// Japanese CJK font drew the Chinese UI alone and its simplified characters showed as boxes).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn chinese_font_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
     #[cfg(target_os = "windows")]
@@ -969,7 +977,7 @@ fn chinese_font_dirs() -> Vec<std::path::PathBuf> {
 /// `/usr/share/fonts/truetype/wqy/`) with a Chinese font's name that draws simplified Chinese.
 /// The drawing check keeps out a Japanese-only file whose name matches, such as a
 /// `SourceHanSansJP` subset, and Windows' SimSun extension fonts.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn find_chinese_font_in(dirs: &[std::path::PathBuf]) -> Option<Vec<u8>> {
     dirs.iter().find_map(|dir| scan_dir_for_font_where(dir, 3, is_chinese_font_name, draws_simplified_chinese))
 }

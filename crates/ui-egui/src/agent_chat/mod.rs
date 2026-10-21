@@ -1504,7 +1504,7 @@ pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8])
 }
 
 /// Attach the picture on the clipboard, if it holds one.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 pub fn paste_picture(app: &mut SolveApp) -> std::result::Result<String, String> {
     let image = arboard::Clipboard::new().and_then(|mut c| c.get_image()).map_err(|_| tr("ui.agent_chat_no_picture").to_string())?;
     attach_rgba(app, image.width, image.height, &image.bytes)

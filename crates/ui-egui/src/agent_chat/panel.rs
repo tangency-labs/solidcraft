@@ -2001,19 +2001,25 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
 /// the clipboard's picture.
 #[cfg(not(target_arch = "wasm32"))]
 fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let (mut choose, mut paste) = (false, false);
+    let mut choose = false;
+    // Android has no clipboard reader: a picture comes through the file picker.
+    #[cfg(not(target_os = "android"))]
+    let mut paste = false;
     let r = ui_kit::action_menu(ui, "+", |ui| {
         let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
         crate::scenario::publish_handle("agent_chat:add_file", a.rect.center());
-        let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
-        crate::scenario::publish_handle("agent_chat:paste_picture", b.rect.center());
         if a.clicked() {
             choose = true;
             ui.close();
         }
-        if b.clicked() {
-            paste = true;
-            ui.close();
+        #[cfg(not(target_os = "android"))]
+        {
+            let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
+            crate::scenario::publish_handle("agent_chat:paste_picture", b.rect.center());
+            if b.clicked() {
+                paste = true;
+                ui.close();
+            }
         }
     });
     crate::scenario::publish_handle("agent_chat:add", r.response.rect.center());
@@ -2027,6 +2033,7 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
     }
+    #[cfg(not(target_os = "android"))]
     if paste && let Err(e) = paste_picture(app) {
         app.agent_chat.notice(e, true);
     }

@@ -29,6 +29,7 @@ pub trait Clipboard {
 /// The system's clipboard.
 pub struct System;
 
+#[cfg(not(target_os = "android"))]
 impl Clipboard for System {
     fn files(&mut self) -> Vec<PathBuf> {
         arboard::Clipboard::new().and_then(|mut c| c.get().file_list()).unwrap_or_default()
@@ -36,6 +37,18 @@ impl Clipboard for System {
     fn picture(&mut self) -> Option<Picture> {
         let i = arboard::Clipboard::new().and_then(|mut c| c.get_image()).ok()?;
         Some(Picture { width: i.width, height: i.height, rgba: i.bytes.into_owned() })
+    }
+}
+
+/// Android has no clipboard reader (arboard has no Android backend): the chat gets its pictures
+/// through the file picker, so the clipboard offers it nothing.
+#[cfg(target_os = "android")]
+impl Clipboard for System {
+    fn files(&mut self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn picture(&mut self) -> Option<Picture> {
+        None
     }
 }
 
