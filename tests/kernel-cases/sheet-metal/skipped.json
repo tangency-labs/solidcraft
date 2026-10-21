@@ -346,5 +346,13 @@
  {
   "source": "tangency-labs/solidcraft#117",
   "why": "profile picks by curves, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2461",
+  "why": "auto-report with command parameters only (an extrude cut on a face of a sheet metal bracket refused for touching a bend); the bracket is not in the report and the refusal is the documented behaviour, no number to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3680",
+  "why": "auto-report with command parameters only (a 5 mm drilled hole at one point of a sheet metal bracket, refused as unsupported 3D machining); no design, and holes in flat sheet are covered by 560 and 955"
  }
 ]

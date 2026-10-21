@@ -286,5 +286,9 @@
  {
   "source": "tangency-labs/solidcraft#85",
   "why": "not geometry: batch rollback and deleting a sketch removes its pipe (document history)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1967",
+  "why": "no repro: 'the Loft operation isn't working', no sections, no parameters, no design"
  }
 ]
