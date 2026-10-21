@@ -1010,5 +1010,9 @@
  {
   "source": "tangency-labs/solidcraft#4154",
   "why": "rendering pipeline (CPU/GPU renderer, lighting, materials); no B-rep or mesh geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2450",
+  "why": "display only: Section Analysis draws a white line along the edge of a circular-pattern of a revolve; the report has no revolve profile or section plane, and the solid itself is not claimed wrong"
  }
 ]
