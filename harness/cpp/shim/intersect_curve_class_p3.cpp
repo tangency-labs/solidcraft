@@ -18,8 +18,14 @@
 // intervals, point objects in the zone tolerance lookups, the topology walks over the bare
 // stand-in edges. Objects live for the whole process (never deleted: topology destructors notify
 // owners).
+//
+// With has_face, the pool also holds a real one-face B-rep built with SmBrepConstructor
+// (sc_one_face_brep.h, as the intersect.curve_class_p4 shim): its face, loops, edges, vertices and
+// edge uses follow the script's objects, and the topology walks over its edges are allowed (they
+// read its real topology). The B-rep is deleted when the run returns.
 
 #include "sc_shim.h"
+#include "sc_one_face_brep.h"
 
 #include "StdAfx.h"
 #include <SmBSplineCurve.h>
@@ -476,6 +482,7 @@ enum : int64_t
     K_FACE = 6,
     K_LOOP = 7,
     K_OTHER = 8,
+    K_EDGEUSE = 9,
 };
 
 // Ops (keep in sync with crates/solidcore-ffi/src/units/intersect_curve_class_p3.rs).
@@ -715,6 +722,8 @@ struct Pool
     std::vector<void*> ptrs; // SmObject* or SmPoint3d*
     std::vector<bool> bspline;
     std::vector<ULONG> dims;
+    // entities of the one-face B-rep (their topology is real, not a stand-in's)
+    std::vector<bool> real;
     std::map<const void*, int64_t> ids;
 
     double id(const void* p) const
@@ -746,6 +755,11 @@ struct Pool
     {
         auto it = ids.find(p);
         return it == ids.end() ? -1 : kinds[(size_t)it->second];
+    }
+    bool is_real(const void* p) const
+    {
+        auto it = ids.find(p);
+        return it != ids.end() && real[(size_t)it->second];
     }
 };
 
@@ -878,13 +892,19 @@ bool pc_ok(const SmPointClassification& pc, const Pool& pool)
     return pc.GetObject() == NULL || pool.kind_of(pc.GetObject()) != K_POINT;
 }
 
-bool has_edge(const SmCurveClassification& cc)
+// An edge classification whose edge is a bare stand-in (or NULL): its topology walks crash.
+bool stand_in_edge(const SmPointClassification& pc, const Pool& pool)
+{
+    return pc.GetPointClass() == SM_PC_EDGE && !pool.is_real(pc.GetObject());
+}
+
+bool has_edge(const SmCurveClassification& cc, const Pool& pool)
 {
     for (ULONG i = 0; i < cc.GetSize(); i++)
     {
         const SmCurveInterval& ivl = cc.GetAt(i);
-        if (ivl.m_vStart.GetPointClass() == SM_PC_EDGE || ivl.m_vMid.GetPointClass() == SM_PC_EDGE ||
-            ivl.m_vEnd.GetPointClass() == SM_PC_EDGE)
+        if (stand_in_edge(ivl.m_vStart, pool) || stand_in_edge(ivl.m_vMid, pool) ||
+            stand_in_edge(ivl.m_vEnd, pool))
             return true;
     }
     return false;
@@ -964,6 +984,16 @@ int32_t run(Rd& rd, std::vector<double>& o)
     const SmContext& ctx = the_context();
     Pool pool;
 
+    // the one-face B-rep (deleted on every return; its objects join the pool after the
+    // script's objects)
+    SmBrep* brep = NULL;
+    sc_one_face::OneFace of;
+    bool has_face = rd.flag();
+    bool built = !has_face || sc_one_face::build(rd, ctx, brep, of);
+    SmObjDelete clean(brep);
+    if (rd.bad || !built)
+        return SC_ERR_ARG;
+
     int64_t n_obj = rd.idx();
     for (int64_t i = 0; i < n_obj && !rd.bad; i++)
     {
@@ -1020,9 +1050,52 @@ int32_t run(Rd& rd, std::vector<double>& o)
         pool.ptrs.push_back(p);
         pool.bspline.push_back(bs);
         pool.dims.push_back(dim);
+        pool.real.push_back(false);
     }
     if (rd.bad)
         return SC_ERR_ARG;
+    // the B-rep's topology: the face, then per loop the loop and its vertex (a vertex loop) or
+    // per edge use its edge, its vertex use's vertex and the edge use (an edge loop)
+    auto add = [&pool](void* q, int64_t kind) {
+        pool.ids[q] = (int64_t)pool.ptrs.size();
+        pool.kinds.push_back(kind);
+        pool.ptrs.push_back(q);
+        pool.bspline.push_back(false);
+        pool.dims.push_back(0);
+        pool.real.push_back(true);
+    };
+    if (has_face)
+    {
+        add(of.face, K_FACE);
+        for (size_t li = 0; li < of.loops.size(); li++)
+        {
+            add(of.loops[li], K_LOOP);
+            if (of.loop_vertex[li] != NULL)
+            {
+                add(of.loop_vertex[li], K_VERTEX);
+                continue;
+            }
+            for (SmEdgeuse* eu : of.loop_edgeuses[li])
+            {
+                SmEdge* e = eu->GetEdge();
+                SmVertexuse* vu = eu->GetVertexuse();
+                SmPoint3d start;
+                // the edge use's vertex is its edge's start vertex (the Rust B-rep is built so)
+                if (e == NULL || vu == NULL || vu->GetVertex() == NULL ||
+                    e->GetCurve()->EvaluatePoint(e->GetInterval().GetMin(), start) != SM_SUCCESS ||
+                    vu->GetVertex()->GetPoint().DistanceBetweenSquared(start) > 1e-18)
+                    return SC_ERR_ARG;
+                // the edge line with its NURB made, as the Rust side makes it
+                SmBSplineCurve* line = dynamic_cast<SmBSplineCurve*>(e->GetCurve());
+                if (line == NULL)
+                    return SC_ERR_ARG;
+                line->GetOrCreateGwNurbPointer();
+                add(e, K_EDGE);
+                add(vu->GetVertex(), K_VERTEX);
+                add(eu, K_EDGEUSE);
+            }
+        }
+    }
 
     SmCurveClassification ccs[2];
     // the pool's curves are never deleted: clear the ownership flags before the
@@ -1374,7 +1447,10 @@ int32_t run(Rd& rd, std::vector<double>& o)
                     SmPointClassificationType bt =
                         pos == SM_IP_START ? ivl.m_vStart.GetPointClass() : ivl.m_vEnd.GetPointClass();
                     SmPointClassificationType nt = pc.GetPointClass();
-                    if ((bt == SM_PC_VERTEX && nt == SM_PC_EDGE) || (bt == SM_PC_EDGE && nt == SM_PC_VERTEX))
+                    const SmObject* bo = pos == SM_IP_START ? ivl.m_vStart.GetObject() : ivl.m_vEnd.GetObject();
+                    bool pair_real = pool.is_real(bo) && pool.is_real(pc.GetObject());
+                    if (((bt == SM_PC_VERTEX && nt == SM_PC_EDGE) || (bt == SM_PC_EDGE && nt == SM_PC_VERTEX)) &&
+                        !pair_real)
                         return SC_ERR_ARG;
                 }
             }
@@ -1418,7 +1494,7 @@ int32_t run(Rd& rd, std::vector<double>& o)
             {
                 if ((int64_t)other.GetSize() < size || cc.GetCurve() == NULL || other.GetCurve() == NULL ||
                     cc.GetCurve()->GetDim() != 3 || other.GetCurve()->GetDim() != 3 || !pcs_ok(cc, pool) ||
-                    !pcs_ok(other, pool) || has_edge(cc) || has_edge(other))
+                    !pcs_ok(other, pool) || has_edge(cc, pool) || has_edge(other, pool))
                     return SC_ERR_ARG;
             }
             else if (cc.GetCurve() == NULL || cc.GetCurve()->GetDim() != 3)
@@ -1433,10 +1509,11 @@ int32_t run(Rd& rd, std::vector<double>& o)
             SmPoint3d p = rd.vec();
             if (rd.bad || size == 0 || index < 0 || index > size || cc.GetCurve() == NULL || !pcs_ok(cc, pool))
                 return SC_ERR_ARG;
-            // only the classifications that are not edges return before the topology walk
+            // only the classifications that are not edges return before the topology walk (of
+            // a real B-rep edge only)
             const SmPointClassification& pc =
                 index == size ? cc.GetAt((ULONG)size - 1).m_vEnd : cc.GetAt((ULONG)index).m_vStart;
-            if (pc.GetPointClass() == SM_PC_EDGE)
+            if (stand_in_edge(pc, pool))
                 return SC_ERR_ARG;
             SmBoolean changed = FALSE;
             SmStatus s = sc_cc_p3::sm_ChangeEdgePointClassToNearVertex((ULONG)index, cc, p, changed);

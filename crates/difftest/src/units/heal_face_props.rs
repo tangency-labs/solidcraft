@@ -621,6 +621,111 @@ fn rust_edge_loop(
     Ok(())
 }
 
+/// The down face use's side of [`rust_brep`]'s B-rep, as `SmBrepConstructor` builds it with
+/// the up side (`StartLoop`, `StartEdge`, `EndLoop`, `StartAndEndSingleVertexLoop`): per loop
+/// a mate loop use on the down face use with the same orientation; per edge use a mate edge
+/// use of its edge (orientation opposite, its vertex use at the edge's end vertex, after the
+/// up edge use in the edge's list) walking the loop the other way, the mate loop use starting
+/// at the mate of the up loop use's first edge use; each vertex gets the vertex use of the
+/// mate ending at it after its own. A vertex loop gets a second vertex use of its vertex.
+/// [`rust_brep`] leaves this side out; units whose queries walk edge mates (an edge's
+/// vertices, its faces) add it.
+pub(crate) fn add_down_side(b: &mut Brep, face: FaceId) -> Result<(), HarnessError> {
+    let e = |e: solidcore::SolidError| harness(e.to_string());
+    let up = b.face(face).map_err(e)?.faceuse.ok_or_else(|| harness("face use"))?;
+    let down = b.faceuse(up).map_err(e)?.mate.ok_or_else(|| harness("face use mate"))?;
+    let loops = b.face(face).map_err(e)?.loops.clone();
+    for l in loops {
+        let lu1 = b.loop_(l).map_err(e)?.loopuse.ok_or_else(|| harness("loop use"))?;
+        let (start, orientation) = {
+            let r = b.loopuse(lu1).map_err(e)?;
+            (r.start, r.orientation)
+        };
+        let lu2 = next_id!(b.loopuses(), LoopuseId);
+        let start2 = match start {
+            LoopuseStart::Vertexuse(Some(vu1)) => {
+                let v = b.vertexuse(vu1).map_err(e)?.vertex.ok_or_else(|| harness("vertex"))?;
+                let vu2 = next_id!(b.vertexuses(), VertexuseId);
+                b.add_vertexuse_record(Vertexuse {
+                    vertex: Some(v),
+                    owner: VertexuseOwner::Loopuse(Some(lu2)),
+                    ..Vertexuse::default()
+                })
+                .map_err(e)?;
+                b.vertex_mut(v).map_err(e)?.vertexuses.push(vu2);
+                LoopuseStart::Vertexuse(Some(vu2))
+            }
+            LoopuseStart::Edgeuse(Some(eu0)) => {
+                // the up loop in order
+                let mut eus = vec![eu0];
+                let mut eu = eu0;
+                loop {
+                    eu = b.edgeuse(eu).map_err(e)?.ccw.ok_or_else(|| harness("ccw edge use"))?;
+                    if eu == eu0 {
+                        break;
+                    }
+                    eus.push(eu);
+                }
+                let n = eus.len();
+                let m0 = b.edgeuses().len();
+                let vm0 = b.vertexuses().len();
+                let id = |base: usize, i: usize| -> Result<u32, HarnessError> {
+                    u32::try_from(base + i % n).map_err(|_| harness("too many records"))
+                };
+                let mut edges = Vec::new();
+                for (i, &eu) in eus.iter().enumerate() {
+                    let edge = b.edgeuse(eu).map_err(e)?.edge.ok_or_else(|| harness("edge"))?;
+                    let [_, end] = b.edge(edge).map_err(e)?.vertices;
+                    b.add_vertexuse_record(Vertexuse {
+                        vertex: Some(end),
+                        owner: VertexuseOwner::Edgeuse(Some(EdgeuseId::from_index(id(m0, i)?))),
+                        ..Vertexuse::default()
+                    })
+                    .map_err(e)?;
+                    edges.push((edge, end));
+                }
+                for (i, &(edge, _)) in edges.iter().enumerate() {
+                    b.add_edgeuse_record(Edgeuse {
+                        edge: Some(edge),
+                        owner: EdgeuseOwner::Loopuse(Some(lu2)),
+                        ccw: Some(EdgeuseId::from_index(id(m0, i + n - 1)?)),
+                        cw: Some(EdgeuseId::from_index(id(m0, i + 1)?)),
+                        vertexuse: Some(VertexuseId::from_index(id(vm0, i)?)),
+                        orientation: OrientType::Opposite,
+                        ..Edgeuse::default()
+                    })
+                    .map_err(e)?;
+                    b.edge_mut(edge)
+                        .map_err(e)?
+                        .edgeuses
+                        .push(EdgeuseId::from_index(id(m0, i)?));
+                }
+                // EndLoop: the vertex at the start of edge use i also takes the vertex use of
+                // the mate of edge use i - 1 (which ends there)
+                for (i, &(_, end)) in edges.iter().enumerate() {
+                    b.vertex_mut(end)
+                        .map_err(e)?
+                        .vertexuses
+                        .push(VertexuseId::from_index(id(vm0, i)?));
+                }
+                LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(id(m0, 0)?)))
+            }
+            _ => return Err(harness("loop use start")),
+        };
+        b.add_loopuse_record(Loopuse {
+            faceuse: Some(down),
+            loop_: Some(l),
+            mate: Some(lu1),
+            start: start2,
+            orientation,
+        })
+        .map_err(e)?;
+        b.loopuse_mut(lu1).map_err(e)?.mate = Some(lu2);
+        b.faceuse_mut(down).map_err(e)?.loopuses.push(lu2);
+    }
+    Ok(())
+}
+
 fn status(r: solidcore::Result<()>) -> Result<f64, solidcore::SolidError> {
     match r {
         Ok(()) => Ok(1000.0),

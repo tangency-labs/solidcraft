@@ -147,7 +147,8 @@ use crate::geom::tol::{
     zone_tol_3d, ScaledZero, SmallTopoType, UNINIT_TOL,
 };
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
+    PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec2, Vec3, PI};
@@ -156,6 +157,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::surface::surface::p1::map_to_2d_on_curve;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::EntityRef;
 
 const OP_CC: &str = "intersect::curve_class::p1::CurveClassification";
 const OP_TOUCH: &str = "intersect::curve_class::p1::get_winding_count";
@@ -1775,27 +1777,129 @@ pub fn apply_point_solution<O, S: Copy>(
 
 /// Makes every interval whose interior classifies to an edge and whose start or end
 /// classifies to a vertex use a vertex of that edge
-/// (`sm_MakeConsistentClassifications`).
+/// (`sm_MakeConsistentClassifications`): for a vertex that is not one of the edge's, the
+/// first edge of that vertex within the intersection tolerance of the interval midpoint
+/// becomes the interior's edge, else the edge vertex nearer the classified vertex becomes
+/// the end's vertex. The topology members (`SmEdge::GetVertex`, `SmVertex::GetEdges`,
+/// `GetPoint`, `SmEdge::GetCurve`, `GetInterval`) go through
+/// [`ClassGeometry::topology_entity`] and [`ClassGeometry::topology_handle`].
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] for such an interval: the edge's vertices
-/// (`SmEdge::GetVertex`, unit `topology.edge`).
+/// [`SolidError::Unported`] for such an interval over handles the adapter cannot resolve
+/// to a B-rep; a null-pointer error for a missing classification curve, edge, vertex or
+/// edge curve upstream dereferences; those of the drop point.
 pub fn make_consistent_classifications<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
     classification: &mut CurveClassification<O>,
 ) -> Result<()> {
+    const OP: &str = "sm_MakeConsistentClassifications";
+    // locals
+    let src_zone_tol_3d = classification.src_zone_tol_3d();
+
     // for every interval
-    for ivl in classification.intervals() {
+    for i in 0..classification.size() {
         // If interval classifies to an Edge
-        if ivl.mid.point_class() == PointClassType::Edge
-            && (ivl.start.point_class() == PointClassType::Vertex
-                || ivl.end.point_class() == PointClassType::Vertex)
-        {
-            // UNPORTED(topology.edge): SmEdge::GetVertex
-            return Err(SolidError::unported("SmEdge::GetVertex", "topology.edge"));
+        if classification.at(i)?.mid.point_class() != PointClassType::Edge {
+            continue;
+        }
+        // the startPoint, then the endPoint, when it classifies to a Vertex (the endPoint
+        // check reads the interior edge the startPoint fix may have substituted)
+        for at_start in [true, false] {
+            let ivl = *classification.at(i)?;
+            let end = if at_start { ivl.start } else { ivl.end };
+            if end.point_class() != PointClassType::Vertex {
+                continue;
+            }
+            let classify_edge = ivl.mid.object().ok_or(SolidError::null_pointer(OP))?;
+            let classify_vertex = end.object().ok_or(SolidError::null_pointer(OP))?;
+            let (edge_vertex1, edge_vertex2) = super::p3::edge_vertices(geometry, classify_edge)?;
+
+            // check that classified vertex is one of the Edge's vertices
+            if classify_vertex == edge_vertex1 || classify_vertex == edge_vertex2 {
+                continue;
+            }
+
+            // Try 1 - Simple ClassifyEdge substitution: the first edge attached to the
+            // ClassifyVertex within XSectTol3d at the interval midpoint
+            let mut fixed_problem = false;
+            for vertex_edge in vertex_edges(geometry, classify_vertex)? {
+                let t_mid = ivl.interval.evaluate(0.5);
+
+                // Ivl MidPoint, XSectTol3d(SrcCrv,VertexEdge)
+                let curve = classification
+                    .curve()
+                    .and_then(|c| geometry.curve(c))
+                    .ok_or(SolidError::null_pointer(OP))?;
+                let mid_pnt = curve.evaluate_point(k, t_mid)?;
+                let xsect_tol_3d = xsect_tol_3d_from_zones(
+                    k,
+                    src_zone_tol_3d,
+                    object_zone_tol_3d(k, geometry, Some(vertex_edge))?,
+                );
+
+                // drop a midInterval Point to this VertexEdge
+                let edge_curve = super::p3::edge_curve(geometry, vertex_edge)?
+                    .ok_or(SolidError::null_pointer(OP))?;
+                let drop = edge_curve.drop_point(
+                    k,
+                    &super::p3::edge_interval(geometry, vertex_edge)?,
+                    mid_pnt,
+                    None,
+                    xsect_tol_3d,
+                    None,
+                    SolverOperation::Minimize,
+                )?;
+
+                // if point was close enough to edge - substitute the ClassifyMid Edge target
+                if drop.success {
+                    classification
+                        .at_mut(i)?
+                        .mid
+                        .set_class_object(PointClassType::Edge, Some(vertex_edge));
+                    fixed_problem = true;
+                    break;
+                }
+            }
+
+            // Try 2 - simple ClassifyVertex substitution: the EdgeVertex closest to the
+            // ClassifyVertex
+            if !fixed_problem {
+                let p = super::p3::vertex_point(geometry, classify_vertex)?;
+                let nearer = if p.distance(super::p3::vertex_point(geometry, edge_vertex1)?)
+                    < p.distance(super::p3::vertex_point(geometry, edge_vertex2)?)
+                {
+                    edge_vertex1
+                } else {
+                    edge_vertex2
+                };
+                let ivl_mut = classification.at_mut(i)?;
+                let pc = if at_start {
+                    &mut ivl_mut.start
+                } else {
+                    &mut ivl_mut.end
+                };
+                pc.set_class_object(PointClassType::Vertex, Some(nearer));
+            }
         }
     }
+
     Ok(())
+}
+
+/// `SmVertex::GetEdges`: the handles of the edges attached to vertex handle `vertex`.
+fn vertex_edges<O: ClassObject>(geometry: &impl ClassGeometry<O>, vertex: O) -> Result<Vec<O>> {
+    const UPSTREAM: &str = "SmVertex::GetEdges";
+    let (b, v) = super::p7::vertex_of(geometry, vertex, UPSTREAM)?;
+    crate::topology::vertex::edges(b, v, None)?
+        .into_iter()
+        .map(|e| {
+            geometry
+                .topology_handle(EntityRef::Edge(e))
+                .ok_or(SolidError::invalid_input(UPSTREAM, "edge without handle"))
+        })
+        .collect()
 }
 
 /// The angle in `[0, PI/2]` between the tangents of two curves at their parameters

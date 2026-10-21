@@ -1170,8 +1170,8 @@ pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
             ))?;
 
             // get the classification curve vertex intersections
-            let vertices = cc.find_vertex_objects(None)?;
-            let coin_edges = cc.find_edge_objects(None, 1)?; // 1 = get CoincidentEdges only
+            let vertices = cc.find_vertex_objects(&*objects, None)?;
+            let coin_edges = cc.find_edge_objects(&*objects, None, 1)?; // 1 = get CoincidentEdges only
 
             let zone_tol_3d_sq = zone_tol_3d_face * zone_tol_3d_face;
 

@@ -1039,7 +1039,7 @@ impl<O: ClassObject> CurveClassification<O> {
         }
 
         // ---- Build Raw Touch List
-        let mut raw = self.point_classifies_connected_to(loops)?;
+        let mut raw = self.point_classifies_connected_to(geometry, loops)?;
 
         // no work - ClassifyCrv does not touch any TgtLoop
         if raw.is_empty() {

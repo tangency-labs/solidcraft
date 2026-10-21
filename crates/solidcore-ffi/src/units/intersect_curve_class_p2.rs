@@ -5,7 +5,7 @@
 //! `SmCurveClassification`, `SmCurveInterval::GetMinUV` / `GetMaxUV` and
 //! `sm_RefineCCIToSurfaces`).
 //!
-//! A script is `objects cos cc0 cc1 n_ops op*n_ops`. `objects` is the object pool block of unit
+//! A script is `has_face [face] objects cos cc0 cc1 n_ops op*n_ops`. `objects` is the object pool block of unit
 //! `intersect.curve_class_p1` (see [`super::intersect_curve_class_p1`]). `cos` is
 //! `n (uv surface)*n`: `SmCrvOnSurf(*uv, *surface, NULL, 0, ctx)` curves (a pool curve on a pool
 //! B-spline surface) appended to the pool, so they have the next object indices. Each
@@ -17,13 +17,17 @@
 //! an interval is `a b (class obj t gap)*3` (`SetInterval(SmExtent1d(a, b))` and, for start,
 //! mid and end, `SetClassObject(class, obj)`, `SetTParam(t)`, `SetGap3d(gap)`). `ti` and
 //! `other` are `Other` stand-ins (stored, never dereferenced). Object ids are pool indices,
-//! `-1` for `NULL`.
+//! `-1` for `NULL`. With `has_face`, the one-face B-rep of the face block (as in unit
+//! `intersect.curve_class_p4`: [`heal_face_props::encode_face`], built by `sc_one_face_brep.h`)
+//! follows the curves on surfaces in the pool, its topology numbered as [`topology_count`]
+//! counts it (the face, then per loop the loop and its vertex or, per edge use, its edge,
+//! vertex and the edge use, kind `9`). [`run`] takes the face separately and writes the prefix.
 //!
 //! | code | op (`op t ...`)                    | upstream                                    | outputs after the status |
 //! |------|------------------------------------|---------------------------------------------|--------------------------|
 //! | 0    |                                    | `cc[t] = cc[1 - t]` (`operator=`)           |                          |
 //! | 1    | `j`                                | `GetPointObjZoneTol3d(j)`                   | `tol`                    |
-//! | 2    | `brep`                             | `HasDeadTopologyPointObject(brep ? empty SmBrep : NULL)` | `flag`      |
+//! | 2    | `brep`                             | `HasDeadTopologyPointObject(NULL, an empty SmBrep or, for 2, the face's B-rep)` | `flag` |
 //! | 3    | `j`                                | `GetClassifyCrvLoc(j, &param)`              | `param x y z`            |
 //! | 4    | `j interval`                       | `InsertAt(j, SmCurveInterval(ctx, cc) + interval)` |                   |
 //! | 5    | `curve has_ivl a b uv tol owned current s1 s2 uv2 ti` | `ReSet(curve, has_ivl ? &SmExtent1d(a, b) : NULL, uv, tol, 0, NULL, owned, current, s1, s2, uv2, ti)` | |
@@ -48,6 +52,8 @@
 //! bare stand-in edge).
 
 use super::intersect_curve_class_p1::{validate_objects, Reader};
+pub use super::intersect_curve_class_p4::topology_count;
+use crate::units::heal_face_props::{self, FaceSpec};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest number of intervals of a classification (and largest interval index of an op).
@@ -143,8 +149,11 @@ fn classification(rd: &mut Reader<'_>, n_obj: usize) -> Result<(), FfiError> {
 ///
 /// # Errors
 ///
-/// [`FfiError::InvalidArgument`] for a malformed script.
-pub fn validate(input: &[f64]) -> Result<(), FfiError> {
+/// [`FfiError::InvalidArgument`] for a malformed script or face.
+pub fn validate(face: Option<&FaceSpec>, input: &[f64]) -> Result<(), FfiError> {
+    if let Some(f) = face {
+        heal_face_props::validate_face(f)?;
+    }
     let mut rd = Reader { input, at: 0 };
     let n_base = validate_objects(&mut rd)?;
     let n_cos = rd.index(MAX_COS)?;
@@ -153,7 +162,7 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
             return Err(bad("curve on surface without curve or surface"));
         }
     }
-    let n_obj = n_base + n_cos;
+    let n_obj = n_base + n_cos + topology_count(face);
     classification(&mut rd, n_obj)?;
     classification(&mut rd, n_obj)?;
     let n_ops = rd.index(MAX_OPS)?;
@@ -165,7 +174,9 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
                 rd.index(MAX_IVLS)?;
             }
             op::DEAD => {
-                rd.flag()?;
+                if rd.index(2)? == 2 && face.is_none() {
+                    return Err(bad("the face's B-rep without a face"));
+                }
             }
             op::INSERT => {
                 rd.index(MAX_IVLS)?;
@@ -229,8 +240,17 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for a malformed script; [`FfiError::Status`] with
 /// `SC_ERR_ARG` when the shim rejects an op at run time.
-pub fn run(input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    validate(input)?;
+pub fn run(face: Option<&FaceSpec>, script: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate(face, script)?;
+    let mut input = Vec::new();
+    match face {
+        None => input.push(0.0),
+        Some(f) => {
+            input.push(1.0);
+            heal_face_props::encode_face(f, &mut input);
+        }
+    }
+    input.extend_from_slice(script);
     call_with_buffer(8192, |buf, len| {
         // SAFETY: input is valid for input.len() reads and is a validated script (every
         // count, code, object index, curve and surface block the shim reads); buf is valid

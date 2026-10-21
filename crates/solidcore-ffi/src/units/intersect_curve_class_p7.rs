@@ -4,8 +4,13 @@
 //! Upstream: `source/SMLib/src/SmCurveClass.cpp` (the part-7 members of
 //! `SmCurveClassification` and `sm_SetDoFilletingGeometry`).
 //!
-//! A script is `objects cc0 cc1 n_ops op*n_ops`. `objects` is the object pool block of unit
-//! `intersect.curve_class_p1` (see [`super::intersect_curve_class_p1`]). Each classification
+//! A script is `has_face [face] objects cc0 cc1 n_ops op*n_ops`. `objects` is the object pool
+//! block of unit `intersect.curve_class_p1` (see [`super::intersect_curve_class_p1`]); with
+//! `has_face`, the one-face B-rep of the face block (as in unit `intersect.curve_class_p4`:
+//! [`heal_face_props::encode_face`], built by `sc_one_face_brep.h`) follows the objects in the
+//! pool, its topology numbered as [`topology_count`] counts it: the face, then per loop the
+//! loop and its vertex (a vertex loop) or, per edge use, its edge, vertex and the edge use
+//! (kind `9`). [`run`] takes the face separately and writes the prefix. Each classification
 //! `cc[t]` is `curve s1 uv1 ignore_tangency tol fillet n interval*n`: `SetCurve(curve)`,
 //! `SetSurface1(s1)`, `SetUVCurve1(uv1)`, `SetIgnoreTangency`, `SmTol::SetZoneTol3d(cc, tol)`,
 //! `fillet` `-1` (none) or `0` / `1` for `SetFilletData(&cc[1 - t], fillet)`, `SetSize(n)`; an
@@ -42,6 +47,8 @@
 //! the edge-curve replacement of `sm_SetDoFilletingGeometry`).
 
 use super::intersect_curve_class_p1::{validate_objects, Reader};
+pub use super::intersect_curve_class_p4::topology_count;
+use crate::units::heal_face_props::{self, FaceSpec};
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
 
@@ -114,10 +121,13 @@ fn classification(rd: &mut Reader<'_>, n_obj: usize) -> Result<(), FfiError> {
 ///
 /// # Errors
 ///
-/// [`FfiError::InvalidArgument`] for a malformed script.
-pub fn validate(input: &[f64]) -> Result<(), FfiError> {
+/// [`FfiError::InvalidArgument`] for a malformed script or face.
+pub fn validate(face: Option<&FaceSpec>, input: &[f64]) -> Result<(), FfiError> {
+    if let Some(f) = face {
+        heal_face_props::validate_face(f)?;
+    }
     let mut rd = Reader { input, at: 0 };
-    let n_obj = validate_objects(&mut rd)?;
+    let n_obj = validate_objects(&mut rd)? + topology_count(face);
     classification(&mut rd, n_obj)?;
     classification(&mut rd, n_obj)?;
     let n_ops = rd.index(MAX_OPS)?;
@@ -176,8 +186,17 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for a malformed script; [`FfiError::Status`] with
 /// `SC_ERR_ARG` when the shim rejects an op at run time.
-pub fn run(input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    validate(input)?;
+pub fn run(face: Option<&FaceSpec>, script: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate(face, script)?;
+    let mut input = Vec::new();
+    match face {
+        None => input.push(0.0),
+        Some(f) => {
+            input.push(1.0);
+            heal_face_props::encode_face(f, &mut input);
+        }
+    }
+    input.extend_from_slice(script);
     call_with_buffer(8192, |buf, len| {
         // SAFETY: input is valid for input.len() reads and is a validated script (every
         // count, code, object index, curve and surface block the shim reads); buf is valid

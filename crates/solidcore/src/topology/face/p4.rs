@@ -1461,7 +1461,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     }
 
     // analyze the classification for problems (Crossing or Missing)
-    let crossed = class.is_crossed_by_edge()?; // only count seam crossings by an Edge
+    let crossed = class.is_crossed_by_edge(&objects)?; // only count seam crossings by an Edge
     let missing = class.is_crossing_face(Some(objects.face(f))); // segments in Face but not on an Edge
     let near_miss = class.has_near_misses(k, &objects, false)?;
     let curves = SeamCurves {

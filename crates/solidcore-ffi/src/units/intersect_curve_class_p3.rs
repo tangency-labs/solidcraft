@@ -5,7 +5,7 @@
 //! members of `SmCurveClassification` and the static `sm_ChangeEdgePointClassToNearVertex` and
 //! `sm_FixProblemsBySqueezing`).
 //!
-//! A script is `n_obj obj*n_obj n_ops op*n_ops`. It builds a pool of objects, constructs two
+//! A script is `has_face [face] n_obj obj*n_obj n_ops op*n_ops`. It builds a pool of objects, constructs two
 //! default classifications `cc[0]`, `cc[1]` (`SmCurveClassification()`), then runs the ops,
 //! each on a target `t` (`0` or `1`; "other" is `cc[1 - t]`). The objects and the setup ops
 //! `0..=29` are those of unit `intersect.curve_class_p1` (see its module docs).
@@ -16,7 +16,11 @@
 //! `SmCircle`), `1 O[3] N[3]` (`SmPlane(O, N)`), `2 oob n m p q r s cpts(x y z w, v fastest) u v`
 //! (an `SmBSplineSurface`), `3 P[3]` (an `SmPoint3d`), `4` vertex, `5 c` (an edge on pool curve
 //! `c`, `-1` none), `6 s` (a face on pool surface `s`, `-1` none), `7` loop stand-in, `8` other
-//! stand-in.
+//! stand-in. With `has_face`, the one-face B-rep of the face block (as in unit
+//! `intersect.curve_class_p4`: [`heal_face_props::encode_face`], built by `sc_one_face_brep.h`)
+//! follows the objects in the pool, its topology numbered as [`topology_count`] counts it: the
+//! face, then per loop the loop and its vertex (a vertex loop) or, per edge use, its edge, vertex
+//! and the edge use (kind `9`). [`run`] takes the face separately and writes the prefix.
 //!
 //! | code | op (`op t ...`)                              | upstream                                   | outputs after the status |
 //! |------|----------------------------------------------|--------------------------------------------|--------------------------|
@@ -50,8 +54,11 @@
 //! the end index, which wraps when the end search fails); interval boundary classifications of
 //! points (not an `SmObject`) where the zone tolerance lookups read them; the topology walks
 //! (`SmEdge::GetVertex`) over the bare stand-in edges of `InsertPointClass`,
-//! `MergePointClass`, `CleanupAndValidate` and `sm_ChangeEdgePointClassToNearVertex`.
+//! `MergePointClass`, `CleanupAndValidate` and `sm_ChangeEdgePointClassToNearVertex` (the edges
+//! of the one-face B-rep are real and walked).
 
+pub use super::intersect_curve_class_p4::topology_count;
+use crate::units::heal_face_props::{self, FaceSpec};
 use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
@@ -374,11 +381,14 @@ fn point_class(rd: &mut Reader<'_>, n_obj: usize) -> Result<(), FfiError> {
 ///
 /// # Errors
 ///
-/// [`FfiError::InvalidArgument`] for a malformed script.
-pub fn validate(input: &[f64]) -> Result<(), FfiError> {
+/// [`FfiError::InvalidArgument`] for a malformed script or face.
+pub fn validate(face: Option<&FaceSpec>, input: &[f64]) -> Result<(), FfiError> {
+    if let Some(f) = face {
+        heal_face_props::validate_face(f)?;
+    }
     let mut rd = Reader::new(input);
-    let n_obj = rd.index(MAX_OBJECTS)?;
-    for i in 0..n_obj {
+    let n_script = rd.index(MAX_OBJECTS)?;
+    for i in 0..n_script {
         let k = rd.index(kind::OTHER)?;
         match k {
             kind::CURVE => curve_block(&mut rd)?,
@@ -396,6 +406,7 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
             _ => {}
         }
     }
+    let n_obj = n_script + topology_count(face);
     let n_ops = rd.index(MAX_OPS)?;
     for _ in 0..n_ops {
         let code = rd.index(op::LAST)?;
@@ -518,8 +529,17 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
 ///
 /// [`FfiError::InvalidArgument`] for a malformed script; [`FfiError::Status`] with
 /// `SC_ERR_ARG` when the shim rejects an op at run time.
-pub fn run(input: &[f64]) -> Result<Vec<f64>, FfiError> {
-    validate(input)?;
+pub fn run(face: Option<&FaceSpec>, script: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate(face, script)?;
+    let mut input = Vec::new();
+    match face {
+        None => input.push(0.0),
+        Some(f) => {
+            input.push(1.0);
+            heal_face_props::encode_face(f, &mut input);
+        }
+    }
+    input.extend_from_slice(script);
     call_with_buffer(262144, |buf, len| {
         // SAFETY: input is valid for input.len() reads and is a validated script (every
         // count, code, object index, curve and surface block the shim reads); buf is valid

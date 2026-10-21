@@ -15,10 +15,16 @@
 //! documented in the ffi module, reported as the `out` values. A Rust error maps to its
 //! `SmStatus` (`InvalidInput` 1007); an `Unported` error anywhere defers the case.
 //!
-//! Deferred cases: the topology zone tolerances of point classifications (vertex, edge and
-//! face objects, through `intersect.point_class`), the live-topology test of
-//! `HasDeadTopologyPointObject` (`topology.brep_p1`) and the face surface of `GetMinUV` /
-//! `GetMaxUV` for a 3D curve (`topology.face_p2`). Generated scripts are filtered by the
+//! Three in ten generated scripts add a real one-face B-rep (`face`, as in unit
+//! `intersect.curve_class_p4`: `sc_one_face_brep.h` in the shim, `heal_face_props::rust_brep`
+//! plus its down face use's side in Rust) after the curves on surfaces in the pool; their
+//! face, edge and vertex classifications (and classification faces) then name its real
+//! topology, so the zone tolerances, `HasDeadTopologyPointObject` (also against that B-rep)
+//! and the face surface drop of `GetMinUV` / `GetMaxUV` run the ported topology through
+//! `ClassGeometry::topology_entity`.
+//!
+//! Deferred cases: those members on the bare vertex, edge and face stand-ins (no B-rep
+//! behind them: `topology.vertex`, `topology.edge`, `topology.face_p2`, `topology.brep_p1`). Generated scripts are filtered by the
 //! shim's run-time checks (scripts it rejects as undefined upstream, or as topology walks over
 //! the bare stand-ins, are dropped).
 
@@ -45,6 +51,10 @@ use super::intersect_curve_class_p1::{
     put_pc, rp, st, surface_block, BSplineIn, CurveIn, Fail, LineIn, ObjIn, Pool, PoolObj, H,
     NOW, NOZ, SC_ERR_ARG, USE_DEFAULT,
 };
+use super::intersect_curve_class_p1::add_face;
+use super::intersect_curve_class_p4::{gen_face, topology_kinds};
+use crate::units::heal_face_props::{self as hfp, FaceIn, LoopsIn};
+use solidcore_ffi::units::heal_face_props::FaceSpec;
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -147,7 +157,13 @@ struct SolIn {
 enum OpIn {
     Assign { t: usize },
     ObjTol { t: usize, j: usize },
-    Dead { t: usize, brep: bool },
+    /// `brep`: an empty B-rep; `live` (with a face): the face's B-rep instead.
+    Dead {
+        t: usize,
+        brep: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        live: bool,
+    },
     CrvLoc { t: usize, j: usize },
     Insert { t: usize, j: usize, ivl: IvlIn },
     Reset { t: usize, r: ResetIn },
@@ -183,6 +199,10 @@ impl OpIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Script {
     objects: Vec<ObjIn>,
+    /// A real one-face B-rep (as in unit `intersect.curve_class_p4`) whose topology follows
+    /// the curves on surfaces in the pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    face: Option<FaceIn>,
     /// Curves on surfaces `(uv curve, B-spline surface)`, appended to the pool.
     #[serde(default)]
     cos: Vec<[usize; 2]>,
@@ -271,7 +291,7 @@ fn cpp_input(s: &Script) -> Vec<f64> {
         match o {
             OpIn::Assign { .. } => {}
             OpIn::ObjTol { j, .. } | OpIn::CrvLoc { j, .. } => v.push(*j as f64),
-            OpIn::Dead { brep, .. } => v.push(b(*brep)),
+            OpIn::Dead { brep, live, .. } => v.push(if *live { 2.0 } else { b(*brep) }),
             OpIn::Insert { j, ivl, .. } => {
                 v.push(*j as f64);
                 ivl_block(&mut v, ivl);
@@ -302,14 +322,18 @@ fn cpp_input(s: &Script) -> Vec<f64> {
     v
 }
 
+fn ffi_face(s: &Script) -> Option<FaceSpec> {
+    s.face.as_ref().map(hfp::ffi_face)
+}
+
 fn cpp(s: &Script) -> Result<Output, HarnessError> {
-    let out = ffi::run(&cpp_input(s)).map_err(|e| harness(format!("c++: {e}")))?;
+    let out = ffi::run(ffi_face(s).as_ref(), &cpp_input(s)).map_err(|e| harness(format!("c++: {e}")))?;
     Ok(Output::new().values("out", out))
 }
 
 /// Whether the shim accepts the script (it rejects what is undefined upstream).
 fn shim_accepts(s: &Script) -> bool {
-    match ffi::run(&cpp_input(s)) {
+    match ffi::run(ffi_face(s).as_ref(), &cpp_input(s)) {
         Ok(_) => true,
         Err(solidcore_ffi::FfiError::Status(c)) if c == SC_ERR_ARG => false,
         Err(_) => false,
@@ -441,7 +465,10 @@ fn position(code: usize) -> Result<IntervalPosition, HarnessError> {
 #[allow(clippy::too_many_lines)]
 fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
-    let pool = build_all(&k, s)?;
+    let mut pool = build_all(&k, s)?;
+    if let Some(face) = &s.face {
+        add_face(&k, &mut pool, face)?;
+    }
     let mut ccs = [build_cc(&k, &pool, &s.cc[0])?, build_cc(&k, &pool, &s.cc[1])?];
     let mut o: Vec<f64> = Vec::new();
     for x in &s.ops {
@@ -463,10 +490,15 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 let tol = must(cc.point_obj_zone_tol_3d(&k, &pool, *j))?;
                 o.extend([0.0, tol]);
             }
-            OpIn::Dead { brep, .. } => {
-                // an empty brep, as on the C++ side
+            OpIn::Dead { brep, live, .. } => {
+                // an empty brep, as on the C++ side, or the face's
                 let empty_brep = solidcore::topology::Brep::new();
-                let r = must(cc.has_dead_topology_point_object(brep.then_some(&empty_brep)))?;
+                let target = if *live {
+                    Some(&pool.topo.as_ref().ok_or_else(|| harness("no face"))?.brep)
+                } else {
+                    brep.then_some(&empty_brep)
+                };
+                let r = must(cc.has_dead_topology_point_object(&pool, target))?;
                 o.extend([0.0, b(r)]);
             }
             OpIn::CrvLoc { j, .. } => {
@@ -778,7 +810,7 @@ fn gen_op(rng: &mut Rng, objs: &[ObjIn], n_cos: usize, ccs: &[CcIn; 2]) -> OpIn 
     match rng.below(28) {
         0..=1 => OpIn::Assign { t },
         2 => OpIn::ObjTol { t, j },
-        3 => OpIn::Dead { t, brep: rng.chance(0.7) },
+        3 => OpIn::Dead { t, brep: rng.chance(0.7), live: false },
         4..=5 => OpIn::CrvLoc { t, j },
         6..=7 => {
             let (lo, hi) = curve_range(objs, c.curve);
@@ -902,7 +934,69 @@ fn gen_script(rng: &mut Rng) -> Script {
     let cc = [gen_cc(rng, &objects, n_cos, topo, points), gen_cc(rng, &objects, n_cos, topo, points)];
     let n_ops = 1 + rng.below(5) as usize;
     let ops = (0..n_ops).map(|_| gen_op(rng, &objects, n_cos, &cc)).collect();
-    Script { objects, cos, cc, ops }
+    let mut s = Script { objects, face: None, cos, cc, ops };
+    if rng.chance(0.3) {
+        add_face_topology(rng, &mut s);
+    }
+    s
+}
+
+/// Gives `s` a one-face B-rep (edge loops) and moves its face, edge and vertex point
+/// classifications (and some classification faces) onto that B-rep's real topology, more of
+/// them than the plain scripts have; `HasDeadTopologyPointObject` also tests against it.
+fn add_face_topology(rng: &mut Rng, s: &mut Script) {
+    let Some(face) = (0..8)
+        .map(|_| gen_face(rng))
+        .find(|f| matches!(f.loops, Some(LoopsIn::Edges { .. })))
+    else {
+        return;
+    };
+    let first = s.objects.len() + s.cos.len();
+    let kinds = topology_kinds(&face);
+    let real = |k: usize| -> Vec<usize> {
+        kinds.iter().enumerate().filter(|(_, &x)| x == k).map(|(j, _)| first + j).collect()
+    };
+    let (faces, edges, vertices) = (real(kind::FACE), real(kind::EDGE), real(kind::VERTEX));
+    let remap = |rng: &mut Rng, pc: &mut PcIn| {
+        // geometry classifications sometimes become topology ones
+        if matches!(pc.class, 100 | 106) && rng.chance(0.3) {
+            pc.class = *rng.choose(&[102, 103, 104, 104]).unwrap_or(&104);
+        }
+        let v = match pc.class {
+            102 => &faces,
+            103 => &edges,
+            104 => &vertices,
+            _ => return,
+        };
+        pc.obj = rng.choose(v).copied();
+    };
+    for c in &mut s.cc {
+        if rng.chance(0.5) {
+            c.face = faces.first().copied();
+        }
+        for ivl in &mut c.ivls {
+            for pc in &mut ivl.pcs {
+                remap(rng, pc);
+            }
+        }
+    }
+    for o in &mut s.ops {
+        match o {
+            OpIn::Insert { ivl, .. } => {
+                for pc in &mut ivl.pcs {
+                    remap(rng, pc);
+                }
+            }
+            OpIn::UpdatePc { pc, .. } => remap(rng, pc),
+            OpIn::Dead { live, .. } => *live = rng.chance(0.6),
+            _ => {}
+        }
+    }
+    if rng.chance(0.5) {
+        let t = rng.below(2) as usize;
+        s.ops.push(OpIn::Dead { t, brep: true, live: rng.chance(0.7) });
+    }
+    s.face = Some(face);
 }
 
 // ---- fixtures built in code ---------------------------------------------------------------
@@ -1001,8 +1095,8 @@ fn edge_cases() -> Vec<(String, Value)> {
             OpIn::CrvLoc { t: 0, j: 0 },
             OpIn::CrvLoc { t: 0, j: 5 },
             OpIn::CrvLoc { t: 1, j: 1 },
-            OpIn::Dead { t: 0, brep: true },
-            OpIn::Dead { t: 0, brep: false },
+            OpIn::Dead { t: 0, brep: true, live: false },
+            OpIn::Dead { t: 0, brep: false, live: false },
             OpIn::MaxUv { t: 1, j: 0, uv: [0.5, 0.5] },
             OpIn::MinUv { t: 1, j: 0, uv: [0.5, 0.5] },
             OpIn::Refine { t: 0, sol: sol(2, [0.1, 0.2], [0.3, 0.4]), edge: None, sss: [1.0, 2.0, 3.0], count: 0 },
@@ -1033,11 +1127,11 @@ fn edge_cases() -> Vec<(String, Value)> {
         let uv3d = vec![OpIn::MinUv { t: 0, j: 0, uv: [0.5, 0.5] }];
         out.push((
             format!("edge_uv_on_face_{name}"),
-            json!(Script { objects: objs.clone(), cos: vec![], cc: [cc0.clone(), cc1.clone()], ops: uv3d }),
+            json!(Script { objects: objs.clone(), face: None, cos: vec![], cc: [cc0.clone(), cc1.clone()], ops: uv3d }),
         ));
         out.push((
             format!("edge_ops_{name}"),
-            json!(Script { objects: objs, cos: vec![], cc: [cc0, cc1], ops }),
+            json!(Script { objects: objs, face: None, cos: vec![], cc: [cc0, cc1], ops }),
         ));
     }
     // empty classifications (no array allocated)
@@ -1049,7 +1143,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         inside_out: false,
     }))];
     let ops = vec![
-        OpIn::Dead { t: 0, brep: true },
+        OpIn::Dead { t: 0, brep: true, live: false },
         OpIn::Reset { t: 0, r: ResetIn { curve: None, ivl: None, uv: None, tol: 1e-3, owned: false, current: false, s1: None, s2: None, uv2: None, ti: None } },
         OpIn::Connect { t: 0, j: 0, end: 1, allow: true },
         OpIn::EditMax { t: 0, j: 0, param: 0.5, collapse: true },
@@ -1059,7 +1153,7 @@ fn edge_cases() -> Vec<(String, Value)> {
     ];
     out.push((
         "edge_empty".into(),
-        json!(Script { objects: objs, cos: vec![], cc: [plain_cc(Some(0), 1e-5, vec![]), plain_cc(None, 1e-5, vec![])], ops }),
+        json!(Script { objects: objs, face: None, cos: vec![], cc: [plain_cc(Some(0), 1e-5, vec![]), plain_cc(None, 1e-5, vec![])], ops }),
     ));
     out
 }
@@ -1072,7 +1166,7 @@ impl UnitDiff for Runner {
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         for _ in 0..64 {
             let s = gen_script(rng);
-            if ffi::validate(&cpp_input(&s)).is_err() || !shim_accepts(&s) {
+            if ffi::validate(ffi_face(&s).as_ref(), &cpp_input(&s)).is_err() || !shim_accepts(&s) {
                 continue;
             }
             return serde_json::to_value(s).ok();
@@ -1134,7 +1228,7 @@ mod tests {
     fn edge_cases_are_accepted() {
         for (name, v) in edge_cases() {
             let s: Script = serde_json::from_value(v).unwrap();
-            assert!(ffi::validate(&cpp_input(&s)).is_ok(), "{name}");
+            assert!(ffi::validate(ffi_face(&s).as_ref(), &cpp_input(&s)).is_ok(), "{name}");
             assert!(shim_accepts(&s), "{name}");
         }
     }
@@ -1162,7 +1256,7 @@ mod dump {
             // each op alone after the ones before it: the status and the size change
             let mut prev_len = 0;
             for n in 1..=s.ops.len() {
-                let sub = Script { objects: s.objects.clone(), cos: s.cos.clone(), cc: s.cc.clone(), ops: s.ops[..n].to_vec() };
+                let sub = Script { objects: s.objects.clone(), face: s.face.clone(), cos: s.cos.clone(), cc: s.cc.clone(), ops: s.ops[..n].to_vec() };
                 let Ok(out) = rust_run(&sub) else { break };
                 let code = out[prev_len] as usize;
                 let status = out[prev_len + 1];

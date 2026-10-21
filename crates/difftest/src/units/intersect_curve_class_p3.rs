@@ -16,15 +16,21 @@
 //! (`InvalidInput` 1007, `-1` for one upstream cannot return); an `Unported` error anywhere
 //! defers the case.
 //!
-//! Deferred cases: every path that reaches `InsertAt`, `EditIntervalMin/Max` or
-//! `ConnectIntervals` (`intersect.curve_class_p2`), `GetPointClassByIndex`,
-//! `GetPointClassMateByIndex` or `AreCoincidentMaybe` (`intersect.curve_class_p7`: the whole of
-//! `MergePointClass`, `sm_ChangeEdgePointClassToNearVertex` and `CleanupAndValidate` of a
-//! non-empty classification), the zone tolerance of an edge, vertex or face classification
-//! (`topology.edge`, `topology.vertex`, `topology.face_p2`: an opaque handle cannot resolve to a
-//! B-rep) and the 2D tolerance mapping that needs a surface point solve. Generated scripts are
-//! filtered by the shim's run-time checks (scripts it rejects as undefined upstream are
-//! dropped).
+//! A third of the generated scripts, and the `face_*` fixtures, add a real one-face B-rep
+//! (`face`, as in unit `intersect.curve_class_p4`: `sc_one_face_brep.h` in the shim,
+//! `heal_face_props::rust_brep` plus its down face use's side in Rust) whose face, loops,
+//! edges, vertices and edge uses follow the objects in the pool; their classifications then
+//! name only its real topology (often along one of its edges), so the `SmEdge` / `SmVertex`
+//! members (`GetVertex`, `GetInterval`, `GetCurve`, `GetPoint`, the zone tolerances) run the
+//! ported topology through the `ClassGeometry::topology_entity` hook, and the topology walks of
+//! `InsertPointClass`, `sm_ChangeEdgePointClassToNearVertex` and `CleanupAndValidate` that the
+//! shim refuses over bare stand-in edges are compared.
+//!
+//! Deferred cases: the zone tolerance of an edge, vertex or face classification on a bare
+//! stand-in (`topology.edge`, `topology.vertex`, `topology.face_p2`: no B-rep behind it),
+//! `MergeIntoObject` (`SmVertex::SetPoint`) and the 2D tolerance mapping that needs a surface
+//! point solve. Generated scripts are filtered by the shim's run-time checks (scripts it
+//! rejects as undefined upstream are dropped).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -52,8 +58,14 @@ use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
-use solidcore::SolidError;
+use solidcore::{EntityRef, SolidError};
+use solidcore::topology::Brep;
+use solidcore_ffi::units::heal_face_props::FaceSpec;
 use solidcore_ffi::units::intersect_curve_class_p3::{self as ffi, kind, op};
+
+use super::intersect_curve_class_p1::PoolTopology;
+use super::intersect_curve_class_p4::{face_brep, gen_face, topology_entities, topology_kinds};
+use crate::units::heal_face_props::{self as hfp, FaceIn, LoopsIn};
 
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
@@ -228,6 +240,10 @@ enum OpIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Script {
     objects: Vec<ObjIn>,
+    /// A real one-face B-rep (as in unit `intersect.curve_class_p4`) whose topology follows
+    /// the objects in the pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    face: Option<FaceIn>,
     ops: Vec<OpIn>,
 }
 
@@ -527,9 +543,13 @@ fn op_code(o: &OpIn) -> (usize, usize) {
     }
 }
 
+fn ffi_face(s: &Script) -> Option<FaceSpec> {
+    s.face.as_ref().map(hfp::ffi_face)
+}
+
 fn cpp(s: &Script) -> Result<Output, HarnessError> {
     let input = cpp_input(s);
-    let out = ffi::run(&input).map_err(|e| harness(format!("c++: {e}")))?;
+    let out = ffi::run(ffi_face(s).as_ref(), &input).map_err(|e| harness(format!("c++: {e}")))?;
     Ok(Output::new().values("out", out))
 }
 
@@ -555,6 +575,9 @@ enum PoolObj {
 struct Pool {
     objs: Vec<PoolObj>,
     handles: Vec<H>,
+    /// A real B-rep whose entities are the pool handles from `first` on; the other topology
+    /// handles are bare stand-ins.
+    topo: Option<PoolTopology>,
 }
 
 impl ClassGeometry<H> for Pool {
@@ -579,9 +602,38 @@ impl ClassGeometry<H> for Pool {
             _ => None,
         }
     }
+    fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
+        match self.entity(o)? {
+            (b, EntityRef::Vertex(v)) => b.vertex(v).ok().map(|r| r.point),
+            _ => None,
+        }
+    }
+    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        match self.entity(o)? {
+            (b, EntityRef::Vertex(v)) => b.vertex(v).ok().map(|r| r.tolerance),
+            (b, EntityRef::Edge(e)) => b.edge(e).ok().map(|r| r.tolerance),
+            (b, EntityRef::Face(f)) => b.face(f).ok().map(|r| r.tolerance),
+            _ => None,
+        }
+    }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.entity(o)
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<H> {
+        let t = self.topo.as_ref()?;
+        let i = t.entities.iter().position(|x| *x == e)?;
+        self.handles.get(t.first + i).copied()
+    }
 }
 
 impl Pool {
+    /// The B-rep entity of handle `o`, if it is one.
+    fn entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        let t = self.topo.as_ref()?;
+        let e = *t.entities.get(o.0.checked_sub(t.first)?)?;
+        Some((&t.brep, e))
+    }
+
     fn handle(&self, i: Option<usize>) -> Result<Option<H>, HarnessError> {
         i.map(|i| {
             self.handles
@@ -624,6 +676,7 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
     let mut pool = Pool {
         objs: Vec::new(),
         handles: Vec::new(),
+        topo: None,
     };
     for (i, o) in objects.iter().enumerate() {
         let obj = match o {
@@ -775,7 +828,10 @@ fn build_pc(k: &Kernel, pool: &Pool, p: &PcIn) -> Result<PointClassification<H>,
 #[allow(clippy::too_many_lines)]
 fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
-    let pool = build_pool(&s.objects)?;
+    let mut pool = build_pool(&s.objects)?;
+    if let Some(face) = &s.face {
+        add_face(&k, &mut pool, face)?;
+    }
     let mut ccs: [CurveClassification<H>; 2] =
         [CurveClassification::new(&k), CurveClassification::new(&k)];
     let mut o: Vec<f64> = Vec::new();
@@ -1030,7 +1086,61 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
     }
 }
 
+/// Appends the topology of `face`'s one-face B-rep to the pool, in the shim's order.
+fn add_face(k: &Kernel, pool: &mut Pool, face: &FaceIn) -> Result<(), HarnessError> {
+    let (mut b, f) = face_brep(k, face)?;
+    // the down face use's loops, so that edge mates (an edge's end vertex) exist as upstream
+    hfp::add_down_side(&mut b, f)?;
+    let first = pool.handles.len();
+    let mut entities = Vec::new();
+    for (e, _) in topology_entities(&b, f)? {
+        let ck = match e {
+            EntityRef::Face(_) => ClassObjectKind::Face,
+            EntityRef::Loop(_) => ClassObjectKind::Loop,
+            EntityRef::Edge(_) => ClassObjectKind::Edge,
+            EntityRef::Vertex(_) => ClassObjectKind::Vertex,
+            EntityRef::Edgeuse(_) => ClassObjectKind::Edgeuse,
+            _ => ClassObjectKind::Other,
+        };
+        pool.handles.push(H(pool.objs.len(), ck));
+        pool.objs.push(PoolObj::Bare);
+        entities.push(e);
+    }
+    pool.topo = Some(PoolTopology { brep: b, first, entities });
+    Ok(())
+}
+
 // ---- generation -------------------------------------------------------------------------
+
+/// The kinds of the pool objects (the script objects, then the face's topology).
+struct Kinds {
+    kinds: Vec<usize>,
+    n_obj: usize,
+}
+
+impl Kinds {
+    fn new(objects: &[ObjIn], face: Option<&FaceIn>) -> Self {
+        let mut kinds: Vec<usize> = objects.iter().map(obj_kind).collect();
+        if let Some(f) = face {
+            kinds.extend(topology_kinds(f));
+        }
+        Self { kinds, n_obj: objects.len() }
+    }
+
+    /// Pool indices of the objects of kind `k`; with a face, only its real topology of that
+    /// kind when it has any (a stand-in among them would defer the whole script).
+    fn of(&self, k: usize) -> Vec<usize> {
+        let all: Vec<usize> = (0..self.kinds.len())
+            .filter(|&i| self.kinds.get(i) == Some(&k))
+            .collect();
+        let real: Vec<usize> = all.iter().copied().filter(|&i| i >= self.n_obj).collect();
+        if real.is_empty() {
+            all
+        } else {
+            real
+        }
+    }
+}
 
 fn rp(rng: &mut Rng, s: f64) -> [f64; 3] {
     rng.point3(-s, s)
@@ -1334,7 +1444,7 @@ fn gen_prm(rng: &mut Rng, bounds: &[f64], d0: f64, d1: f64) -> f64 {
 }
 
 /// A class / object pair for a point classification; `None` for unknown.
-fn gen_class(rng: &mut Rng, objs: &[ObjIn], topo: bool) -> (i32, Option<usize>) {
+fn gen_class(rng: &mut Rng, kinds: &Kinds, topo: bool) -> (i32, Option<usize>) {
     let choices: &[(i32, usize)] = if topo {
         &[(102, kind::FACE), (103, kind::EDGE), (104, kind::VERTEX), (106, kind::CURVE)]
     } else {
@@ -1344,11 +1454,12 @@ fn gen_class(rng: &mut Rng, objs: &[ObjIn], topo: bool) -> (i32, Option<usize>) 
         return (100, None);
     }
     let &(c, k) = rng.choose(choices).unwrap_or(&(106, kind::CURVE));
-    (c, pick(rng, &of_kind(objs, k)))
+    let v = kinds.of(k);
+    (c, pick(rng, &v))
 }
 
-fn gen_pc(rng: &mut Rng, objs: &[ObjIn], prm: f64, topo: bool) -> PcIn {
-    let (class, obj) = gen_class(rng, objs, topo);
+fn gen_pc(rng: &mut Rng, kinds: &Kinds, prm: f64, topo: bool) -> PcIn {
+    let (class, obj) = gen_class(rng, kinds, topo);
     PcIn {
         class,
         obj,
@@ -1361,7 +1472,7 @@ fn gen_pc(rng: &mut Rng, objs: &[ObjIn], prm: f64, topo: bool) -> PcIn {
 }
 
 /// The setup ops of classification `t` over `bounds` on pool curve `curve`.
-fn setup_cc(rng: &mut Rng, objs: &[ObjIn], t: usize, curve: Option<usize>, bounds: &[f64], topo: bool, ops: &mut Vec<OpIn>) {
+fn setup_cc(rng: &mut Rng, kinds: &Kinds, t: usize, curve: Option<usize>, bounds: &[f64], topo: bool, ops: &mut Vec<OpIn>) {
     let n = bounds.len().saturating_sub(1);
     ops.push(OpIn::SetSize { t, n });
     ops.push(OpIn::SetCurve { t, obj: curve, owned: false });
@@ -1381,7 +1492,7 @@ fn setup_cc(rng: &mut Rng, objs: &[ObjIn], t: usize, curve: Option<usize>, bound
         if !rng.chance(0.6) {
             continue;
         }
-        let pc = gen_pc(rng, objs, prm, topo);
+        let pc = gen_pc(rng, kinds, prm, topo);
         let mut targets = Vec::new();
         if bi < n {
             targets.push((bi, 0));
@@ -1400,9 +1511,18 @@ fn setup_cc(rng: &mut Rng, objs: &[ObjIn], t: usize, curve: Option<usize>, bound
     for j in 0..n {
         if rng.chance(0.5) {
             let (class, obj) = match rng.below(4) {
-                0 | 1 => (103, pick(rng, &of_kind(objs, kind::EDGE))),
-                2 => (106, pick(rng, &of_kind(objs, kind::CURVE))),
-                _ => (102, pick(rng, &of_kind(objs, kind::FACE))),
+                0 | 1 => {
+                    let v = kinds.of(kind::EDGE);
+                    (103, pick(rng, &v))
+                }
+                2 => {
+                    let v = kinds.of(kind::CURVE);
+                    (106, pick(rng, &v))
+                }
+                _ => {
+                    let v = kinds.of(kind::FACE);
+                    (102, pick(rng, &v))
+                }
             };
             ops.push(OpIn::PcSetClass { t, j, w: 1, class, obj });
         }
@@ -1410,9 +1530,38 @@ fn setup_cc(rng: &mut Rng, objs: &[ObjIn], t: usize, curve: Option<usize>, bound
 }
 
 fn gen_script(rng: &mut Rng) -> Script {
-    let objects = gen_objects(rng);
+    let mut objects = gen_objects(rng);
+    // a third of the scripts add a real one-face B-rep and classify to its topology; with
+    // edges, often along one of them (a line through two corners)
+    // (edge loops only: the edge classifications of a vertex-loop face would be stand-ins)
+    let face = if rng.chance(0.33) {
+        (0..8)
+            .map(|_| gen_face(rng))
+            .find(|f| matches!(f.loops, Some(LoopsIn::Edges { .. })))
+    } else {
+        None
+    };
+    let corners: Vec<[f64; 3]> = match face.as_ref().and_then(|f| f.loops.as_ref()) {
+        Some(LoopsIn::Edges { loops }) => loops.iter().flatten().copied().collect(),
+        Some(LoopsIn::Vertex { at }) => vec![*at],
+        None => Vec::new(),
+    };
+    let along = corners.len() > 1 && rng.chance(0.6);
+    if along {
+        let i = rng.below(corners.len() as u64) as usize;
+        let a = corners.get(i).copied().unwrap_or_default();
+        let c = corners.get((i + 1) % corners.len()).copied().unwrap_or_default();
+        objects.push(ObjIn::Curve(CurveIn::Line(LineIn {
+            p: a,
+            v: [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+            domain: [0.0, 1.0],
+            scale: 1.0,
+            inside_out: false,
+        })));
+    }
+    let kinds = Kinds::new(&objects, face.as_ref());
     let pure = rng.chance(0.5);
-    let topo = !pure && rng.chance(0.12);
+    let topo = (face.is_some() && rng.chance(0.85)) || (!pure && rng.chance(0.12));
     // the classification curve: a 3D one most of the time
     let curves: Vec<(usize, (f64, f64, u64))> = objects
         .iter()
@@ -1422,8 +1571,9 @@ fn gen_script(rng: &mut Rng) -> Script {
         .collect();
     let three_d: Vec<(usize, (f64, f64, u64))> = curves.iter().filter(|(_, c)| c.2 == 3).copied().collect();
     let pool = if rng.chance(0.9) && !three_d.is_empty() { &three_d } else { &curves };
-    let Some(&(ci, (d0, d1, dim))) = rng.choose(pool) else {
-        return Script { objects, ops: Vec::new() };
+    let chosen = if along { curves.last() } else { rng.choose(pool) };
+    let Some(&(ci, (d0, d1, dim))) = chosen else {
+        return Script { objects, face, ops: Vec::new() };
     };
     let mut ops = Vec::new();
     let mut set_up = [false; 2];
@@ -1440,7 +1590,7 @@ fn gen_script(rng: &mut Rng) -> Script {
             continue;
         }
         let curve = if rng.chance(0.04) { None } else { Some(ci) };
-        setup_cc(rng, &objects, t, curve, &bounds, topo, &mut ops);
+        setup_cc(rng, &kinds, t, curve, &bounds, topo, &mut ops);
         if dim == 2 && rng.chance(0.5) {
             let surfs: Vec<usize> = of_kind(&objects, kind::PLANE)
                 .into_iter()
@@ -1480,7 +1630,7 @@ fn gen_script(rng: &mut Rng) -> Script {
             },
             44..=69 => OpIn::Insert {
                 t,
-                pc: gen_pc(rng, &objects, prm, topo),
+                pc: gen_pc(rng, &kinds, prm, topo),
                 prm,
                 last,
                 force: !pure && rng.chance(0.1),
@@ -1499,7 +1649,17 @@ fn gen_script(rng: &mut Rng) -> Script {
                 OpIn::RemovePc { t, j, pos }
             }
             80..=82 => OpIn::Merge { t, index: rng.below(size as u64 + 2) as usize },
-            83..=85 => OpIn::NearVertex { t, index: rng.below(size as u64 + 2) as usize, p: rp(rng, 10.0) },
+            83..=85 => {
+                // near a corner of the face (within its tolerances) or anywhere
+                let p = match rng.choose(&corners) {
+                    Some(c) if rng.chance(0.7) => {
+                        let e = *rng.choose(&[0.0, 1e-9, 1e-6, 1e-4]).unwrap_or(&0.0);
+                        [c[0] + e, c[1] - e, c[2]]
+                    }
+                    _ => rp(rng, 10.0),
+                };
+                OpIn::NearVertex { t, index: rng.below(size as u64 + 2) as usize, p }
+            }
             86..=89 => OpIn::Squeeze { t },
             90..=91 => OpIn::Cleanup { t },
             92..=93 => OpIn::SetSize { t, n: rng.below(4) as usize },
@@ -1508,12 +1668,12 @@ fn gen_script(rng: &mut Rng) -> Script {
             _ => OpIn::SetSrcTol { t, tol: gen_tol(rng) },
         });
     }
-    Script { objects, ops }
+    Script { objects, face, ops }
 }
 
 /// Whether the shim accepts the script (it rejects what is undefined upstream).
 fn shim_accepts(s: &Script) -> bool {
-    match ffi::run(&cpp_input(s)) {
+    match ffi::run(ffi_face(s).as_ref(), &cpp_input(s)) {
         Ok(_) => true,
         Err(solidcore_ffi::FfiError::Status(c)) if c == SC_ERR_ARG => false,
         Err(_) => false,
@@ -1600,7 +1760,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         for (a, b) in [(0.0, 1.0), (0.3, 0.7), (0.25, 0.75), (0.1, 0.9), (0.75, 1.0), (0.0, 0.25), (0.5, 0.5)] {
             ops.push(OpIn::IsCoincident { t: 0, a, b, tol: 1e-5 });
         }
-        out.push((format!("edge_find_{name}"), json!(Script { objects: objs, ops })));
+        out.push((format!("edge_find_{name}"), json!(Script { objects: objs, face: None, ops })));
     }
     // short, zero-length and closed intervals
     let objs = edge_objects(1.0);
@@ -1616,7 +1776,7 @@ fn edge_cases() -> Vec<(String, Value)> {
             ops.push(OpIn::FindInterval { t: 0, prm, last: BIG, tol: USE_DEFAULT });
             ops.push(OpIn::FindInterval { t: 0, prm, last: b.first().copied().unwrap_or(0.0), tol: 1e-3 });
         }
-        out.push((format!("edge_find_{name}"), json!(Script { objects: objs.clone(), ops })));
+        out.push((format!("edge_find_{name}"), json!(Script { objects: objs.clone(), face: None, ops })));
     }
     // merges: every boundary class against every new class, at and next to the boundary (one
     // script per insertion: an insertion that needs InsertAt defers its script)
@@ -1637,7 +1797,7 @@ fn edge_cases() -> Vec<(String, Value)> {
                         last: BIG,
                         force: false,
                     });
-                    out.push((format!("edge_insert_{name}_{ci}_{pi}_{gi}"), json!(Script { objects: objs.clone(), ops })));
+                    out.push((format!("edge_insert_{name}_{ci}_{pi}_{gi}"), json!(Script { objects: objs.clone(), face: None, ops })));
                 }
             }
         }
@@ -1656,7 +1816,7 @@ fn edge_cases() -> Vec<(String, Value)> {
             last: BIG,
             force: i % 2 == 1,
         });
-        out.push((format!("edge_insert_mid_conflict_{i}"), json!(Script { objects: objs.clone(), ops })));
+        out.push((format!("edge_insert_mid_conflict_{i}"), json!(Script { objects: objs.clone(), face: None, ops })));
     }
     // removal: ends, interior, invalid positions and indices
     for (i, (j, pos)) in [(0, 1), (2, 3), (0, 3), (2, 1), (1, 2), (1, 0), (1, 4), (3, 1), (9, 3)].into_iter().enumerate() {
@@ -1664,7 +1824,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         ops.push(OpIn::PcSetClass { t: 0, j: 0, w: 0, class: 106, obj: Some(0) });
         ops.push(OpIn::PcSetClass { t: 0, j: 2, w: 2, class: 107, obj: Some(1) });
         ops.push(OpIn::RemovePc { t: 0, j, pos });
-        out.push((format!("edge_remove_{i}"), json!(Script { objects: objs.clone(), ops })));
+        out.push((format!("edge_remove_{i}"), json!(Script { objects: objs.clone(), face: None, ops })));
     }
     // squeeze and cleanup of two classifications of one curve
     let others: [&[f64]; 6] = [
@@ -1680,14 +1840,145 @@ fn edge_cases() -> Vec<(String, Value)> {
             let mut ops = edge_setup(0, 0, first, 1e-5);
             ops.extend(edge_setup(1, 0, other, 1e-5));
             ops.push(OpIn::Squeeze { t: 0 });
-            out.push((format!("edge_squeeze_{name}_{i}"), json!(Script { objects: objs.clone(), ops })));
+            out.push((format!("edge_squeeze_{name}_{i}"), json!(Script { objects: objs.clone(), face: None, ops })));
         }
     }
     let mut ops = edge_setup(0, 0, &bounds, 1e-5);
     ops.push(OpIn::SetSize { t: 1, n: 0 });
     ops.push(OpIn::SetSize { t: 0, n: 0 });
     ops.push(OpIn::Cleanup { t: 0 });
-    out.push(("edge_cleanup_empty".into(), json!(Script { objects: objs, ops })));
+    out.push(("edge_cleanup_empty".into(), json!(Script { objects: objs, face: None, ops })));
+    out.extend(face_cases());
+    out
+}
+
+/// The square face `(0,0)-(2,0)-(2,2)-(0,2)` (tolerance `tol`) of the face cases.
+fn square_face(tol: f64) -> FaceIn {
+    FaceIn {
+        tol,
+        o: [0.0, 0.0, 0.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 1.0, 0.0],
+        domain: [-4.0, -4.0, 4.0, 4.0],
+        surf: None,
+        loops: Some(LoopsIn::Edges {
+            loops: vec![vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0], [0.0, 2.0, 0.0]]],
+        }),
+    }
+}
+
+/// Face cases over the real topology of [`square_face`]: a classification along its first
+/// edge (pool: the line 0, face 1, loop 2, then per edge use its edge, vertex and edge use:
+/// edge 3 from vertex 4 at the origin, edge 6 from vertex 7 at `(2, 0)`), whose boundaries
+/// classify to the edge and its vertices. Snapping an edge boundary to a near vertex (and
+/// removing the short interval it leaves), inserting a vertex onto an edge boundary and the
+/// other way round, and the cleanup of edge-classified intervals.
+fn face_cases() -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    let line = || {
+        ObjIn::Curve(CurveIn::Line(LineIn {
+            p: [0.0, 0.0, 0.0],
+            v: [2.0, 0.0, 0.0],
+            domain: [0.0, 1.0],
+            scale: 1.0,
+            inside_out: false,
+        }))
+    };
+    let (edge, v0, v1) = (3, 4, 7);
+    let along = |t: usize, bounds: &[f64], mid_class: i32, tol: f64| {
+        let mut ops = edge_setup(t, 0, bounds, tol);
+        let n = bounds.len() - 1;
+        for (bi, &prm) in bounds.iter().enumerate() {
+            let (class, obj) = if bi == 0 {
+                (104, v0)
+            } else if bi == n {
+                (104, v1)
+            } else {
+                (mid_class, if mid_class == 104 { v0 } else { edge })
+            };
+            let mut ends = Vec::new();
+            if bi < n {
+                ends.push((bi, 0));
+            }
+            if bi > 0 {
+                ends.push((bi - 1, 2));
+            }
+            for (j, w) in ends {
+                ops.push(OpIn::PcSetClass { t, j, w, class, obj: Some(obj) });
+                ops.push(OpIn::PcSetT { t, j, w, v: prm });
+            }
+        }
+        for j in 0..n {
+            ops.push(OpIn::PcSetClass { t, j, w: 1, class: 103, obj: Some(edge) });
+        }
+        ops
+    };
+    let bound_sets: [(&str, &[f64]); 4] = [
+        ("half", &[0.0, 0.5, 1.0]),
+        ("short_start", &[0.0, 1e-7, 1.0]),
+        ("short_end", &[0.0, 1.0 - 1e-7, 1.0]),
+        ("three", &[0.0, 0.25, 0.75, 1.0]),
+    ];
+    for tol in [1e-5, 1e-3] {
+        for (bn, bounds) in bound_sets {
+            // sm_ChangeEdgePointClassToNearVertex at every boundary, from points at, near and
+            // away from both vertices
+            for p in [
+                [0.0, 0.0, 0.0],
+                [1e-6, 0.0, 0.0],
+                [1e-4, 1e-4, 0.0],
+                [2.0, 0.0, 0.0],
+                [2.0 - 1e-6, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ] {
+                for index in 0..bounds.len() {
+                    let mut ops = along(0, bounds, 103, 1e-6);
+                    ops.push(OpIn::NearVertex { t: 0, index, p });
+                    out.push((
+                        format!("face_near_vertex_{tol}_{bn}_{index}_{}_{}", p[0], p[1]),
+                        json!(Script { objects: vec![line()], face: Some(square_face(tol)), ops }),
+                    ));
+                }
+            }
+            // InsertPointClass of a vertex onto the edge boundaries and of an edge onto the
+            // vertex ones, at and next to each boundary
+            for (class, obj) in [(104, v0), (104, v1), (103, edge)] {
+                for &prm in bounds {
+                    for d in [0.0, 1e-9, 1e-4] {
+                        let mut ops = along(0, bounds, 103, 1e-6);
+                        let pc = PcIn {
+                            class,
+                            obj: Some(obj),
+                            t: prm + d,
+                            gap: 0.0,
+                            presnap: BIG,
+                            tol: 1e-6,
+                            sss: None,
+                        };
+                        ops.push(OpIn::Insert { t: 0, pc, prm: prm + d, last: BIG, force: false });
+                        out.push((
+                            format!("face_insert_{tol}_{bn}_{class}_{obj}_{prm}_{d}"),
+                            json!(Script { objects: vec![line()], face: Some(square_face(tol)), ops }),
+                        ));
+                    }
+                }
+            }
+            // CleanupAndValidate of edge-classified intervals against the same and other
+            // boundaries
+            for (on, other) in bound_sets {
+                if other.len() < bounds.len() {
+                    continue;
+                }
+                let mut ops = along(0, bounds, 103, 1e-6);
+                ops.extend(along(1, other, 103, 1e-6));
+                ops.push(OpIn::Cleanup { t: 0 });
+                out.push((
+                    format!("face_cleanup_{tol}_{bn}_{on}"),
+                    json!(Script { objects: vec![line()], face: Some(square_face(tol)), ops }),
+                ));
+            }
+        }
+    }
     out
 }
 
@@ -1699,7 +1990,7 @@ impl UnitDiff for Runner {
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         for _ in 0..64 {
             let s = gen_script(rng);
-            if ffi::validate(&cpp_input(&s)).is_err() || !shim_accepts(&s) {
+            if ffi::validate(ffi_face(&s).as_ref(), &cpp_input(&s)).is_err() || !shim_accepts(&s) {
                 continue;
             }
             return serde_json::to_value(s).ok();
@@ -1762,7 +2053,7 @@ mod tests {
     fn edge_cases_are_accepted() {
         for (name, v) in edge_cases() {
             let s: Script = serde_json::from_value(v).unwrap();
-            assert!(ffi::validate(&cpp_input(&s)).is_ok(), "{name}");
+            assert!(ffi::validate(ffi_face(&s).as_ref(), &cpp_input(&s)).is_ok(), "{name}");
             assert!(shim_accepts(&s), "{name}");
         }
     }

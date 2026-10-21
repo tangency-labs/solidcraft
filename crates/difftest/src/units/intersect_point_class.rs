@@ -915,8 +915,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     if matches!(ok, Some(kind::POINT | kind::EDGEUSE)) {
                         return Err(rejected());
                     }
-                    let r =
-                        st(pc.is_connected_to(tgt))?.map_err(|_| harness("connected failed"))?;
+                    let r = st(pc.is_connected_to(&pool, tgt))?.map_err(|_| harness("connected failed"))?;
                     o.extend([0.0, b(r)]);
                 }
                 OpIn::ConnectedAny { js, .. } => {
@@ -927,7 +926,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     if matches!(ok, Some(kind::POINT | kind::EDGEUSE)) {
                         return Err(rejected());
                     }
-                    let r = st(pc.is_connected_to_any(&tgts))?
+                    let r = st(pc.is_connected_to_any(&pool, &tgts))?
                         .map_err(|_| harness("connected failed"))?;
                     o.extend([0.0, b(r.is_some()), r.map_or(-1.0, |i| i as f64)]);
                 }
