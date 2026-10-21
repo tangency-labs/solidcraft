@@ -1007,7 +1007,8 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(hint) = entry.problem_hint() {
         chat.notice(hint, true);
     }
-    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
+    let design_feedback = app.preferences.agent_design_feedback;
+    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port, design_feedback });
     chat.tools_available = Some(bridge.is_some());
     let wake = ctx.clone();
     let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };

@@ -700,7 +700,7 @@ impl ApiBackend {
         // The same MCP server an ACP agent would get.
         let mcp = match &ctx.bridge {
             Some(b) => {
-                let argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
+                let argv: Vec<String> = std::iter::once(b.cli.to_string_lossy().into_owned()).chain(b.args()).collect();
                 Some(AgentProcess::spawn(&argv, &ctx.cwd, &["SOLIDCRAFT_CONTROL_TOKEN"], || {})?)
             }
             None => None,
@@ -3091,7 +3091,7 @@ mod tests {
 
     #[test]
     fn a_long_tool_result_keeps_its_design_feedback() {
-        let feedback = r#"Design feedback: {"notices":[{"name":"Base","issues":[{"code":"sketch_open_profile"}]}]}"#;
+        let feedback = r#"Design feedback: {"failing":1,"new_errors":[{"feature":2,"name":"Fillet1","error":"the radius is too big"}]}"#;
         let r = json!({"content": [{"type": "text", "text": "x".repeat(MAX_TOOL_TEXT * 2)}, {"type": "text", "text": feedback}]});
         let (text, failed) = tool_text(&r);
         assert!(!failed);

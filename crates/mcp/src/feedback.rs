@@ -159,8 +159,8 @@ pub(crate) fn report(last: Option<&Health>, pre: &Health, post: &Health) -> Opti
 #[derive(Default)]
 pub struct Feedback {
     last: Option<Health>,
-    /// Off: tool results carry no feedback block.
-    pub off: bool,
+    /// On: tool results carry the feedback block. Off by default (`Server::with_design_feedback`).
+    pub on: bool,
 }
 
 impl Feedback {
@@ -168,7 +168,7 @@ impl Feedback {
     /// A backend without `model.health` (an older app), or one that cannot be reached, gets the
     /// result alone.
     pub fn around(&mut self, b: &mut dyn Backend, call: impl FnOnce(&mut dyn Backend) -> Value) -> Value {
-        if self.off {
+        if !self.on {
             return call(b);
         }
         let Some(pre) = Health::read(b) else {

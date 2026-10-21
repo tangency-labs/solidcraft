@@ -56,7 +56,10 @@ back (volume, errors, cylinder axes), or change them in one `batch` with `coales
 then set them back the same way before saving.\n\n\
 Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
 (`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
-A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result. A result may end with a \"Design feedback:\" block: \
+A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
+
+/// Added to the instructions when the server sends design feedback.
+const FEEDBACK_INSTRUCTIONS: &str = " A result may end with a \"Design feedback:\" block: \
 features the call broke (new_errors) or mended (fixed), new warnings, and changed_since_your_last_call when the person \
 at the app (or another client) changed the design between your calls; act on it before going on.";
 
@@ -107,9 +110,11 @@ impl Server {
         self.scope = scope;
         self
     }
-    /// Tool results without the design feedback block (see `feedback.rs`).
-    pub fn without_feedback(mut self) -> Self {
-        self.feedback.off = true;
+    /// End tool results with the design feedback block (see `feedback.rs` and docs/mcp.md). Off by
+    /// default, so agents that don't expect it see the replies they always did;
+    /// `solidcraft-cli mcp --design-feedback` and the agent chat's preference turn it on.
+    pub fn with_design_feedback(mut self, on: bool) -> Self {
+        self.feedback.on = on;
         self
     }
     pub fn backend(&mut self) -> &mut dyn Backend {
@@ -225,7 +230,11 @@ impl Server {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
                     "serverInfo": {"name": "solidcraft", "title": "SolidCraft", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe()),
+                    "instructions": format!(
+                        "{INSTRUCTIONS}{} Backend: {}.",
+                        if self.feedback.on { FEEDBACK_INSTRUCTIONS } else { "" },
+                        self.backend.describe()
+                    ),
                 }))
             }
             "ping" => Ok(json!({})),

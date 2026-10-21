@@ -1,20 +1,26 @@
 {
   "en": {
-    "Design Health": "Design Health"
+    "Design Health": "Design Health",
+    "ui.agent_design_feedback": "Tell the agent what each call did to the design (design feedback)"
   },
   "ja": {
-    "Design Health": "設計の状態"
+    "Design Health": "設計の状態",
+    "ui.agent_design_feedback": "各呼び出しが設計に与えた変化をエージェントに伝える（設計フィードバック）"
   },
   "zh": {
-    "Design Health": "设计状态"
+    "Design Health": "设计状态",
+    "ui.agent_design_feedback": "告诉智能体每次调用对设计做了什么（设计反馈）"
   },
   "ar": {
-    "Design Health": "حالة التصميم"
+    "Design Health": "حالة التصميم",
+    "ui.agent_design_feedback": "إخبار الوكيل بما فعله كل استدعاء بالتصميم (ملاحظات التصميم)"
   },
   "he": {
-    "Design Health": "מצב התכנון"
+    "Design Health": "מצב התכנון",
+    "ui.agent_design_feedback": "לספר לסוכן מה כל קריאה עשתה לתכנון (משוב תכנון)"
   },
   "vi": {
-    "Design Health": "Tình trạng thiết kế"
+    "Design Health": "Tình trạng thiết kế",
+    "ui.agent_design_feedback": "Cho agent AI biết mỗi lệnh gọi đã làm gì với thiết kế (phản hồi thiết kế)"
   }
 }

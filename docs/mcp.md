@@ -421,6 +421,10 @@ To look closely at one part of a large model, such as a STEP assembly, work in a
 
 ## Design feedback
 
+Off by default: start the server with `solidcraft-cli mcp --design-feedback` (the in-app agent
+chat passes it when **Preferences → Assistant** has design feedback turned on), and the server
+instructions then describe the block too. Without it, results and instructions are as before.
+
 The server reads `model.health` (the design's failing features, warnings, parameter errors and
 undo history, in brief) before and after every tool call. When there is something to tell, the
 call's result ends with one more text block, `Design feedback: {…}`:
@@ -435,7 +439,7 @@ call's result ends with one more text block, `Design feedback: {…}`:
 - `failing_features`: on the first call, the features already failing.
 
 A call that changes nothing has no block. Bridged to an app that predates `model.health`, results
-come without it. `Server::without_feedback` turns it off.
+come without it. In code, `Server::with_design_feedback(true)` turns it on.
 
 ## Compact replies
 

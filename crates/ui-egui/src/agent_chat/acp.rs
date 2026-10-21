@@ -181,14 +181,24 @@ pub fn is_bridge_tool(title: &str, kind: Option<&str>) -> bool {
 pub struct McpBridge {
     pub cli: std::path::PathBuf,
     pub port: u16,
+    /// `--design-feedback`: tool results say what each call did to the design (Preferences → AI).
+    pub design_feedback: bool,
 }
 
 impl McpBridge {
+    /// The server's arguments after the program.
+    pub fn args(&self) -> Vec<String> {
+        let mut args = vec!["mcp".into(), "--connect".into(), format!("127.0.0.1:{}", self.port)];
+        if self.design_feedback {
+            args.push("--design-feedback".into());
+        }
+        args
+    }
     pub fn to_json(&self) -> Value {
         json!({
             "name": BRIDGE_NAME,
             "command": self.cli.to_string_lossy(),
-            "args": ["mcp", "--connect", format!("127.0.0.1:{}", self.port)],
+            "args": self.args(),
             "env": [],
         })
     }
@@ -196,7 +206,7 @@ impl McpBridge {
     /// The same bridge for an agent inside WSL: the CLI as WSL sees it. It still runs on the
     /// Windows side (WSL starts Windows programs itself), so the port is the same.
     pub fn in_wsl(&self) -> McpBridge {
-        McpBridge { cli: wsl_path(&self.cli), port: self.port }
+        McpBridge { cli: wsl_path(&self.cli), port: self.port, design_feedback: self.design_feedback }
     }
 }
 
@@ -233,7 +243,8 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. A tool result may end with a \"Design \
 feedback:\" block (when the user turned it on): what the call broke or mended, and what the user changed in the window since your \
-last call; act on it. Saving, opening or exporting files waits for the user's approval in the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
+last call; act on it. Saving, opening or exporting files waits for the user's approval in the chat, and each message allows \
+a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
 Keep answers short.";
 
 /// The Claude Code adapter's own tools that reach the computer rather than the design: turned off
@@ -763,11 +774,13 @@ mod tests {
 
     #[test]
     fn the_session_gets_the_bridged_mcp_server_without_a_token_or_any_path() {
-        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234, design_feedback: false };
         let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}));
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+        let on = McpBridge { design_feedback: true, ..b.clone() };
+        assert_eq!(on.to_json()["args"], json!(["mcp", "--connect", "127.0.0.1:41234", "--design-feedback"]), "the preference reaches the server");
         let text = p.to_string();
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
@@ -826,7 +839,7 @@ mod tests {
         assert_eq!(wsl("/home/u/designs"), "/home/u/designs");
         assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
 
-        let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
+        let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234, design_feedback: false };
         let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}));
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
