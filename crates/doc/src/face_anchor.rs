@@ -225,12 +225,7 @@ impl Document {
     /// is not guessed). It never does while the exact cap is still on another body (profiles
     /// reordered: the bodies swapped names). The note names what changed. Every other identity
     /// stays exact.
-    pub(crate) fn anchored_face_indices(
-        &self,
-        state: &ModelState,
-        body: &ModelBody,
-        target: &ConfigFaceTarget,
-    ) -> Result<(Vec<usize>, Option<String>)> {
+    pub fn anchored_face_indices(&self, state: &ModelState, body: &ModelBody, target: &ConfigFaceTarget) -> Result<(Vec<usize>, Option<String>)> {
         let error = match self.configuration_face_indices(body, target) {
             Ok(indices) => return Ok((indices, None)),
             Err(error) => error,

@@ -277,7 +277,7 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
 /// Else as [`locate_face`], over every body: the name moved to another body (a combine took the
 /// face), or on this body it names a piece of a split face or a merged one. The same face on
 /// another body (a copy of this one) is not a piece of this body's face.
-pub(crate) fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
+pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
     if crate::sheet::split_sheet_face_name(name).is_some() {
         return sheet_locate(st, name, p);
     }
