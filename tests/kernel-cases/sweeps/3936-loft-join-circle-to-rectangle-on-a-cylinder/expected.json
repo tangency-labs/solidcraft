@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3936"
+ ],
+ "what": "a loft from the circle on top of a cylinder (r 10, height 15) to a 40 x 30 rectangle 30 mm above, joined to the cylinder (builds as a new body in 2 ms, the join never returns)",
+ "source": "invariants",
+ "method": "the loft pairing of circle and rectangle is not canonical, so no volume is graded: the join must give one closed valid solid in the hull of the cylinder and both sections, bbox x +-20, y +-15, z 0..45.",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -20,
+   -15,
+   0
+  ],
+  "max": [
+   20,
+   15,
+   45
+  ]
+ }
+}

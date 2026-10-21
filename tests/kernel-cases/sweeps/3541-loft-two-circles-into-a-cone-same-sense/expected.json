@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3541"
+ ],
+ "what": "a loft from a circle of radius 8 to a circle of radius 20, 30 mm below it (sections given small first, the small one drawn on a plane facing the same way): \"a horizontal narrowing is created\" instead of a cone",
+ "source": "analytic",
+ "method": "two coaxial circles lofted ruled give a cone frustum whichever way the section planes face: V = h/3 (A1 + A2 + sqrt(A1 A2)) = 10 pi (400 + 64 + 160) = 19603.5; faces: cone and two caps.",
+ "body_count": 1,
+ "volume_mm3": 19603.538158400308,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -20,
+   -20,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   30
+  ]
+ }
+}

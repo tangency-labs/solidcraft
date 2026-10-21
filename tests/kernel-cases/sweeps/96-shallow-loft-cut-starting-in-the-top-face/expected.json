@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#96"
+ ],
+ "what": "a loft cut from a 556.68 x 99 rectangle on the top face of a 900 x 480 x 160 slab down 4 mm to an 80 x 80 square (a kernel panic in healing; the sides are about 0.9 degrees from horizontal)",
+ "source": "analytic",
+ "method": "a ruled loft of two rectangles: V = h/6 (A0 + 4 Am + A1) with h = 4, A0 = 556.68 * 99, A1 = 80 * 80, Am = 318.34 * 89.5 = 116984.69 removed from the slab 900 * 480 * 160 = 69120000.",
+ "body_count": 1,
+ "volume_mm3": 69003015.30666667
+}
