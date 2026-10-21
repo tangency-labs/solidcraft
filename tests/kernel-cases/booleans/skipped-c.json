@@ -49,7 +49,7 @@
  },
  {
   "source": "tangency-labs/solidcraft#3518",
-  "why": "other area: shell (split of a user's body by a plane, 'Intersect: no result')"
+  "why": "needs a user's design that can't be rebuilt synthetically: a plane split (XZ) of one body of a 41-body design, no geometry given; plain plane splits are covered by case 13"
  },
  {
   "source": "tangency-labs/solidcraft#3531",
@@ -81,7 +81,7 @@
  },
  {
   "source": "tangency-labs/solidcraft#3602",
-  "why": "other area: shell (split of a user's body by a plane, 'Intersect: no result')"
+  "why": "needs a user's design that can't be rebuilt synthetically: a split by a sketch line (l8 of sketch 9) of one body, the body is not given; plain splits are covered by case 13"
  },
  {
   "source": "tangency-labs/solidcraft#3607",
@@ -150,10 +150,6 @@
  {
   "source": "tangency-labs/solidcraft#3734",
   "why": "not geometry: the failing step is a profile that is not closed in the user's sketch"
- },
- {
-  "source": "tangency-labs/solidcraft#3741",
-  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('lumps: ...' error on a cut or join in a user's design)"
  },
  {
   "source": "tangency-labs/solidcraft#3753",

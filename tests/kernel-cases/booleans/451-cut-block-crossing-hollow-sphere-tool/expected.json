@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#451"
+ ],
+ "what": "a 12x8x8 block (x 8..20) crossing the inner sphere r=18.5 of a hollow spherical-shell tool: the cut keeps the part inside r=18.5",
+ "source": "analytic",
+ "method": "the block's farthest corner is at r=sqrt(20^2+4^2+4^2)=20.78 < 40, so the tool removes exactly the block's part with r>18.5. Kept: V = integral over |y|,|z|<=4 of (min(20, sqrt(18.5^2-y^2-z^2)) - 8) dy dz = 653.343 (numeric quadrature in python, midpoint 1500 x Simpson 200 points; the integrand is smooth). The far face x=20 lies wholly outside the sphere (r>=20), so the kept part is one piece",
+ "body_count": 1,
+ "volume_mm3": 653.3429
+}

@@ -60,10 +60,6 @@
   "why": "hang on a user's STEP file (gehaeuse82.stp), performance; no synthetic repro"
  },
  {
-  "source": "tangency-labs/solidcraft#1984",
-  "why": "other area: booleans (interference of near-coaxial pins after a round trip)"
- },
- {
   "source": "tangency-labs/solidcraft#2052",
   "why": "DXF import, not STEP/IGES"
  },
@@ -154,10 +150,6 @@
  {
   "source": "tangency-labs/solidcraft#3557",
   "why": "export-only: loop order of merged cone and cylinder faces on STEP export"
- },
- {
-  "source": "tangency-labs/solidcraft#3573",
-  "why": "other area: shell (tapered filleted box shell, fillet edges 0.02 mm off the surface)"
  },
  {
   "source": "tangency-labs/solidcraft#3595",

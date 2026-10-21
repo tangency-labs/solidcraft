@@ -1,0 +1,277 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      5,
+      -10
+     ],
+     [
+      5,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     10
+    ],
+    "start": [
+     5,
+     10
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -5,
+      10
+     ],
+     [
+      -5,
+      -10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     -10
+    ],
+    "start": [
+     -5,
+     -10
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      3,
+      -10
+     ],
+     [
+      3,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     10
+    ],
+    "start": [
+     3,
+     10
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -3,
+      10
+     ],
+     [
+      -3,
+      -10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     -10
+    ],
+    "start": [
+     -3,
+     -10
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Base",
+    "distance": 2,
+    "operation": "new",
+    "body_name": "Base"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 2,
+    "name": "Lips"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0.0001,
+     10
+    ],
+    "start": [
+     5.0001,
+     10
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -4.9999,
+      10
+     ],
+     [
+      -3.9999,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0.0001,
+     10
+    ],
+    "start": [
+     -3.9999,
+     10
+    ],
+    "sweep": -180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      4.0001,
+      10
+     ],
+     [
+      5.0001,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     -0.0001,
+     -10
+    ],
+    "start": [
+     -5.0001,
+     -10
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      4.9999,
+      -10
+     ],
+     [
+      3.9999,
+      -10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     -0.0001,
+     -10
+    ],
+    "start": [
+     3.9999,
+     -10
+    ],
+    "sweep": -180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -4.0001,
+      -10
+     ],
+     [
+      -5.0001,
+      -10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Lips",
+    "distance": 18,
+    "operation": "join",
+    "profiles": "all"
+   }
+  }
+ ]
+}
