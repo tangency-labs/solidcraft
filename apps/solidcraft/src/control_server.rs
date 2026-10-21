@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use solidcraft_engine::MAX_LINE;
 use solidcraft_engine::control_auth;
+use solidcraft_engine::control_pending;
 use solidcraft_ui_egui::ControlRequest;
 
 /// Connections served at once, so a flood must not be able to spawn threads without end.
@@ -176,6 +177,8 @@ const WAITS: Waits = Waits { short: Duration::from_secs(60), long: Duration::fro
 struct Pending {
     id: Value,
     method: String,
+    /// The request in messages ("`engine.execute` (solid.fillet)").
+    what: String,
     reply: Receiver<Value>,
 }
 
@@ -296,6 +299,35 @@ fn watch(reply: Receiver<Value>, ticket: Ticket) -> Receiver<Value> {
     late_rx
 }
 
+/// The reply text for a request that outlasts its wait. A request that only reads changes
+/// nothing when it finishes; an export or a save still writes its file, and any other request
+/// still applies, as it was not cancelled.
+fn timeout_message(what: &str, effect: control_pending::Effect) -> String {
+    match effect {
+        control_pending::Effect::ReadsOnly => {
+            format!("timeout: {what} is still running in the app ({}); ask `control.pending` for its answer", effect.when_done())
+        }
+        control_pending::Effect::WritesFile => format!(
+            "timeout: {what} is still running in the app and will still write the file when it finishes (it was not cancelled: \
+             don't send it again; the design does not change); ask `control.pending` for its result"
+        ),
+        control_pending::Effect::Changes => format!(
+            "timeout: {what} is still running in the app and will still apply when it finishes (it was not cancelled: don't send it \
+             again); ask `control.pending` for its result"
+        ),
+    }
+}
+
+/// The reply text for a request refused because an earlier one on the connection still runs.
+fn busy_message(p: &Pending, method: &str) -> String {
+    let method: String = method.chars().take(128).collect();
+    format!(
+        "busy: request {} ({}) is still running, so `{method}` was not run; ask `control.pending` for that request's result, then \
+         send this one again",
+        p.id, p.what
+    )
+}
+
 fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) {
     serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING);
 }
@@ -364,7 +396,7 @@ fn serve_with(
                     }
                 } else if let Some(p) = pending.as_ref().filter(|_| late.is_none()) {
                     // Nothing more is queued behind it, to run unseen when it ends.
-                    json!({"ok": false, "busy": true, "error": format!("busy: request {} (`{}`) is still running; ask `control.pending` for its result", p.id, p.method)})
+                    json!({"ok": false, "busy": true, "error": busy_message(p, &method)})
                 } else {
                     if late.is_some() {
                         // Finished, and the client moved on without asking: it is dropped.
@@ -372,6 +404,8 @@ fn serve_with(
                     }
                     // A batch replaces many short requests: the whole of it may take long (#743).
                     let wait = if patient || method == "engine.batch" { waits.long } else { waits.short };
+                    let what = control_pending::describe(&method, &params);
+                    let effect = control_pending::effect(&method, &params);
                     let (req, rrx) = ControlRequest::new(method.clone(), params);
                     let ticket = running.add(connection, &id, &req);
                     if tx.send(req).is_err() {
@@ -381,8 +415,8 @@ fn serve_with(
                     match rrx.recv_timeout(wait) {
                         Ok(r) => r,
                         Err(_) => {
-                            let r = json!({"ok": false, "running": true, "error": format!("timeout: `{method}` is still running in the app and will still apply; ask `control.pending` for its result")});
-                            pending = Some(Pending { id: id.clone(), method, reply: watch(rrx, ticket) });
+                            let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect)});
+                            pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket) });
                             r
                         }
                     }
@@ -575,6 +609,25 @@ mod tests {
         // Asking `control.running` did not take the export's reply from its connection.
         let r = export(json!({"id": 9, "method": "control.pending"}));
         assert_eq!((&r["result"]["pending"], &r["result"]["done"]), (&json!(7), &json!(true)), "{r}");
+    }
+
+    /// A timed-out request that only reads is not said to "still apply", nor is one that only
+    /// writes a file (an export, #1989); a change is, by name.
+    #[test]
+    fn timeout_text_tells_reads_from_changes() {
+        let says = |method: &str, p: Value| timeout_message(&control_pending::describe(method, &p), control_pending::effect(method, &p));
+        let read = says("ui.inspect", json!({}));
+        assert!(read.starts_with("timeout") && read.contains("only reads") && !read.contains("will still apply"), "{read}");
+        let read = says("engine.execute", json!({"command": "sketch.inspect"}));
+        assert!(read.contains("only reads") && read.contains("sketch.inspect"), "{read}");
+        let change = says("engine.execute", json!({"command": "solid.fillet"}));
+        assert!(change.starts_with("timeout") && change.contains("will still apply") && change.contains("solid.fillet"), "{change}");
+        let export = says("engine.execute", json!({"command": "file.export", "params": {"path": "/tmp/wall.step"}}));
+        assert!(export.contains("will still write the file") && !export.contains("apply") && export.contains("file.export"), "{export}");
+        let save = says("engine.execute", json!({"command": "file.save"}));
+        assert!(save.contains("will still write the file") && !save.contains("apply"), "{save}");
+        let render = says("ui.render", json!({"path": "/tmp/a.png"}));
+        assert!(render.contains("will still write the file"), "{render}");
     }
 
     /// #205: a connection runs nothing until a request carries the launch's token; a wrong or

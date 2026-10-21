@@ -51,13 +51,20 @@ answered within 60 seconds (3600 seconds for `engine.batch`) is replied to with
 `{"ok": false, "running": true, "error": "timeout: … is still running …"}`. The same 16 MiB line
 limit applies to the MCP server.
 
-A timed-out request has not failed: it is still running in the app and will still apply (a long
-fillet, say), so don't simply send it again. The connection keeps its reply (#1618). Ask for it
+A timed-out request has not failed: it is still running in the app, and a change still applies
+when it finishes (a long fillet, say), so don't simply send it again. The timeout's text says
+what it still does: a request that only reads (`ui.inspect`, `document.inspect`, an inspection
+command) "only reads: nothing changes"; one that only writes a file (`file.export`,
+`file.save`, `file.save_as`, `file.save_mesh`, another export given a `path`, `ui.render`, or
+`ui.screenshot` with a `path`) "will still write the file when it finishes" and leaves the design
+as it is; any other request "will still apply when it finishes". The connection keeps its reply (#1618). Ask for it
 with `control.pending`: `{"pending": <id>, "method": …, "done": false}` while it runs, then
 `{"pending": <id>, "method": …, "done": true, "reply": {…}}` (its own reply, once), and
 `{"pending": null}` when nothing is outstanding. Until it lands, any other request on that
 connection is refused at once with `{"ok": false, "busy": true, "error": "busy: …"}` and not
-run, so nothing is queued to apply unseen behind it.
+run, so nothing is queued to apply unseen behind it. `control.pending` belongs to the
+connection: a new connection has nothing pending. The bridged MCP server does this itself
+([mcp.md](mcp.md#long-running-requests)).
 
 `control.pending` answers only for its own connection. `control.running` answers for the whole
 app, the same on every connection, at once (it never waits behind a running request, and a
@@ -191,7 +198,7 @@ labels; `prefs:measure_axis_distances` identifies the checkbox.
 | `ui.sketchToScreen` | `points`: `[[x, y]…]` in active-sketch coordinates | their screen points (null when behind the camera) |
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
-| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL; contextual SKETCH; workspace RENDER), panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>` and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; optional cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible cube faces; Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Cube`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>` |
+| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW; contextual SKETCH and SHEET METAL; workspace RENDER), panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>` and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; optional cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible cube faces; Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Cube`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>` |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode) |
 | `ui.scroll` | `x`, `y`, `delta?` | wheel zoom at the cursor |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `shift?` | |
