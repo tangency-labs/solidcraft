@@ -320,8 +320,8 @@ impl FilletSurfaceGenerator {
     ///
     /// `SM_ERR` for [`FilletSurfaceGenerator::Base`]; those of
     /// `SmEiffelTowerCrossSectionFSG::CreateSurface` and
-    /// `SmLinearCrossSectionFSG::CreateSurface`; [`SolidError::Unported`] for the
-    /// circular and blend-curve generators.
+    /// `SmLinearCrossSectionFSG::CreateSurface` ([`LinearCrossSectionFsg::create_surface`]);
+    /// [`SolidError::Unported`] for the circular and blend-curve generators.
     pub fn create_surface(
         &self,
         k: &Kernel,
@@ -336,6 +336,7 @@ impl FilletSurfaceGenerator {
                 crate::blend::fillet_custom_solver::EiffelTowerCrossSectionFsg::new()
                     .create_surface(k, approx_tol_3d, rail1, rail2, points)
             }
+            // the ruled surface between the rails (SER)
             Self::Linear => LinearCrossSectionFsg.create_surface(rail1, rail2),
             // UNPORTED(blend.fillet_standard_solver_p2): SmCircularCrossSectionFSG::CreateSurface
             Self::Circular(_) => Err(SolidError::unported(
@@ -2556,7 +2557,6 @@ pub enum AnalyticTestSurface<'a> {
 /// `SmBSplineSurface`.
 pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Result<bool> {
     use crate::surface::surface::p2::{CONE_TYPE, PLANE_TYPE};
-    use crate::surface::surface::SurfaceKind;
     let type_code = match surface {
         AnalyticTestSurface::Surface(s) => s.type_code(),
         AnalyticTestSurface::Cone(c) => c.type_code(),
@@ -2598,7 +2598,7 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
         },
         AnalyticTestSurface::Cone(c) => c.rev().base(),
         AnalyticTestSurface::Sphere(s) => s.base().base(),
-        AnalyticTestSurface::Torus(t) => t.base().base(),
+        AnalyticTestSurface::Torus(t) => t.base.base(),
     };
     match Cone::is_nurb_surface_cone(k, bss, 1.0) {
         Ok(None) => Ok(false),
