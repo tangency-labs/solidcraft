@@ -1,0 +1,50 @@
+{
+  "en": {
+    "browser.link_frozen": "Frozen",
+    "browser.link_lost": "Lost",
+    "browser.link_pending": "Pending",
+    "cmd.sketch_freeze_link": "Freeze Link",
+    "cmd.sketch_link_visibility": "Show/Hide Projection",
+    "cmd.sketch_references": "Sketch References",
+    "cmd.sketch_remove_link": "Remove Projection",
+    "cmd.sketch_repair_link": "Repair Link",
+    "cmd.sketch_resume_link": "Resume Link",
+    "cmd.sketch_update_references": "Update References"
+  },
+  "ja": {
+    "browser.link_frozen": "凍結",
+    "browser.link_lost": "参照切れ",
+    "browser.link_pending": "保留中",
+    "cmd.sketch_freeze_link": "リンクを凍結",
+    "cmd.sketch_link_visibility": "投影の表示/非表示",
+    "cmd.sketch_references": "スケッチの参照",
+    "cmd.sketch_remove_link": "投影を削除",
+    "cmd.sketch_repair_link": "リンクを修復",
+    "cmd.sketch_resume_link": "リンクを再開",
+    "cmd.sketch_update_references": "参照を更新"
+  },
+  "pl": {
+    "browser.link_frozen": "Zamrożone",
+    "browser.link_lost": "Utracone",
+    "browser.link_pending": "Oczekujące",
+    "cmd.sketch_freeze_link": "Zamroź łącze",
+    "cmd.sketch_link_visibility": "Pokaż/ukryj rzutowanie",
+    "cmd.sketch_references": "Odniesienia szkicu",
+    "cmd.sketch_remove_link": "Usuń rzutowanie",
+    "cmd.sketch_repair_link": "Napraw łącze",
+    "cmd.sketch_resume_link": "Wznów łącze",
+    "cmd.sketch_update_references": "Aktualizuj odniesienia"
+  },
+  "zh": {
+    "browser.link_frozen": "已冻结",
+    "browser.link_lost": "已丢失",
+    "browser.link_pending": "待定",
+    "cmd.sketch_freeze_link": "冻结链接",
+    "cmd.sketch_link_visibility": "显示/隐藏投影",
+    "cmd.sketch_references": "草图参照",
+    "cmd.sketch_remove_link": "移除投影",
+    "cmd.sketch_repair_link": "修复链接",
+    "cmd.sketch_resume_link": "恢复链接",
+    "cmd.sketch_update_references": "更新参照"
+  }
+}

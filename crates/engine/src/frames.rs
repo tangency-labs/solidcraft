@@ -94,7 +94,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
-        "sketch.project" | "sketch.intersect" | "sketch.include_3d" => &[("refs", Here), ("ref", Here)],
+        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.repair_link" => &[("refs", Here), ("ref", Here)],
         "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Here)],
         "sketch.intersection_curve" => &[("a", Here), ("b", Here)],
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
@@ -218,6 +218,8 @@ struct Mapper<'a> {
     changed: bool,
     /// Picks go into the sketch's frame (`Here`), not the frame of the body under them.
     here: bool,
+    /// Instance body names ("Body1 (Occ:2)") stay: the command finds the exact placement by them.
+    world_names: bool,
 }
 
 impl Mapper<'_> {
@@ -302,6 +304,7 @@ impl Mapper<'_> {
                 // gives it (`with_placed_copies`), so that name stays (#9957).
                 if let Some(bn) = &b
                     && !self.here
+                    && !self.world_names
                     && let Some(own) = self.own_name(bn)
                 {
                     m.insert("body".into(), Value::String(own));
@@ -652,7 +655,9 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
     }
     let obj = &obj;
-    let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
+    // Projections keep the placement a body was picked at (`sketch_project::pick`).
+    let world_names = matches!(id, "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.repair_link");
+    let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false, world_names };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     // Picks first: their frame turns the directions.

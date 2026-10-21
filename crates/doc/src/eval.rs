@@ -7338,7 +7338,8 @@ fn eval_feature(
                 // A sketch that reads no geometry (a fixed plane, no projections) needs no other
                 // component's bodies moved into its frame: placing every body of a large
                 // assembly again is what made each sketch edit as slow as the design is big.
-                None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
+                // Links to an exact placement read the model in its own frames.
+                None if !plane_reads_geometry(plane) && sketch.links.iter().all(link_reads_own_frames) => std::borrow::Cow::Borrowed(st),
                 None => state_in_frame(doc, st, f.component)?,
             };
             // A further placement a link reads is placed in its frame too (#9957).
@@ -7362,10 +7363,8 @@ fn eval_feature(
             // A text's outlines are rebuilt from its numbers when the links are refreshed: the
             // ones its expressions give come first.
             doc.apply_text_values(vals, &mut sk)?;
-            let mut warns = match anchor {
-                Some(anchor) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
-                None => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
-            };
+            let placed = crate::project::Placed { raw: st, component: f.component };
+            let mut warns = crate::project::refresh_sketch_links(doc, vals, placed, &fst, &plane, &mut sk, anchor)?;
             drop(fst);
             sk.refresh_offsets()?;
             if let Some(w) = face_warning {
@@ -8334,6 +8333,15 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
             c.geom = geom;
         }
     }
+}
+
+/// Whether a link needs nothing of other components moved into its sketch's frame: it reads an
+/// exact placement itself, is frozen, or reads nothing outside its sketch and the origin.
+fn link_reads_own_frames(link: &solidcraft_sketch::Link) -> bool {
+    use solidcraft_sketch::LinkSource;
+    link.frozen
+        || link.placement.is_some()
+        || matches!(link.source, LinkSource::Text { .. } | LinkSource::SketchAxis { .. } | LinkSource::Origin | LinkSource::Axis { .. })
 }
 
 /// Whether `plane` is given by the origin planes and numbers alone.
