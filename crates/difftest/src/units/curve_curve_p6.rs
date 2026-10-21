@@ -734,6 +734,11 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             nsamp,
             max,
         } => {
+            // the FFI rejects more than `ffi::MAX_SAMPLES` samples; upstream (and the port)
+            // would loop that many times, so a larger count is not a case for Rust either
+            if *nsamp > ffi::MAX_SAMPLES as u64 {
+                return Err(HarnessError::new(format!("{nsamp} samples")));
+            }
             let a = build(c1)?;
             let other = match c2 {
                 Some(c2) => Some(build(c2)?),

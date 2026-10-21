@@ -889,7 +889,7 @@ fn rust_op(op: &OpIn, a: &mut Line, o: &mut Vec<f64>) -> Result<(), Fail> {
             put_boxes(o, &boxes);
         }
         OpIn::Tessellate { ivl, nseg, flags } => {
-            let t = a.tessellate(
+            let r = a.tessellate(
                 &ivl_of(a, *ivl),
                 u64::from(*nseg),
                 TessellationRequest {
@@ -898,21 +898,22 @@ fn rust_op(op: &OpIn, a: &mut Line, o: &mut Vec<f64>) -> Result<(), Fail> {
                     tangents: flags & 4 != 0,
                 },
             );
-            o.push(0.0);
-            if flags & 1 != 0 {
-                o.push(t.parameters.len() as f64);
-                o.extend_from_slice(&t.parameters);
-            }
-            if flags & 2 != 0 {
-                o.push(t.points.len() as f64);
-                for p in &t.points {
-                    put_vec(o, *p);
+            if let Some(t) = st(o, r)? {
+                if flags & 1 != 0 {
+                    o.push(t.parameters.len() as f64);
+                    o.extend_from_slice(&t.parameters);
                 }
-            }
-            if flags & 4 != 0 {
-                o.push(t.tangents.len() as f64);
-                for p in &t.tangents {
-                    put_vec(o, *p);
+                if flags & 2 != 0 {
+                    o.push(t.points.len() as f64);
+                    for p in &t.points {
+                        put_vec(o, *p);
+                    }
+                }
+                if flags & 4 != 0 {
+                    o.push(t.tangents.len() as f64);
+                    for p in &t.tangents {
+                        put_vec(o, *p);
+                    }
                 }
             }
         }

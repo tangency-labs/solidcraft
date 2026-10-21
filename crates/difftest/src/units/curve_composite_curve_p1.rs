@@ -315,8 +315,12 @@ fn comp_block(v: &mut Vec<f64>, c: &CompIn) -> Result<(), HarnessError> {
         curve_block(v, cu)?;
     }
     v.push(b(c.closed));
+    // The shim reads one sense and one gap per curve: upstream ignores entries past
+    // the curve count and reads past a shorter array (undefined).
+    let n = c.curves.len();
     match &c.senses {
         Some(s) => {
+            let s = s.get(..n).ok_or_else(|| harness("fewer senses than curves"))?;
             v.push(1.0);
             v.extend(s.iter().map(|x| b(*x)));
         }
@@ -324,6 +328,7 @@ fn comp_block(v: &mut Vec<f64>, c: &CompIn) -> Result<(), HarnessError> {
     }
     match &c.gaps {
         Some(g) => {
+            let g = g.get(..n).ok_or_else(|| harness("fewer gaps than curves"))?;
             v.push(1.0);
             v.extend_from_slice(g);
         }

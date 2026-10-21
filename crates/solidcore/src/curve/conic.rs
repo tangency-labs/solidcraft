@@ -318,7 +318,9 @@ impl Conic {
         num_derivs: usize,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
-        let mut out = vec![Vec3::UNDEF; num_derivs.saturating_add(1)];
+        // At most three slots: `num_derivs > 2` is `SM_ERR` below, so a huge caller
+        // order must not size the allocation.
+        let mut out = vec![Vec3::UNDEF; num_derivs.min(2) + 1];
         let pos = self.evaluate_point(param);
         if let Some(o) = out.get_mut(0) {
             *o = pos;

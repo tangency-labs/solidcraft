@@ -366,8 +366,21 @@ fn build_offset(base: Curve, s: &SpecIn) -> Curve {
     c
 }
 
+/// Most reversals the runner applies (`ffi::MAX_REVERSALS`, the guard's bound): the
+/// `nrev` loop is runner code, so a fuzzed count must not make it run for hours.
+const MAX_RUNNER_REVERSALS: usize = 4;
+
 /// The base curve and the op's curve.
 fn build(i: &Inputs) -> Result<(Curve, Curve), HarnessError> {
+    let other = match &i.op {
+        OpIn::Eq { other, .. } => other.as_ref(),
+        _ => None,
+    };
+    for s in [i.spec.as_ref(), i.outer.as_ref(), other].into_iter().flatten() {
+        if s.nrev > MAX_RUNNER_REVERSALS {
+            return Err(harness("nrev above the runner's reversal bound"));
+        }
+    }
     let base = build_base(i.base.as_ref().ok_or_else(|| harness("no base"))?)?;
     let spec = i.spec.as_ref().ok_or_else(|| harness("no spec"))?;
     let inner = build_offset(base.clone(), spec);

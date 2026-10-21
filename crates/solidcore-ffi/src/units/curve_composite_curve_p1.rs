@@ -136,7 +136,7 @@ fn len_sq(v: [f64; 3]) -> f64 {
 }
 
 /// What validation learns about a curve block.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct CurveInfo {
     /// `0` B-spline, `1` Hermite, `2` line.
     kind: usize,
@@ -145,10 +145,15 @@ struct CurveInfo {
     /// for a line).
     start: [f64; 3],
     end: [f64; 3],
+    /// The distinct knot values of a B-spline (empty otherwise).
+    knots: Vec<f64>,
 }
 
-/// A B-spline `n p m cpts knots`: its range and end points.
-fn bspline(rd: &mut Reader<'_>) -> Result<(f64, f64, [f64; 3], [f64; 3]), FfiError> {
+/// Distinct knot values, start point and end point of a curve.
+type KnotsAndEnds = (Vec<f64>, [f64; 3], [f64; 3]);
+
+/// A B-spline `n p m cpts knots`: its distinct knot values and end points.
+fn bspline(rd: &mut Reader<'_>) -> Result<KnotsAndEnds, FfiError> {
     let n = rd.index(MAX_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;
     let m = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
@@ -210,7 +215,13 @@ fn bspline(rd: &mut Reader<'_>) -> Result<(f64, f64, [f64; 3], [f64; 3]), FfiErr
     }
     let first = cpts.first().copied().ok_or_else(|| bad("empty curve"))?;
     let last = cpts.last().copied().ok_or_else(|| bad("empty curve"))?;
-    Ok((a, b, euclid(first), euclid(last)))
+    let mut distinct: Vec<f64> = Vec::new();
+    for &k in knots {
+        if distinct.last() != Some(&k) {
+            distinct.push(k);
+        }
+    }
+    Ok((distinct, euclid(first), euclid(last)))
 }
 
 /// A line `P V d0 d1 scale io`.
@@ -240,12 +251,13 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
     match kind {
         0 => {
             rd.flag()?;
-            let (_, _, start, end) = bspline(rd)?;
+            let (knots, start, end) = bspline(rd)?;
             Ok(CurveInfo {
                 kind,
                 dim,
                 start,
                 end,
+                knots,
             })
         }
         1 => {
@@ -258,6 +270,7 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
                 dim,
                 start: p1,
                 end: p2,
+                knots: Vec::new(),
             })
         }
         _ => {
@@ -270,6 +283,7 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
                 dim,
                 start: [f64::NAN; 3],
                 end: [f64::NAN; 3],
+                knots: Vec::new(),
             })
         }
     }
@@ -355,6 +369,33 @@ fn check_approx(curves: &[CurveInfo]) -> Result<(), FfiError> {
         if len_sq(d).sqrt() > 1e-9 * size {
             return Err(bad("approx: segments not connected (the join fails)"));
         }
+    }
+    // `SmBSplineCurve::CreateByJoining` appends each segment's distinct knots shifted
+    // by `last joined knot - first segment knot`; a knot span that the shift rounds
+    // away leaves equal knots, `CreateCanonical` fails and `ApproximateCurve` calls
+    // `AssertValid` on the `NULL` result (`SmCompositeCurve.cpp:676`, SIGSEGV). The
+    // same sums in the same order, with a Hermite segment's approximation over its
+    // natural interval `[0, 1]`.
+    let mut last: Option<f64> = None;
+    for c in curves {
+        let hermite = [0.0, 1.0];
+        let knots: &[f64] = if c.kind == 1 { &hermite } else { &c.knots };
+        let (Some(&u0), Some(rest)) = (knots.first(), knots.get(1..)) else {
+            continue;
+        };
+        let start = *last.get_or_insert(u0);
+        let offset = start - u0;
+        let mut prev = start;
+        for &u in rest {
+            let v = u + offset;
+            if v <= prev {
+                return Err(bad(
+                    "approx: a knot span vanishes in the join (the join fails)",
+                ));
+            }
+            prev = v;
+        }
+        last = Some(prev);
     }
     Ok(())
 }

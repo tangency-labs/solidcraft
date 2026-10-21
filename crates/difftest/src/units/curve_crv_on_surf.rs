@@ -941,6 +941,11 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             tol,
             max,
         } => {
+            // the FFI rejects more than 8 samples; upstream (and the port) would loop that
+            // many times, so a larger count is not a case for Rust either
+            if *samples > 8 {
+                return Err(HarnessError::new(format!("{samples} samples")).into());
+            }
             let ivl = Extent1d::from_min_max(*a, *bb);
             let run = |this: &CrvOnSurf, oc: &Curve| {
                 this.surface_curve_max_distance_between(k, &ivl, oc, *s0, *s1, *samples, *tol, *max)

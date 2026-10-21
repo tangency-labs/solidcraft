@@ -953,6 +953,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             samples,
             turn,
         } => {
+            // the FFI rejects more than `ffi::MAX_SAMPLES` samples; upstream (and the port)
+            // would loop that many times, so a larger count is not a case for Rust either
+            if *samples > ffi::MAX_SAMPLES {
+                return Err(HarnessError::new(format!("{samples} samples")));
+            }
             let (len, t) = tri!(
                 o,
                 c_ref()?.approximate_length(&k, &Extent1d::from_min_max(*a, *bb), *samples, *turn)

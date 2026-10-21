@@ -770,6 +770,11 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             o.extend([0.0, b(r.is_some()), r.unwrap_or(0.0)]);
         }
         OpIn::IsArc { curve, n, tol } => {
+            // the FFI rejects more than `ffi::MAX_SAMPLES` samples; upstream (and the port)
+            // would loop that many times, so a larger count is not a case for Rust either
+            if *n > ffi::MAX_SAMPLES as u64 {
+                return Err(HarnessError::new(format!("{n} samples")));
+            }
             let c = build(&k, curve)?;
             let r = tri!(o, c.is_arc(&k, *n, *tol));
             o.extend([0.0, b(r.is_some())]);
@@ -781,6 +786,10 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             }
         }
         OpIn::IsLine { curve, n, tol } => {
+            // as `IsArc`: the FFI bounds the sample count
+            if *n > ffi::MAX_SAMPLES as u64 {
+                return Err(HarnessError::new(format!("{n} samples")));
+            }
             let c = build(&k, curve)?;
             let r = tri!(o, c.is_line(&k, *n, *tol));
             o.extend([0.0, b(r.is_some())]);

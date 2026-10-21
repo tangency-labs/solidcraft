@@ -364,7 +364,8 @@ fn per_point(r: &DbRecord) -> usize {
 
 /// Checks a record: `1 <= p <= n <= MAX_DB_INDEX`, flags in range, the exact number
 /// of finite values, positive weights, polar tables of at most `MAX_DB_INDEX` finite
-/// values with the angle table as long as the knot table (upstream reads them in step).
+/// values with the angle table as long as the knot table (upstream reads them in step)
+/// and, for a usable converter, a non-empty angle table with an exactness flag per arc.
 fn check_record(r: &DbRecord) -> Result<(), FfiError> {
     for &x in &r.head {
         finite(x)?;
@@ -381,6 +382,13 @@ fn check_record(r: &DbRecord) -> Result<(), FfiError> {
     }
     if r.exact.iter().any(|&x| !(0..=1).contains(&x)) {
         return Err(bad("polar exactness flags"));
+    }
+    // `SmPolarConversion::ConvertToNURBSParameter` reads `m_vAngles[0]` and, per arc
+    // interval `ii`, `m_vExactConversion[ii-1]` without bounds checks: a usable
+    // converter read with no angles or fewer than `angles - 1` flags dereferences past
+    // its arrays (SIGSEGV, `SmEllipse.cpp:555`).
+    if r.possible != 0 && (r.angles.is_empty() || r.exact.len() + 1 < r.angles.len()) {
+        return Err(bad("polar exactness table shorter than the angle table"));
     }
     if !(1..=MAX_DB_INDEX).contains(&r.n) || r.p < 1 || i64::from(r.p) > r.n {
         return Err(bad("record sizes"));
@@ -403,6 +411,14 @@ fn check_record(r: &DbRecord) -> Result<(), FfiError> {
                 return Err(bad("record weight"));
             }
         }
+    }
+    // NLib assumes a non-decreasing knot vector (span search); a record with a
+    // decreasing knot is not a B-spline (fuzz: `GlobalPointSolve` fails upstream).
+    if r.vals
+        .get(n_pts * per..)
+        .is_some_and(|k| k.windows(2).any(|w| w.first() > w.last()))
+    {
+        return Err(bad("record knots not non-decreasing"));
     }
     Ok(())
 }

@@ -60,6 +60,10 @@
 //!   (unused upstream), `GetMemoryUsed`, `Dump`, `GetBaseCurve`, `GetRootCurve`,
 //!   `GetOffsetDistance`, `GetOffsetNormal` and `GetMaxAnalyticDomain` are not part
 //!   of this unit; plain getters are provided for the data.
+//! - **Derivative order bound.** `Evaluate` returns [`SolidError::InvalidInput`] when
+//!   `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`] (upstream fills a
+//!   caller-supplied array of any length; the port's output `Vec` must not be sized by
+//!   an unbounded caller value).
 
 use crate::curve::curve::p2::{is_kind_of as curve_is_kind_of, Curve, OFFSET_CURVE_TYPE};
 use crate::error::{Result, SolidError};
@@ -278,6 +282,8 @@ impl OffsetCurve {
         from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
+        // The output holds `num_derivs + 1` vectors: bound the caller's order.
+        crate::curve::check_eval_derivs(num_derivs, OP_EVAL)?;
         let base = self.base()?;
         let mut from_left = from_left;
 
@@ -707,6 +713,28 @@ mod tests {
             d,
             true,
         )
+    }
+
+    #[test]
+    fn huge_derivative_orders_are_rejected() {
+        // fuzz: `n = 2^31` / `usize::MAX` sized the output allocation (abort)
+        let c = offset(0.5);
+        for n in [crate::curve::MAX_EVAL_DERIVS + 1, 1 << 31, usize::MAX] {
+            assert!(matches!(
+                c.evaluate(&Kernel::default(), 0.25, n, true, true),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        let e = c
+            .evaluate(
+                &Kernel::default(),
+                0.25,
+                crate::curve::MAX_EVAL_DERIVS,
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(e.len(), crate::curve::MAX_EVAL_DERIVS + 1);
     }
 
     #[test]

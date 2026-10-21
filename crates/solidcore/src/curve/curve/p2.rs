@@ -147,6 +147,11 @@
 //!   `surface.surface_p1`), and
 //!   `ReadFromDB` of the analytic and generated curve types needs their units;
 //!   those calls return [`SolidError::Unported`].
+//! - **Derivative order bound.** [`Curve::evaluate`] returns
+//!   [`SolidError::InvalidInput`] for a Hermite or line kind (whose evaluators are
+//!   infallible) when `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`]; the other
+//!   kinds' evaluators check the bound themselves or fail earlier (B-splines at
+//!   `NL_MAXDER`).
 
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::Conic;
@@ -282,6 +287,7 @@ const OP_FLUSH: &str = "curve::curve::p2::flush_crv";
 const OP_GEOM: &str = "curve::curve::p2::evaluate_geometric";
 const OP_READ: &str = "curve::curve::p2::Curve::read_from_db";
 const OP_GS: &str = "curve::curve::p2::CurvePropertyGs";
+const OP_EVAL: &str = "curve::curve::p2::Curve::evaluate";
 
 /// `SM_ERR` of a base-class default.
 const fn base_err() -> SolidError {
@@ -1079,7 +1085,8 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// Those of the kind's evaluator.
+    /// Those of the kind's evaluator; [`SolidError::InvalidInput`] for a Hermite or
+    /// line kind when `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`].
     pub fn evaluate(
         &self,
         k: &Kernel,
@@ -1091,7 +1098,11 @@ impl Curve {
         match &self.kind {
             CurveKind::Composite(_) => Err(base_err()),
             CurveKind::BSpline(c) => c.evaluate(t, num_derivs, from_left, non_zero_tangents),
-            CurveKind::Hermite(c) => Ok(c.evaluate(t, num_derivs, non_zero_tangents)),
+            CurveKind::Hermite(c) => {
+                // The Hermite evaluator is infallible: bound its output size here.
+                crate::curve::check_eval_derivs(num_derivs, OP_EVAL)?;
+                Ok(c.evaluate(t, num_derivs, non_zero_tangents))
+            }
             CurveKind::Hyperbola(c) => {
                 c.base()
                     .evaluate(t, num_derivs, from_left, non_zero_tangents)
@@ -1109,7 +1120,11 @@ impl Curve {
             CurveKind::Offset(c) => c.evaluate(k, t, num_derivs, from_left, non_zero_tangents),
             CurveKind::CrvInVolume(c) => c.evaluate(k, t, num_derivs, from_left, non_zero_tangents),
             CurveKind::CrvOnSurf(c) => c.evaluate(k, t, num_derivs, from_left, non_zero_tangents),
-            CurveKind::Line(c) => Ok(c.evaluate(t, num_derivs)),
+            CurveKind::Line(c) => {
+                // The line evaluator is infallible: bound its output size here.
+                crate::curve::check_eval_derivs(num_derivs, OP_EVAL)?;
+                Ok(c.evaluate(t, num_derivs))
+            }
         }
     }
 
@@ -3693,6 +3708,25 @@ mod tests {
         })
         .unwrap();
         Curve::from(c)
+    }
+
+    #[test]
+    fn dispatcher_rejects_huge_derivative_orders() {
+        // fuzz (curve_p2, offset_curve, projected_curve): a Hermite kind evaluated with
+        // `n = 2^31` / `usize::MAX` sized the output allocation
+        let h = hermite();
+        for n in [crate::curve::MAX_EVAL_DERIVS + 1, 1 << 31, usize::MAX] {
+            assert!(matches!(
+                h.evaluate(&Kernel::default(), 0.5, n, true, true),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        assert_eq!(
+            h.evaluate(&Kernel::default(), 0.5, 6, true, true)
+                .unwrap()
+                .len(),
+            7
+        );
     }
 
     #[test]

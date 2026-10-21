@@ -360,6 +360,13 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let op = op_of(&i.op);
     let mut v = Vec::new();
     if let OpIn::ReadDb(d) = &i.op {
+        // `(SmProjectionType)lValue` beyond the enum's range of values (0..=3) is
+        // undefined behaviour upstream (the port reads it as `SM_PT_UNKNOWN`).
+        if d.ptype > 3 {
+            return Err(harness(
+                "projection type outside SmProjectionType (undefined upstream)",
+            ));
+        }
         let bytes = db_bytes(d);
         v.extend([d.version as f64, b(d.binary), bytes.len() as f64]);
         v.extend(bytes.iter().map(|&x| f64::from(x)));

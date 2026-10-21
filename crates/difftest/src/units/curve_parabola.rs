@@ -244,6 +244,11 @@ fn arg(args: &[f64], i: usize) -> Result<f64, HarnessError> {
         .ok_or_else(|| harness("missing argument"))
 }
 
+/// A flag argument as the shim reads it: `(int64_t)x != 0` (so `1e-300` is false).
+fn flag_arg(args: &[f64], i: usize) -> Result<bool, HarnessError> {
+    Ok(arg(args, i)? as i64 != 0)
+}
+
 fn arg3(args: &[f64], i: usize) -> Result<Vec3, HarnessError> {
     Ok(Vec3::new(
         arg(args, i)?,
@@ -282,11 +287,11 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         }
         Op::Eq => {
             out.push(0.0);
-            if arg(args, 0)? == 0.0 {
+            if flag_arg(args, 0)? {
+                out.push(flag(a.approx_eq(&a)));
+            } else {
                 let b = build(&i.b)?;
                 out.push(flag(a.approx_eq(&b)));
-            } else {
-                out.push(flag(a.approx_eq(&a)));
             }
         }
         Op::Adjust => {
@@ -300,7 +305,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         }
         Op::Invert => {
             let p = arg3(args, 0)?;
-            let (t, loc) = a.step_inversion(p, arg(args, 3)? != 0.0);
+            let (t, loc) = a.step_inversion(p, flag_arg(args, 3)?);
             out.extend([0.0, t, loc.map_or(-1.0, |l| f64::from(l as i32))]);
         }
         Op::Copy => {
@@ -326,7 +331,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             let sop = solver_op(arg(args, 2)?)?;
             let p = arg3(args, 3)?;
             let tol = arg(args, 6)?;
-            let target = (arg(args, 7)? != 0.0).then_some(arg(args, 8)?);
+            let target = flag_arg(args, 7)?.then_some(arg(args, 8)?);
             let req = if arg(args, 9)? == 0.0 {
                 SolutionRequested::Single
             } else {
@@ -384,21 +389,22 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             if let Err(e) = a2p.set_canonical(arg3(args, 0)?, arg3(args, 3)?, arg3(args, 6)?) {
                 out.extend([-2.0, status_code(&e)]);
             } else {
-                let scale = (arg(args, 9)? != 0.0).then_some(arg3(args, 10)?);
+                let scale = flag_arg(args, 9)?.then_some(arg3(args, 10)?);
                 let r = a.transform(&a2p, scale);
                 out.push(st(&r));
                 put_state(&mut out, &a);
             }
         }
         Op::ReadDb => {
-            let ft = if arg(args, 0)? == 0.0 {
+            let ft = if arg(args, 0)? as i64 == 0 {
                 FileType::Ascii
             } else {
                 FileType::Binary
             };
-            let dim = arg(args, 1)? as u64;
-            let version = arg(args, 2)? as u64;
-            let via_curve = arg(args, 3)? != 0.0;
+            // as the shim: `(ULONG)(int64_t)x` (`-1` is `ULONG_MAX`)
+            let dim = arg(args, 1)? as i64 as u64;
+            let version = arg(args, 2)? as i64 as u64;
+            let via_curve = flag_arg(args, 3)?;
             let mut db = DatabaseReader::new();
             db.open_for_read(db_bytes(i)?, ft);
             let r = if via_curve {

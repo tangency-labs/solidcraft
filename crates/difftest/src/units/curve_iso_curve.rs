@@ -347,10 +347,17 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             binary,
             version,
             db,
-        } => (
-            Op::ReadDb,
-            Params::Db(db_bytes(*binary, *version, db)?, *binary, *version as i64),
-        ),
+        } => {
+            // Enum values beyond the enums' range of values (`SmSurfParamType`,
+            // `SmBSplineSurfaceForm`: 0..=15) are undefined behaviour upstream.
+            if db.sp > 15 || db.form > 15 {
+                return Err(harness("enum value outside its range (undefined upstream)"));
+            }
+            (
+                Op::ReadDb,
+                Params::Db(db_bytes(*binary, *version, db)?, *binary, *version as i64),
+            )
+        }
     };
     match ffi::op(op, &a, &params) {
         Ok(v) => Ok(Output::new().values("out", v)),

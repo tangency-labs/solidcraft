@@ -110,11 +110,41 @@ impl Curve {
     }
 }
 
+/// Index of `has_nurb` in a [`Op::Adjust`] / [`Op::MakeNurb`] output (status, then
+/// `type dim oob borrowed knot_type form O(3) X(3) Y(3) F step_min step_max has_nurb`).
+const STATE_HAS_NURB: usize = 19;
+
 /// Run `op` on curves `a`, `b` with arguments `args` and stream bytes `data`.
+///
+/// [`Op::GpsStep`] is refused when it would dereference a missing NURB:
+/// `GlobalPointSolveSTEP` first calls `AdjustSTEPInterval` (which either keeps an
+/// unchanged domain as it is or rebuilds the NURB, failing when `MakeNurb` fails), then
+/// `SmCurve::GlobalPointSolve` builds the length cache through
+/// `SmBSplineCurve::EvaluatePoint`, which dereferences `GetOrCreateGwNurbPointer()`
+/// (`SmBSplineCurve.cpp:3300`, SIGSEGV when `MakeNurb` fails, e.g. on a non-finite
+/// frame). The check replays both steps on fresh curves: `AdjustSTEPInterval`
+/// succeeds without leaving a NURB and `MakeNurb` cannot make one.
 pub fn op(op: Op, a: &Curve, b: &Curve, args: &[f64], data: &[u8]) -> Result<Vec<f64>, FfiError> {
     if !matches!(a.kind, 0 | 1) || !matches!(b.kind, 0 | 1) {
         return Err(FfiError::InvalidArgument("curve kind".into()));
     }
+    if op == Op::GpsStep {
+        let ivl = args.get(..2).unwrap_or(&[]);
+        let adjusted = raw_op(Op::Adjust, a, b, ivl, &[])?;
+        if adjusted.first() == Some(&0.0) && adjusted.get(STATE_HAS_NURB) == Some(&0.0) {
+            let made = raw_op(Op::MakeNurb, a, b, &[], &[])?;
+            if made.get(STATE_HAS_NURB) != Some(&1.0) {
+                return Err(FfiError::InvalidArgument(
+                    "GlobalPointSolveSTEP on a parabola whose NURB cannot be made".into(),
+                ));
+            }
+        }
+    }
+    raw_op(op, a, b, args, data)
+}
+
+/// [`op`] without its guards.
+fn raw_op(op: Op, a: &Curve, b: &Curve, args: &[f64], data: &[u8]) -> Result<Vec<f64>, FfiError> {
     let mut input = a.block();
     input.extend(b.block());
     input.extend_from_slice(args);

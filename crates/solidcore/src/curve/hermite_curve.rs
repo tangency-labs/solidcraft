@@ -48,8 +48,10 @@
 //!   `SmVector3d` member initialisers), so an ASCII value whose extraction is
 //!   skipped stays `SM_UNDEF_DOUBLE`. A short binary read is an
 //!   error (upstream: undefined values, see `topology::database_io`).
-//! - `CalculateBoundingBox` propagates a failure of `MakeUnitOrthoVectors`, whose
-//!   status upstream ignores; it cannot fail there (the chord is not zero).
+//! - `CalculateBoundingBox` ignores a failure of `MakeUnitOrthoVectors`, as upstream
+//!   (a chord whose squared length overflows); upstream then passes an uninitialised
+//!   second axis and a zero third axis to `SetBasis`, which fails on the zero
+//!   determinant, so the port leaves the pseudo box's basis unchanged.
 //! - The offset constructor, `ComputeAngleSpannedInDegrees`,
 //!   `GetBSplineControlPolygon`, `AssertValid`, `WriteToDB`, `GetMemoryUsed`,
 //!   `GetRootCurve` and `Dump` are not part of this unit.
@@ -229,8 +231,7 @@ impl HermiteCurve {
     ///
     /// # Errors
     ///
-    /// Only a failure of [`Vec3::make_unit_ortho_vectors`] on the non-zero chord,
-    /// which does not happen.
+    /// None (kept fallible for the callers).
     pub fn calculate_bounding_box(
         &self,
         normal_box: Option<&mut Extent3d>,
@@ -253,9 +254,14 @@ impl HermiteCurve {
                 // use default basis vectors
                 *pb = PseudoBox::new();
             } else {
-                let [b1, b2, b3] = v1.make_unit_ortho_vectors(Some(self.d1))?;
-                // upstream ignores the status (the box is then unchanged)
-                let _ = pb.set_basis(b1, b2, b3);
+                // Upstream ignores both statuses. `MakeUnitOrthoVectors` only fails here
+                // when the chord unitizes to the zero vector (its squared length
+                // overflows): it then leaves `sBasis2` uninitialised and `sBasis3` the
+                // zero vector, so `SetBasis` sees a zero determinant, fails, and the box
+                // keeps its basis.
+                if let Ok([b1, b2, b3]) = v1.make_unit_ortho_vectors(Some(self.d1)) {
+                    let _ = pb.set_basis(b1, b2, b3);
+                }
             }
         }
 
@@ -529,6 +535,24 @@ mod tests {
         h.calculate_bounding_box(Some(&mut e), None, None).unwrap();
         assert_eq!(e.min(), Vec3::ZERO);
         assert_eq!(e.max(), Vec3::new(3.0, 3.0, 0.0));
+    }
+
+    #[test]
+    fn overflowing_chord_keeps_the_pseudo_box_basis() {
+        // fuzz: a control point at `-1e300` overflows the chord's squared length;
+        // upstream ignores the `MakeUnitOrthoVectors` failure (its `SetBasis` then
+        // fails on a zero third axis) and the box keeps its basis
+        let h = HermiteCurve::new(
+            Vec3::new(0.0, 0.0, -1e300),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1e300),
+            Vec3::new(1.0, 0.0, 0.0),
+            3,
+        );
+        let mut pb = PseudoBox::new();
+        let before = pb;
+        h.calculate_bounding_box(None, Some(&mut pb), None).unwrap();
+        assert_eq!(pb.basis(), before.basis());
     }
 
     #[test]

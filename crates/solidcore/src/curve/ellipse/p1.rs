@@ -68,7 +68,8 @@
 //! - **Undefined behaviour.** Where upstream would read an uninitialised value (an
 //!   unreadable ASCII count or flag, a failed `ConvertTFromSTEPToNURBS` in
 //!   `AssertValid`, a missing polar curve in `ConvertToPolarParameter`'s callers,
-//!   `ConvertTo2D`'s quadratic with fewer than two roots, the 3-point circle of
+//!   `ConvertTo2D`'s quadratic without a root (with one root only the unused
+//!   `dThetaYRad` reads the uninitialised second, and the port goes on), the 3-point circle of
 //!   collinear points) or index past a table (polar tables shorter than the knot
 //!   list), the port returns [`SolidError::InvalidInput`] (or the solver's status).
 //! - **Statuses ignored upstream** stay ignored, except [`SolidError::Unported`],
@@ -1235,8 +1236,8 @@ impl Ellipse {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` when the extremal radius quadratic has fewer than two roots
-    /// (upstream: uninitialised values).
+    /// `InvalidInput` when the extremal radius quadratic has no root (upstream:
+    /// uninitialised values).
     pub fn convert_to_2d(&mut self, k: &Kernel) -> Result<()> {
         // modify the NURB
         ignore_status(self.base.convert_to_2d())?;
@@ -1271,15 +1272,17 @@ impl Ellipse {
                 ry * rx * x_dot_y,
             ];
             let sols = solve_quadratic(&coefs, scaled_zero);
-            if sols.len() != 2 {
+            // Upstream only uses the first root: it also computes ThetaY from the second
+            // (uninitialised when the solver finds one root, e.g. a degenerate radius
+            // makes the equation linear) but never uses it. Without any root the first
+            // is uninitialised too.
+            let Some(&first_root) = sols.first() else {
                 return Err(SolidError::invalid_input(
                     OP_TO_2D,
-                    "extremal radius quadratic without two roots",
+                    "extremal radius quadratic without a root",
                 ));
-            }
-            // upstream also computes ThetaY (from the second root, plus PI when below
-            // ThetaX) but uses ThetaX for both vectors
-            let theta_x_rad = sols.first().copied().unwrap_or(0.0).atan();
+            };
+            let theta_x_rad = first_root.atan();
 
             // get max vectors for each angle
             let v = rx * theta_x_rad.cos() * x_axis + ry * theta_x_rad.sin() * y_axis;

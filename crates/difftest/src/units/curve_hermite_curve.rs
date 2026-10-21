@@ -225,6 +225,11 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         }
         Op::Evaluate => {
             let n = usize::try_from(i.n).map_err(|_| HarnessError::new("negative n"))?;
+            // `HermiteCurve::evaluate` is infallible and sizes its output by `n`; the
+            // FFI rejects orders above its own bound, so a larger one is not a case
+            if n > solidcore::curve::MAX_EVAL_DERIVS {
+                return Err(HarnessError::new("derivative order above MAX_EVAL_DERIVS"));
+            }
             out.push(SM_SUCCESS);
             for v in a.evaluate(i.t, n, i.flags & 1 != 0) {
                 put_v(&mut out, v);

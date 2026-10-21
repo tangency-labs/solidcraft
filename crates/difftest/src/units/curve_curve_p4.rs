@@ -771,6 +771,11 @@ fn rust(k: &Kernel, op: &OpIn) -> Result<Output, HarnessError> {
             o.extend([0.0, b(r)]);
         }
         OpIn::PolarBox { curve, ivl, count } => {
+            // the FFI rejects more than `ffi::MAX_SAMPLES` samples; upstream (and the port)
+            // would loop that many times, so a larger count is not a case for Rust either
+            if *count > ffi::MAX_SAMPLES as u64 {
+                return Err(HarnessError::new(format!("{count} samples")));
+            }
             let c = build(curve)?;
             let bx = tri!(
                 o,

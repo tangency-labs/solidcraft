@@ -743,6 +743,11 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let r = run_ffi(&i).map_err(|e| harness(format!("ffi: {e}")))?;
+        // The shim refuses some inputs in band with `SC_ERR_ARG` (-1002) as the first
+        // value (e.g. `gps` on a curve that would have no NURB): a guard rejection.
+        if r.first() == Some(&-1002.0) {
+            return Err(harness("shim rejected the input (SC_ERR_ARG)"));
+        }
         Ok(Output::new().values("r", r))
     }
 

@@ -100,6 +100,10 @@
 //!   `CreatePlaneProjection`, `FindContext`, `SetBaseSurface`, `SetUVDomain`,
 //!   `SetOwnerFlag`, `GetRootCurve`, `GetMemoryUsed`, `WriteToDB`, `Dump` and
 //!   `AssertValid` belong to other units or are out of scope.
+//! - **Derivative order bound.** `Evaluate` returns [`SolidError::InvalidInput`] when
+//!   `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`] (upstream fills a
+//!   caller-supplied array of any length; the port's output `Vec` must not be sized by
+//!   an unbounded caller value).
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p2::{
@@ -637,6 +641,8 @@ impl CrvOnSurf {
         from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
+        // The output holds `num_derivs + 1` vectors: bound the caller's order.
+        crate::curve::check_eval_derivs(num_derivs, OP)?;
         // limit the number of derivatives to 3
         let mut n_eval = num_derivs.min(MAX_DERIVS);
 
@@ -1796,6 +1802,18 @@ mod tests {
         assert_eq!(l.owner_flag(), 1);
         let p = l.evaluate_point(k, 0.5).unwrap();
         assert!((p.z - 0.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn huge_derivative_orders_are_rejected() {
+        // fuzz: `n = 2^31` sized the output allocation (abort)
+        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
+        for n in [crate::curve::MAX_EVAL_DERIVS + 1, 1 << 31, usize::MAX] {
+            assert!(matches!(
+                c.evaluate(&Kernel::default(), 0.3, n, true, false),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
     }
 
     #[test]
