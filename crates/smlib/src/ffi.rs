@@ -179,6 +179,7 @@ mod calls {
 
 pub use calls::*;
 
+pub mod check;
 pub mod history;
 
 /// Where [`set_log`] sends SMLib's log lines.

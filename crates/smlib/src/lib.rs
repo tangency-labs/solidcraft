@@ -15,8 +15,11 @@ use std::path::Path;
 use std::sync::Once;
 use std::sync::atomic::{AtomicI32, Ordering};
 
+mod check;
 mod ffi;
 pub mod history;
+
+pub use check::{CheckLevel, CheckReport};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
