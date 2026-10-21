@@ -88,7 +88,7 @@ fn check_case(dir: &str) -> Value {
     // case so the gap is visible, never run against a stand-in.
     if let Some(missing) = want["missing"].as_str() {
         out["status"] = json!("unsupported");
-        out["error"] = json!(format!("not supported yet: {missing}"));
+        out["error"] = json!(missing);
         return out;
     }
     let commands = match scratch(&area, &name).and_then(|o| read_json(&format!("{dir}/recipe.json")).and_then(|r| script(dir, &o, &r))) {
