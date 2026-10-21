@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#570",
+  "tangency-labs/solidcraft#594",
+  "tangency-labs/solidcraft#572"
+ ],
+ "what": "sheet.flange given thickness, k_factor and bend_radius, which the rule alone defines, used to ignore them silently and build the 2.5 mm default",
+ "source": "invariants",
+ "method": "a base flange asked for a 0.8 mm sheet must either build 0.8 mm (V = 100*60*0.8 = 4800) or refuse; it must never succeed with another thickness. The engine's documented behaviour is the refusal (the rule is the only source of thickness, k-factor and radius), so the right answer here is a clean refusal",
+ "outcome": "refused"
+}
