@@ -22,6 +22,11 @@
 //! curves, points and tolerances run the ported topology members through the
 //! `ClassGeometry::topology_entity` hook.
 //!
+//! Without that B-rep, the vertex, edge and face stand-ins are B-rep records in the shim's
+//! bare state (see unit `intersect.curve_class_p1`,
+//! [`BareTopology`](super::intersect_curve_class_p1::BareTopology)), so the members those
+//! records answer (zone tolerances, edge curve / interval, face surface) are compared too.
+//!
 //! Deferred cases: those members on the bare stand-ins (no B-rep behind them), the edits of
 //! `sm_SetDoFilletingGeometry` (`SmVertex::SetPoint`, `SmEdge::SetCurve`), the face queries of
 //! `ClassifyFaceInterval` (`topology.face_p4`, `query.face_p1`, `query.face_p2`), in-surface

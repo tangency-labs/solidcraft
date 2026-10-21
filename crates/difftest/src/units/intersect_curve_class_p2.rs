@@ -23,6 +23,11 @@
 //! and the face surface drop of `GetMinUV` / `GetMaxUV` run the ported topology through
 //! `ClassGeometry::topology_entity`.
 //!
+//! Without that B-rep, the vertex, edge and face stand-ins are B-rep records in the shim's
+//! bare state (see unit `intersect.curve_class_p1`,
+//! [`BareTopology`](super::intersect_curve_class_p1::BareTopology)), so the members those
+//! records answer (zone tolerances, edge curve / interval, face surface) are compared too.
+//!
 //! Deferred cases: those members on the bare vertex, edge and face stand-ins (no B-rep
 //! behind them: `topology.vertex`, `topology.edge`, `topology.face_p2`, `topology.brep_p1`). Generated scripts are filtered by the
 //! shim's run-time checks (scripts it rejects as undefined upstream, or as topology walks over

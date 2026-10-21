@@ -26,8 +26,12 @@
 //! `InsertPointClass`, `sm_ChangeEdgePointClassToNearVertex` and `CleanupAndValidate` that the
 //! shim refuses over bare stand-in edges are compared.
 //!
+//! In the other scripts the vertex, edge and face stand-ins are B-rep records in the shim's
+//! state (see unit `intersect.curve_class_p1`, [`BareTopology`]), so their zone tolerances are
+//! compared too.
+//!
 //! Deferred cases: the zone tolerance of an edge, vertex or face classification on a bare
-//! stand-in (`topology.edge`, `topology.vertex`, `topology.face_p2`: no B-rep behind it),
+//! stand-in next to a real B-rep (`topology.edge`, `topology.vertex`, `topology.face_p2`),
 //! `MergeIntoObject` (`SmVertex::SetPoint`) and the 2D tolerance mapping that needs a surface
 //! point solve. Generated scripts are filtered by the shim's run-time checks (scripts it
 //! rejects as undefined upstream are dropped).
@@ -63,7 +67,7 @@ use solidcore::topology::Brep;
 use solidcore_ffi::units::heal_face_props::FaceSpec;
 use solidcore_ffi::units::intersect_curve_class_p3::{self as ffi, kind, op};
 
-use super::intersect_curve_class_p1::PoolTopology;
+use super::intersect_curve_class_p1::{BareTopology, PoolTopology};
 use super::intersect_curve_class_p4::{face_brep, gen_face, topology_entities, topology_kinds};
 use crate::units::heal_face_props::{self as hfp, FaceIn, LoopsIn};
 
@@ -578,6 +582,9 @@ struct Pool {
     /// A real B-rep whose entities are the pool handles from `first` on; the other topology
     /// handles are bare stand-ins.
     topo: Option<PoolTopology>,
+    /// Without `topo`: the vertex, edge and face stand-ins as B-rep records
+    /// ([`BareTopology`]).
+    bare: BareTopology,
 }
 
 impl ClassGeometry<H> for Pool {
@@ -603,12 +610,18 @@ impl ClassGeometry<H> for Pool {
         }
     }
     fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
-        match self.entity(o)? {
-            (b, EntityRef::Vertex(v)) => b.vertex(v).ok().map(|r| r.point),
-            _ => None,
+        match self.topo {
+            Some(_) => match self.entity(o)? {
+                (b, EntityRef::Vertex(v)) => b.vertex(v).ok().map(|r| r.point),
+                _ => None,
+            },
+            None => self.bare.vertex_point(o.0),
         }
     }
     fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        if self.topo.is_none() {
+            return self.bare.zone_tol_3d(o.0);
+        }
         match self.entity(o)? {
             (b, EntityRef::Vertex(v)) => b.vertex(v).ok().map(|r| r.tolerance),
             (b, EntityRef::Edge(e)) => b.edge(e).ok().map(|r| r.tolerance),
@@ -617,10 +630,15 @@ impl ClassGeometry<H> for Pool {
         }
     }
     fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
-        self.entity(o)
+        match self.topo {
+            Some(_) => self.entity(o),
+            None => self.bare.entity(o.0),
+        }
     }
     fn topology_handle(&self, e: EntityRef) -> Option<H> {
-        let t = self.topo.as_ref()?;
+        let Some(t) = self.topo.as_ref() else {
+            return self.handles.get(self.bare.index_of(e)?).copied();
+        };
         let i = t.entities.iter().position(|x| *x == e)?;
         self.handles.get(t.first + i).copied()
     }
@@ -677,8 +695,27 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
         objs: Vec::new(),
         handles: Vec::new(),
         topo: None,
+        bare: BareTopology::default(),
     };
     for (i, o) in objects.iter().enumerate() {
+        // the curve of an edge object, the surface of a face object (earlier pool objects;
+        // the shim rejects any other)
+        let curve = match o {
+            ObjIn::Edge(Some(c)) => match pool.objs.get(*c) {
+                Some(PoolObj::Curve(x)) => Some((*c, x)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let surface = match o {
+            ObjIn::Face(Some(sf)) => match pool.objs.get(*sf) {
+                Some(PoolObj::Surface(x)) => Some(x),
+                _ => None,
+            },
+            _ => None,
+        };
+        pool.bare
+            .push(class_kind_of(obj_kind(o)), curve, surface)?;
         let obj = match o {
             ObjIn::Curve(c) => PoolObj::Curve(build_curve(c)?),
             ObjIn::Plane { o, n } => {

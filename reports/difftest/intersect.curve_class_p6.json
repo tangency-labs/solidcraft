@@ -6080,33 +6080,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o0_c434",
@@ -6148,40 +6140,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -6265,8 +6245,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o3_c222",
@@ -6277,8 +6257,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f0_o3_c333",
@@ -6324,33 +6304,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o0_c434",
@@ -6392,40 +6364,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -6525,8 +6485,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o3_c222",
@@ -6537,8 +6497,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f1_o3_c333",
@@ -6596,33 +6556,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o0_c434",
@@ -6664,40 +6616,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -6781,8 +6721,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o3_c222",
@@ -6793,8 +6733,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f2_o3_c333",
@@ -6844,33 +6784,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o0_c434",
@@ -6912,40 +6844,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -7045,8 +6965,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o3_c222",
@@ -7057,8 +6977,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k0_f3_o3_c333",
@@ -13312,33 +13232,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o0_c434",
@@ -13380,40 +13292,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -13497,8 +13397,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o3_c222",
@@ -13509,8 +13409,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f0_o3_c333",
@@ -13556,33 +13456,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o0_c434",
@@ -13624,40 +13516,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -13757,8 +13637,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o3_c222",
@@ -13769,8 +13649,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f1_o3_c333",
@@ -13828,33 +13708,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o0_c434",
@@ -13896,40 +13768,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -14013,8 +13873,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o3_c222",
@@ -14025,8 +13885,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f2_o3_c333",
@@ -14076,33 +13936,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o0_c434",
@@ -14144,40 +13996,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -14277,8 +14117,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o3_c222",
@@ -14289,8 +14129,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k1_f3_o3_c333",
@@ -20544,33 +20384,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o0_c434",
@@ -20612,40 +20444,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -20729,8 +20549,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o3_c222",
@@ -20741,8 +20561,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f0_o3_c333",
@@ -20788,33 +20608,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o0_c434",
@@ -20856,40 +20668,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -20989,8 +20789,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o3_c222",
@@ -21001,8 +20801,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f1_o3_c333",
@@ -21060,33 +20860,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o0_c434",
@@ -21128,40 +20920,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -21245,8 +21025,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o3_c222",
@@ -21257,8 +21037,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f2_o3_c333",
@@ -21308,33 +21088,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o0_c434",
@@ -21376,40 +21148,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -21509,8 +21269,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o3_c222",
@@ -21521,8 +21281,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k2_f3_o3_c333",
@@ -27776,33 +27536,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o0_c434",
@@ -27844,40 +27596,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -27961,8 +27701,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o3_c222",
@@ -27973,8 +27713,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f0_o3_c333",
@@ -28020,33 +27760,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o0_c434",
@@ -28088,40 +27820,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -28221,8 +27941,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o3_c222",
@@ -28233,8 +27953,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f1_o3_c333",
@@ -28292,33 +28012,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o0_c434",
@@ -28360,40 +28072,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -28477,8 +28177,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o3_c222",
@@ -28489,8 +28189,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f2_o3_c333",
@@ -28540,33 +28240,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o0_c434",
@@ -28608,40 +28300,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -28741,8 +28421,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o3_c222",
@@ -28753,8 +28433,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k3_f3_o3_c333",
@@ -35008,33 +34688,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o0_c434",
@@ -35076,40 +34748,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -35193,8 +34853,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o3_c222",
@@ -35205,8 +34865,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f0_o3_c333",
@@ -35252,33 +34912,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o0_c434",
@@ -35320,40 +34972,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -35453,8 +35093,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o3_c222",
@@ -35465,8 +35105,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f1_o3_c333",
@@ -35524,33 +35164,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o0_c434",
@@ -35592,40 +35224,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -35709,8 +35329,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o3_c222",
@@ -35721,8 +35341,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f2_o3_c333",
@@ -35772,33 +35392,25 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o0_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o0_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmVertex::SetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o0_c434",
@@ -35840,40 +35452,28 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetTolerance",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o1_c434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 139
     },
     {
       "max_rel_err": 0.0,
@@ -35973,8 +35573,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o3_c222",
@@ -35985,8 +35585,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEdge::GetTolerance",
-        "unit": "topology.edge"
+        "symbol": "SmCurveClassification::MergeInterval (imprinting)",
+        "unit": "intersect.curve_class_p6"
       },
       "max_rel_err": 0.0,
       "name": "matrix_k4_f3_o3_c333",
@@ -36401,15 +36001,13 @@
     }
   ],
   "cases_both_errored": 6,
-  "cases_deferred": 222,
+  "cases_deferred": 122,
   "cases_failed": 0,
-  "cases_passed": 4216,
+  "cases_passed": 4316,
   "cases_total": 4438,
   "deferred_by_unit": {
-    "intersect.curve_class_p6": 52,
+    "intersect.curve_class_p6": 92,
     "intersect.curve_class_p7": 10,
-    "topology.edge": 80,
-    "topology.face_p2": 60,
     "topology.vertex": 20
   },
   "max_rel_err": 0.0,

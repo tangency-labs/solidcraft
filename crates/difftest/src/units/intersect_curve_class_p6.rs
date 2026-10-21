@@ -3,10 +3,18 @@
 //! Unported p2/p7 calls defer the whole case. Construction failures are harness errors.
 //! Explicit `expected_rejection` fixtures check FFI rejection only; they are reported
 //! as both-errored cases, separately from successful kernel comparisons.
+//!
+//! The topology objects are those of the shim's `SmApiCreateBox(0, 1, 1, 1)` B-rep (face,
+//! edge, vertex and region: the first of `GetFaces`, `GetEdges`, `GetVertices`,
+//! `GetRegions`). The Rust side imports the same box through unit `heal.stitch_p1`'s
+//! export (`topology.brep_p1`'s importer) and resolves the handles to it through the
+//! `ClassGeometry` hooks, so their tolerances, points and topology are the ported ones.
 
 use crate::{Case, CaseContext, CaseSource, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::cell::OnceCell;
+use std::rc::Rc;
 use solidcore::curve::curve::p2::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::line::{BoundedLineOptions, Line};
@@ -21,7 +29,13 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
-use solidcore::SolidError;
+use solidcore::topology::brep::p1 as brep_p1;
+use solidcore::topology::edge as topo_edge;
+use solidcore::topology::face::p2 as topo_face;
+use solidcore::topology::vertex as topo_vertex;
+use solidcore::topology::Brep;
+use solidcore::{EntityRef, SolidError};
+use solidcore_ffi::units::topology_brep_p1::counts;
 use solidcore_ffi::units::intersect_curve_class_p6 as ffi;
 
 /// Curve-classification part 6 oracle.
@@ -55,7 +69,17 @@ impl ClassObject for Handle {
         }
     }
 }
-struct Geometry(Curve);
+/// The classification curve and the shim's box B-rep with its face, edge, vertex and
+/// region objects (handles 2 to 5).
+struct Geometry(Curve, Rc<BoxTopology>);
+/// The box B-rep and its face, edge, vertex and region.
+type BoxTopology = (Brep, [EntityRef; 4]);
+impl Geometry {
+    fn entity_of(&self, o: Handle) -> Option<EntityRef> {
+        let i = usize::try_from(o.0.checked_sub(2)?).ok()?;
+        self.1 .1.get(i).copied()
+    }
+}
 impl ClassGeometry<Handle> for Geometry {
     fn curve(&self, h: Handle) -> Option<&Curve> {
         (h.0 == 1).then_some(&self.0)
@@ -69,6 +93,72 @@ impl ClassGeometry<Handle> for Geometry {
     fn point(&self, _: Handle) -> Option<Vec3> {
         None
     }
+    fn classification_vertex_point(&self, o: Handle) -> Option<Vec3> {
+        match self.entity_of(o)? {
+            EntityRef::Vertex(v) => topo_vertex::point(&self.1 .0, v).ok(),
+            _ => None,
+        }
+    }
+    fn topology_zone_tol_3d(&self, o: Handle) -> Option<f64> {
+        match self.entity_of(o)? {
+            EntityRef::Vertex(v) => topo_vertex::tolerance(&self.1 .0, v).ok(),
+            EntityRef::Edge(e) => topo_edge::tolerance(&self.1 .0, e).ok(),
+            EntityRef::Face(f) => topo_face::tolerance(&self.1 .0, f).ok(),
+            _ => None,
+        }
+    }
+    fn topology_entity(&self, o: Handle) -> Option<(&Brep, EntityRef)> {
+        self.entity_of(o).map(|e| (&self.1 .0, e))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<Handle> {
+        let i = self.1 .1.iter().position(|x| *x == e)?;
+        Some(Handle(i32::try_from(i).ok()? + 2))
+    }
+}
+
+thread_local! {
+    /// The box, built once per run: cases only read it (classification takes the
+    /// geometry by shared reference and `Brep` has no interior mutability).
+    static BOX: OnceCell<Rc<BoxTopology>> = const { OnceCell::new() };
+}
+
+/// The shared box of [`build_box`].
+fn box_topology() -> Result<Rc<BoxTopology>, HarnessError> {
+    BOX.with(|cell| {
+        if let Some(b) = cell.get() {
+            return Ok(Rc::clone(b));
+        }
+        let b = Rc::new(build_box()?);
+        Ok(Rc::clone(cell.get_or_init(|| b)))
+    })
+}
+
+/// The shim's box (`SmApiCreateBox(0, 1, 1, 1)`, the same call as `heal.stitch_p1`'s box
+/// block) and its first face, edge, vertex and region.
+fn build_box() -> Result<BoxTopology, HarnessError> {
+    let ex = super::heal_stitch_p1::export(&super::heal_stitch_p1::StitchBrep::Box {
+        p: [0.0; 3],
+        size: [1.0; 3],
+    })?;
+    let (_, graph_at) = counts(&ex).ok_or_else(|| h("box export failed"))?;
+    let (b, _) = super::topology_brep_p1::import(&ex, graph_at)?;
+    let e = |e: SolidError| h(e.to_string());
+    let first = |v: Option<EntityRef>| v.ok_or_else(|| h("box without that entity"));
+    let face = first(brep_p1::faces(&b, None).map_err(e)?.first().map(|x| EntityRef::Face(*x)))?;
+    let edge = first(brep_p1::edges(&b, None).map_err(e)?.first().map(|x| EntityRef::Edge(*x)))?;
+    let vertex = first(
+        brep_p1::vertices(&b, None)
+            .map_err(e)?
+            .first()
+            .map(|x| EntityRef::Vertex(*x)),
+    )?;
+    let region = first(
+        brep_p1::regions(&b, None)
+            .map_err(e)?
+            .first()
+            .map(|x| EntityRef::Region(*x)),
+    )?;
+    Ok((b, [face, edge, vertex, region]))
 }
 fn h(e: impl Into<String>) -> HarnessError {
     HarnessError::new(e)
@@ -127,7 +217,7 @@ fn geometry(k: &Kernel, kind: i32, scale: f64) -> Result<Geometry, HarnessError>
             Curve::from(BSplineCurve::from_nurb(c, 3, false))
         }
     };
-    Ok(Geometry(c))
+    Ok(Geometry(c, box_topology()?))
 }
 fn pc(p: &[f64; 8], tol: f64) -> PointClassification<Handle> {
     let kind = p[0] as i32;

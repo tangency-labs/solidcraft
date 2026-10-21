@@ -13,9 +13,13 @@
 //! error maps to its `SmStatus` (`-1` for one upstream cannot return); an `Unported`
 //! error anywhere defers the case.
 //!
-//! Deferred cases: every op that reaches topology (`SmVertex`, `SmEdge`, `SmFace`, ...
-//! members: `IsConnectedTo`, `GetBrep`, `GetTolerance`, `GetPoint` / `SetPoint`,
-//! `MergeIntoObject` on a vertex), the surface and volume point solves of
+//! The vertex, edge and face objects are B-rep records (see unit `intersect.curve_class_p1`,
+//! [`BareTopology`]): their zone tolerances and the curve / surface of
+//! `ComputePointParameters` come from the ported topology members.
+//!
+//! Deferred cases: every op that reaches the other topology members (`SmVertex`, `SmEdge`,
+//! `SmFace`, ...: `IsConnectedTo`, `GetBrep`, `GetPoint` / `SetPoint`, `GetCurve` of
+//! `FindObjPoint3d`, `MergeIntoObject` on a vertex), the surface and volume point solves of
 //! `ComputePointParameters` and `GetGap3d` (units `surface.surface_p4`,
 //! `surface.volume_p2`), and stand-in regions and edgeuses whose
 //! tolerance upstream takes from the system (the port asks their topology units).
@@ -48,9 +52,11 @@ use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
-use solidcore::SolidError;
+use solidcore::topology::Brep;
+use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::intersect_point_class::{self as ffi, kind, op};
 
+use super::intersect_curve_class_p1::BareTopology;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -567,6 +573,8 @@ struct Pool {
     objs: Vec<PoolObj>,
     handles: Vec<H>,
     kinds: Vec<usize>,
+    /// The vertex, edge and face objects as B-rep records ([`BareTopology`]).
+    topo: BareTopology,
 }
 
 impl ClassGeometry<H> for Pool {
@@ -591,6 +599,18 @@ impl ClassGeometry<H> for Pool {
             _ => None,
         }
     }
+    fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
+        self.topo.vertex_point(o.0)
+    }
+    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        self.topo.zone_tol_3d(o.0)
+    }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.topo.entity(o.0)
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<H> {
+        self.handles.get(self.topo.index_of(e)?).copied()
+    }
 }
 
 impl Pool {
@@ -608,10 +628,13 @@ impl Pool {
         o.and_then(|h| self.kinds.get(h.0).copied())
     }
 
+    /// The pool id of curve `c` (by address; an edge's curve is the pool curve the shim's
+    /// edge shares), `-2` for one outside the pool.
     fn id_of_curve(&self, c: &Curve) -> f64 {
         self.objs
             .iter()
             .position(|o| matches!(o, PoolObj::Curve(x) if core::ptr::eq(x, c)))
+            .or_else(|| self.topo.pool_curve_of(c))
             .map_or(-2.0, |i| i as f64)
     }
 }
@@ -636,8 +659,25 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
         objs: Vec::new(),
         handles: Vec::new(),
         kinds: Vec::new(),
+        topo: BareTopology::default(),
     };
     for (i, o) in objects.iter().enumerate() {
+        // the curve of an edge object, the surface of a face object (earlier pool objects;
+        // the shim rejects any other)
+        let curve = match o {
+            ObjIn::Edge(Some(c)) => match pool.objs.get(*c) {
+                Some(PoolObj::Curve(x)) => Some((*c, x)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let surface = match o {
+            ObjIn::Face(Some(sf)) => match pool.objs.get(*sf) {
+                Some(PoolObj::Surface(x)) => Some(x),
+                _ => None,
+            },
+            _ => None,
+        };
         let (k, obj) = match o {
             ObjIn::Curve(c) => (kind::CURVE, PoolObj::Curve(build_curve(c)?)),
             ObjIn::Plane { o, n } => (
@@ -653,6 +693,7 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
             ObjIn::Edgeuse => (kind::EDGEUSE, PoolObj::Bare),
             ObjIn::Other => (kind::OTHER, PoolObj::Bare),
         };
+        pool.topo.push(class_kind_of(k), curve, surface)?;
         pool.objs.push(obj);
         pool.handles.push(H(i, class_kind_of(k)));
         pool.kinds.push(k);
