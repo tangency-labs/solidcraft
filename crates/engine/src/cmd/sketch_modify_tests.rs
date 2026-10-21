@@ -2104,3 +2104,59 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
         assert!(volume[0] > 0.0 && (volume[0] - 10.0 * ring).abs() < 0.02 * volume[0], "{volume:?} against {areas:?}");
     }
 }
+
+#[test]
+fn freeform_chain_offsets_take_the_straight_pieces_of_the_chain_along() {
+    // Outlines mix straight pieces with free-form ones: an SVG path with `L` commands, a
+    // text glyph (lines and conics). Picking one curve offsets the whole chain, lines too.
+    let distance = 1.26;
+    let certified = |s: &Session, curves: &[String]| {
+        let sk = sketch(s);
+        let offsets: Vec<usize> = curves.iter().map(|c| sk.curve_index(c).unwrap()).collect();
+        let source: Vec<_> = (0..sk.curves.len()).filter(|i| !offsets.contains(i)).flat_map(|i| sk.exact_pieces(i)).collect();
+        for &c in &offsets {
+            for seg in sk.exact_pieces(c) {
+                for k in 0..=8 {
+                    let p = seg.point_at(k as f64 / 8.0);
+                    let d = source.iter().flat_map(|s| (0..=2000).map(move |j| s.point_at(j as f64 / 2000.0).dist(p))).fold(f64::INFINITY, f64::min);
+                    assert!((d - distance).abs() < solidcraft_sketch::OFFSET_TOLERANCE, "distance {d} at {p:?}");
+                }
+            }
+        }
+    };
+
+    let svg = r#"<svg width="60mm" height="60mm" viewBox="-15 -15 60 60"><path d="M0,0 L30,0 C35,10 35,20 30,30 L0,30 Z"/></svg>"#;
+    for d in [distance, -distance] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.insert_svg", json!({"text": svg}));
+        let sk = sketch(&s);
+        let kinds = sk.curves.iter().map(|c| matches!(c.kind, CurveKind::Line { .. })).collect::<Vec<_>>();
+        assert_eq!(kinds, [true, false, true, true], "lines and one Bézier curve");
+        let line = sk.curves[0].id.clone();
+        let out = run(&mut s, "sketch.offset", json!({"curves": [line], "distance": d}));
+        let curves = ids(&out["curves"]);
+        assert!(!curves.is_empty(), "{out}");
+        assert_eq!(sketch(&s).curves.len(), 4 + curves.len());
+        certified(&s, &curves);
+        let areas = profiles(&s);
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        let wall = inside_offset_wall(&s, &curves[0]);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [{"point": [wall.x, wall.y]}]}));
+        assert_eq!(body_volumes(&mut s).len(), 1);
+    }
+
+    // The letter D: a straight stem and conic bowls, outside and inside.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.text", json!({"text": "D", "at": [0, 0], "height": 30}));
+    let sk = sketch(&s);
+    assert!(
+        sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Line { .. }))
+            && sk.curves.iter().any(|c| sk.shape(sk.curve_index(&c.id).unwrap()).is_none())
+    );
+    let line = sk.curves.iter().find(|c| matches!(c.kind, CurveKind::Line { .. })).unwrap().id.clone();
+    let out = run(&mut s, "sketch.offset", json!({"curves": [line], "distance": distance}));
+    let curves = ids(&out["curves"]);
+    assert!(!curves.is_empty(), "{out}");
+    certified(&s, &curves);
+}
