@@ -250,6 +250,11 @@ coil
     Section size = coil.section_size (Length)
     Start angle = coil.start_angle (Angle)
   expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z
+coil_profile
+  inputs:
+    Pitch = coil_profile.pitch (Length)
+    Revolutions = coil_profile.turns (Unitless)
+  expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z
 sheet_base
 sheet_contour
   inputs:

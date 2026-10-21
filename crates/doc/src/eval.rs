@@ -4849,9 +4849,26 @@ fn feature_tools_with_constructor(
             // Its sides are named by the profile's curves, its base `start`.
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
-        FeatureKind::Coil { base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, .. } => {
+        FeatureKind::Coil {
+            base,
+            axis,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            sketch: _,
+            profiles: _,
+            ..
+        } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
+            let section_size =
+                section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
             let (d, p, n, s) = (
                 val(vals, diameter, Kind::Length)?,
                 val(vals, pitch, Kind::Length)?,

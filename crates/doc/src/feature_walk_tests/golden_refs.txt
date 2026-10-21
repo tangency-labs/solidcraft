@@ -127,6 +127,9 @@ align
   remap_bodies: bodies[0]
 coil
   remap_bodies: targets[0]
+coil_profile
+  sketches: [1]
+  remap_refs: sketch
 sheet_base
   sketches: [1]
   remap_refs: sketch

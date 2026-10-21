@@ -115,6 +115,10 @@ align
 coil
   moves: axis[0], axis[2], base[0], base[1], base[2]
   placement: coil.x, coil.y, coil.z
+coil_profile
+  moves: axis[0], axis[2], base[0], base[1], base[2]
+  profiles: 1 indices
+  placement: coil_profile.x, coil_profile.y, coil_profile.z
 sheet_base
   profiles: 1 all
 sheet_contour

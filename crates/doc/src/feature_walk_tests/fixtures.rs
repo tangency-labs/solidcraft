@@ -126,6 +126,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "coil",
             json!({"type": "coil", "base": ["coil.x", "coil.y", "coil.z"], "diameter": "coil.diameter", "pitch": "coil.pitch", "turns": "coil.turns", "section_size": "coil.section_size", "start_angle": "coil.start_angle"}),
         ),
+        (
+            "coil_profile",
+            json!({"type": "coil", "base": ["coil_profile.x", "coil_profile.y", "coil_profile.z"], "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "pitch": "coil_profile.pitch", "turns": "coil_profile.turns"}),
+        ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
