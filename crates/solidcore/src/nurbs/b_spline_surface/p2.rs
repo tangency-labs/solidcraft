@@ -62,10 +62,10 @@
 //!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only
 //!   the NURB is replaced: form and knot type stay those of the surface.
 //! - **Back-edges.** `CopyAndAddAnalytics` returns the [`Surface`] that
-//!   `SmPlane::IsNurbSurfacePlane` recognises; a cone `SmCone::IsNurbSurfaceCone`
-//!   recognises needs `SurfaceKind::Cone` (`surface.surface_p2`), anything else the
-//!   recognisers after it (`surface.sphere`, then
-//!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
+//!   `SmPlane::IsNurbSurfacePlane` or `IsNurbSurfaceSurfOfRevolution` recognises; a
+//!   cone, sphere or extrusion that `IsNurbSurfaceCone`, `IsNurbSurfaceSphere` or
+//!   `IsNurbSurfaceSurfOfExtrusion` recognises needs a `SurfaceKind` variant
+//!   (`surface.surface_p2`, dispatch gap);
 //!   `GetMaxAnalyticDomain` nothing unported (`SmSurface::Evaluate1stDerivatives` is
 //!   `surface::surface::p1`'s, `IsPlanar` and `IsClosed` are those of
 //!   `surface::surface::p7`). `IsDegeneratePoint` over another domain runs the
@@ -96,6 +96,8 @@ use crate::nurbs::nurbs_srf::{is_nsrf_degenerate, split_srf};
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch};
 use crate::surface::plane::Plane;
+use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::Surface;
 
 use super::p1::{
@@ -206,9 +208,11 @@ fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
 
 // ---- unported callees ---------------------------------------------------------------
 
-/// `SmCone::IsNurbSurfaceCone` (then the sphere, revolution and extrusion
-/// recognisers).
-fn is_nurb_surface_cone(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface>> {
+/// The analytic recognisers after the plane: `SmCone::IsNurbSurfaceCone`,
+/// `SmSphere::IsNurbSurfaceSphere`, `SmSurfOfRevolution::IsNurbSurfaceSurfOfRevolution`
+/// and `SmSurfOfExtrusion::IsNurbSurfaceSurfOfExtrusion`, in upstream's order. `None`
+/// when none recognises the surface.
+fn recognise_analytic(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface>> {
     if crate::surface::cone::Cone::is_nurb_surface_cone(k, srf, 1.0)?.is_some() {
         // DISPATCH GAP: the cone is not a SurfaceKind yet (no variant with its
         // SmSurface overrides; issue #76 / PR #133), so no Surface can hold the
@@ -218,11 +222,25 @@ fn is_nurb_surface_cone(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surfa
             unit: "surface.surface_p2",
         });
     }
-    // UNPORTED(surface.sphere): SmSphere::IsNurbSurfaceSphere
-    Err(SolidError::Unported {
-        upstream: "SmSphere::IsNurbSurfaceSphere",
-        unit: "surface.sphere",
-    })
+    if crate::surface::sphere::Sphere::is_nurb_surface_sphere(k, srf, 1.0)?.is_some() {
+        // DISPATCH GAP: as the cone, the sphere is not a SurfaceKind yet.
+        return Err(SolidError::Unported {
+            upstream: "SmSphere as SmSurface",
+            unit: "surface.surface_p2",
+        });
+    }
+    let test = Surface::from(srf.copy());
+    if let Some(rev) = SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0)? {
+        return Ok(Some(Surface::from(rev)));
+    }
+    if SurfOfExtrusion::is_nurb_surface_surf_of_extrusion(k, srf, 1.0)?.is_some() {
+        // DISPATCH GAP: as the cone, the extrusion is not a SurfaceKind yet.
+        return Err(SolidError::Unported {
+            upstream: "SmSurfOfExtrusion as SmSurface",
+            unit: "surface.surface_p2",
+        });
+    }
+    Ok(None)
 }
 
 /// `pArc->IsArc(lNumberOfSamplePoints, d3DTol, ..)`: the virtual call on an
@@ -349,18 +367,18 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// Those of [`Plane::is_nurb_surface_plane`] and
-    /// [`crate::surface::cone::Cone::is_nurb_surface_cone`]; [`SolidError::Unported`]:
-    /// a recognised cone cannot be held by a [`Surface`] yet, and the recognisers
-    /// after the cone (`SmSphere::IsNurbSurfaceSphere`, ...) are not ported.
+    /// Those of the recognisers ([`Plane::is_nurb_surface_plane`],
+    /// [`crate::surface::cone::Cone::is_nurb_surface_cone`], ...);
+    /// [`SolidError::Unported`]: a recognised cone, sphere or extrusion cannot be held
+    /// by a [`Surface`] yet.
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
         // SmPlane
         if let Some(plane) = Plane::is_nurb_surface_plane(self, 1.0)? {
             return Ok(Surface::from(plane));
         }
-        // SmCone (then SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion)
-        if let Some(analytic) = is_nurb_surface_cone(k, self)? {
+        // SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
+        if let Some(analytic) = recognise_analytic(k, self)? {
             return Ok(analytic);
         }
         // arrive here - make sure it's a copy
@@ -1706,11 +1724,13 @@ mod tests {
     }
 
     #[test]
-    fn back_edges_are_unported() {
+    fn back_edges_are_wired() {
         let s = patch(false);
-        let unported = |r: Result<()>| matches!(r, Err(SolidError::Unported { .. }));
-        assert!(unported(
-            s.copy_and_add_analytics(&Kernel::default()).map(|_| ())
+        // no recogniser takes the patch: a B-spline copy
+        let copy = s.copy_and_add_analytics(&Kernel::default()).unwrap();
+        assert!(matches!(
+            copy.kind(),
+            crate::surface::surface::SurfaceKind::BSpline(_)
         ));
         // (wired through surface.surface_p1 / surface.surface_p7)
         assert!(s.max_analytic_domain().is_ok());

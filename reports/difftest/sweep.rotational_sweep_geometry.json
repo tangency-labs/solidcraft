@@ -2730,16 +2730,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "face_same_nurb_twisted",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.rotational_sweep_geometry/cases.json#341 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3030,16 +3026,12 @@
       "values_compared": 359
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811161",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3058,16 +3050,12 @@
       "values_compared": 359
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0020",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811164",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3222,16 +3210,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0040",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811184",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3458,16 +3442,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0069",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811213",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -3590,16 +3570,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0085",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811229",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3714,16 +3690,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0100",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811244",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3774,28 +3746,20 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0107",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811251",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0108",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811252",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -3878,16 +3842,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0119",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811263",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -3978,16 +3938,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0131",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811275",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -4210,16 +4166,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0159",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811303",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -4342,28 +4294,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0175",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811319",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0176",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811320",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -4479,8 +4423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -4522,28 +4466,20 @@
       "values_compared": 359
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0196",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811340",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0197",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811341",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -4594,16 +4530,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0204",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811348",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -4822,16 +4754,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811376",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -4906,16 +4834,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0242",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811386",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -4950,16 +4874,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811391",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -5018,16 +4938,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0255",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811399",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -5218,16 +5134,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0279",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811423",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -5238,16 +5150,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811425",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -5358,16 +5266,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811439",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -5430,16 +5334,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0303",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811447",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -5458,16 +5358,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0306",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811450",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -5546,16 +5442,12 @@
       "values_compared": 231
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811460",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -5622,16 +5514,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0325",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811469",
-      "values_compared": 0
+      "values_compared": 303
     },
     {
       "max_rel_err": 0.0,
@@ -5746,28 +5634,20 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0340",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811484",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811485",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "deferred": {
@@ -5854,16 +5734,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0352",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811496",
-      "values_compared": 0
+      "values_compared": 359
     },
     {
       "max_rel_err": 0.0,
@@ -5882,16 +5758,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0355",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811499",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -5983,8 +5855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0367",
@@ -6142,16 +6014,12 @@
       "values_compared": 359
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0386",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811530",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -6162,16 +6030,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15377569132031811532",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -6263,13 +6127,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 43,
+  "cases_deferred": 9,
   "cases_failed": 0,
-  "cases_passed": 718,
+  "cases_passed": 752,
   "cases_total": 761,
   "deferred_by_unit": {
-    "surface.sphere": 36,
-    "surface.surface_p2": 7
+    "surface.surface_p2": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

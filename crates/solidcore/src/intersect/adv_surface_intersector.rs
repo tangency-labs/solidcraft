@@ -57,8 +57,8 @@
 //!   [`SolidError::Unported`], which always propagates (also where
 //!   `FindInteriorCurves` skips a node pair whose `ComputePointValues` fails).
 //! - **Unported callees.** `SmSurface::LocalSurfaceIntersect`
-//!   (`surface.surface_p11`), `SmSurfaceIntersector::ComputePointValues` and
-//!   `FlushCurve` (`intersect.surface_intersector_p2`) and `TraceCurve`
+//!   (`surface.surface_p11`), `SmSurfaceIntersector::ComputePointValues`
+//!   (`intersect.surface_intersector_p2`) and `TraceCurve`
 //!   (`intersect.surface_intersector_p4`) return [`SolidError::Unported`].
 //! - **Recursion.** `SolveBranch` nests at most once per tree node; deeper nesting
 //!   (cyclic tree links, which recurse forever upstream) is
@@ -1499,13 +1499,34 @@ fn trace_curve(
 }
 
 /// `FlushCurve(r3DCurves, rSurface1UVCurves, rSurface2UVCurves, rCurveTypes,
-/// rDeviations)`.
-fn flush_curve(_si: &mut SurfaceIntersector<'_>, _out: &mut InteriorCurves) -> Result<()> {
-    // UNPORTED(intersect.surface_intersector_p2): SmSurfaceIntersector::FlushCurve
-    Err(SolidError::unported(
-        "SmSurfaceIntersector::FlushCurve",
-        "intersect.surface_intersector_p2",
-    ))
+/// rDeviations)`: the base `SmSurfaceIntersector::FlushCurve` (not overridden). The
+/// output arrays are moved in and back, not cleared: its uniqueness test reads the 3D
+/// curves already flushed.
+fn flush_curve(si: &mut SurfaceIntersector<'_>, out: &mut InteriorCurves) -> Result<()> {
+    let mut curves = crate::intersect::surface_intersector::p2::TsectCurves {
+        curves_3d: core::mem::take(&mut out.curves_3d),
+        uv_curves: [
+            core::mem::take(&mut out.surface1_uv_curves),
+            core::mem::take(&mut out.surface2_uv_curves),
+        ],
+        curve_types: core::mem::take(&mut out.curve_types),
+        deviations: core::mem::take(&mut out.deviations),
+    };
+    let r = si.flush_curve(&mut curves);
+    let crate::intersect::surface_intersector::p2::TsectCurves {
+        curves_3d,
+        uv_curves: [surface1_uv_curves, surface2_uv_curves],
+        curve_types,
+        deviations,
+    } = curves;
+    *out = InteriorCurves {
+        curves_3d,
+        surface1_uv_curves,
+        surface2_uv_curves,
+        curve_types,
+        deviations,
+    };
+    r
 }
 
 #[cfg(test)]

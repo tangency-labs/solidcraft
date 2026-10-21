@@ -2216,16 +2216,27 @@ mod tests {
         }
     }
 
-    /// The scripts undefined upstream are rejected by the shim, and the Rust side reports an
-    /// error (or defers) instead of reading past its data.
+    /// The scripts undefined upstream are rejected by the shim (or the ffi guard), and the
+    /// Rust side reports an error status (or defers) instead of reading past its data.
     #[test]
     fn undefined_scripts_are_rejected() {
         for (name, s, guard) in rejected_cases() {
             let valid = ffi::validate(ffi_face(&s).as_ref(), &cpp_input(&s)).is_ok();
             if guard {
                 assert!(!valid, "{name}");
-                // Rust reports the null dereference instead of carrying on
-                assert!(matches!(rust_run(&s), Err(Fail::Harness(_))), "{name}");
+                // Rust reports the null dereference instead of carrying on: the last op
+                // (the loop crossings) records SM_ERR_NULL_POINTER (InvalidInput, 1007) right
+                // after the record of the ops before it
+                let mut before = s.clone();
+                assert!(matches!(before.ops.pop(), Some(OpIn::LoopCrossings { .. })), "{name}");
+                let Ok(prefix) = rust_run(&before) else { panic!("{name}: setup failed") };
+                let Ok(full) = rust_run(&s) else { panic!("{name}: no record") };
+                assert_eq!(full.get(..prefix.len()), Some(prefix.as_slice()), "{name}");
+                assert_eq!(
+                    full.get(prefix.len()..prefix.len() + 2),
+                    Some([op::LOOP_CROSSINGS as f64, 1007.0].as_slice()),
+                    "{name}"
+                );
                 continue;
             }
             assert!(valid, "{name}");

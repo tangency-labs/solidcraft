@@ -187,8 +187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "isolated_op13_editing_False",
@@ -199,8 +199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep::MakeWireEdgeVertex",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "isolated_op13_editing_True",
@@ -6597,9 +6597,9 @@
   "cases_total": 797,
   "deferred_by_unit": {
     "topology.brep_p1": 28,
-    "topology.brep_p3": 7,
+    "topology.brep_p3": 9,
     "topology.brep_p4": 14,
-    "topology.brep_p9": 4
+    "topology.brep_p9": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

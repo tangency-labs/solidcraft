@@ -1481,8 +1481,8 @@ fn delete_face(
 }
 
 /// `SmBrep::FindAndSetInfiniteRegion(pOptShellToTest, eVoidSettingFlag, pOptBrepBBox)`
-/// (unit `topology.brep_p5`; upstream defaults `NULL`, `SM_VS_INFINITEREGION_SWAP`,
-/// `NULL`).
+/// (upstream defaults `NULL`, `SM_VS_INFINITEREGION_SWAP`, `NULL`); the box is passed
+/// as a copy.
 pub(crate) fn find_and_set_infinite_region(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1490,12 +1490,14 @@ pub(crate) fn find_and_set_infinite_region(
     void_setting: SetRegionVoidType,
     brep_bbox: Option<&Extent3d>,
 ) -> Result<()> {
-    let _ = (k, b, shell_to_test, void_setting, brep_bbox);
-    // UNPORTED(topology.brep_p5): SmBrep::FindAndSetInfiniteRegion
-    Err(SolidError::unported(
-        "SmBrep::FindAndSetInfiniteRegion",
-        "topology.brep_p5",
-    ))
+    let _ = k;
+    let code = match void_setting {
+        SetRegionVoidType::NestedSolid => 0,
+        SetRegionVoidType::InfiniteRegionOnly => 1,
+        SetRegionVoidType::InfiniteRegionSwap => 2,
+    };
+    let mut bbox = brep_bbox.copied();
+    crate::topology::brep::p5::find_and_set_infinite_region(b, shell_to_test, code, bbox.as_mut())
 }
 
 /// `SmFace::IsLamina` (unit `topology.face_p3`).

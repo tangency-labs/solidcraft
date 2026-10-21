@@ -210,16 +210,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "surf1_analytics",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#26 (upstream tests/prog_test/src/smSurfaceTest.cpp:4627 my_test_surface_interface (surf1 control net) CopyAndAddAnalytics)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1966,16 +1962,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0181",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781831",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2922,16 +2914,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0300",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781950",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4238,16 +4226,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0464",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782114",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5978,16 +5962,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0681",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782331",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -6135,17 +6115,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 5,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 759,
+  "cases_passed": 764,
   "cases_total": 764,
-  "deferred_by_unit": {
-    "surface.sphere": 5
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "nurbs.b_spline_surface_p2"
 }

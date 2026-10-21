@@ -175,7 +175,6 @@
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` of `topology.face_p1`) and the
 //!   unported callees of `SmFace::Point3DClassify` (wired to `query::face::p1`) in
 //!   `sm_ClassifyFacePoint`;
-//!   `SmFilletSolver::FindIndexOfRailOnFace` (`blend.fillet_solver_p1`) and
 //!   `SmFilletSolver::RailRailIntersect` (`blend.fillet_solver_p2`) in
 //!   `sm_CreateCubicRailRailInterpolant` (the cubic built from their result is ported
 //!   behind them); `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`) in the
@@ -2895,9 +2894,8 @@ pub fn adjust_uv_on_seam(surf: &Surface, ref_direction: Vec3, uv: &mut Point2) -
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`]: `SmFilletSolver::FindIndexOfRailOnFace`
-/// (`blend.fillet_solver_p1`) and `SmFilletSolver::RailRailIntersect`
-/// (`blend.fillet_solver_p2`); [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`) for a
+/// [`SolidError::Unported`]: `SmFilletSolver::RailRailIntersect`
+/// (`blend.fillet_solver_p2`); those of `SmFilletSolver::FindIndexOfRailOnFace`; [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`) for a
 /// rail index past the solver's two edge uses, a missing edge use or vertex use (all
 /// dereferenced unchecked upstream); `SM_ERR` when the rails do not intersect; those of
 /// the angle computations and [`BSplineCurve::create_canonical`].
@@ -2924,8 +2922,12 @@ pub fn create_cubic_rail_rail_interpolant(
             .ok_or_else(|| SolidError::null_pointer(OP))
     };
     // First, calculate the intersection of two rails
-    let rail_index = find_index_of_rail_on_face(fil_solver1, face)?;
-    let other_rail_index = find_index_of_rail_on_face(fil_solver2, face)?;
+    let rail_index = fil_solver1
+        .solver
+        .find_index_of_rail_on_face(brep, Some(face))?;
+    let other_rail_index = fil_solver2
+        .solver
+        .find_index_of_rail_on_face(brep, Some(face))?;
     // Derive guess uv point here
     let mut eu = solver_edgeuse(fil_solver1, rail_index)?;
     let eu_vertex = |brep: &Brep, eu: EdgeuseId| -> Result<(VertexuseId, Option<VertexId>)> {
@@ -2988,18 +2990,6 @@ pub fn create_cubic_rail_rail_interpolant(
         weights: None,
         trim: None,
     })
-}
-
-/// `SmFilletSolver::FindIndexOfRailOnFace(pOrigFace)` (unit `blend.fillet_solver_p1`).
-fn find_index_of_rail_on_face(
-    _solver: &ConstantRadiusAssistedFs,
-    _orig_face: FaceId,
-) -> Result<usize> {
-    // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::FindIndexOfRailOnFace
-    Err(SolidError::unported(
-        "SmFilletSolver::FindIndexOfRailOnFace",
-        "blend.fillet_solver_p1",
-    ))
 }
 
 /// `SmFilletSolver::RailRailIntersect(crUVGuess, lRailIndex, pOtherFillet,

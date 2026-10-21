@@ -186,6 +186,13 @@ jobs:
         # process per unit, one per vCPU (same output and reports as a serial run).
         run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0
 
+      # The runners' own unit tests (guards, decoders, probes) need the C++ reference, so
+      # the test job cannot run them. Same profile as above: only the test harness of the
+      # difftest crate is compiled on top of that build.
+      - name: Difftest runner tests
+        if: steps.green.outputs.any == 'true'
+        run: cargo test --profile difftest -p difftest --features cpp
+
       - name: sccache stats
         if: always() && steps.green.outputs.any == 'true'
         run: sccache --show-stats || true

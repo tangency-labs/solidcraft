@@ -1674,18 +1674,20 @@ fn set_face_tolerance(
 
 fn compute_loop_orientation(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     face: FaceId,
     loop_: LoopId,
     uv_bounds: Option<&mut crate::geom::extent2d::Extent2d>,
     do_3d_loop_computation: bool,
 ) -> Result<OrientType> {
-    let _ = (k, b, face, loop_, uv_bounds, do_3d_loop_computation);
-    // UNPORTED(topology.face_p3): SmFace::ComputeLoopOrientation
-    Err(SolidError::unported(
-        "SmFace::ComputeLoopOrientation",
-        "topology.face_p3",
-    ))
+    crate::topology::face::p3::compute_loop_orientation(
+        k,
+        b,
+        face,
+        loop_,
+        uv_bounds,
+        do_3d_loop_computation,
+    )
 }
 
 fn shell_post_insert(

@@ -226,338 +226,226 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_manifold3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#28",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_manifold_neg1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#29",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_manifold3_closure",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#30",
-      "values_compared": 0
+      "values_compared": 538
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_eu1_loop1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#31",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_loop1_start0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#32",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_loop0_num2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#33",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_loop0_num9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#34",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_eu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#35",
-      "values_compared": 0
+      "values_compared": 249
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_eu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#36",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_eu1_wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#37",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_eu1_vertex",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#38",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_prims",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#39",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_prim_huge",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#40",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_edge0_sv4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#41",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_iges_empty",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#42",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_iges_closure",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#43",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_eu_next_self",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#44",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_share_uv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#45",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_zt_0.0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#46",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_zt_1e-08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#47",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_zt_9.999999999999999e-09",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#48",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_zt_0.00010000000000000002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#49",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_zt_5e-324",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#50",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_healer10_heal_on",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#51",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_healer_max",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#52",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_borrowed_sharecurve",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#53",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_borrowed_sharesurf",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#54",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_fan_a_stamp_closure_m0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#55",
       "values_compared": 0
     },
@@ -790,33 +678,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_manifold3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#84",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_manifold_neg1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#85",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_manifold3_closure",
@@ -826,302 +706,202 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_eu1_loop1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#87",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_loop1_start0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#88",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_loop0_num2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#89",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_loop0_num9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#90",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_eu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#91",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_eu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#92",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_eu1_wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#93",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_eu1_vertex",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#94",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_prims",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#95",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_prim_huge",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#96",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_edge0_sv4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#97",
-      "values_compared": 0
+      "values_compared": 229
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_iges_empty",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#98",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_iges_closure",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#99",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_eu_next_self",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#100",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_share_uv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#101",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_zt_0.0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#102",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_zt_1e-08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#103",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_zt_9.999999999999999e-09",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#104",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_zt_0.00010000000000000002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#105",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_zt_5e-324",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#106",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_healer10_heal_on",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#107",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_healer_max",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#108",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_borrowed_sharecurve",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#109",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_borrowed_sharesurf",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#110",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "adv_spine_doubled_a_stamp_closure_m0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/adv_cases.json#111",
       "values_compared": 0
     },
@@ -3654,16 +3434,12 @@
       "values_compared": 538
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "stamp_spine_fan",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/edge_cases.json#221 (upstream crafted)",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
       "max_rel_err": 0.0,
@@ -3698,16 +3474,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "stamp_spine_doubled",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/edge_cases.json#225 (upstream crafted)",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
       "max_rel_err": 0.0,
@@ -3966,40 +3738,28 @@
       "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "review_spine_fan_sharecurve_an",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/review_cases.json#32",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "review_spine_fan_sharecurve3_an",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/review_cases.json#33",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "review_spine_fan_sharesurf_an",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/review_cases.json#34",
-      "values_compared": 0
+      "values_compared": 269
     },
     {
       "max_rel_err": 0.0,
@@ -4226,40 +3986,28 @@
       "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "review_spine_doubled_sharecurve_an",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/review_cases.json#62",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "review_spine_doubled_sharecurve3_an",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/review_cases.json#63",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "review_spine_doubled_sharesurf_an",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/review_cases.json#64",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
       "max_rel_err": 0.0,
@@ -4423,8 +4171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_analytics_sphere.smb",
@@ -4467,8 +4215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_analytics_Boolean_extrudeHoles1.smb",
@@ -4511,8 +4259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_analytics_Solids_fillet_ts.smb",
@@ -4555,8 +4303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "review_analytics_Mouse.smb",
@@ -4843,8 +4591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Boolean_extrudeHoles1",
@@ -4855,8 +4603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Boolean_extrudeHoles1",
@@ -5075,8 +4823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Defeature_extrusion",
@@ -5087,8 +4835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Defeature_extrusion",
@@ -5283,8 +5031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Endcap",
@@ -5294,16 +5042,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Endcap",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#49 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -5407,8 +5151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_Heart",
@@ -5419,8 +5163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_Heart",
@@ -5439,8 +5183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_bague",
@@ -5450,16 +5194,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_bague",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#64 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 593
     },
     {
       "max_rel_err": 0.0,
@@ -5507,8 +5247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_blade_hub",
@@ -5518,16 +5258,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_blade_hub",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#70 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 2317
     },
     {
       "max_rel_err": 0.0,
@@ -5539,8 +5275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_blade_hub_1",
@@ -5551,8 +5287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_blade_hub_1",
@@ -5571,8 +5307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_blade_hub_2",
@@ -5583,8 +5319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_blade_hub_2",
@@ -5603,8 +5339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_blade_hub_3",
@@ -5614,16 +5350,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_blade_hub_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#79 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 8797
     },
     {
       "max_rel_err": 0.0,
@@ -5635,8 +5367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_bolt",
@@ -5646,16 +5378,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_bolt",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#82 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1457
     },
     {
       "max_rel_err": 0.0,
@@ -5667,8 +5395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_bottle",
@@ -5679,8 +5407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_bottle",
@@ -5823,8 +5551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_box_extrusion1",
@@ -5835,8 +5563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_box_extrusion1",
@@ -5855,8 +5583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_box_extrusion2",
@@ -5867,8 +5595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_box_extrusion2",
@@ -5915,8 +5643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_box_w_slot",
@@ -5927,8 +5655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_box_w_slot",
@@ -5947,8 +5675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_brepForFillet1",
@@ -5958,16 +5686,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_brepForFillet1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#112 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -5979,8 +5703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_brepForFillet2",
@@ -5990,16 +5714,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_brepForFillet2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#115 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1103
     },
     {
       "max_rel_err": 0.0,
@@ -6039,8 +5759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_cap1",
@@ -6051,8 +5771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_cap1",
@@ -6071,8 +5791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_caps_coons",
@@ -6083,8 +5803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_caps_coons",
@@ -6103,8 +5823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_caps_nside",
@@ -6115,8 +5835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_caps_nside",
@@ -6135,8 +5855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_case_ext",
@@ -6147,8 +5867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_case_ext",
@@ -6167,8 +5887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_case_int",
@@ -6179,8 +5899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_case_int",
@@ -6199,8 +5919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_cliff_1",
@@ -6211,8 +5931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_cliff_1",
@@ -6231,8 +5951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_cliff_2",
@@ -6243,8 +5963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_cliff_2",
@@ -6359,8 +6079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_coons_01_03_29",
@@ -6371,8 +6091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_coons_01_03_29",
@@ -6391,8 +6111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_corner_box",
@@ -6403,8 +6123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_corner_box",
@@ -6455,8 +6175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_cube_sphere2",
@@ -6466,16 +6186,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_cube_sphere2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#160 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1103
     },
     {
       "max_rel_err": 0.0,
@@ -6551,8 +6267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_cyl_cyl_shell",
@@ -6563,8 +6279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_cyl_cyl_shell",
@@ -6839,8 +6555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_cyl_sphere",
@@ -6851,8 +6567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_cyl_sphere",
@@ -6907,8 +6623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_eg1_srf2",
@@ -6918,16 +6634,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_eg1_srf2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#202 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 201
     },
     {
       "max_rel_err": 0.0,
@@ -6939,8 +6651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_ext_w_hole",
@@ -6951,8 +6663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_ext_w_hole",
@@ -6971,8 +6683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_extrusion0206",
@@ -6983,8 +6695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_extrusion0206",
@@ -7003,8 +6715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_extrusion0210",
@@ -7015,8 +6727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_extrusion0210",
@@ -7035,8 +6747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_extrusion1002",
@@ -7047,8 +6759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_extrusion1002",
@@ -7067,8 +6779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_fillet0114",
@@ -7079,8 +6791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_fillet0114",
@@ -7099,8 +6811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_fillet0227",
@@ -7111,8 +6823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_fillet0227",
@@ -7163,8 +6875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_fillet1017",
@@ -7174,16 +6886,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_fillet1017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#226 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1757
     },
     {
       "max_rel_err": 0.0,
@@ -7195,8 +6903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_fillet1018",
@@ -7207,8 +6915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_fillet1018",
@@ -7291,8 +6999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_knife",
@@ -7303,8 +7011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_knife",
@@ -7351,8 +7059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_letter_g",
@@ -7363,8 +7071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_letter_g",
@@ -7383,8 +7091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_loft_brick",
@@ -7394,16 +7102,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_loft_brick",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#247 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -7415,8 +7119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_box",
@@ -7427,8 +7131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_box",
@@ -7447,8 +7151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_box1",
@@ -7458,16 +7162,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_box1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#253 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 691
     },
     {
       "max_rel_err": 0.0,
@@ -7479,8 +7179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_cone",
@@ -7490,16 +7190,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_cone",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#256 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1721
     },
     {
       "max_rel_err": 0.0,
@@ -7511,8 +7207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_nurb_1",
@@ -7523,8 +7219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_nurb_1",
@@ -7543,8 +7239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_nurb_2",
@@ -7555,8 +7251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_nurb_2",
@@ -7575,8 +7271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_plane_w_notch1",
@@ -7587,8 +7283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_plane_w_notch1",
@@ -7635,8 +7331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_sph_1",
@@ -7647,8 +7343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_sph_1",
@@ -7667,8 +7363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_nurb_sph_2",
@@ -7679,8 +7375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_nurb_sph_2",
@@ -7699,8 +7395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_open_shell",
@@ -7711,8 +7407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_open_shell",
@@ -7731,8 +7427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_rollover_corner",
@@ -7743,8 +7439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_rollover_corner",
@@ -7791,8 +7487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_shell_fillet2",
@@ -7802,16 +7498,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_shell_fillet2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#286 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 579
     },
     {
       "max_rel_err": 0.0,
@@ -7823,8 +7515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_sphere_dif_box",
@@ -7834,16 +7526,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_sphere_dif_box",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#289 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1033
     },
     {
       "max_rel_err": 0.0,
@@ -7855,8 +7543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_sphere_diff_3cylinders",
@@ -7867,8 +7555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_sphere_diff_3cylinders",
@@ -7887,8 +7575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_sphere_plane",
@@ -7899,8 +7587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_sphere_plane",
@@ -7919,8 +7607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_test1",
@@ -7931,8 +7619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_test1",
@@ -7951,8 +7639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_test4",
@@ -7963,8 +7651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_test4",
@@ -7983,8 +7671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_test5",
@@ -7994,16 +7682,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_test5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#304 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 693
     },
     {
       "max_rel_err": 0.0,
@@ -8015,8 +7699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_test6",
@@ -8026,16 +7710,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_test6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#307 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 781
     },
     {
       "max_rel_err": 0.0,
@@ -8075,8 +7755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_test8",
@@ -8086,16 +7766,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_test8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#313 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 403
     },
     {
       "max_rel_err": 0.0,
@@ -8199,8 +7875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_torii_unioned",
@@ -8210,16 +7886,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_torii_unioned",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#325 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 355
     },
     {
       "max_rel_err": 0.0,
@@ -8231,8 +7903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_vase",
@@ -8242,16 +7914,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_vase",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#328 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1757
     },
     {
       "max_rel_err": 0.0,
@@ -8263,8 +7931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_vase1",
@@ -8274,16 +7942,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_vase1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#331 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 3405
     },
     {
       "max_rel_err": 0.0,
@@ -8295,8 +7959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_vase2",
@@ -8306,16 +7970,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_vase2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#334 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1757
     },
     {
       "max_rel_err": 0.0,
@@ -8327,8 +7987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Fillet_vase3",
@@ -8338,16 +7998,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Fillet_vase3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#337 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 3133
     },
     {
       "max_rel_err": 0.0,
@@ -8359,8 +8015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Mouse",
@@ -8371,8 +8027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Mouse",
@@ -8391,8 +8047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_ShellBrep_983",
@@ -8402,16 +8058,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_ShellBrep_983",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#343 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 2133
     },
     {
       "max_rel_err": 0.0,
@@ -8423,8 +8075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell",
@@ -8434,16 +8086,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#346 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8455,8 +8103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell1",
@@ -8466,16 +8114,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#349 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8487,8 +8131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell10",
@@ -8499,8 +8143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell10",
@@ -8519,8 +8163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell11",
@@ -8530,16 +8174,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#355 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8615,8 +8255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell14",
@@ -8626,16 +8266,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell14",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#364 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8647,8 +8283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell15",
@@ -8658,16 +8294,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#367 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1721
     },
     {
       "max_rel_err": 0.0,
@@ -8679,8 +8311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell16",
@@ -8690,16 +8322,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#370 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8743,8 +8371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell18",
@@ -8754,16 +8382,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell18",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#376 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8775,8 +8399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell19",
@@ -8786,16 +8410,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell19",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#379 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8807,8 +8427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell2",
@@ -8818,16 +8438,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#382 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8839,8 +8455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell20",
@@ -8850,16 +8466,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell20",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#385 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8871,8 +8483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell21",
@@ -8882,16 +8494,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell21",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#388 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -8935,8 +8543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell23",
@@ -8946,16 +8554,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell23",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#394 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -9027,8 +8631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell5",
@@ -9039,8 +8643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell5",
@@ -9059,8 +8663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell6",
@@ -9070,16 +8674,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#406 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -9123,8 +8723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell8",
@@ -9134,16 +8734,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#412 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -9155,8 +8751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Shell_problemShell9",
@@ -9166,16 +8762,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Shell_problemShell9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#415 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -9219,8 +8811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_InsetTaperedExtrude",
@@ -9231,8 +8823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_InsetTaperedExtrude",
@@ -9355,8 +8947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_OffsetBoxSphOnCorner",
@@ -9367,8 +8959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_OffsetBoxSphOnCorner",
@@ -9419,8 +9011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_boolean_trees_result",
@@ -9431,8 +9023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_boolean_trees_result",
@@ -9511,8 +9103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_extrusion",
@@ -9523,8 +9115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_extrusion",
@@ -9543,8 +9135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_extrusion2",
@@ -9555,8 +9147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_extrusion2",
@@ -9639,8 +9231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_fillet_ts",
@@ -9651,8 +9243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_fillet_ts",
@@ -9731,8 +9323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_mouse_2",
@@ -9743,8 +9335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_mouse_2",
@@ -9763,8 +9355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_mouse_3",
@@ -9775,8 +9367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_mouse_3",
@@ -9795,8 +9387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_mouse_4",
@@ -9806,16 +9398,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_mouse_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#475 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 201
     },
     {
       "max_rel_err": 0.0,
@@ -9827,8 +9415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_mouse_5",
@@ -9838,16 +9426,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_mouse_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#478 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 201
     },
     {
       "max_rel_err": 0.0,
@@ -9859,8 +9443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_nurb_fillet",
@@ -9871,8 +9455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_nurb_fillet",
@@ -9891,8 +9475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_off_extrusion",
@@ -9903,8 +9487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_off_extrusion",
@@ -10011,8 +9595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_pyramid",
@@ -10022,16 +9606,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_pyramid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#496 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 633
     },
     {
       "max_rel_err": 0.0,
@@ -10043,8 +9623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_revolution",
@@ -10054,16 +9634,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_revolution",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#499 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1103
     },
     {
       "max_rel_err": 0.0,
@@ -10075,8 +9651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_revolution2",
@@ -10087,8 +9663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_revolution2",
@@ -10107,8 +9683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_revolution_360",
@@ -10119,8 +9695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_revolution_360",
@@ -10139,8 +9715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_revolution_mold",
@@ -10151,8 +9727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_revolution_mold",
@@ -10171,8 +9747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Solids_sphere",
@@ -10183,8 +9759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_Solids_sphere",
@@ -10235,8 +9811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_Tess_tess_20_2_80_0",
@@ -10246,16 +9822,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_Tess_tess_20_2_80_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#517 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 1653
     },
     {
       "max_rel_err": 0.0,
@@ -10359,8 +9931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_ellips_ts2",
@@ -10370,16 +9942,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_ellips_ts2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#529 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 939
     },
     {
       "max_rel_err": 0.0,
@@ -10447,8 +10015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_sphere",
@@ -10459,8 +10027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_sphere",
@@ -10479,8 +10047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_extrude",
@@ -10491,8 +10059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_surf_extrude",
@@ -10511,8 +10079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_rev",
@@ -10522,16 +10090,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_surf_rev",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#544 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 201
     },
     {
       "max_rel_err": 0.0,
@@ -10543,8 +10107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_surf_sphere150",
@@ -10555,8 +10119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "noheal_surf_sphere150",
@@ -10575,8 +10139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_torus",
@@ -10586,16 +10150,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_torus",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#550 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 149
     },
     {
       "max_rel_err": 0.0,
@@ -10607,8 +10167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_toruswvy",
@@ -10618,16 +10178,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_toruswvy",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#553 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 149
     },
     {
       "max_rel_err": 0.0,
@@ -10639,8 +10195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_vase_rev",
@@ -10650,16 +10206,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "noheal_vase_rev",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p10/upstream_files.json#556 (upstream TestFiles/pt_TestFiles (healer disabled: the whole build is compared))",
-      "values_compared": 0
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -10727,8 +10279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0006",
@@ -10795,8 +10347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -10846,16 +10398,12 @@
       "values_compared": 283
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0019",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021164",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "deferred": {
@@ -10879,8 +10427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0022",
@@ -10951,8 +10499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0029",
@@ -10963,8 +10511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0030",
@@ -11042,21 +10590,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021183",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0039",
@@ -11067,8 +10611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0040",
@@ -11235,8 +10779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0059",
@@ -11287,8 +10831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0064",
@@ -11327,8 +10871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0068",
@@ -11379,8 +10923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0074",
@@ -11407,8 +10951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0077",
@@ -11503,8 +11047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0088",
@@ -11583,8 +11127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0096",
@@ -11782,16 +11326,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0118",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021263",
-      "values_compared": 0
+      "values_compared": 1103
     },
     {
       "max_rel_err": 0.0,
@@ -11803,8 +11343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0120",
@@ -11927,8 +11467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -11959,8 +11499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0137",
@@ -12030,16 +11570,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0145",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021290",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -12122,16 +11658,12 @@
       "values_compared": 1959
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0156",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021301",
-      "values_compared": 0
+      "values_compared": 710
     },
     {
       "max_rel_err": 0.0,
@@ -12159,8 +11691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0160",
@@ -12359,8 +11891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0182",
@@ -12383,8 +11915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -12411,8 +11943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0187",
@@ -12423,8 +11955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0188",
@@ -12450,16 +11982,12 @@
       "values_compared": 581
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0191",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021336",
-      "values_compared": 0
+      "values_compared": 897
     },
     {
       "max_rel_err": 0.0,
@@ -12511,8 +12039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -12531,8 +12059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0199",
@@ -12695,8 +12223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmCone as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0218",
@@ -12826,14 +12354,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0233",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021378",
       "values_compared": 0
     },
@@ -12951,8 +12475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0246",
@@ -13042,16 +12566,12 @@
       "values_compared": 2031
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0257",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021402",
-      "values_compared": 0
+      "values_compared": 812
     },
     {
       "max_rel_err": 0.0,
@@ -13087,8 +12607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0262",
@@ -13247,8 +12767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0280",
@@ -13319,8 +12839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0288",
@@ -13363,8 +12883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmSurfOfExtrusion as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0292",
@@ -13394,16 +12914,12 @@
       "values_compared": 201
     },
     {
-      "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
-      },
       "max_rel_err": 0.0,
       "name": "gen0295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13374710602729021440",
-      "values_compared": 0
+      "values_compared": 1794
     },
     {
       "max_rel_err": 0.0,
@@ -13427,8 +12943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSphere::IsNurbSurfaceSphere",
-        "unit": "surface.sphere"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0298",
@@ -13447,18 +12963,17 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 553,
+  "cases_deferred": 432,
   "cases_failed": 0,
-  "cases_passed": 851,
+  "cases_passed": 972,
   "cases_total": 1404,
   "deferred_by_unit": {
     "geom.tol": 5,
-    "query.brep": 5,
+    "query.brep": 6,
     "surface.cone_p1": 41,
-    "surface.sphere": 328,
     "surface.surf_of_extrusion_p2": 10,
-    "surface.surface_p2": 96,
-    "topology.face_p2": 60,
+    "surface.surface_p2": 249,
+    "topology.face_p2": 113,
     "topology.face_p4": 8
   },
   "max_rel_err": 0.0,

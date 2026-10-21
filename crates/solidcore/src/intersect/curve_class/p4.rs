@@ -54,9 +54,10 @@
 //!   whose interval index is past the intervals.
 //! - **Not ported (reporting only).** `SM_ASSERT*`, `SM_DBG_WARN`, `ERR_MSG` and `MSG`
 //!   messages and the `SM_DEBUG_CODE` blocks (the release build compiles them out).
-//! - **Callees in units not ported yet** return [`SolidError::Unported`]:
-//!   `intersect.curve_class_p2` (`ReSet`, `ConnectIntervals`, `SmCurveInterval::GetMinUV`
-//!   / `GetMaxUV`).
+//! - **Callees.** `SmCurveInterval::GetMinUV` / `GetMaxUV` are those of
+//!   `intersect::curve_class::p2`. `ReSet` and `ConnectIntervals` stay stubs
+//!   ([`SolidError::Unported`], unit `intersect.curve_class_p2`): wired, they make
+//!   difftest cases disagree or fail (plan/findings.md).
 //! - **`EvaluateBinormal`** takes `&mut Brep` in the port; with `bUse3DOnly` true it
 //!   creates nothing, so it runs on a copy of the B-rep, as `ComputeUVSector` does. Both
 //!   upstream call sites ignore its status: a failure keeps the out-vectors as upstream
@@ -194,6 +195,9 @@ fn reset<O: ClassObject>(
     init: &ClassificationInit<O>,
 ) -> Result<()> {
     let _ = (cc, init);
+    // Not wired: with the real CurveClassification::reset, topology.brep_p2's
+    // MergeCurves fixture (merge_plane10_line) reaches a classification handle its
+    // ClassGeometry cannot resolve (plan/findings.md, intersect.curve_class_p4).
     // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
     Err(SolidError::unported(
         "SmCurveClassification::ReSet",
@@ -209,6 +213,8 @@ fn connect_intervals<O: ClassObject>(
     allow_removal_of_ends: bool,
 ) -> Result<()> {
     let _ = (cc, index, end, allow_removal_of_ends);
+    // Not wired: calling CurveClassification::connect_intervals here makes 4 generated
+    // squeeze cases disagree with the C++ (plan/findings.md, intersect.curve_class_p4).
     // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ConnectIntervals
     Err(SolidError::unported(
         "SmCurveClassification::ConnectIntervals",
@@ -216,25 +222,18 @@ fn connect_intervals<O: ClassObject>(
     ))
 }
 
-/// `SmCurveInterval::GetMinUV` (`do_min`) or `GetMaxUV` of interval `index`.
+/// `SmCurveInterval::GetMinUV` (`do_min`) or `GetMaxUV` of interval `index` (the
+/// output starts as an undefined `SmPoint2d`).
 fn interval_end_uv<O: ClassObject>(
     cc: &CurveClassification<O>,
+    geometry: &impl ClassGeometry<O>,
     index: usize,
     do_min: bool,
 ) -> Result<Point2> {
-    let _ = (cc, index);
     if do_min {
-        // UNPORTED(intersect.curve_class_p2): SmCurveInterval::GetMinUV
-        Err(SolidError::unported(
-            "SmCurveInterval::GetMinUV",
-            "intersect.curve_class_p2",
-        ))
+        cc.interval_min_uv(geometry, index, Vec2::UNDEF)
     } else {
-        // UNPORTED(intersect.curve_class_p2): SmCurveInterval::GetMaxUV
-        Err(SolidError::unported(
-            "SmCurveInterval::GetMaxUV",
-            "intersect.curve_class_p2",
-        ))
+        cc.interval_max_uv(geometry, index, Vec2::UNDEF)
     }
 }
 
@@ -733,8 +732,8 @@ fn end_on_seams<O: LoopObject>(
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a classification without intervals (upstream reads
-/// `m_pData[0]`); those of `ConnectIntervals` ([`SolidError::Unported`]: unit
-/// `intersect.curve_class_p2`).
+/// `m_pData[0]`); [`SolidError::Unported`] for `ConnectIntervals` (not wired, see
+/// plan/findings.md).
 pub fn squeeze_out_smallest_interval<O: ClassObject>(
     cc: &mut CurveClassification<O>,
 ) -> Result<()> {
@@ -773,7 +772,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from `ReSet` (unit `intersect.curve_class_p2`).
+    /// [`SolidError::Unported`] from `ReSet` (not wired, see plan/findings.md).
     pub fn with_curve(k: &Kernel, init: &ClassificationInit<O>) -> Result<Self> {
         let mut cc = Self::new(k);
 
@@ -794,8 +793,8 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// [`SolidError::InvalidInput`] for `index >= size()`, a classification without a
     /// face (upstream calls `GetUpwardFaceuse` on `NULL`, UB-124) and a face, edge or edge
-    /// use handle `geometry` does not resolve; [`SolidError::Unported`] for `GetMinUV` /
-    /// `GetMaxUV` (unit `intersect.curve_class_p2`).
+    /// use handle `geometry` does not resolve; [`SolidError::Unported`] from the
+    /// evaluations it reaches.
     pub fn ivl_bound_edgeuse_obj<G: ClassGeometry<O>>(
         &self,
         geometry: &G,
@@ -842,7 +841,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // CrvClassification Face locals (statuses ignored)
         let tgt_classify_surf_uv =
-            ignored(interval_end_uv(self, index, do_min))?.unwrap_or(Vec2::UNDEF);
+            ignored(interval_end_uv(self, geometry, index, do_min))?.unwrap_or(Vec2::UNDEF);
         let tgt_classify_surf_norm = ignored(classify_surface.evaluate_normal(
             tgt_classify_surf_uv,
             Side::Left,

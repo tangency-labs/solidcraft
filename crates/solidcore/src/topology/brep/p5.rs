@@ -34,9 +34,8 @@
 //! notifications reach no context callback. Curves have no identity in the port: `SetCurve`'s new/old curve
 //! data are null and a curve's own `SM_NO_CHANGE_OWNER` is not delivered.
 //! `SmBrep::Notify` is owned by `topology.brep_p2`, not this unit. Owning-list
-//! traversal and editing state belong to `topology.brep_p1`: arena allocation order
-//! is not substituted for list order. Callers supply the actual editing flag where
-//! it is tested before any missing call. Pointer inputs are optional typed ids;
+//! traversal (`GetRegions`, `GetFaces`, `GetEdges`, `GetVertices`) and the editing
+//! flag are `topology.brep_p1`'s list-order collections and `Brep` member. Pointer inputs are optional typed ids;
 //! out-parameters are mutable outputs where failure must clear them. The old-tol
 //! target calculation is factored out for direct numerical-stage verification;
 //! that verification does not certify vertex deletion or gluing. The internal
@@ -45,8 +44,7 @@
 //! Its reader integration remains uncertified until `MakeTopologyFromData` lands.
 //! Aliased `CombineCoincidentVertices` takes the native path in every case,
 //! including an isolated vertex, which upstream deletes along with its survivor
-//! before returning success. Explicit editing arguments are temporary: part 1's
-//! owning record/accessor will replace them without assuming that editing is on.
+//! before returning success.
 //! Shell/region queries and transfers use the landed shell port. Stable shell,
 //! vertex and vertex-use record erasure requires part 4's owning-storage lifecycle: the shared
 //! arena is append-only, so shifting ids or leaving a visible dummy is invalid.
@@ -486,7 +484,7 @@ pub fn create_wire_edge_from_curve(
     let region = b
         .infinite_region()
         .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let (_, first) = make_shell_vertex(b, region, start)?;
+    let (_, first) = make_shell_vertex(k, b, region, start)?;
     let (edge, last) =
         make_wire_edge_vertex(b, region, first, curve, interval, OrientType::Same, end)?;
     if start.distance(end) < b.tolerance() {
@@ -495,9 +493,15 @@ pub fn create_wire_edge_from_curve(
     Ok(edge)
 }
 
-fn make_shell_vertex(_b: &mut Brep, _r: RegionId, _point: Point3) -> Result<(ShellId, VertexId)> {
-    // UNPORTED(topology.brep_p9): SmBrep::MakeShellVertex
-    missing("SmBrep::MakeShellVertex", "topology.brep_p9")
+fn make_shell_vertex(
+    k: &mut Kernel,
+    b: &mut Brep,
+    r: RegionId,
+    point: Point3,
+) -> Result<(ShellId, VertexId)> {
+    with_notifications(b, None, Some(&mut k.context), |b, env, _| {
+        crate::topology::brep::p9::make_shell_vertex(b, Some(r), point, env)
+    })
 }
 
 fn make_wire_edge_vertex(
@@ -2092,7 +2096,7 @@ pub fn transform_with_notifications(
     }
     if scale.is_some() && scale_tolerances {
         let size = bbox.size().length();
-        let zone = set_brep_model_size(b, size)?;
+        let zone = b.set_this_model_size_estimate(k, size);
         crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
         for vertex in vertices {
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, zone, false, false))?;
@@ -2217,12 +2221,6 @@ fn reverse_reflection_edgeuses(b: &mut Brep, edge: EdgeId) -> Result<()> {
 }
 fn swap_reflection_shells(b: &mut Brep, face: FaceId) -> Result<()> {
     crate::topology::brep::p1::swap_reflection_shells(b, face)
-}
-fn set_brep_model_size(_b: &mut Brep, _size: f64) -> Result<f64> {
-    // SmTol::SetModelSizeEstimate's arithmetic belongs to geom.tol; the
-    // missing owning B-rep fields, not that already ported routine, block it.
-    // UNPORTED(topology.brep_p1): SmBrep::SetThisModelSizeEstimate
-    missing("SmBrep::SetThisModelSizeEstimate", "topology.brep_p1")
 }
 fn set_face_tolerance(
     b: &mut Brep,

@@ -374,15 +374,24 @@ fn classify_param_on_faces<O: Copy>(
     ))
 }
 
-/// `SmSurface::DropPoint` (normalising) over the surface's natural domain: the drop
-/// point when it succeeded.
-fn surface_drop_point<O: Copy>(surface: Option<O>, point: Point3) -> Result<Option<Point2>> {
-    let _ = (surface, point);
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::unported(
-        "SmSurface::DropPoint",
-        "surface.surface_p5",
-    ))
+/// `SmSurface::DropPoint(pt, GetNaturalUVDomain(), NULL, .., SM_SO_NORMALIZE)`: the
+/// drop point when it succeeded.
+fn surface_drop_point<O: Copy>(
+    k: &Kernel,
+    brep: &impl ProtoBrep<O>,
+    surface: Option<O>,
+    point: Point3,
+) -> Result<Option<Point2>> {
+    let srf = surface
+        .and_then(|o| brep.surface(o))
+        .ok_or(dangling("surface handle is null or unknown"))?;
+    let domain = srf.natural_uv_domain();
+    let opts = crate::surface::surface::p5::DropPointOptions {
+        operation: SolverOperation::Normalize, // Don't want off-boundary drops.
+        ..crate::surface::surface::p5::DropPointOptions::default()
+    };
+    let r = srf.drop_point::<crate::surface::surface::p4::NoObject>(k, point, &domain, &opts)?;
+    Ok(r.success.then_some(r.result_uv))
 }
 
 /// `SmEdgeuse::EvaluateBinormal(dParam, FALSE, rPt, rBinormal)`: the binormal.
@@ -1781,7 +1790,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     Err(e) if e.is_unported() => return Err(e),
                     _ => Vec3::UNDEF,
                 };
-                face_uv = ignore_soft(surface_drop_point(surface, mid_pt))?.flatten();
+                face_uv = ignore_soft(surface_drop_point(k, brep, surface, mid_pt))?.flatten();
             }
             let Some(face_uv) = face_uv else { continue };
 
@@ -1880,7 +1889,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         _ => Vec3::UNDEF,
                     };
                     let surface = brep.face_surface(old_face).ok_or_else(unknown)?;
-                    let Some(face_uv) = ignore_soft(surface_drop_point(surface, mid_pt))?.flatten()
+                    let Some(face_uv) =
+                        ignore_soft(surface_drop_point(k, brep, surface, mid_pt))?.flatten()
                     else {
                         continue;
                     };
