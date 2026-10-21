@@ -76,7 +76,18 @@ mod smlib {
         let Some(r) = ta.boolean(&tb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
         let check = r.check(CheckLevel::All).map_err(|e| failed("check", e))?;
         if !check.is_valid() {
-            return Err(failed("SMLib's check refuses the result", check));
+            // Whether an operand failed it already says whose the fault is.
+            let operands: Vec<&str> = [("the first operand", &sa), ("the second operand", &sb)]
+                .into_iter()
+                .filter(|(_, s)| s.check(CheckLevel::All).is_ok_and(|c| !c.is_valid()))
+                .map(|(name, _)| name)
+                .collect();
+            let what = if operands.is_empty() {
+                "SMLib's check refuses the result".to_string()
+            } else {
+                format!("SMLib's check refuses the result ({} already fails it)", operands.join(" and "))
+            };
+            return Err(failed(&what, check));
         }
         let (body, or) = body_from_smlib_ordered(&r)?;
         let history = match (oa, ob, or) {

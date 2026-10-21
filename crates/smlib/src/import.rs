@@ -388,23 +388,31 @@ fn net_rows(a: &mut Arrays, cps: impl Iterator<Item = ([f64; 3], f64)>) {
     net(a, cps);
 }
 
-/// A plane `origin + u·U + v·V`. With unit, orthogonal axes it is SMLib's plane, whose (u, v) are
-/// distances along them; otherwise it is the exact bilinear patch over the domain.
+/// A plane `origin + u·U + v·V` as SMLib's plane, whose (u, v) are distances along unit,
+/// orthogonal axes: U's direction, and the one at a right angle to it in the plane, the normal
+/// U × V as the record's. The range is the record's domain mapped onto those axes (its bounding
+/// box: a face's range need not be tight, and SMLib rebuilds an analytic face's trims from its
+/// edges). Truck's planes run through three points, their axes the face's own sides.
 fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f64; 2]; 2]) -> R<()> {
     let [[u0, u1], [v0, v1]] = domain;
-    let unit = |x: [f64; 3]| (dot(x, x).sqrt() - 1.0).abs() <= 1e-12;
-    if unit(u) && unit(v) && dot(u, v).abs() <= 1e-12 {
-        a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_PLANE));
-        a.r3(flat::FACE_PLANE_ORIGIN, origin);
-        a.r3(flat::FACE_PLANE_AXIS, cross(u, v));
-        a.r3(flat::FACE_PLANE_REF_DIRECTION, u);
-        a.r(flat::FACE_RANGE).extend([u0, v0, u1, v1]);
-        return Ok(());
+    let n = cross(u, v);
+    let (lu, ln) = (dot(u, u).sqrt(), dot(n, n).sqrt());
+    if !(lu > 0.0 && ln > 0.0 && lu.is_finite() && ln.is_finite()) {
+        return Err(Unsupported::Invalid("plane axes"));
     }
-    nurbs_face(a, &[u0, u0, u1, u1], &[v0, v0, v1, v1], 2, 2)?;
-    let at = |s: f64, t: f64| add(origin, add(scale(u, s), scale(v, t)));
-    net(a, [at(u0, v0), at(u0, v1), at(u1, v0), at(u1, v1)].into_iter().map(|p| (p, 1.0)));
-    a.r(flat::FACE_RANGE).extend([u0, v0, u1, v1]);
+    let (x, z) = (scale(u, 1.0 / lu), scale(n, 1.0 / ln));
+    let y = cross(z, x);
+    let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
+        let d = add(scale(u, s), scale(v, t));
+        [dot(d, x), dot(d, y)]
+    });
+    let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
+    let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+    a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_PLANE));
+    a.r3(flat::FACE_PLANE_ORIGIN, origin);
+    a.r3(flat::FACE_PLANE_AXIS, z);
+    a.r3(flat::FACE_PLANE_REF_DIRECTION, x);
+    a.r(flat::FACE_RANGE).extend([lo(0), lo(1), hi(0), hi(1)]);
     Ok(())
 }
 

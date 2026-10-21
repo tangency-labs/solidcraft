@@ -32,13 +32,18 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
     for (i, f) in out.faces.iter_mut().enumerate() {
         let b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } = &f.surface else { continue };
         let rev = Revolution::new(profile, *origin, *axis, matrix, *forward)?;
-        let (surface, mut domain, v) = rev.analytic(f.domain)?;
-        // Angles start within the first turn, where SMLib's degree domains are at home.
-        domain[0] = first_turn(domain[0]);
+        let (mut surface, mut domain, v) = rev.analytic(f.domain)?;
+        // The angle about the axis starts at 0: the frame turns to the face's first angle (SMLib
+        // refuses an analytic range past 360°). A torus's tube angle can't turn so: it starts
+        // within the first turn, where SMLib's degree domains are at home.
+        let start = domain[0][0];
+        turn_frame(&mut surface, start);
+        domain[0] = [0.0, domain[0][1] - start];
         if matches!(surface, b::Surface::Torus { .. }) {
             domain[1] = first_turn(domain[1]);
         }
-        let flip = agree(&f.surface, f.domain, &surface, domain, &rev, &v, brep.tolerance.max(1e-9 * size))?;
+        let map = Map { rev: &rev, start, v: &v };
+        let flip = agree((&f.surface, f.domain), (&surface, domain), map, brep.tolerance.max(1e-9 * size))?;
         f.surface = surface;
         f.domain = domain;
         if flip {
@@ -49,6 +54,18 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
         turn_over(&mut out, i)?;
     }
     Ok(Cow::Owned(out))
+}
+
+/// An analytic surface's frame turned by `angle` about its axis: u then counts from there.
+fn turn_frame(s: &mut b::Surface, angle: f64) {
+    if let b::Surface::Cylinder { frame, .. } | b::Surface::Cone { frame, .. } | b::Surface::Sphere { frame, .. } | b::Surface::Torus { frame, .. } =
+        s
+    {
+        let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
+        let (sin, cos) = angle.sin_cos();
+        frame.x_axis = arr(x * cos + y * sin);
+        frame.y_axis = arr(y * cos - x * sin);
+    }
 }
 
 /// An angle range moved by whole turns to start in [0, 2π).
@@ -243,11 +260,19 @@ impl Revolution {
 
     /// The analytic (u, v) of the record's (u, v): the angle is the revolution's own, v that of
     /// the profile's point (at angle 0), unwrapped to within half a turn of `near`.
-    fn map(&self, v: &V, uv: [f64; 2], near: f64) -> Option<[f64; 2]> {
+    fn map(&self, v: &V, uv: [f64; 2], start: f64, near: f64) -> Option<[f64; 2]> {
         let (t, angle) = if self.forward { (uv[0], uv[1]) } else { (uv[1], uv[0]) };
         let p = self.profile.point(t)?;
-        Some([angle, v.of(p, near)])
+        Some([angle - start, v.of(p, near)])
     }
+}
+
+/// From a revolution's (u, v) to its analytic surface's: the revolution, the angle the
+/// surface's u starts at, and how its v is found.
+struct Map<'a> {
+    rev: &'a Revolution,
+    start: f64,
+    v: &'a V,
 }
 
 /// How the analytic v of a profile point is found.
@@ -280,7 +305,8 @@ impl V {
 /// Checks the analytic surface against the revolution over the face's range, 5 × 5 points
 /// within `tol`, and says whether their natural normals are opposite (the face must be turned
 /// over), read at the range's middle.
-fn agree(record: &b::Surface, domain: [[f64; 2]; 2], analytic: &b::Surface, range: [[f64; 2]; 2], rev: &Revolution, v: &V, tol: f64) -> R<bool> {
+fn agree(record: (&b::Surface, [[f64; 2]; 2]), analytic: (&b::Surface, [[f64; 2]; 2]), map: Map, tol: f64) -> R<bool> {
+    let ((record, domain), (analytic, range), Map { rev, start, v }) = (record, analytic, map);
     let bad = Unsupported::Invalid("a revolution its analytic surface does not match");
     let s = SurfaceEval::new(record).map_err(|_| bad.clone())?;
     let a = SurfaceEval::new(analytic).map_err(|_| bad.clone())?;
@@ -288,7 +314,7 @@ fn agree(record: &b::Surface, domain: [[f64; 2]; 2], analytic: &b::Surface, rang
     let near = 0.5 * (range[1][0] + range[1][1]);
     let normals = |u: f64, w: f64| -> R<f64> {
         let (p, du, dv) = s.derivs(u, w).ok_or(bad.clone())?;
-        let uv = rev.map(v, [u, w], near).ok_or(bad.clone())?;
+        let uv = rev.map(v, [u, w], start, near).ok_or(bad.clone())?;
         let (q, au, av) = a.derivs(uv[0], uv[1]).ok_or(bad.clone())?;
         if !((p - q).len() <= tol) {
             return Err(bad.clone());

@@ -127,9 +127,9 @@ fn a_cube_record_imports_into_smlib() {
 
 #[cfg(feature = "native")]
 #[test]
-fn a_skewed_plane_goes_as_an_exact_bilinear_patch() {
+fn a_plane_on_other_axes_goes_as_smlibs_plane() {
     // A tetrahedron: its faces' natural frames are unit and orthogonal, so make one plane's axes
-    // non-unit to force the NURBS form and check the volume is unchanged.
+    // non-unit and check it still goes as SMLib's plane, the volume unchanged.
     let c = [[0., 0., 0.], [6., 0., 0.], [0., 6., 0.], [0., 0., 6.]];
     let mut r = polyhedron(&c, &[&[0, 2, 1], &[0, 1, 3], &[1, 2, 3], &[2, 0, 3]]);
     if let Some(Face { surface: Surface::Plane { u_axis, v_axis, .. }, domain, loops }) = r.faces.get_mut(0) {
@@ -146,7 +146,7 @@ fn a_skewed_plane_goes_as_an_exact_bilinear_patch() {
     }
     r.validate().unwrap();
     let a = arrays(&r, true).unwrap();
-    assert_eq!(a.ints[&flat::FACE_SURFACE_TYPE][0], i64::from(flat::SURFACE_NURBS));
+    assert_eq!(a.ints[&flat::FACE_SURFACE_TYPE][0], i64::from(flat::SURFACE_PLANE));
     let b = crate::Brep::from_record(&r, true).unwrap();
     assert!((b.volume(1e-7).unwrap() - 36.0).abs() < 1e-6, "{:?}", b.volume(1e-7));
 }
