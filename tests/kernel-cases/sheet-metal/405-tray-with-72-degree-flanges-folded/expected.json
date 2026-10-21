@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#405",
+  "tangency-labs/solidcraft#406"
+ ],
+ "what": "a 120 x 90 tray with four 38.6 mm flanges at 72 degrees closed with the rule's gap: the corners used to stay open as a V",
+ "source": "invariants",
+ "method": "one valid closed body: the four flanges end a gap apart at every corner, so they are joined to the base only and the part is one shell",
+ "body_count": 1
+}

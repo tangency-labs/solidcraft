@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3417",
+  "tangency-labs/solidcraft#3421",
+  "tangency-labs/solidcraft#3280"
+ ],
+ "what": "a 60 mm rhombus (120 and 60 degree corners) with a 90 degree flange on each of its four edges and a square corner relief 8 mm across: the reliefs at the two 120 degree corners would overlap",
+ "source": "invariants",
+ "method": "one valid closed body whichever relief is left out; a square relief 8 mm across at a 120 degree corner reaches 2r from the corner along the bisector, so the reliefs at the two opposite 120 degree corners reach each other and are left out together, which makes the result independent of the order the flanges were made in; no volume is graded because the corner closure has no simple closed form",
+ "body_count": 1
+}

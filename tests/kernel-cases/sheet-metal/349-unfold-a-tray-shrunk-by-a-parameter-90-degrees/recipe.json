@@ -1,0 +1,132 @@
+{
+ "commands": [
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "W",
+    "expression": "2000 mm"
+   }
+  },
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "H",
+    "expression": "2500 mm"
+   }
+  },
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "AL2",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Tray"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     2000,
+     2500
+    ]
+   }
+  },
+  {
+   "command": "sketch.constraint.fix",
+   "params": {
+    "entities": [
+     "p1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "value": "W"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "value": "H"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Tray"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "edges": [
+     [
+      1000,
+      0,
+      2
+     ],
+     [
+      2000,
+      1250,
+      2
+     ],
+     [
+      1000,
+      2500,
+      2
+     ],
+     [
+      0,
+      1250,
+      2
+     ]
+    ],
+    "height": 38.6,
+    "angle": 90
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "changes": {
+     "W": "400 mm",
+     "H": "300 mm"
+    }
+   }
+  },
+  {
+   "command": "sheet.unfold",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}
