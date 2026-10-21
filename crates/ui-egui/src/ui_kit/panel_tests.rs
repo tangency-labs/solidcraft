@@ -592,6 +592,69 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
     crate::theme::set_dark(previous);
 }
 
+/// A card that cannot show its own size takes the display edge to edge: a phone has no room
+/// for a floating card, so the card covers the screen, the page list keeps its icons only and
+/// the actions hold the bottom of the screen.
+#[test]
+fn a_window_that_does_not_fit_the_display_takes_it_edge_to_edge() {
+    let ctx = crate::fonts::test_context();
+    let mut selected = 0usize;
+    let mut drawn = 0usize;
+    let pages = [
+        WindowPage {
+            icon: "settings",
+            label: "ui.general",
+            handle: "test:page:general",
+            scroll: true,
+            draw: |ui, state| {
+                *state = 1;
+                text(ui, "General", Text::Inline);
+            },
+        },
+        WindowPage {
+            icon: "orbit",
+            label: "ui.navigation",
+            handle: "test:page:navigation",
+            scroll: true,
+            draw: |ui, state| {
+                *state = 2;
+                text(ui, "Navigation", Text::Inline);
+            },
+        },
+    ];
+    let mut draw = |ui: &mut Ui| {
+        Window::new(ui.id().with("pages"), "settings", "Preferences").cards(3.0).height(536.0).fills_display().show_pages(
+            ui.ctx(),
+            &mut selected,
+            &pages,
+            &mut drawn,
+            |_| {},
+        );
+    };
+    // A phone: the card cannot hold its own size.
+    let phone = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(420.0, 780.0));
+    for _ in 0..3 {
+        scenario::clear_handles();
+        crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(phone), focused: true, ..Default::default() }, &mut draw);
+    }
+    let window = scenario::rect_of("dialog:window").unwrap();
+    assert_eq!(window, phone, "the card covers the display it cannot fit in");
+    let nav = scenario::rect_of("dialog:pages").unwrap();
+    assert_eq!(nav.width(), 48.0, "a narrow display keeps the page list's icons only");
+    let footer = scenario::rect_of("dialog:footer").unwrap();
+    assert!(footer.bottom() <= phone.bottom() + 0.01, "the actions stay on the display: {footer:?}");
+    assert!(nav.height() > 400.0, "the page list takes the room the display gives it: {nav:?}");
+    // A desktop display holds the card as a floating card.
+    let desktop = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+    for _ in 0..3 {
+        scenario::clear_handles();
+        crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(desktop), focused: true, ..Default::default() }, &mut draw);
+    }
+    let window = scenario::rect_of("dialog:window").unwrap();
+    assert!(window.width() < desktop.width() && window.height() < desktop.height(), "the card stays a card: {window:?}");
+    assert_eq!(scenario::rect_of("dialog:pages").unwrap().width(), 188.0, "a wide display keeps the page list's labels");
+}
+
 #[test]
 fn page_window_is_as_opaque_as_every_other_window_in_both_themes() {
     // #9078: the Preferences window let the ribbon's labels show through its title bar and search field.
@@ -859,6 +922,26 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
         }
     }
     crate::theme::set_dark(previous);
+}
+
+/// The preferences on a phone: the card takes the display edge to edge, the page list keeps
+/// its icons and the actions stay on the screen.
+#[test]
+fn preferences_take_a_phone_display_edge_to_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width": 420, "height": 780}));
+    crate::prefs::open_at(&mut h.app, 0);
+    h.frames(3);
+    let window = scenario::rect_of("prefs:window").expect("the preferences are drawn");
+    assert_eq!(window, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(420.0, 780.0)), "the card covers the display it cannot fit in");
+    let nav = scenario::rect_of("dialog:pages").expect("the page list is drawn");
+    assert_eq!(nav.width(), 48.0, "the page list keeps its icons only");
+    for action in ["prefs:ok", "prefs:apply", "prefs:cancel"] {
+        let rect = scenario::rect_of(action).expect("the actions are drawn");
+        assert!(window.contains_rect(rect), "{action} stays on the display: {rect:?}");
+    }
+    assert!(scenario::rect_of("prefs:page_body").is_some());
 }
 
 #[test]

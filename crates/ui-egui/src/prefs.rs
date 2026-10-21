@@ -346,6 +346,13 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
     },
 ];
 
+/// The room the preferences ask for: the page list's own cap plus the header and the actions.
+/// A display that cannot hold it gets the card edge to edge.
+fn prefs_height() -> f32 {
+    let t = Tokens::get();
+    t.control_height * 16.0 + t.form_header_height + t.form_footer_height
+}
+
 fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     let typed = drive_search(ui, app);
     let (field, _) =
