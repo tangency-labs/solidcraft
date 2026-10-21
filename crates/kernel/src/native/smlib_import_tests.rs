@@ -80,3 +80,16 @@ fn extruded_circles_go_as_cylinders() {
     let check = r.check(solidcraft_smlib::CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");
 }
+
+/// A cavity cut out of a block: SMLib's result lists the cavity's faces on the void's side with
+/// mixed orientations, and every one of them comes back.
+#[test]
+fn a_cavity_comes_back_from_smlib() {
+    let block = box_solid(v(0., 0., 0.), v(40., 40., 40.)).unwrap();
+    let cavity = box_solid(v(25., 25., 25.), v(30., 30., 30.)).unwrap();
+    let r = super::smlib_body(&block).unwrap().boolean(&super::smlib_body(&cavity).unwrap(), solidcraft_smlib::BooleanOp::Subtract).unwrap().unwrap();
+    let back = super::body_from_smlib(&r).unwrap();
+    assert_eq!((back.solid.boundaries().len(), back.face_count()), (2, 12));
+    let got = super::smlib_body(&back).unwrap().volume(1e-7).unwrap();
+    assert!((got - (64_000.0 - 125.0)).abs() < 1e-6, "{got}");
+}
