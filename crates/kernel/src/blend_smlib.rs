@@ -1,0 +1,329 @@
+//! Fillets and chamfers through SMLib, when [`crate::backend`] selects it.
+//!
+//! Each kernel entry point ([`crate::fillet`], [`crate::chamfer`], …) asks [`selected`] first and,
+//! when SMLib is the kernel, hands its arguments here unchanged: the body goes into SMLib as its
+//! schema 4 record (healed where SMLib's check refuses it as given), tagged as operand 0; each
+//! point picks the body's nearest edge in its own edge order, as truck's blends do, and SMLib is
+//! given that edge's midpoint, which no other edge is as near to (a point at a vertex between two
+//! edges would leave SMLib to choose); SMLib blends those edges with their tangent chains, its check must pass, and the result comes back decoded with its
+//! geometry checked. An option SMLib has no construction for is refused as "not supported yet",
+//! never built by truck instead, so a comparison never compares truck with itself.
+//!
+//! The history is SMLib's tags, renumbered into the body's orders; a blend face, which SMLib
+//! leaves untagged, comes from the edge it replaces ([`solidcraft_smlib::history::blends`]).
+
+use solidcraft_geom::Vec3;
+
+use crate::blend_variable::RadiusSpline;
+use crate::body::Body;
+use crate::{KernelError, Result};
+
+/// Whether SMLib runs the blends ([`crate::backend`]). A setting naming SMLib in a build without
+/// it, or naming no kernel, is the error it is for every operation.
+pub(crate) fn selected() -> Result<bool> {
+    Ok(crate::backend()? == crate::Backend::Smlib)
+}
+
+/// What SMLib cannot build yet: refused rather than built by truck.
+pub(crate) fn unsupported(what: &str) -> KernelError {
+    KernelError::Invalid(format!("not supported yet: {what} with the SMLib kernel"))
+}
+
+/// A constant-radius round of the edges nearest `edges` ([`crate::fillet`]).
+pub(crate) fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    imp::blend(body, "fillet", Kind::Round, edges, &vec![radius; edges.len()])
+}
+
+/// Each edge rounded at its own radius ([`crate::fillet_each`]).
+pub(crate) fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+    if radii.len() != edges.len() {
+        return Err(KernelError::Invalid("one radius per edge".into()));
+    }
+    imp::blend(body, "fillet", Kind::Round, edges, radii)
+}
+
+/// Curvature-continuous rounds with the setback of a round of `radius` ([`crate::fillet_g2`]).
+pub(crate) fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    imp::blend(body, "G2 fillet", Kind::Curvature, edges, &vec![radius; edges.len()])
+}
+
+/// Rounds `chord` wide from contact to contact ([`crate::fillet_chord`]).
+pub(crate) fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
+    imp::blend(body, "chord fillet", Kind::Chord, edges, &vec![chord; edges.len()])
+}
+
+/// An equal-distance chamfer ([`crate::chamfer`]).
+pub(crate) fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    imp::blend(body, "chamfer", Kind::Chamfer, edges, &vec![distance; edges.len()])
+}
+
+/// One edge rounded with the radius `spline` (checked by the caller) along it from the end
+/// nearest `start` ([`crate::fillet_variable_spline`]).
+pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+    imp::variable(body, edge_at, start, spline)
+}
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Round,
+    Curvature,
+    Chord,
+    Chamfer,
+}
+
+#[cfg(feature = "smlib")]
+mod imp {
+    use std::collections::BTreeSet;
+
+    use solidcraft_geom::Vec3;
+    use solidcraft_smlib::{Blend, Brep, CheckLevel};
+
+    use super::Kind;
+    use crate::blend_variable::RadiusSpline;
+    use crate::body::Body;
+    use crate::history::{BodyHistory, EdgeOrigin, History};
+    use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
+    use crate::{KernelError, Result, guard, record};
+
+    fn failed(what: &str, step: &str, e: impl std::fmt::Display) -> KernelError {
+        KernelError::Failed(format!("SMLib {what}: {step}: {e}"))
+    }
+
+    /// How far a pick may lie from its edge: as far as truck's blends accept one.
+    fn pick_tolerance(body: &Body) -> f64 {
+        body.size() * 0.05 + 1e-3
+    }
+
+    /// The edges `picks` select: each one's index in the body's edge order and the point halfway
+    /// along it, for SMLib to pick.
+    fn resolve(body: &Body, picks: &[Vec3]) -> Result<Picked> {
+        if picks.iter().any(|p| !p.is_finite()) {
+            return Err(KernelError::Invalid("edge picks must be finite points".into()));
+        }
+        let edges = body.edges((body.size() * 2e-3).max(1e-3))?;
+        let reach = pick_tolerance(body);
+        let mut out = Picked { edges: Vec::with_capacity(picks.len()), points: Vec::with_capacity(picks.len()) };
+        for p in picks {
+            let mut best: Option<(f64, &crate::body::EdgeInfo)> = None;
+            for e in &edges {
+                for w in e.points.windows(2) {
+                    if let [a, b] = w {
+                        let d = p.dist_to_segment(*a, *b);
+                        if best.is_none_or(|(bd, _)| d < bd) {
+                            best = Some((d, e));
+                        }
+                    }
+                }
+            }
+            let Some((_, e)) = best.filter(|(d, _)| *d <= reach) else {
+                return Err(KernelError::Invalid(format!("no edge near the pick at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)));
+            };
+            out.edges.push(e.index);
+            out.points.push([e.mid.x, e.mid.y, e.mid.z]);
+        }
+        Ok(out)
+    }
+
+    struct Picked {
+        /// Each pick's edge in the body's edge order.
+        edges: Vec<usize>,
+        /// A point halfway along each.
+        points: Vec<[f64; 3]>,
+    }
+
+    fn sizes_ok(what: &str, sizes: &[f64]) -> Result<()> {
+        if sizes.is_empty() || sizes.len() > solidcraft_smlib::MAX_POINTS {
+            return Err(KernelError::Invalid(format!("{what}: select 1…{} edges", solidcraft_smlib::MAX_POINTS)));
+        }
+        if sizes.iter().any(|s| !(s.is_finite() && *s > 1e-6 && *s < 1e6)) {
+            return Err(KernelError::Invalid(format!("{what}: the size must be positive and finite")));
+        }
+        Ok(())
+    }
+
+    pub(super) fn blend(body: &Body, what: &str, kind: Kind, edges: &[Vec3], sizes: &[f64]) -> Result<Body> {
+        body.require_brep(what)?;
+        sizes_ok(what, sizes)?;
+        let picked = resolve(body, edges)?;
+        let kind = match kind {
+            Kind::Round => Blend::Round,
+            Kind::Curvature => Blend::Curvature,
+            Kind::Chord => Blend::Chord,
+            Kind::Chamfer => Blend::Chamfer,
+        };
+        let tol = pick_tolerance(body);
+        run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol))
+    }
+
+    pub(super) fn variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+        body.require_brep("fillet")?;
+        if !start.is_finite() {
+            return Err(KernelError::Invalid("the start point must be finite".into()));
+        }
+        let picked = resolve(body, &[edge_at])?;
+        let [at] = picked.points[..] else { return Err(KernelError::Invalid("one edge".into())) };
+        let tol = pick_tolerance(body);
+        run(body, "variable fillet", &picked.edges, |b| {
+            b.fillet_variable(at, tol, [start.x, start.y, start.z], spline.degree, &spline.knots, &spline.radii)
+        })
+    }
+
+    /// `op` on `body` in SMLib, tagged as operand 0, checked, decoded, with its history.
+    fn run(body: &Body, what: &str, edges: &[usize], op: impl FnOnce(&Brep) -> solidcraft_smlib::Result<Brep>) -> Result<Body> {
+        guard(what, || {
+            let (sb, order) = smlib_body_ordered(body)?;
+            let tagged = sb.tagged(0).map_err(|e| failed(what, "tag", e))?;
+            let r = op(&tagged).map_err(|e| failed(what, "operation", e))?;
+            let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
+            if !check.is_valid() {
+                let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+                let step =
+                    if input_fails { "SMLib's check refuses the result (the input already fails it)" } else { "SMLib's check refuses the result" };
+                return Err(failed(what, step, check));
+            }
+            let (out, result_order) = body_from_smlib_ordered(&r)?;
+            let history = match (order, result_order) {
+                (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], &ro) {
+                    Ok(mut h) => {
+                        let operand = History::identity(body).edges;
+                        let replaced = blended(body, edges, &h);
+                        solidcraft_smlib::history::blends(&mut h, &operand, &replaced);
+                        Some(h)
+                    }
+                    Err(e) => {
+                        log::debug!(target: "smlib", "{what} history: {e}");
+                        None
+                    }
+                },
+                _ => None,
+            };
+            Ok(out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body))
+        })
+    }
+
+    /// The operand's edges the blend replaced: each picked edge, and every edge no result edge
+    /// comes from (the rest of the tangent chains), in the operand's edge order.
+    fn blended(body: &Body, picked: &[usize], h: &History) -> Vec<usize> {
+        let mut out: BTreeSet<usize> = picked.iter().copied().collect();
+        let kept: BTreeSet<usize> = h
+            .edges
+            .iter()
+            .flat_map(|e| e.origins.iter())
+            .filter_map(|o| match o {
+                EdgeOrigin::Edge { operand: 0, edge } => Some(*edge),
+                _ => None,
+            })
+            .collect();
+        out.extend((0..body.edge_count()).filter(|e| !kept.contains(e)));
+        out.into_iter().collect()
+    }
+}
+
+#[cfg(not(feature = "smlib"))]
+mod imp {
+    use solidcraft_geom::Vec3;
+
+    use super::Kind;
+    use crate::blend_variable::RadiusSpline;
+    use crate::body::Body;
+    use crate::{KernelError, Result};
+
+    fn not_built() -> KernelError {
+        KernelError::Invalid("not supported yet: this build has no SMLib".into())
+    }
+
+    pub(super) fn blend(_: &Body, _: &str, _: Kind, _: &[Vec3], _: &[f64]) -> Result<Body> {
+        Err(not_built())
+    }
+
+    pub(super) fn variable(_: &Body, _: Vec3, _: Vec3, _: &RadiusSpline) -> Result<Body> {
+        Err(not_built())
+    }
+}
+
+#[cfg(all(test, feature = "smlib"))]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use solidcraft_geom::Vec3;
+
+    use super::*;
+    use crate::history::{Change, FaceOrigin};
+    use crate::{box_solid, measure};
+
+    const QUARTER: f64 = 1.0 - std::f64::consts::FRAC_PI_4;
+
+    fn cube() -> Body {
+        box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap()
+    }
+
+    fn volume(b: &Body) -> f64 {
+        measure(b).unwrap().volume
+    }
+
+    /// Within the kernel measure's accuracy on a curved face (a few 1e-6 of the volume; SMLib's
+    /// own exact volumes match to 1e-3 mm³ in the C API's tests).
+    fn near(got: f64, want: f64) -> bool {
+        (got - want).abs() <= 5e-6 * want.abs()
+    }
+
+    /// The edge of `b` nearest `p`, in its edge order.
+    fn edge_at(b: &Body, p: Vec3) -> usize {
+        b.nearest_edge(p, 1e-3).unwrap().unwrap().0
+    }
+
+    #[test]
+    fn a_round_loses_its_corner_and_its_face_comes_from_the_edge() {
+        let b = cube();
+        let at = Vec3::new(10.0, 20.0, 20.0);
+        let r = imp::blend(&b, "fillet", Kind::Round, &[at], &[2.0]).unwrap();
+        assert!(near(volume(&r), 8000.0 - QUARTER * 4.0 * 20.0), "{}", volume(&r));
+        assert_eq!(r.face_count(), 7);
+        let h = r.history().expect("a history");
+        let blends: Vec<_> = h.faces.iter().filter(|f| f.change == Change::Generated).collect();
+        assert_eq!(blends.len(), 1);
+        assert_eq!(blends[0].origins, vec![FaceOrigin::Edge { operand: 0, edge: edge_at(&b, at) }]);
+    }
+
+    #[test]
+    fn a_pick_at_a_vertex_takes_the_nearest_edge_by_its_midpoint() {
+        // (20, 20, 10) is on the vertical edge only; (20, 20, 20) is a corner of three edges, which
+        // the body's own order resolves as truck's blends do, never left to SMLib.
+        let b = cube();
+        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(20.0, 20.0, 20.0)], &[1.0]).is_ok());
+        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(60.0, 60.0, 60.0)], &[1.0]).is_err());
+    }
+
+    #[test]
+    fn each_edge_takes_its_own_size() {
+        let b = cube();
+        let picks = [Vec3::new(10.0, 20.0, 20.0), Vec3::new(10.0, 0.0, 20.0)];
+        let r = imp::blend(&b, "fillet", Kind::Round, &picks, &[2.0, 3.0]).unwrap();
+        assert!(near(volume(&r), 8000.0 - QUARTER * 13.0 * 20.0), "{}", volume(&r));
+        let c = imp::blend(&b, "chamfer", Kind::Chamfer, &picks, &[2.0, 3.0]).unwrap();
+        assert!(near(volume(&c), 8000.0 - 0.5 * 13.0 * 20.0), "{}", volume(&c));
+        assert_eq!(c.history().map(|h| h.faces.iter().filter(|f| matches!(f.origins[..], [FaceOrigin::Edge { .. }])).count()), Some(2));
+    }
+
+    #[test]
+    fn a_linear_radius_runs_from_the_start_end() {
+        // 3 at x = 0 to 1 at x = 20: (1 - pi/4) L (r0^2 + r0 r1 + r1^2) / 3 taken away, from
+        // either end given as the start with the law reversed.
+        let b = cube();
+        let at = Vec3::new(10.0, 20.0, 20.0);
+        let law = RadiusSpline { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], radii: vec![3.0, 1.0] };
+        let r = imp::variable(&b, at, Vec3::new(0.0, 20.0, 20.0), &law).unwrap();
+        let want = 8000.0 - QUARTER * 20.0 * 13.0 / 3.0;
+        assert!((volume(&r) - want).abs() < 0.05, "{}", volume(&r));
+        let back = imp::variable(&b, at, Vec3::new(20.0, 20.0, 20.0), &law.reversed()).unwrap();
+        assert!((volume(&back) - volume(&r)).abs() < 1e-6 * 8000.0);
+    }
+
+    #[test]
+    fn options_smlib_cannot_build_are_refused() {
+        assert!(unsupported("x").to_string().contains("not supported yet"));
+        let b = cube();
+        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
+        assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
+        assert!(imp::blend(&b, "fillet", Kind::Round, &[], &[]).is_err());
+    }
+}

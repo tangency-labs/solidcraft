@@ -210,6 +210,9 @@ pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &
 pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
     body.require_brep("fillet")?;
     spline.check()?;
+    if crate::blend_smlib::selected()? {
+        return crate::blend_smlib::fillet_variable(body, edge_at, start, spline);
+    }
     let edge = crate::surfaces::edge_near(body, edge_at).ok_or_else(|| KernelError::Invalid(format!("no edge at {edge_at:?}")))?;
     guard("variable fillet", || {
         let Ok(s) = EdgeSetup::new(body, &edge) else {
@@ -598,6 +601,9 @@ pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
     }
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
+    }
+    if crate::blend_smlib::selected()? {
+        return crate::blend_smlib::fillet_chord(body, edges, chord);
     }
     let found: Vec<mt::Edge> = edges
         .iter()

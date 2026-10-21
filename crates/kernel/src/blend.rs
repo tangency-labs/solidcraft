@@ -1119,6 +1119,9 @@ pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     if edges.is_empty() || edges.len() > 1000 || edges.iter().any(|p| ![p.x, p.y, p.z].into_iter().all(f64::is_finite)) {
         return Err(KernelError::Invalid("G2 fillet needs 1 to 1000 finite edge points".into()));
     }
+    if crate::blend_smlib::selected()? {
+        return crate::blend_smlib::fillet_g2(body, edges, radius);
+    }
     let counts = record::counts(&[body]);
     let mut cur = crate::boolean_record::healed(body)?;
     for p in edges {
@@ -1847,6 +1850,9 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
 /// largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     body.require_brep("fillet")?;
+    if crate::blend_smlib::selected()? {
+        return crate::blend_smlib::fillet(body, edges, radius);
+    }
     // A round that would run past its faces into other geometry or another round (#1080).
     // Checked once built, so a refusal of the build itself stands as it is.
     let size = crate::blend_fit::Size::Round(radius);
@@ -1919,6 +1925,9 @@ fn corners(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, g2: bo
 /// unchanged.
 pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     body.require_brep("fillet")?;
+    if crate::blend_smlib::selected()? {
+        return Err(crate::blend_smlib::unsupported("a fillet with G2 corner patches"));
+    }
     if !(radius.is_finite() && radius > 0.0) {
         return Err(KernelError::Invalid("the blend radius must be finite and positive".into()));
     }
@@ -2004,6 +2013,9 @@ pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
+    if crate::blend_smlib::selected()? {
+        return crate::blend_smlib::fillet_each(body, edges, radii);
+    }
     if let Some(r) = radii.first().filter(|r| radii.iter().all(|x| x.to_bits() == r.to_bits())) {
         return fillet(body, edges, *r);
     }
@@ -2088,6 +2100,9 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     }
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
+    }
+    if crate::blend_smlib::selected()? {
+        return crate::blend_smlib::chamfer(body, edges, distance);
     }
     // A chamfer that would run past its faces into other geometry or another chamfer, or whose
     // result changes more than the chamfers can (#1080).
@@ -2326,6 +2341,13 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
     }
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
+    }
+    if crate::blend_smlib::selected()? {
+        // SMLib has no solver for unequal setbacks: equal ones are its equal-distance chamfer.
+        return match side {
+            ChamferSide::Distance(d2) if d2 == d1 => crate::blend_smlib::chamfer(body, edges, d1),
+            _ => Err(crate::blend_smlib::unsupported("a chamfer with two different setbacks (two distances, or a distance and an angle)")),
+        };
     }
     let size = crate::blend_fit::Size::Sides(d1, side, flip);
     let counts = record::counts(&[body]);
