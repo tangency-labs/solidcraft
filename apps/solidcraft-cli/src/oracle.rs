@@ -13,28 +13,28 @@ use crate::{read_json, recipe};
 /// Default relative tolerance for volume and area (our curved-face tessellation is within ~2e-4).
 pub const REL_TOL: f64 = 1e-3;
 /// Default tolerance for centre of mass and bounding box, as a fraction of the bbox diagonal.
-const ABS_FRAC: f64 = 1e-3;
+pub(crate) const ABS_FRAC: f64 = 1e-3;
 /// Chord tolerance used to triangulate our part for the surface-distance check (mm).
 const MESH_TOL: f64 = 0.01;
 /// Relative tolerance on the principal second moments of the two triangulations.
 const INERTIA_REL: f64 = 2e-3;
 
 /// What SolidCraft built: totals over every body.
-struct Got {
-    body_count: usize,
-    volume: f64,
-    area: f64,
-    com: [f64; 3],
-    bbox: ([f64; 3], [f64; 3]),
-    faces: u64,
+pub(crate) struct Got {
+    pub(crate) body_count: usize,
+    pub(crate) volume: f64,
+    pub(crate) area: f64,
+    pub(crate) com: [f64; 3],
+    pub(crate) bbox: ([f64; 3], [f64; 3]),
+    pub(crate) faces: u64,
 }
 
-fn v3(v: &Value) -> Option<[f64; 3]> {
+pub(crate) fn v3(v: &Value) -> Option<[f64; 3]> {
     let a = v.as_array()?;
     Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
 }
 
-fn totals(m: &Value) -> Got {
+pub(crate) fn totals(m: &Value) -> Got {
     let bodies = m["bodies"].as_array().cloned().unwrap_or_default();
     let (mut volume, mut area, mut faces) = (0.0, 0.0, 0);
     let mut moment = [0.0; 3];
@@ -57,21 +57,21 @@ fn totals(m: &Value) -> Got {
     Got { body_count: bodies.len(), volume, area, com, bbox: (lo, hi), faces }
 }
 
-struct Checks {
-    list: Vec<Value>,
-    pass: bool,
+pub(crate) struct Checks {
+    pub(crate) list: Vec<Value>,
+    pub(crate) pass: bool,
 }
 
 impl Checks {
-    fn push(&mut self, what: &str, got: Value, want: Value, ok: bool) {
+    pub(crate) fn push(&mut self, what: &str, got: Value, want: Value, ok: bool) {
         self.pass &= ok;
         self.list.push(json!({"check": what, "got": got, "want": want, "ok": ok}));
     }
-    fn rel(&mut self, what: &str, g: f64, w: Option<f64>, rel: f64) {
+    pub(crate) fn rel(&mut self, what: &str, g: f64, w: Option<f64>, rel: f64) {
         let ok = w.is_some_and(|w| g.is_finite() && (g - w).abs() <= rel * w.abs().max(1.0));
         self.push(what, json!(g), json!(w), ok);
     }
-    fn vec(&mut self, what: &str, g: [f64; 3], w: Option<[f64; 3]>, tol: f64) {
+    pub(crate) fn vec(&mut self, what: &str, g: [f64; 3], w: Option<[f64; 3]>, tol: f64) {
         let ok = w.is_some_and(|w| g.iter().zip(w).all(|(g, w)| g.is_finite() && (g - w).abs() <= tol));
         self.push(what, json!(g), json!(w), ok);
     }
