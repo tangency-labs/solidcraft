@@ -24,10 +24,12 @@
 //! A Rust error maps to its `SmStatus` (`-1` for one upstream cannot return, e.g. a
 //! dereference the shim should have refused); an `Unported` error anywhere defers the case.
 //! The B-rep walks (`ProtoTopology`) of the bare stand-ins answer as upstream's do: no
-//! uses, no B-rep, vertices at the origin. Deferred: point classifications on topology
-//! objects (their `SmVertex::GetPoint`, `SmEdge::GetCurve`, `SmFace::GetSurface`, ...
-//! in `intersect.point_class`), `SmBrep::Transform`, and the manager's fallback
-//! tolerance.
+//! uses, no B-rep, vertices at the origin. The vertex, edge and face stand-ins are also
+//! records of one B-rep ([`TopoRecords`]), so point classifications on them reach the
+//! ported topology members (`SmVertex::GetPoint`, `SmEdge::GetCurve`,
+//! `SmFace::GetSurface`, the zone tolerances) through the [`ClassGeometry`] hooks.
+//! Deferred: `SmBrep::Transform`, the manager's fallback tolerance and what needs a real
+//! B-rep (`SmBrep::GetVertices`, `Point3DClassify`, UV domains from trim curves).
 
 use std::collections::BTreeMap;
 
@@ -78,8 +80,11 @@ use solidcore::topology::proto_topology::p1::{
 };
 use solidcore::topology::proto_topology::p2::ProtoBrep;
 use solidcore::topology::topology::{Topology, TopologyRecords};
-use solidcore::topology::Brep;
-use solidcore::SolidError;
+use solidcore::topology::edge as topo_edge;
+use solidcore::topology::face::p2 as topo_face;
+use solidcore::topology::vertex as topo_vertex;
+use solidcore::topology::{Brep, Edge, Face, Vertex, VertexId};
+use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::topology_proto_topology_p1::{
     self as ffi, kind, list_op as lop, pool as pk, proto_op as p, proto_op_p2 as q, slot, tobj,
     PROBE_TYPES,
@@ -1226,6 +1231,88 @@ pub(super) struct Pool {
     pub(super) objs: Vec<PObj>,
     pub(super) kinds: Vec<i64>,
     pub(super) alive: Vec<bool>,
+    /// The vertex, edge and face stand-ins as records of one B-rep ([`TopoRecords`]).
+    pub(super) topo: TopoRecords,
+}
+
+/// The shim's vertex, edge and face stand-ins as records of one B-rep, so that topology
+/// handles resolve through the [`ClassGeometry`] hooks to the ported topology members
+/// (as `intersect.curve_class_p1`'s `BareTopology`). The shim builds default-constructed
+/// `SmVertex` / `SmEdge` / `SmFace` objects with only the point, interval, tolerance,
+/// `m_pCurve` / `m_pSurface` set, never joined to a B-rep; the records are in that state:
+/// no uses, an edge sharing its pool curve (kept in step by [`Pool::sync_topo`]), a face
+/// with its surface and nothing else (its shell is a placeholder no list names).
+#[derive(Default)]
+pub(super) struct TopoRecords {
+    brep: Brep,
+    /// Per pool object: its entity (vertex, edge and face stand-ins).
+    ents: Vec<Option<EntityRef>>,
+    /// Per pool object: for an edge, the pool index of its curve.
+    edge_curve: Vec<Option<usize>>,
+}
+
+impl TopoRecords {
+    /// Appends the record of pool object `obj` (kind `kind`; `surface`: a face's surface).
+    fn push(
+        &mut self,
+        obj: &PObj,
+        kind: i64,
+        curve: Option<&Curve>,
+        surface: Option<&Surface>,
+    ) -> Result<(), HarnessError> {
+        let e = |e: SolidError| harness(e.to_string());
+        let mut edge_curve = None;
+        let ent = match (kind, obj) {
+            (pk::VERTEX, PObj::Tol(tol)) => Some(EntityRef::Vertex(
+                self.brep
+                    .add_vertex_record(Vertex {
+                        tolerance: *tol,
+                        ..Vertex::default()
+                    })
+                    .map_err(e)?,
+            )),
+            (pk::VERTEX, PObj::VertexPt(p, tol)) => Some(EntityRef::Vertex(
+                self.brep
+                    .add_vertex_record(Vertex {
+                        point: *p,
+                        tolerance: *tol,
+                        ..Vertex::default()
+                    })
+                    .map_err(e)?,
+            )),
+            (pk::EDGE, PObj::Edge { curve: c, ivl, tol }) => {
+                edge_curve = Some(*c);
+                Some(EntityRef::Edge(
+                    self.brep
+                        .add_edge_record(Edge {
+                            // never read: an edge's vertices are those of its (absent)
+                            // edge uses
+                            vertices: [VertexId::from_index(u32::MAX); 2],
+                            edgeuses: Vec::new(),
+                            interval: *ivl,
+                            tolerance: *tol,
+                            curve: curve.cloned(),
+                        })
+                        .map_err(e)?,
+                ))
+            }
+            (pk::FACE, PObj::Tol(tol)) => {
+                let shell = self.brep.add_shell().map_err(e)?;
+                let mut face = Face::new(shell);
+                face.surface = surface.cloned();
+                face.tolerance = *tol;
+                Some(EntityRef::Face(self.brep.add_face_record(face).map_err(e)?))
+            }
+            _ => None,
+        };
+        self.ents.push(ent);
+        self.edge_curve.push(edge_curve);
+        Ok(())
+    }
+
+    fn ent(&self, i: usize) -> Option<EntityRef> {
+        self.ents.get(i).copied().flatten()
+    }
 }
 
 /// The pool holds proto-topology objects, not a B-rep arena: it cannot glue. The glue
@@ -1268,6 +1355,58 @@ impl ClassGeometry<H> for Pool {
     }
     fn point(&self, _o: H) -> Option<Vec3> {
         None
+    }
+    fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
+        match self.topo_entity(o)? {
+            EntityRef::Vertex(v) => topo_vertex::point(&self.topo.brep, v).ok(),
+            _ => None,
+        }
+    }
+    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        let b = &self.topo.brep;
+        match self.topo_entity(o)? {
+            EntityRef::Vertex(v) => topo_vertex::tolerance(b, v).ok(),
+            EntityRef::Edge(e) => topo_edge::tolerance(b, e).ok(),
+            EntityRef::Face(f) => topo_face::tolerance(b, f).ok(),
+            _ => None,
+        }
+    }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.topo_entity(o).map(|e| (&self.topo.brep, e))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<H> {
+        let i = self.topo.ents.iter().position(|t| *t == Some(e))?;
+        let h = H(i, class_kind_of(self.kinds.get(i).copied().unwrap_or(-1)));
+        self.live_h(h).then_some(h)
+    }
+}
+
+impl Pool {
+    /// The entity of live topology stand-in `o`.
+    fn topo_entity(&self, o: H) -> Option<EntityRef> {
+        if !self.live_h(o) {
+            return None;
+        }
+        self.topo.ent(o.0)
+    }
+
+    /// Brings the edge records' curves in step with the pool curves they share (an op
+    /// may have edited a pool curve).
+    pub(super) fn sync_topo(&mut self) {
+        for j in 0..self.topo.ents.len() {
+            let (Some(Some(EntityRef::Edge(e))), Some(Some(c))) =
+                (self.topo.ents.get(j), self.topo.edge_curve.get(j))
+            else {
+                continue;
+            };
+            let curve = match self.objs.get(*c) {
+                Some(PObj::Curve(x)) => Some(x.clone()),
+                _ => None,
+            };
+            if let Ok(r) = self.topo.brep.edge_mut(*e) {
+                r.curve = curve;
+            }
+        }
     }
 }
 
@@ -1375,6 +1514,8 @@ impl ProtoBrep<H> for Pool {
         self.objs.push(PObj::Curve(curve));
         self.kinds.push(pk::CURVE);
         self.alive.push(true);
+        self.topo.ents.push(None);
+        self.topo.edge_curve.push(None);
         Some(H(self.objs.len() - 1, ClassObjectKind::Curve))
     }
     fn vertex_common_edges(&self, v1: H, v2: H) -> solidcore::Result<Vec<H>> {
@@ -2020,6 +2161,7 @@ fn run_proto(
         objs: Vec::new(),
         kinds: Vec::new(),
         alive: Vec::new(),
+        topo: TopoRecords::default(),
     };
     for ob in objects {
         let (obj, kd) = match ob {
@@ -2069,6 +2211,22 @@ fn run_proto(
             ObjIn::Region => (PObj::Bare, pk::REGION),
             ObjIn::Loop => (PObj::Bare, pk::LOOP),
         };
+        // the curve of an edge, the surface of a face (earlier pool objects)
+        let curve = match ob {
+            ObjIn::Edge(c) | ObjIn::EdgeIvl { c, .. } => match pool.objs.get(*c) {
+                Some(PObj::Curve(x)) => Some(x),
+                _ => None,
+            },
+            _ => None,
+        };
+        let surface = match ob {
+            ObjIn::Face(sf) => match pool.objs.get(*sf) {
+                Some(PObj::Surface(x)) => Some(x),
+                _ => None,
+            },
+            _ => None,
+        };
+        pool.topo.push(&obj, kd, curve, surface)?;
         pool.objs.push(obj);
         pool.kinds.push(kd);
         pool.alive.push(true);
@@ -2105,6 +2263,7 @@ fn run_proto(
     let mut o = Vec::new();
 
     for opv in ops {
+        r.pool.sync_topo();
         let mut rd = Rd {
             v: opv,
             at: 0,
