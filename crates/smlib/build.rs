@@ -60,8 +60,9 @@ fn build() -> Result<(), String> {
     };
 
     // Link order: the C API needs SM_API, which needs SMLib.
+    let capi = sources(&root.join("capi/src"), &[])?;
     let mut c = base();
-    c.file(root.join("capi/src/smlib_c.cpp")).include(root.join("capi/include")).include(src.join("SM_API/inc")).include(src.join("SMLib/inc"));
+    c.files(&capi).include(root.join("capi/include")).include(src.join("SM_API/inc")).include(src.join("SMLib/inc"));
     quiet(&mut c);
     c.try_compile("smlib_capi").map_err(|e| e.to_string())?;
 
