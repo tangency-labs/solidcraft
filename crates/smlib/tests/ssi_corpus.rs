@@ -10,6 +10,10 @@
 //! SSI_PARITY_TOL=1e-6 SSI_SM_MESSAGES=<smlib>/source/SMLib/inc/SmMessages.h \
 //!   cargo test -p solidcraft-smlib --test ssi_corpus -- --ignored --nocapture
 //! ```
+//!
+//! With the `native` feature, [`smlib_global_intersect_at_1e_6`] runs every case through SMLib's
+//! GlobalSurfaceIntersect (via `solidcraft_smlib::ssi`, as the corpus runner calls it) and checks
+//! exactly which cases pass.
 
 mod ssi_score;
 
@@ -357,4 +361,250 @@ fn parity_with_python_scorer() {
     }
     println!("{same}/119 identical verdicts");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+// ---- SMLib itself (feature `native`) ---------------------------------------------------------
+
+/// The cases SMLib's GlobalSurfaceIntersect passes at approximation tolerance 1e-6, as score.py
+/// grades the corpus runner's output. A fix that makes another case pass adds it here.
+#[cfg(feature = "native")]
+const GSI_1E6_PASS: &[&str] = &[
+    "c1_cone_plane_ellipse",
+    "c1_cone_plane_hyperbola",
+    "c1_cyl_cyl_two_loops",
+    "c1_plane_cyl_ellipse",
+    "c1_plane_halfcyl_arc",
+    "c1_plane_sphere_circle",
+    "c1_sphere_cyl_two_loops",
+    "c1_torus_plane_nested",
+    "c1n_cylN_plane_ellipse",
+    "c1n_parab_parab_circle",
+    "c1n_parab_plane_circle",
+    "c1n_saddle_plane_hyperbola",
+    "c1n_sphereN_cylN_two_loops",
+    "c1n_torusN_planeN_nested",
+    "c2_cones_tangent_ruling",
+    "c2_cyl_cyl_external",
+    "c2_cyl_on_plane",
+    "c2_sphere_in_cyl",
+    "c2_sphere_in_torus",
+    "c2n_parabcyl_plane",
+    "c2n_sphereN_in_cyl",
+    "c3_sphere_on_plane",
+    "c3_spheres_external",
+    "c3_spheres_internal",
+    "c4_cone_apex_plane",
+    "c4n_cusp",
+    "c4n_saddle_tangent_plane",
+    "c5_corner_to_corner",
+    "c5_curve_on_edge",
+    "c5_cyl_end_circle",
+    "c5_cyl_quilt_seam",
+    "c5_hemisphere_equator",
+    "c5_shared_border_L",
+    "c5n_curve_on_edge",
+    "c5n_cylN_quilt_seam",
+    "c6_cyl_overlap",
+    "c6_planes_identical",
+    "c6_planes_overlap",
+    "c6_spheres_overlap",
+    "c6n_cyl_vs_nurbscyl",
+    "c6n_plane_vs_nurbsplane",
+    "c6n_sphere_vs_nurbssphere",
+    "c7_angle_planes_1e-3",
+    "c7_angle_planes_1e-4",
+    "c7_angle_planes_1e-5",
+    "c7_offset_planes_1e-3",
+    "c7_offset_planes_1e-5",
+    "c7_offset_spheres_1e-3",
+    "c7_offset_spheres_1e-5",
+    "c7_sunk_cyl_1e-3",
+    "c7_sunk_cyl_1e-4",
+    "c7_sunk_cyl_1e-5",
+    "c7_sunk_cyl_1e-6",
+    "c8_cone_plane_seam",
+    "c8_cyl_plane_seam_line",
+    "c8_sphere_cyl_through_poles",
+    "c8_sphere_plane_poles",
+    "c8_sphere_plane_poles_seam",
+    "c8_sphere_polar_cap",
+    "c8_torus_axis_plane_seam",
+    "c8_torus_equator_seam",
+    "c8n_cylN_seam_line",
+    "c8n_sphereN_polar_cap",
+    "c8n_sphereN_poles",
+    "c8n_torusN_equator_seam",
+    "c9n_deg6_circle",
+    "c9n_elevated_paraboloids",
+    "c9n_many_spans_plane_sphere",
+    "c9n_rational_deg5_cyl_arc",
+    "c9n_rational_deg5_sphere_arc",
+    "c9n_refined_torus_sphere",
+    "y23_appendix_ex2",
+    "y23_fig1b_two_arcs_and_point",
+    "y23_fig1c_boundary_triangle",
+    "y23_fig1e_loops_touching",
+    "y23_t3_ex1_torus_ellipsoid",
+    "y23_t3_ex2_torus_ellipsoid",
+    "y23_t3_ex3_torus_ellipsoid",
+    "y23_t3_ex5_torus_ellipsoid",
+    "y23_t6_ex2_tangential_arc",
+    "y23_t6_ex5_four_boundary_curves",
+];
+
+/// The corpus runner's samples per curve.
+#[cfg(feature = "native")]
+const RUNNER_SAMPLES: usize = 4001;
+
+#[cfg(feature = "native")]
+fn surface(s: &Value) -> Result<solidcraft_smlib::ssi::Surface, String> {
+    use solidcraft_smlib::ssi::Surface;
+    let f = |k: &str| s.get(k).map(ssi_score::geom::num).ok_or(format!("{k}: missing"));
+    let v3 = |k: &str| -> Result<[f64; 3], String> {
+        let a = s.get(k).and_then(Value::as_array).filter(|a| a.len() == 3).ok_or(format!("{k}: not 3 numbers"))?;
+        Ok([0, 1, 2].map(|i| ssi_score::geom::num(&a[i])))
+    };
+    let v2 = |k: &str| -> Result<[f64; 2], String> {
+        let a = s.get(k).and_then(Value::as_array).filter(|a| a.len() == 2).ok_or(format!("{k}: not 2 numbers"))?;
+        Ok([0, 1].map(|i| ssi_score::geom::num(&a[i])))
+    };
+    let list = |k: &str| -> Vec<f64> { s.get(k).and_then(Value::as_array).map(|a| a.iter().map(ssi_score::geom::num).collect()).unwrap_or_default() };
+    let r = match s.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "plane" => Surface::plane(v3("origin")?, v3("xaxis")?, v3("yaxis")?, v2("u")?, v2("v")?),
+        "cylinder" => Surface::cylinder(v3("origin")?, v3("xaxis")?, v3("yaxis")?, f("radius")?, v2("angle")?, v2("height")?),
+        "cone" => Surface::cone(v3("apex")?, v3("xaxis")?, v3("yaxis")?, f("half_angle_deg")?, v2("height")?),
+        "sphere" => Surface::sphere(v3("center")?, v3("xaxis")?, v3("yaxis")?, f("radius")?, v2("lon")?, v2("lat")?),
+        "torus" => Surface::torus(v3("center")?, v3("xaxis")?, v3("yaxis")?, f("R")?, f("r")?, v2("major")?, v2("minor")?),
+        "nurbs" => {
+            let d = v2("degree")?;
+            let points: Vec<[f64; 3]> = s
+                .get("points")
+                .and_then(Value::as_array)
+                .ok_or("points: missing")?
+                .iter()
+                .map(|p| [0, 1, 2].map(|i| ssi_score::geom::num(&p[i])))
+                .collect();
+            let weights = list("weights");
+            Surface::nurbs(
+                [d[0] as usize, d[1] as usize],
+                f("nu")? as usize,
+                f("nv")? as usize,
+                &list("knots_u"),
+                &list("knots_v"),
+                &points,
+                (!weights.is_empty()).then_some(&weights[..]),
+            )
+        }
+        t => return Err(format!("unknown surface type {t}")),
+    };
+    r.map_err(|e| e.to_string())
+}
+
+/// SMLib's answer as the corpus runner writes it for `gsi`: samples SMLib could not evaluate
+/// dropped, empty UV arrays for a UV curve the method did not return, the runner's type names,
+/// and no isolated points (the runner only reports those in face mode).
+#[cfg(feature = "native")]
+fn runner_output(r: solidcraft_smlib::Result<solidcraft_smlib::ssi::SsiResult>, ms: f64) -> Outcome {
+    use solidcraft_smlib::ssi::CurveType;
+    let r = match r {
+        Ok(r) => r,
+        Err(solidcraft_smlib::Error::Status(s)) => {
+            return Outcome::Ran(EngineResult { status: i64::from(s), status_name: None, time_ms: ms, curves: Vec::new(), points: Vec::new() });
+        }
+        Err(e) => return Outcome::Crashed(e.to_string()),
+    };
+    let curves = r
+        .curves
+        .into_iter()
+        .map(|c| {
+            let curve_type = match c.curve_type {
+                CurveType::None => "n/a",
+                CurveType::Unknown => "UNKNOWN",
+                CurveType::Touching => "TOUCHING",
+                CurveType::Crossing => "CROSSING",
+                CurveType::Tangent => "TANGENT",
+                CurveType::Coincident => "COINCIDENT",
+                CurveType::NearTangent => "NEAR_TANGENT",
+                CurveType::RegionBoundary => "REGION_BOUNDARY",
+                CurveType::Other(_) => "?",
+            };
+            let evaluated = |p: &[f64]| p.iter().any(|x| !x.is_nan());
+            let on = |has: bool, uv: Vec<[f64; 2]>, at: Vec<V3>| -> (Vec<[f64; 2]>, Vec<V3>) {
+                if !has {
+                    return (Vec::new(), Vec::new());
+                }
+                uv.into_iter().zip(at).filter(|(q, _)| evaluated(q)).unzip()
+            };
+            let (uv1, s1_at_uv) = on(c.has_uv_a, c.uv_a, c.a_at_uv);
+            let (uv2, s2_at_uv) = on(c.has_uv_b, c.uv_b, c.b_at_uv);
+            EngineCurve { curve_type: curve_type.into(), xyz: c.xyz.into_iter().filter(|p| evaluated(p)).collect(), uv1, uv2, s1_at_uv, s2_at_uv }
+        })
+        .collect();
+    Outcome::Ran(EngineResult { status: ssi_score::SM_SUCCESS, status_name: None, time_ms: ms, curves, points: Vec::new() })
+}
+
+/// Every case through SMLib's GlobalSurfaceIntersect at approximation tolerance 1e-6, scored as
+/// score.py scores the corpus runner's `gsi 1e-6` run: exactly [`GSI_1E6_PASS`] pass.
+#[cfg(feature = "native")]
+#[test]
+fn smlib_global_intersect_at_1e_6() {
+    use solidcraft_smlib::ssi::{Method, intersect};
+    let t0 = std::time::Instant::now();
+    let cases = all_cases();
+    // SMLib serialises its calls, so the cases run one after another; only the scoring is parallel.
+    let outcomes: Vec<Outcome> = cases
+        .iter()
+        .map(|case| {
+            let a = surface(&case.surfaces[0]).unwrap_or_else(|e| panic!("{} surface 1: {e}", case.id));
+            let b = surface(&case.surfaces[1]).unwrap_or_else(|e| panic!("{} surface 2: {e}", case.id));
+            let t = std::time::Instant::now();
+            let r = intersect(&a, &b, Method::Global, 1e-6, RUNNER_SAMPLES);
+            runner_output(r, t.elapsed().as_secs_f64() * 1e3)
+        })
+        .collect();
+    let ran = t0.elapsed();
+    // Status names for the flags, from the SMLib sources the build used, as score.py has them.
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = std::env::var_os("SOLIDCRAFT_SMLIB_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| {
+        let rev = std::fs::read_to_string(manifest.join("SMLIB_REV")).unwrap_or_default();
+        manifest.join("../../target").join(format!("smlib-{}", rev.trim().get(..12).unwrap_or_default()))
+    });
+    let names = std::fs::read_to_string(src.join("source/SMLib/inc/SmMessages.h")).map(|h| ssi_score::status_names(&h)).unwrap_or_default();
+    let outcomes: Vec<Outcome> = outcomes
+        .into_iter()
+        .map(|o| match o {
+            Outcome::Ran(mut r) if r.status_name.is_none() => {
+                r.status_name = names.get(&r.status).cloned();
+                Outcome::Ran(r)
+            }
+            o => o,
+        })
+        .collect();
+    let pairs: Vec<(&Case, &Outcome)> = cases.iter().zip(&outcomes).collect();
+    let scores = par_map(&pairs, |(case, out)| score_case(case, out, Tolerances::at(1e-6)));
+
+    let mut by_verdict: std::collections::BTreeMap<Verdict, Vec<&str>> = Default::default();
+    for s in &scores {
+        by_verdict.entry(s.verdict).or_default().push(&s.id);
+    }
+    println!(
+        "SMLib GlobalSurfaceIntersect, approx tol 1e-6 ({} cases, SMLib {:.1} s, total {:.1} s)",
+        scores.len(),
+        ran.as_secs_f64(),
+        t0.elapsed().as_secs_f64()
+    );
+    for (v, ids) in &by_verdict {
+        println!("  {:<15} {:>3}", v.as_str(), ids.len());
+    }
+    for s in scores.iter().filter(|s| s.verdict != Verdict::Pass) {
+        println!("  {:<40} {:<15} {}", s.id, s.verdict.as_str(), s.flags.join("; "));
+    }
+
+    let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
+    let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
+    assert_eq!(listed.len(), GSI_1E6_PASS.len(), "GSI_1E6_PASS lists a case twice");
+    let newly: Vec<_> = passed.difference(&listed).collect();
+    let lost: Vec<_> = listed.difference(&passed).collect();
+    assert!(newly.is_empty() && lost.is_empty(), "now pass (add to GSI_1E6_PASS): {newly:?}; no longer pass: {lost:?}");
+    assert_eq!(passed.len(), 81);
 }
