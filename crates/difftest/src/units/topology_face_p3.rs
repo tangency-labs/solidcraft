@@ -187,8 +187,10 @@ struct Built {
 fn build(i: &Inputs) -> Result<Result<Built, Output>, HarnessError> {
     let path = shared::path_of(&i.brep)?;
     let block = block(i)?;
-    let export = fixture::eval(FixtureOp::Export, &path, &block)
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
+    let export = crate::export_memo::export("topology_vertexuse", &[&path], &block, || {
+        fixture::eval(FixtureOp::Export, &path, &block)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     let Some(counts) = fixture::counts(&export) else {
         let status = export.get(1).copied().unwrap_or(0.0);
         return Ok(Err(Output::err(format!("brep_build_status_{status}"))));

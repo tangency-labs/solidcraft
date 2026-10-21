@@ -101,8 +101,10 @@ impl OpIn {
 fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps)?;
-    let ex = ffi1::eval(ffi1::Op::Export, &path, &block)
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
+    let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
+        ffi1::eval(ffi1::Op::Export, &path, &block)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     let Some(c) = ffi1::counts(&ex) else {
         let st = ex.get(1).copied().unwrap_or(0.0);
         return Ok(Err(Output::err(format!("brep_build_status_{st}"))));

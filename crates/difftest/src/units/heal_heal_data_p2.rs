@@ -527,7 +527,10 @@ fn ffi_out(r: Result<Vec<f64>, solidcore_ffi::FfiError>) -> Result<Output, Harne
 /// The export of a heal case's B-rep and its `[n_v, n_e, n_f]` (`None` when it could
 /// not be built).
 fn export_of(path: &str, block: &[f64]) -> Result<(Vec<f64>, Option<[usize; 3]>), HarnessError> {
-    let ex = ffi::export(path, block).map_err(|e| harness(format!("c++ export: {e}")))?;
+    let ex = crate::export_memo::export("heal_heal_data_p2", &[path], block, || {
+        ffi::export(path, block)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     let n = counts(&ex).map(vef);
     Ok((ex, n))
 }

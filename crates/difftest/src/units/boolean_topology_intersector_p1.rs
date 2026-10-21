@@ -562,7 +562,14 @@ fn blocks(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 fn export(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     let pa = path_of(Some(&i.brep_a))?;
     let pb = path_of(i.brep_b.as_ref())?;
-    ffi::eval(Op::Export, [&pa, &pb], &blocks(i)?).map_err(|e| harness(format!("c++ export: {e}")))
+    let block = blocks(i)?;
+    crate::export_memo::export(
+        "boolean_topology_intersector_p1",
+        &[&pa, &pb],
+        &block,
+        || ffi::eval(Op::Export, [&pa, &pb], &block),
+    )
+    .map_err(|e| harness(format!("c++ export: {e}")))
 }
 
 /// A build failure as an operation error.

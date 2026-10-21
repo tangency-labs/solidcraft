@@ -10,6 +10,7 @@
 
 pub mod case;
 pub mod compare;
+pub mod export_memo;
 pub mod fixtures;
 pub mod fuzz;
 pub mod jobs;

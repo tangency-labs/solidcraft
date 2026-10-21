@@ -740,7 +740,11 @@ fn brep_block(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 /// The C++ export of the case's B-rep (extras, then the graph).
 fn export(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     let path = path_of(i.brep.as_ref())?;
-    ffi::eval(Op::Export, &path, &brep_block(i)?).map_err(|e| harness(format!("c++ export: {e}")))
+    let block = brep_block(i)?;
+    crate::export_memo::export("topology_brep_p1", &[&path], &block, || {
+        ffi::eval(Op::Export, &path, &block)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))
 }
 
 fn build_failure(export: &[f64]) -> Output {
@@ -755,8 +759,11 @@ fn build_failure(export: &[f64]) -> Output {
 /// runners of other units whose Rust side needs the file's B-rep.
 pub(crate) fn import_file(path: &str, rebuild: bool) -> Result<Brep, HarnessError> {
     // the file block: kind 0, rebuild, validate_only, init_gaps
-    let ex = ffi::eval(Op::Export, path, &[0.0, flag(rebuild), 0.0, 0.0])
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
+    let block = [0.0, flag(rebuild), 0.0, 0.0];
+    let ex = crate::export_memo::export("topology_brep_p1", &[path], &block, || {
+        ffi::eval(Op::Export, path, &block)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     let Some((_, graph_at)) = ffi::counts(&ex) else {
         return Err(harness(format!(
             "brep_build_status_{}",

@@ -1384,8 +1384,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessError> {
     let path = path_of(Some(brep))?;
     let block = brep_block_of(Some(brep), false, false)?;
-    let ex = ffi1::eval(ffi1::Op::Export, &path, &block)
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
+    let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
+        ffi1::eval(ffi1::Op::Export, &path, &block)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     let Some(c) = ffi1::counts(&ex) else {
         let st = ex.get(1).copied().unwrap_or(0.0);
         return Ok(Err(Output::err(format!("brep_build_status_{st}"))));

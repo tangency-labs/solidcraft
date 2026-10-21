@@ -302,6 +302,11 @@ fn main() -> ExitCode {
             {
                 eprintln!("difftest: {}: {e}", path.display());
             }
+            let path = Path::new(&dir).join(format!("{id}.cppdigest"));
+            let body = res.timing.cpp_digests.join("\n") + "\n";
+            if let Err(e) = std::fs::write(&path, body) {
+                eprintln!("difftest: {}: {e}", path.display());
+            }
         }
         for c in res.cases.iter().filter(|c| c.fail()).take(5) {
             let first = c

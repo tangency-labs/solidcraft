@@ -481,8 +481,10 @@ fn scene(k: &Kernel, i: &Inputs) -> Result<Result<Scene, Output>, HarnessError> 
     let block = brep_block(&i.brep)?;
     let mut plain = block.clone();
     plain.extend(edit_block(None, 0));
-    let first =
-        ffi::eval(Op::Export, &path, &plain).map_err(|e| harness(format!("c++ export: {e}")))?;
+    let first = crate::export_memo::export("query_edge", &[&path], &plain, || {
+        ffi::eval(Op::Export, &path, &plain)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     let Some(c) = ffi::counts(&first) else {
         let st = first.get(1).copied().unwrap_or(0.0);
         return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
@@ -490,8 +492,10 @@ fn scene(k: &Kernel, i: &Inputs) -> Result<Result<Scene, Output>, HarnessError> 
     let n_edges = c[7];
     let mut prefix = block;
     prefix.extend(edit_block(i.edits.as_ref(), n_edges));
-    let ex =
-        ffi::eval(Op::Export, &path, &prefix).map_err(|e| harness(format!("c++ export: {e}")))?;
+    let ex = crate::export_memo::export("query_edge", &[&path], &prefix, || {
+        ffi::eval(Op::Export, &path, &prefix)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     // the edge curve kinds follow the graph
     let split = ex
         .len()

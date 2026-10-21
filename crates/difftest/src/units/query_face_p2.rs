@@ -205,8 +205,10 @@ fn model(i: &Inputs) -> Result<Result<Model, Output>, HarnessError> {
     }
     let mut input = block(i)?;
     input.extend(&edit_block);
-    let ex =
-        ffi::eval(Op::Export, &path, &input).map_err(|e| harness(format!("c++ export: {e}")))?;
+    let ex = crate::export_memo::export("query_face_p2", &[&path], &input, || {
+        ffi::eval(Op::Export, &path, &input)
+    })
+    .map_err(|e| harness(format!("c++ export: {e}")))?;
     if ex.first() != Some(&0.0) {
         return Ok(Err(Output::err(format!(
             "brep_build_status_{}",

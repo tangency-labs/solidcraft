@@ -215,6 +215,9 @@ pub struct UnitTiming {
     /// line per case (f64 `Debug` is the shortest round-trip form, so equal digests mean
     /// bit-identical Rust outputs across builds).
     pub rust_digests: Vec<String>,
+    /// With `DIFFTEST_RUST_DIGEST` set: the same line for the C++ output of every case
+    /// (proves that harness changes leave the C++ side's results untouched).
+    pub cpp_digests: Vec<String>,
 }
 
 fn fnv1a64(s: &str) -> u64 {
@@ -430,9 +433,17 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 continue;
             }
         }
+        // the Rust side reuses this case's C++ fixture exports (`export_memo`)
+        let memo = crate::export_memo::CaseScope::new();
         let t0 = Instant::now();
         let cpp = guarded(|| unit.run_cpp(&case), "cpp");
         res.timing.cpp += t0.elapsed();
+        if digest {
+            let d = fnv1a64(&format!("{cpp:?}"));
+            res.timing
+                .cpp_digests
+                .push(format!("{}\t{d:016x}", case.name));
+        }
 
         let mut cr = CaseResult {
             name: case.name.clone(),
@@ -452,9 +463,11 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 continue;
             }
         }
+        crate::export_memo::rust_side();
         let t0 = Instant::now();
         let rust = guarded(|| unit.run_rust(&case), "rust");
         let dt = t0.elapsed();
+        drop(memo);
         res.timing.rust += dt;
         if digest {
             let d = fnv1a64(&format!("{rust:?}"));

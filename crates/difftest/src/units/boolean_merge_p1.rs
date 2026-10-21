@@ -993,11 +993,16 @@ impl UnitDiff for Runner {
             return Ok(Output::new().values("record", control(i.args)));
         }
         let (path, block) = block(&i)?;
-        let raw = fixture::eval(fixture::Op::Export, &path, &block)
-            .map_err(|e| harness(e.to_string()))?;
+        let raw = crate::export_memo::export("topology_vertexuse", &[&path], &block, || {
+            fixture::eval(fixture::Op::Export, &path, &block)
+        })
+        .map_err(|e| harness(e.to_string()))?;
         let (mut b, _) = import(&raw)?;
         let (other_path, other_block) = other_block(&i)?;
-        let other_raw = fixture::eval(fixture::Op::Export, &other_path, &other_block)
+        let other_raw =
+            crate::export_memo::export("topology_vertexuse", &[&other_path], &other_block, || {
+                fixture::eval(fixture::Op::Export, &other_path, &other_block)
+            })
             .map_err(|e| harness(e.to_string()))?;
         let (other, _) = import(&other_raw)?;
         match run_rust(&i, &mut b, &other) {
