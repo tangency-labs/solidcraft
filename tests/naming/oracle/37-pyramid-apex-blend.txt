@@ -1,0 +1,60 @@
+# oracle/37-pyramid-apex-blend: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Pyramid: 18 faces, 32 edges
+Pyramid face F4:side:l1
+Pyramid face F4:side:l2
+Pyramid face F4:side:l3
+Pyramid face F4:side:l4
+Pyramid face F4:start
+Pyramid face F5:blend:F4:side:l1|F4:side:l2
+Pyramid face F5:blend:F4:side:l1|F4:side:l4#[F4:side:l1,F4:side:l4,F5:blend:F4:side:l4|F4:start]
+Pyramid face F5:blend:F4:side:l1|F4:side:l4#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l3|F4:side:l4]
+Pyramid face F5:blend:F4:side:l1|F4:start
+Pyramid face F5:blend:F4:side:l2|F4:side:l3
+Pyramid face F5:blend:F4:side:l2|F4:start#[F4:side:l2,F4:start,F5:blend:F4:side:l3|F4:start]
+Pyramid face F5:blend:F4:side:l2|F4:start#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l1|F4:start]
+Pyramid face F5:blend:F4:side:l3|F4:side:l4
+Pyramid face F5:blend:F4:side:l3|F4:start#[F4:side:l3,F4:start,F5:blend:F4:side:l4|F4:start]
+Pyramid face F5:blend:F4:side:l3|F4:start#[F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l2|F4:start]
+Pyramid face F5:blend:F4:side:l4|F4:start#[F4:side:l4,F4:start]
+Pyramid face F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l1|F4:side:l4,F5:blend:F4:side:l1|F4:start]
+Pyramid face F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l3|F4:side:l4,F5:blend:F4:side:l3|F4:start]
+Pyramid edge F4:side:l1|F5:blend:F4:side:l1|F4:side:l2
+Pyramid edge F4:side:l1|F5:blend:F4:side:l1|F4:side:l4#[F4:side:l1,F4:side:l4,F5:blend:F4:side:l4|F4:start]
+Pyramid edge F4:side:l1|F5:blend:F4:side:l1|F4:start
+Pyramid edge F4:side:l2|F5:blend:F4:side:l1|F4:side:l2
+Pyramid edge F4:side:l2|F5:blend:F4:side:l2|F4:side:l3
+Pyramid edge F4:side:l2|F5:blend:F4:side:l2|F4:start#[F4:side:l2,F4:start,F5:blend:F4:side:l3|F4:start]
+Pyramid edge F4:side:l3|F5:blend:F4:side:l2|F4:side:l3
+Pyramid edge F4:side:l3|F5:blend:F4:side:l3|F4:side:l4
+Pyramid edge F4:side:l3|F5:blend:F4:side:l3|F4:start#[F4:side:l3,F4:start,F5:blend:F4:side:l4|F4:start]
+Pyramid edge F4:side:l4|F5:blend:F4:side:l1|F4:side:l4#[F4:side:l1,F4:side:l4,F5:blend:F4:side:l4|F4:start]
+Pyramid edge F4:side:l4|F5:blend:F4:side:l3|F4:side:l4
+Pyramid edge F4:side:l4|F5:blend:F4:side:l4|F4:start#[F4:side:l4,F4:start]
+Pyramid edge F4:start|F5:blend:F4:side:l1|F4:start
+Pyramid edge F4:start|F5:blend:F4:side:l2|F4:start#[F4:side:l2,F4:start,F5:blend:F4:side:l3|F4:start]
+Pyramid edge F4:start|F5:blend:F4:side:l3|F4:start#[F4:side:l3,F4:start,F5:blend:F4:side:l4|F4:start]
+Pyramid edge F4:start|F5:blend:F4:side:l4|F4:start#[F4:side:l4,F4:start]
+Pyramid edge F5:blend:F4:side:l1|F4:side:l2|F5:blend:F4:side:l1|F4:side:l4#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l3|F4:side:l4]
+Pyramid edge F5:blend:F4:side:l1|F4:side:l2|F5:blend:F4:side:l2|F4:start#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l1|F4:start]
+Pyramid edge F5:blend:F4:side:l1|F4:side:l4#[F4:side:l1,F4:side:l4,F5:blend:F4:side:l4|F4:start]|F5:blend:F4:side:l1|F4:side:l4#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l3|F4:side:l4]
+Pyramid edge F5:blend:F4:side:l1|F4:side:l4#[F4:side:l1,F4:side:l4,F5:blend:F4:side:l4|F4:start]|F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l1|F4:side:l4,F5:blend:F4:side:l1|F4:start]
+Pyramid edge F5:blend:F4:side:l1|F4:side:l4#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l3|F4:side:l4]|F5:blend:F4:side:l2|F4:side:l3
+Pyramid edge F5:blend:F4:side:l1|F4:side:l4#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l3|F4:side:l4]|F5:blend:F4:side:l3|F4:side:l4
+Pyramid edge F5:blend:F4:side:l1|F4:start|F5:blend:F4:side:l2|F4:start#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l1|F4:start]
+Pyramid edge F5:blend:F4:side:l1|F4:start|F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l1|F4:side:l4,F5:blend:F4:side:l1|F4:start]
+Pyramid edge F5:blend:F4:side:l2|F4:side:l3|F5:blend:F4:side:l3|F4:start#[F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l2|F4:start]
+Pyramid edge F5:blend:F4:side:l2|F4:start#[F4:side:l2,F4:start,F5:blend:F4:side:l3|F4:start]|F5:blend:F4:side:l2|F4:start#[F5:blend:F4:side:l1|F4:side:l2,F5:blend:F4:side:l1|F4:start]
+Pyramid edge F5:blend:F4:side:l2|F4:start#[F4:side:l2,F4:start,F5:blend:F4:side:l3|F4:start]|F5:blend:F4:side:l3|F4:start#[F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l2|F4:start]
+Pyramid edge F5:blend:F4:side:l3|F4:side:l4|F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l3|F4:side:l4,F5:blend:F4:side:l3|F4:start]
+Pyramid edge F5:blend:F4:side:l3|F4:start#[F4:side:l3,F4:start,F5:blend:F4:side:l4|F4:start]|F5:blend:F4:side:l3|F4:start#[F5:blend:F4:side:l2|F4:side:l3,F5:blend:F4:side:l2|F4:start]
+Pyramid edge F5:blend:F4:side:l3|F4:start#[F4:side:l3,F4:start,F5:blend:F4:side:l4|F4:start]|F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l3|F4:side:l4,F5:blend:F4:side:l3|F4:start]
+Pyramid edge F5:blend:F4:side:l4|F4:start#[F4:side:l4,F4:start]|F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l1|F4:side:l4,F5:blend:F4:side:l1|F4:start]
+Pyramid edge F5:blend:F4:side:l4|F4:start#[F4:side:l4,F4:start]|F5:blend:F4:side:l4|F4:start#[F5:blend:F4:side:l3|F4:side:l4,F5:blend:F4:side:l3|F4:start]
+ref Fillet1 (5) edge 0 `F4:side:l4|F4:start` -> Pyramid edge F4:side:l4|F4:start
+ref Fillet1 (5) edge 1 `F4:side:l3|F4:start` -> Pyramid edge F4:side:l3|F4:start
+ref Fillet1 (5) edge 2 `F4:side:l2|F4:start` -> Pyramid edge F4:side:l2|F4:start
+ref Fillet1 (5) edge 3 `F4:side:l1|F4:start` -> Pyramid edge F4:side:l1|F4:start
+ref Fillet1 (5) edge 4 `F4:side:l1|F4:side:l4` -> Pyramid edge F4:side:l1|F4:side:l4
+ref Fillet1 (5) edge 5 `F4:side:l3|F4:side:l4` -> Pyramid edge F4:side:l3|F4:side:l4
+ref Fillet1 (5) edge 6 `F4:side:l1|F4:side:l2` -> Pyramid edge F4:side:l1|F4:side:l2
+ref Fillet1 (5) edge 7 `F4:side:l2|F4:side:l3` -> Pyramid edge F4:side:l2|F4:side:l3

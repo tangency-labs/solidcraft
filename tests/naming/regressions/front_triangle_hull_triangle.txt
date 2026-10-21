@@ -1,0 +1,105 @@
+# regressions/front_triangle_hull_triangle: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body FrontTriangle: 27 faces, 76 edges
+FrontTriangle face F11:side:e1#1 [geometric]
+FrontTriangle face F11:side:e1#2 [geometric]
+FrontTriangle face F11:side:e1#3 [geometric]
+FrontTriangle face F11:side:e1#4 [geometric]
+FrontTriangle face F15:end
+FrontTriangle face F15:side:c1#1
+FrontTriangle face F15:side:c1#2
+FrontTriangle face F15:start
+FrontTriangle face F22:side:a1
+FrontTriangle face F22:side:a2
+FrontTriangle face F22:side:a3
+FrontTriangle face F22:side:a4
+FrontTriangle face F22:side:l1
+FrontTriangle face F22:side:l2
+FrontTriangle face F22:side:l3
+FrontTriangle face F22:side:l4
+FrontTriangle face F6:end
+FrontTriangle face F6:side:e1#1 [geometric]
+FrontTriangle face F6:side:e1#2 [geometric]
+FrontTriangle face F6:side:e1#3 [geometric]
+FrontTriangle face F6:side:e1#4 [geometric]
+FrontTriangle face F6:start#[F22:side:a3]
+FrontTriangle face F6:start#[F22:side:a4]
+FrontTriangle face F7:bottom
+FrontTriangle face F7:side#1
+FrontTriangle face F7:side#2
+FrontTriangle face F7:top
+FrontTriangle edge F11:side:e1#1|F11:side:e1#2 [geometric]
+FrontTriangle edge F11:side:e1#1|F11:side:e1#4 [geometric]
+FrontTriangle edge F11:side:e1#1|F15:side:c1#1 [geometric]
+FrontTriangle edge F11:side:e1#1|F6:side:e1#4 [geometric]
+FrontTriangle edge F11:side:e1#2|F11:side:e1#3 [geometric]
+FrontTriangle edge F11:side:e1#2|F15:side:c1#1 [geometric]
+FrontTriangle edge F11:side:e1#2|F6:side:e1#3 [geometric]
+FrontTriangle edge F11:side:e1#3|F11:side:e1#4 [geometric]
+FrontTriangle edge F11:side:e1#3|F15:side:c1#1 [geometric]
+FrontTriangle edge F11:side:e1#3|F6:side:e1#3 [geometric]
+FrontTriangle edge F11:side:e1#4|F15:side:c1#1 [geometric]
+FrontTriangle edge F11:side:e1#4|F6:side:e1#4 [geometric]
+FrontTriangle edge F15:end|F15:side:c1#1
+FrontTriangle edge F15:end|F15:side:c1#2
+FrontTriangle edge F15:side:c1#1|F15:side:c1#2~1 [geometric]
+FrontTriangle edge F15:side:c1#1|F15:side:c1#2~2 [geometric]
+FrontTriangle edge F15:side:c1#1|F15:start~1 [geometric]
+FrontTriangle edge F15:side:c1#1|F15:start~2 [geometric]
+FrontTriangle edge F15:side:c1#1|F22:side:a1
+FrontTriangle edge F15:side:c1#1|F22:side:a2
+FrontTriangle edge F15:side:c1#1|F22:side:a3
+FrontTriangle edge F15:side:c1#1|F22:side:a4
+FrontTriangle edge F15:side:c1#1|F22:side:l2
+FrontTriangle edge F15:side:c1#1|F22:side:l3
+FrontTriangle edge F15:side:c1#1|F22:side:l4
+FrontTriangle edge F15:side:c1#2|F15:start
+FrontTriangle edge F15:start|F22:side:a1
+FrontTriangle edge F15:start|F22:side:a2
+FrontTriangle edge F15:start|F22:side:l1
+FrontTriangle edge F22:side:a1|F22:side:l1
+FrontTriangle edge F22:side:a1|F22:side:l4
+FrontTriangle edge F22:side:a1|F7:side#1
+FrontTriangle edge F22:side:a1|F7:side#2
+FrontTriangle edge F22:side:a2|F22:side:l1
+FrontTriangle edge F22:side:a2|F22:side:l2
+FrontTriangle edge F22:side:a2|F7:side#1
+FrontTriangle edge F22:side:a2|F7:side#2
+FrontTriangle edge F22:side:a3|F22:side:l2
+FrontTriangle edge F22:side:a3|F22:side:l3
+FrontTriangle edge F22:side:a3|F6:side:e1#4 [geometric]
+FrontTriangle edge F22:side:a3|F6:start#[F22:side:a3]
+FrontTriangle edge F22:side:a3|F7:side#1
+FrontTriangle edge F22:side:a4|F22:side:l3
+FrontTriangle edge F22:side:a4|F22:side:l4
+FrontTriangle edge F22:side:a4|F6:side:e1#3 [geometric]
+FrontTriangle edge F22:side:a4|F6:start#[F22:side:a4]
+FrontTriangle edge F22:side:a4|F7:side#1
+FrontTriangle edge F22:side:l1|F7:side#2
+FrontTriangle edge F22:side:l2|F7:side#1
+FrontTriangle edge F22:side:l3|F6:side:e1#3 [geometric]
+FrontTriangle edge F22:side:l3|F6:side:e1#4 [geometric]
+FrontTriangle edge F22:side:l4|F7:side#1
+FrontTriangle edge F6:end|F6:side:e1#1 [geometric]
+FrontTriangle edge F6:end|F6:side:e1#2 [geometric]
+FrontTriangle edge F6:end|F6:side:e1#3 [geometric]
+FrontTriangle edge F6:end|F6:side:e1#4 [geometric]
+FrontTriangle edge F6:side:e1#1|F6:side:e1#2 [geometric]
+FrontTriangle edge F6:side:e1#1|F6:side:e1#4 [geometric]
+FrontTriangle edge F6:side:e1#1|F7:side#1 [geometric]
+FrontTriangle edge F6:side:e1#2|F6:side:e1#3 [geometric]
+FrontTriangle edge F6:side:e1#2|F7:side#1 [geometric]
+FrontTriangle edge F6:side:e1#3|F6:side:e1#4~1 [geometric]
+FrontTriangle edge F6:side:e1#3|F6:side:e1#4~2 [geometric]
+FrontTriangle edge F6:side:e1#3|F6:start#[F22:side:a4] [geometric]
+FrontTriangle edge F6:side:e1#3|F7:side#1 [geometric]
+FrontTriangle edge F6:side:e1#4|F6:start#[F22:side:a3] [geometric]
+FrontTriangle edge F6:side:e1#4|F7:side#1 [geometric]
+FrontTriangle edge F6:start#[F22:side:a3]|F7:side#1
+FrontTriangle edge F6:start#[F22:side:a4]|F7:side#1
+FrontTriangle edge F7:bottom|F7:side#1
+FrontTriangle edge F7:bottom|F7:side#2
+FrontTriangle edge F7:side#1|F7:side#2~1 [geometric]
+FrontTriangle edge F7:side#1|F7:side#2~2 [geometric]
+FrontTriangle edge F7:side#1|F7:side#2~3 [geometric]
+FrontTriangle edge F7:side#1|F7:top
+FrontTriangle edge F7:side#2|F7:top

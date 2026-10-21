@@ -1,0 +1,39 @@
+# typical/multi-body-face-extrude: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Cap: 6 faces, 12 edges
+Cap face F1:+x
+Cap face F1:+y
+Cap face F1:+z
+Cap face F1:-x
+Cap face F1:-y
+Cap face F1:-z
+Cap edge F1:+x|F1:+y
+Cap edge F1:+x|F1:+z
+Cap edge F1:+x|F1:-y
+Cap edge F1:+x|F1:-z
+Cap edge F1:+y|F1:+z
+Cap edge F1:+y|F1:-x
+Cap edge F1:+y|F1:-z
+Cap edge F1:+z|F1:-x
+Cap edge F1:+z|F1:-y
+Cap edge F1:-x|F1:-y
+Cap edge F1:-x|F1:-z
+Cap edge F1:-y|F1:-z
+body Wall: 6 faces, 12 edges
+Wall face F2:+x
+Wall face F2:+y
+Wall face F2:+z
+Wall face F2:-x
+Wall face F2:-y
+Wall face F2:-z
+Wall edge F2:+x|F2:+y
+Wall edge F2:+x|F2:+z
+Wall edge F2:+x|F2:-y
+Wall edge F2:+x|F2:-z
+Wall edge F2:+y|F2:+z
+Wall edge F2:+y|F2:-x
+Wall edge F2:+y|F2:-z
+Wall edge F2:+z|F2:-x
+Wall edge F2:+z|F2:-y
+Wall edge F2:-x|F2:-y
+Wall edge F2:-x|F2:-z
+Wall edge F2:-y|F2:-z

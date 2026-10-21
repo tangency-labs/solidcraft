@@ -1,0 +1,20 @@
+# oracle/20-slot-constrained: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Slot: 6 faces, 12 edges
+Slot face F2:side:a1
+Slot face F2:side:a2
+Slot face F2:side:l1
+Slot face F2:side:l2
+Slot face F2:start
+Slot face F2:top
+Slot edge F2:side:a1|F2:side:l1
+Slot edge F2:side:a1|F2:side:l2
+Slot edge F2:side:a1|F2:start
+Slot edge F2:side:a1|F2:top
+Slot edge F2:side:a2|F2:side:l1
+Slot edge F2:side:a2|F2:side:l2
+Slot edge F2:side:a2|F2:start
+Slot edge F2:side:a2|F2:top
+Slot edge F2:side:l1|F2:start
+Slot edge F2:side:l1|F2:top
+Slot edge F2:side:l2|F2:start
+Slot edge F2:side:l2|F2:top

@@ -1,0 +1,39 @@
+# oracle/43-cut-splits-body: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Bar: 6 faces, 12 edges
+Bar face F2:side:l1#[F2:side:l2,F4:side:l2]
+Bar face F2:side:l2
+Bar face F2:side:l3#[F2:side:l2,F4:side:l2]
+Bar face F2:start#[F2:side:l2,F4:side:l2]
+Bar face F2:top#[F2:side:l2,F4:side:l2]
+Bar face F4:side:l2
+Bar edge F2:side:l1#[F2:side:l2,F4:side:l2]|F2:side:l2
+Bar edge F2:side:l1#[F2:side:l2,F4:side:l2]|F2:start#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l1#[F2:side:l2,F4:side:l2]|F2:top#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l1#[F2:side:l2,F4:side:l2]|F4:side:l2
+Bar edge F2:side:l2|F2:side:l3#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l2|F2:start#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l3#[F2:side:l2,F4:side:l2]|F2:start#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l3#[F2:side:l2,F4:side:l2]|F2:top#[F2:side:l2,F4:side:l2]
+Bar edge F2:side:l3#[F2:side:l2,F4:side:l2]|F4:side:l2
+Bar edge F2:start#[F2:side:l2,F4:side:l2]|F4:side:l2
+Bar edge F2:top#[F2:side:l2,F4:side:l2]|F4:side:l2
+body Bar (1): 6 faces, 12 edges
+Bar (1) face F2:side:l1#[F2:side:l4,F4:side:l4]
+Bar (1) face F2:side:l3#[F2:side:l4,F4:side:l4]
+Bar (1) face F2:side:l4
+Bar (1) face F2:start#[F2:side:l4,F4:side:l4]
+Bar (1) face F2:top#[F2:side:l4,F4:side:l4]
+Bar (1) face F4:side:l4
+Bar (1) edge F2:side:l1#[F2:side:l4,F4:side:l4]|F2:side:l4
+Bar (1) edge F2:side:l1#[F2:side:l4,F4:side:l4]|F2:start#[F2:side:l4,F4:side:l4]
+Bar (1) edge F2:side:l1#[F2:side:l4,F4:side:l4]|F2:top#[F2:side:l4,F4:side:l4]
+Bar (1) edge F2:side:l1#[F2:side:l4,F4:side:l4]|F4:side:l4
+Bar (1) edge F2:side:l3#[F2:side:l4,F4:side:l4]|F2:side:l4
+Bar (1) edge F2:side:l3#[F2:side:l4,F4:side:l4]|F2:start#[F2:side:l4,F4:side:l4]
+Bar (1) edge F2:side:l3#[F2:side:l4,F4:side:l4]|F2:top#[F2:side:l4,F4:side:l4]
+Bar (1) edge F2:side:l3#[F2:side:l4,F4:side:l4]|F4:side:l4
+Bar (1) edge F2:side:l4|F2:start#[F2:side:l4,F4:side:l4]
+Bar (1) edge F2:side:l4|F2:top#[F2:side:l4,F4:side:l4]
+Bar (1) edge F2:start#[F2:side:l4,F4:side:l4]|F4:side:l4
+Bar (1) edge F2:top#[F2:side:l4,F4:side:l4]|F4:side:l4

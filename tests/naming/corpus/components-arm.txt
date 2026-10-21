@@ -1,0 +1,74 @@
+# corpus/components-arm: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Base: 8 faces, 18 edges
+Base face F12:side:c1#1
+Base face F12:side:c1#2
+Base face F1:+x
+Base face F1:+y
+Base face F1:+z
+Base face F1:-x
+Base face F1:-y
+Base face F1:-z
+Base edge F12:side:c1#1|F12:side:c1#2~1 [geometric]
+Base edge F12:side:c1#1|F12:side:c1#2~2 [geometric]
+Base edge F12:side:c1#1|F1:+z
+Base edge F12:side:c1#1|F1:-z
+Base edge F12:side:c1#2|F1:+z
+Base edge F12:side:c1#2|F1:-z
+Base edge F1:+x|F1:+y
+Base edge F1:+x|F1:+z
+Base edge F1:+x|F1:-y
+Base edge F1:+x|F1:-z
+Base edge F1:+y|F1:+z
+Base edge F1:+y|F1:-x
+Base edge F1:+y|F1:-z
+Base edge F1:+z|F1:-x
+Base edge F1:+z|F1:-y
+Base edge F1:-x|F1:-y
+Base edge F1:-x|F1:-z
+Base edge F1:-y|F1:-z
+body ArmBody: 7 faces, 15 edges
+ArmBody face F4:+x
+ArmBody face F4:+y
+ArmBody face F4:+z
+ArmBody face F4:-x
+ArmBody face F4:-y
+ArmBody face F4:-z
+ArmBody face F5:blend:F4:+y|F4:+z
+ArmBody edge F4:+x|F4:+y
+ArmBody edge F4:+x|F4:+z
+ArmBody edge F4:+x|F4:-y
+ArmBody edge F4:+x|F4:-z
+ArmBody edge F4:+x|F5:blend:F4:+y|F4:+z
+ArmBody edge F4:+y|F4:-x
+ArmBody edge F4:+y|F4:-z
+ArmBody edge F4:+y|F5:blend:F4:+y|F4:+z
+ArmBody edge F4:+z|F4:-x
+ArmBody edge F4:+z|F4:-y
+ArmBody edge F4:+z|F5:blend:F4:+y|F4:+z
+ArmBody edge F4:-x|F4:-y
+ArmBody edge F4:-x|F4:-z
+ArmBody edge F4:-x|F5:blend:F4:+y|F4:+z
+ArmBody edge F4:-y|F4:-z
+body Body1: 7 faces, 15 edges
+Body1 face F10:blend:F9:+y|F9:+z
+Body1 face F9:+x
+Body1 face F9:+y
+Body1 face F9:+z
+Body1 face F9:-x
+Body1 face F9:-y
+Body1 face F9:-z
+Body1 edge F10:blend:F9:+y|F9:+z|F9:+x
+Body1 edge F10:blend:F9:+y|F9:+z|F9:+y
+Body1 edge F10:blend:F9:+y|F9:+z|F9:+z
+Body1 edge F10:blend:F9:+y|F9:+z|F9:-x
+Body1 edge F9:+x|F9:+y
+Body1 edge F9:+x|F9:+z
+Body1 edge F9:+x|F9:-y
+Body1 edge F9:+x|F9:-z
+Body1 edge F9:+y|F9:-x
+Body1 edge F9:+y|F9:-z
+Body1 edge F9:+z|F9:-x
+Body1 edge F9:+z|F9:-y
+Body1 edge F9:-x|F9:-y
+Body1 edge F9:-x|F9:-z
+Body1 edge F9:-y|F9:-z

@@ -1,0 +1,28 @@
+# oracle/19-l-bracket-constrained: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body LBracket: 8 faces, 18 edges
+LBracket face F2:side:l1
+LBracket face F2:side:l2
+LBracket face F2:side:l3
+LBracket face F2:side:l4
+LBracket face F2:side:l5
+LBracket face F2:side:l6
+LBracket face F2:start
+LBracket face F2:top
+LBracket edge F2:side:l1|F2:side:l2
+LBracket edge F2:side:l1|F2:side:l6
+LBracket edge F2:side:l1|F2:start
+LBracket edge F2:side:l1|F2:top
+LBracket edge F2:side:l2|F2:side:l3
+LBracket edge F2:side:l2|F2:start
+LBracket edge F2:side:l2|F2:top
+LBracket edge F2:side:l3|F2:side:l4
+LBracket edge F2:side:l3|F2:start
+LBracket edge F2:side:l3|F2:top
+LBracket edge F2:side:l4|F2:side:l5
+LBracket edge F2:side:l4|F2:start
+LBracket edge F2:side:l4|F2:top
+LBracket edge F2:side:l5|F2:side:l6
+LBracket edge F2:side:l5|F2:start
+LBracket edge F2:side:l5|F2:top
+LBracket edge F2:side:l6|F2:start
+LBracket edge F2:side:l6|F2:top

@@ -1,0 +1,23 @@
+# oracle/22-split-body: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Cyl: 4 faces, 6 edges
+Cyl face F2:side:c1#1
+Cyl face F2:side:c1#2
+Cyl face F2:top
+Cyl face F4:section
+Cyl edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Cyl edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Cyl edge F2:side:c1#1|F2:top
+Cyl edge F2:side:c1#1|F4:section
+Cyl edge F2:side:c1#2|F2:top
+Cyl edge F2:side:c1#2|F4:section
+body Cyl (1): 4 faces, 6 edges
+Cyl (1) face F2:bottom
+Cyl (1) face F2:side:c1#1
+Cyl (1) face F2:side:c1#2
+Cyl (1) face F4:section
+Cyl (1) edge F2:bottom|F2:side:c1#1
+Cyl (1) edge F2:bottom|F2:side:c1#2
+Cyl (1) edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Cyl (1) edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Cyl (1) edge F2:side:c1#1|F4:section
+Cyl (1) edge F2:side:c1#2|F4:section

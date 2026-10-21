@@ -1,0 +1,49 @@
+# corpus/split-body-pieces: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 7 faces, 15 edges
+Body1 face F2:side:l2#[F2:side:l3,F4:side:l3]
+Body1 face F2:side:l3
+Body1 face F2:side:l4#[F2:side:l3,F4:side:l3]
+Body1 face F2:start#[F2:side:l3,F4:side:l3]
+Body1 face F2:top#[F2:side:l3,F4:side:l3]
+Body1 face F4:side:l3
+Body1 face F6:blend:F2:side:l3|F2:top#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l2#[F2:side:l3,F4:side:l3]|F2:side:l3
+Body1 edge F2:side:l2#[F2:side:l3,F4:side:l3]|F2:start#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l2#[F2:side:l3,F4:side:l3]|F2:top#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l2#[F2:side:l3,F4:side:l3]|F4:side:l3
+Body1 edge F2:side:l2#[F2:side:l3,F4:side:l3]|F6:blend:F2:side:l3|F2:top#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l3|F2:side:l4#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l3|F2:start#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l3|F6:blend:F2:side:l3|F2:top#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l4#[F2:side:l3,F4:side:l3]|F2:start#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l4#[F2:side:l3,F4:side:l3]|F2:top#[F2:side:l3,F4:side:l3]
+Body1 edge F2:side:l4#[F2:side:l3,F4:side:l3]|F4:side:l3
+Body1 edge F2:side:l4#[F2:side:l3,F4:side:l3]|F6:blend:F2:side:l3|F2:top#[F2:side:l3,F4:side:l3]
+Body1 edge F2:start#[F2:side:l3,F4:side:l3]|F4:side:l3
+Body1 edge F2:top#[F2:side:l3,F4:side:l3]|F4:side:l3
+Body1 edge F2:top#[F2:side:l3,F4:side:l3]|F6:blend:F2:side:l3|F2:top#[F2:side:l3,F4:side:l3]
+body Body1 (1): 7 faces, 15 edges
+Body1 (1) face F2:side:l1
+Body1 (1) face F2:side:l2#[F2:side:l1,F4:side:l1]
+Body1 (1) face F2:side:l4#[F2:side:l1,F4:side:l1]
+Body1 (1) face F2:start#[F2:side:l1,F4:side:l1]
+Body1 (1) face F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) face F4:side:l1
+Body1 (1) face F5:blend:F2:side:l1|F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l1|F2:side:l2#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l1|F2:side:l4#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l1|F2:start#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l1|F5:blend:F2:side:l1|F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l2#[F2:side:l1,F4:side:l1]|F2:start#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l2#[F2:side:l1,F4:side:l1]|F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l2#[F2:side:l1,F4:side:l1]|F4:side:l1
+Body1 (1) edge F2:side:l2#[F2:side:l1,F4:side:l1]|F5:blend:F2:side:l1|F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l4#[F2:side:l1,F4:side:l1]|F2:start#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l4#[F2:side:l1,F4:side:l1]|F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:side:l4#[F2:side:l1,F4:side:l1]|F4:side:l1
+Body1 (1) edge F2:side:l4#[F2:side:l1,F4:side:l1]|F5:blend:F2:side:l1|F2:top#[F2:side:l1,F4:side:l1]
+Body1 (1) edge F2:start#[F2:side:l1,F4:side:l1]|F4:side:l1
+Body1 (1) edge F2:top#[F2:side:l1,F4:side:l1]|F4:side:l1
+Body1 (1) edge F2:top#[F2:side:l1,F4:side:l1]|F5:blend:F2:side:l1|F2:top#[F2:side:l1,F4:side:l1]
+ref NearRound (5) edge 0 `?F2:side:l1|F2:top` -> Body1 (1) edge F2:side:l1|F2:top#[F2:side:l1,F4:side:l1] [geometric, legacy]
+ref FarBevel (6) edge 0 `?F2:side:l3|F2:top` -> Body1 edge F2:side:l3|F2:top#[F2:side:l3,F4:side:l3] [geometric, legacy]

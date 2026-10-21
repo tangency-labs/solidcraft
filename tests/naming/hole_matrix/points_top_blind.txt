@@ -1,0 +1,38 @@
+# hole_matrix/points_top_blind: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body B: 12 faces, 24 edges
+B face F2:side:l1
+B face F2:side:l2
+B face F2:side:l3
+B face F2:side:l4
+B face F2:start
+B face F2:top
+B face F4:bore:base#1
+B face F4:bore:base#2
+B face F4:bore:side:0#1
+B face F4:bore:side:0#2
+B face F4:bore:side:1#1
+B face F4:bore:side:1#2
+B edge F2:side:l1|F2:side:l2
+B edge F2:side:l1|F2:side:l4
+B edge F2:side:l1|F2:start
+B edge F2:side:l1|F2:top
+B edge F2:side:l2|F2:side:l3
+B edge F2:side:l2|F2:start
+B edge F2:side:l2|F2:top
+B edge F2:side:l3|F2:side:l4
+B edge F2:side:l3|F2:start
+B edge F2:side:l3|F2:top
+B edge F2:side:l4|F2:start
+B edge F2:side:l4|F2:top
+B edge F2:top|F4:bore:side:0#1
+B edge F2:top|F4:bore:side:0#2
+B edge F2:top|F4:bore:side:1#1
+B edge F2:top|F4:bore:side:1#2
+B edge F4:bore:base#1|F4:bore:side:0#1
+B edge F4:bore:base#1|F4:bore:side:1#1
+B edge F4:bore:base#2|F4:bore:side:0#2
+B edge F4:bore:base#2|F4:bore:side:1#2
+B edge F4:bore:side:0#1|F4:bore:side:1#1~1 [geometric]
+B edge F4:bore:side:0#1|F4:bore:side:1#1~2 [geometric]
+B edge F4:bore:side:0#2|F4:bore:side:1#2~1 [geometric]
+B edge F4:bore:side:0#2|F4:bore:side:1#2~2 [geometric]

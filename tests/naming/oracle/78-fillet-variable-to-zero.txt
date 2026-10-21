@@ -1,0 +1,24 @@
+# oracle/78-fillet-variable-to-zero: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Part: 7 faces, 14 edges
+Part face F2:side:l1
+Part face F2:side:l2
+Part face F2:side:l3
+Part face F2:side:l4
+Part face F2:start
+Part face F2:top
+Part face F3:blend:F2:side:l1|F2:top
+Part edge F2:side:l1|F2:side:l2
+Part edge F2:side:l1|F2:side:l4
+Part edge F2:side:l1|F2:start
+Part edge F2:side:l1|F3:blend:F2:side:l1|F2:top
+Part edge F2:side:l2|F2:side:l3
+Part edge F2:side:l2|F2:start
+Part edge F2:side:l2|F2:top
+Part edge F2:side:l3|F2:side:l4
+Part edge F2:side:l3|F2:start
+Part edge F2:side:l3|F2:top
+Part edge F2:side:l4|F2:start
+Part edge F2:side:l4|F2:top
+Part edge F2:side:l4|F3:blend:F2:side:l1|F2:top
+Part edge F2:top|F3:blend:F2:side:l1|F2:top
+ref Fillet1 (3) edge 0 `F2:side:l1|F2:top` -> Part edge F2:side:l1|F2:top

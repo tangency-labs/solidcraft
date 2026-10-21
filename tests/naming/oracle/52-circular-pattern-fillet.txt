@@ -1,0 +1,109 @@
+# oracle/52-circular-pattern-fillet: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Hub: 36 faces, 70 edges
+Hub face F2:side:c1#1#[F2:start]
+Hub face F2:side:c1#1#[F2:top]
+Hub face F2:side:c1#2#[F2:start]
+Hub face F2:side:c1#2#[F2:top]
+Hub face F2:start
+Hub face F2:top
+Hub face F4:side:c1#1
+Hub face F4:side:c1#2
+Hub face F4:side:c1@F6.1#1
+Hub face F4:side:c1@F6.1#2
+Hub face F4:side:c1@F6.2#1
+Hub face F4:side:c1@F6.2#2
+Hub face F4:side:c1@F6.3#1
+Hub face F4:side:c1@F6.3#2
+Hub face F4:side:c1@F6.4#1
+Hub face F4:side:c1@F6.4#2
+Hub face F4:side:c1@F6.5#1
+Hub face F4:side:c1@F6.5#2
+Hub face F4:top
+Hub face F4:top@F6.1
+Hub face F4:top@F6.2
+Hub face F4:top@F6.3
+Hub face F4:top@F6.4
+Hub face F4:top@F6.5
+Hub face F5:blend:F2:top|F4:side:c1#1
+Hub face F5:blend:F2:top|F4:side:c1#2
+Hub face F6:blend::face:11|:face:7
+Hub face F6:blend::face:12|:face:7
+Hub face F6:blend::face:14|:face:7
+Hub face F6:blend::face:15|:face:7
+Hub face F6:blend::face:17|:face:7
+Hub face F6:blend::face:18|:face:7
+Hub face F6:blend::face:20|:face:7
+Hub face F6:blend::face:21|:face:7
+Hub face F6:blend::face:23|:face:7
+Hub face F6:blend::face:24|:face:7
+Hub edge F2:side:c1#1#[F2:start]|F2:side:c1#1#[F2:top]
+Hub edge F2:side:c1#1#[F2:start]|F2:side:c1#2#[F2:start]~1 [geometric]
+Hub edge F2:side:c1#1#[F2:start]|F2:side:c1#2#[F2:start]~2 [geometric]
+Hub edge F2:side:c1#1#[F2:start]|F2:start
+Hub edge F2:side:c1#1#[F2:top]|F2:side:c1#2#[F2:top]~1 [geometric]
+Hub edge F2:side:c1#1#[F2:top]|F2:side:c1#2#[F2:top]~2 [geometric]
+Hub edge F2:side:c1#1#[F2:top]|F2:top
+Hub edge F2:side:c1#2#[F2:start]|F2:side:c1#2#[F2:top]
+Hub edge F2:side:c1#2#[F2:start]|F2:start
+Hub edge F2:side:c1#2#[F2:top]|F2:top
+Hub edge F2:top|F5:blend:F2:top|F4:side:c1#1
+Hub edge F2:top|F5:blend:F2:top|F4:side:c1#2
+Hub edge F2:top|F6:blend::face:11|:face:7
+Hub edge F2:top|F6:blend::face:12|:face:7
+Hub edge F2:top|F6:blend::face:14|:face:7
+Hub edge F2:top|F6:blend::face:15|:face:7
+Hub edge F2:top|F6:blend::face:17|:face:7
+Hub edge F2:top|F6:blend::face:18|:face:7
+Hub edge F2:top|F6:blend::face:20|:face:7
+Hub edge F2:top|F6:blend::face:21|:face:7
+Hub edge F2:top|F6:blend::face:23|:face:7
+Hub edge F2:top|F6:blend::face:24|:face:7
+Hub edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Hub edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Hub edge F4:side:c1#1|F4:top
+Hub edge F4:side:c1#1|F5:blend:F2:top|F4:side:c1#1
+Hub edge F4:side:c1#2|F4:top
+Hub edge F4:side:c1#2|F5:blend:F2:top|F4:side:c1#2
+Hub edge F4:side:c1@F6.1#1|F4:side:c1@F6.1#2~1 [geometric]
+Hub edge F4:side:c1@F6.1#1|F4:side:c1@F6.1#2~2 [geometric]
+Hub edge F4:side:c1@F6.1#1|F4:top@F6.1
+Hub edge F4:side:c1@F6.1#1|F6:blend::face:11|:face:7
+Hub edge F4:side:c1@F6.1#2|F4:top@F6.1
+Hub edge F4:side:c1@F6.1#2|F6:blend::face:12|:face:7
+Hub edge F4:side:c1@F6.2#1|F4:side:c1@F6.2#2~1 [geometric]
+Hub edge F4:side:c1@F6.2#1|F4:side:c1@F6.2#2~2 [geometric]
+Hub edge F4:side:c1@F6.2#1|F4:top@F6.2
+Hub edge F4:side:c1@F6.2#1|F6:blend::face:14|:face:7
+Hub edge F4:side:c1@F6.2#2|F4:top@F6.2
+Hub edge F4:side:c1@F6.2#2|F6:blend::face:15|:face:7
+Hub edge F4:side:c1@F6.3#1|F4:side:c1@F6.3#2~1 [geometric]
+Hub edge F4:side:c1@F6.3#1|F4:side:c1@F6.3#2~2 [geometric]
+Hub edge F4:side:c1@F6.3#1|F4:top@F6.3
+Hub edge F4:side:c1@F6.3#1|F6:blend::face:17|:face:7
+Hub edge F4:side:c1@F6.3#2|F4:top@F6.3
+Hub edge F4:side:c1@F6.3#2|F6:blend::face:18|:face:7
+Hub edge F4:side:c1@F6.4#1|F4:side:c1@F6.4#2~1 [geometric]
+Hub edge F4:side:c1@F6.4#1|F4:side:c1@F6.4#2~2 [geometric]
+Hub edge F4:side:c1@F6.4#1|F4:top@F6.4
+Hub edge F4:side:c1@F6.4#1|F6:blend::face:20|:face:7
+Hub edge F4:side:c1@F6.4#2|F4:top@F6.4
+Hub edge F4:side:c1@F6.4#2|F6:blend::face:21|:face:7
+Hub edge F4:side:c1@F6.5#1|F4:side:c1@F6.5#2~1 [geometric]
+Hub edge F4:side:c1@F6.5#1|F4:side:c1@F6.5#2~2 [geometric]
+Hub edge F4:side:c1@F6.5#1|F4:top@F6.5
+Hub edge F4:side:c1@F6.5#1|F6:blend::face:23|:face:7
+Hub edge F4:side:c1@F6.5#2|F4:top@F6.5
+Hub edge F4:side:c1@F6.5#2|F6:blend::face:24|:face:7
+Hub edge F5:blend:F2:top|F4:side:c1#1|F5:blend:F2:top|F4:side:c1#2~1 [geometric]
+Hub edge F5:blend:F2:top|F4:side:c1#1|F5:blend:F2:top|F4:side:c1#2~2 [geometric]
+Hub edge F6:blend::face:11|:face:7|F6:blend::face:12|:face:7~1 [geometric]
+Hub edge F6:blend::face:11|:face:7|F6:blend::face:12|:face:7~2 [geometric]
+Hub edge F6:blend::face:14|:face:7|F6:blend::face:15|:face:7~1 [geometric]
+Hub edge F6:blend::face:14|:face:7|F6:blend::face:15|:face:7~2 [geometric]
+Hub edge F6:blend::face:17|:face:7|F6:blend::face:18|:face:7~1 [geometric]
+Hub edge F6:blend::face:17|:face:7|F6:blend::face:18|:face:7~2 [geometric]
+Hub edge F6:blend::face:20|:face:7|F6:blend::face:21|:face:7~1 [geometric]
+Hub edge F6:blend::face:20|:face:7|F6:blend::face:21|:face:7~2 [geometric]
+Hub edge F6:blend::face:23|:face:7|F6:blend::face:24|:face:7~1 [geometric]
+Hub edge F6:blend::face:23|:face:7|F6:blend::face:24|:face:7~2 [geometric]
+ref BossFillet (5) edge 0 `F2:top|F4:side:c1#1` -> Hub edge F2:top|F4:side:c1#1

@@ -1,0 +1,12 @@
+# oracle/49-helical-sweep: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Spring: 4 faces, 6 edges
+Spring face F3:face:0 [geometric]
+Spring face F3:face:1 [geometric]
+Spring face F3:face:2 [geometric]
+Spring face F3:face:3 [geometric]
+Spring edge F3:face:0|F3:face:1~1 [geometric]
+Spring edge F3:face:0|F3:face:1~2 [geometric]
+Spring edge F3:face:0|F3:face:2 [geometric]
+Spring edge F3:face:0|F3:face:3 [geometric]
+Spring edge F3:face:1|F3:face:2 [geometric]
+Spring edge F3:face:1|F3:face:3 [geometric]

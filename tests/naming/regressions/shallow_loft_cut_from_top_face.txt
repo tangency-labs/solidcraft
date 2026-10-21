@@ -1,0 +1,50 @@
+# regressions/shallow_loft_cut_from_top_face: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 11 faces, 37 edges
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:side:l3
+Body1 face F2:side:l4
+Body1 face F2:start
+Body1 face F2:top
+Body1 face F5:end
+Body1 face F5:side:l1
+Body1 face F5:side:l2
+Body1 face F5:side:l3
+Body1 face F5:side:l4
+Body1 edge F2:side:l1|F2:side:l2
+Body1 edge F2:side:l1|F2:side:l4
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l1|F2:top
+Body1 edge F2:side:l2|F2:side:l3~1 [geometric]
+Body1 edge F2:side:l2|F2:side:l3~2 [geometric]
+Body1 edge F2:side:l2|F2:start
+Body1 edge F2:side:l2|F2:top~1 [geometric]
+Body1 edge F2:side:l2|F2:top~2 [geometric]
+Body1 edge F2:side:l3|F2:side:l4~1 [geometric]
+Body1 edge F2:side:l3|F2:side:l4~2 [geometric]
+Body1 edge F2:side:l3|F2:side:l4~3 [geometric]
+Body1 edge F2:side:l3|F2:start
+Body1 edge F2:side:l3|F2:top~1 [geometric]
+Body1 edge F2:side:l3|F2:top~2 [geometric]
+Body1 edge F2:side:l4|F2:start
+Body1 edge F2:side:l4|F2:top~1 [geometric]
+Body1 edge F2:side:l4|F2:top~2 [geometric]
+Body1 edge F2:side:l4|F2:top~3 [geometric]
+Body1 edge F2:top|F5:side:l1~1 [geometric]
+Body1 edge F2:top|F5:side:l1~2 [geometric]
+Body1 edge F2:top|F5:side:l1~3 [geometric]
+Body1 edge F2:top|F5:side:l2~1 [geometric]
+Body1 edge F2:top|F5:side:l2~2 [geometric]
+Body1 edge F2:top|F5:side:l2~3 [geometric]
+Body1 edge F2:top|F5:side:l3~1 [geometric]
+Body1 edge F2:top|F5:side:l3~2 [geometric]
+Body1 edge F2:top|F5:side:l4~1 [geometric]
+Body1 edge F2:top|F5:side:l4~2 [geometric]
+Body1 edge F5:end|F5:side:l1
+Body1 edge F5:end|F5:side:l2
+Body1 edge F5:end|F5:side:l3
+Body1 edge F5:end|F5:side:l4
+Body1 edge F5:side:l1|F5:side:l2
+Body1 edge F5:side:l1|F5:side:l4
+Body1 edge F5:side:l2|F5:side:l3
+Body1 edge F5:side:l3|F5:side:l4

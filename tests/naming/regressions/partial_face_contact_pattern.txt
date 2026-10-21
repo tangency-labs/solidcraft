@@ -1,0 +1,66 @@
+# regressions/partial_face_contact_pattern: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 21 faces, 43 edges
+Body1 face F1:+x
+Body1 face F1:+y
+Body1 face F1:+z
+Body1 face F1:-x
+Body1 face F1:-y
+Body1 face F1:-z
+Body1 face F2:bottom@F3.1
+Body1 face F2:bottom@F3.2
+Body1 face F2:bottom@F3.3#[F1:-y]
+Body1 face F2:bottom@F3.3#[F1:-z]
+Body1 face F2:side#1
+Body1 face F2:side#2
+Body1 face F2:side@F3.1#1
+Body1 face F2:side@F3.1#2
+Body1 face F2:side@F3.2#1
+Body1 face F2:side@F3.2#2
+Body1 face F2:side@F3.3
+Body1 face F2:side@F3.3#[F1:-y]
+Body1 face F2:top
+Body1 face F2:top@F3.1
+Body1 face F2:top@F3.2
+Body1 edge F1:+x|F1:+y
+Body1 edge F1:+x|F1:+z
+Body1 edge F1:+x|F1:-y
+Body1 edge F1:+x|F1:-z
+Body1 edge F1:+y|F1:+z
+Body1 edge F1:+y|F1:-x
+Body1 edge F1:+y|F1:-z
+Body1 edge F1:+z|F1:-x
+Body1 edge F1:+z|F1:-y
+Body1 edge F1:-x|F1:-y
+Body1 edge F1:-x|F1:-z~1 [geometric]
+Body1 edge F1:-x|F1:-z~2 [geometric]
+Body1 edge F1:-x|F2:side#1
+Body1 edge F1:-x|F2:side#2
+Body1 edge F1:-y|F1:-z~1 [geometric]
+Body1 edge F1:-y|F1:-z~2 [geometric]
+Body1 edge F1:-y|F2:bottom@F3.3#[F1:-y]
+Body1 edge F1:-y|F2:side@F3.3#[F1:-y]
+Body1 edge F1:-z|F2:bottom@F3.3#[F1:-z]
+Body1 edge F1:-z|F2:side#1
+Body1 edge F1:-z|F2:side#2
+Body1 edge F1:-z|F2:top
+Body1 edge F2:bottom@F3.1|F2:side@F3.1#1
+Body1 edge F2:bottom@F3.1|F2:side@F3.1#2
+Body1 edge F2:bottom@F3.2|F2:side@F3.2#1
+Body1 edge F2:bottom@F3.2|F2:side@F3.2#2
+Body1 edge F2:bottom@F3.3#[F1:-y]|F2:bottom@F3.3#[F1:-z]
+Body1 edge F2:bottom@F3.3#[F1:-y]|F2:side@F3.3
+Body1 edge F2:bottom@F3.3#[F1:-y]|F2:side@F3.3#[F1:-y]~1 [geometric]
+Body1 edge F2:bottom@F3.3#[F1:-y]|F2:side@F3.3#[F1:-y]~2 [geometric]
+Body1 edge F2:bottom@F3.3#[F1:-z]|F2:side@F3.3#[F1:-y]
+Body1 edge F2:side#1|F2:side#2
+Body1 edge F2:side#1|F2:top
+Body1 edge F2:side#2|F2:top
+Body1 edge F2:side@F3.1#1|F2:side@F3.1#2~1 [geometric]
+Body1 edge F2:side@F3.1#1|F2:side@F3.1#2~2 [geometric]
+Body1 edge F2:side@F3.1#1|F2:top@F3.1
+Body1 edge F2:side@F3.1#2|F2:top@F3.1
+Body1 edge F2:side@F3.2#1|F2:side@F3.2#2~1 [geometric]
+Body1 edge F2:side@F3.2#1|F2:side@F3.2#2~2 [geometric]
+Body1 edge F2:side@F3.2#1|F2:top@F3.2
+Body1 edge F2:side@F3.2#2|F2:top@F3.2
+Body1 edge F2:side@F3.3|F2:side@F3.3#[F1:-y]

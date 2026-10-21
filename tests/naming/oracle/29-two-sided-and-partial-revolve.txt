@@ -1,0 +1,56 @@
+# oracle/29-two-sided-and-partial-revolve: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Block: 15 faces, 39 edges
+Block face F2:bottom
+Block face F2:side:l1
+Block face F2:side:l2
+Block face F2:side:l3
+Block face F2:side:l4
+Block face F2:top
+Block face F4:end
+Block face F4:side:l1
+Block face F4:side:l2#[F2:top,F4:start]
+Block face F4:side:l2#[F2:top]
+Block face F4:side:l2#[F4:end]
+Block face F4:side:l4
+Block face F4:side:l4#[F4:end]
+Block face F4:side:l4#[F4:start]
+Block face F4:start
+Block edge F2:bottom|F2:side:l1
+Block edge F2:bottom|F2:side:l2
+Block edge F2:bottom|F2:side:l3
+Block edge F2:bottom|F2:side:l4
+Block edge F2:side:l1|F2:side:l2
+Block edge F2:side:l1|F2:side:l4
+Block edge F2:side:l1|F2:top
+Block edge F2:side:l2|F2:side:l3
+Block edge F2:side:l2|F2:top
+Block edge F2:side:l3|F2:side:l4
+Block edge F2:side:l3|F2:top~1 [geometric]
+Block edge F2:side:l3|F2:top~2 [geometric]
+Block edge F2:side:l3|F4:end
+Block edge F2:side:l3|F4:side:l2#[F2:top,F4:start]
+Block edge F2:side:l3|F4:side:l2#[F2:top]
+Block edge F2:side:l3|F4:side:l2#[F4:end]
+Block edge F2:side:l3|F4:side:l4
+Block edge F2:side:l3|F4:side:l4#[F4:end]
+Block edge F2:side:l3|F4:side:l4#[F4:start]
+Block edge F2:side:l3|F4:start
+Block edge F2:side:l4|F2:top
+Block edge F2:top|F4:side:l1
+Block edge F2:top|F4:side:l2#[F2:top,F4:start]
+Block edge F2:top|F4:side:l2#[F2:top]
+Block edge F4:end|F4:side:l1
+Block edge F4:end|F4:side:l2#[F4:end]
+Block edge F4:end|F4:side:l4#[F4:end]
+Block edge F4:side:l1|F4:side:l2#[F2:top,F4:start]
+Block edge F4:side:l1|F4:side:l2#[F2:top]
+Block edge F4:side:l1|F4:side:l2#[F4:end]
+Block edge F4:side:l1|F4:side:l4
+Block edge F4:side:l1|F4:side:l4#[F4:end]
+Block edge F4:side:l1|F4:side:l4#[F4:start]
+Block edge F4:side:l1|F4:start
+Block edge F4:side:l2#[F2:top,F4:start]|F4:start
+Block edge F4:side:l2#[F2:top]|F4:side:l2#[F4:end]
+Block edge F4:side:l4#[F4:start]|F4:start
+Block edge F4:side:l4|F4:side:l4#[F4:end]
+Block edge F4:side:l4|F4:side:l4#[F4:start]

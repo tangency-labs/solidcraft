@@ -1,0 +1,91 @@
+# oracle/23-bracket-multifeature: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Bracket: 23 faces, 63 edges
+Bracket face F10:side:c1#1
+Bracket face F10:side:c1#2
+Bracket face F10:side:c2#1
+Bracket face F10:side:c2#2
+Bracket face F12:side:c1#1
+Bracket face F12:side:c1#2
+Bracket face F12:side:c2#1
+Bracket face F12:side:c2#2
+Bracket face F13:blend:F2:side:l1|F2:side:l2
+Bracket face F13:blend:F2:side:l1|F2:side:l4
+Bracket face F2:side:l1
+Bracket face F2:side:l2
+Bracket face F2:side:l3
+Bracket face F2:side:l4
+Bracket face F2:start
+Bracket face F2:top
+Bracket face F4:side:l1
+Bracket face F4:top
+Bracket face F5:blend:F2:top|F4:side:l1#[F2:side:l2,F8:top]
+Bracket face F5:blend:F2:top|F4:side:l1#[F2:side:l4,F8:bottom]
+Bracket face F8:bottom
+Bracket face F8:side:l2
+Bracket face F8:top
+Bracket edge F10:side:c1#1|F10:side:c1#2~1 [geometric]
+Bracket edge F10:side:c1#1|F10:side:c1#2~2 [geometric]
+Bracket edge F10:side:c1#1|F2:start
+Bracket edge F10:side:c1#1|F2:top
+Bracket edge F10:side:c1#2|F2:start
+Bracket edge F10:side:c1#2|F2:top
+Bracket edge F10:side:c2#1|F10:side:c2#2~1 [geometric]
+Bracket edge F10:side:c2#1|F10:side:c2#2~2 [geometric]
+Bracket edge F10:side:c2#1|F2:start
+Bracket edge F10:side:c2#1|F2:top
+Bracket edge F10:side:c2#2|F2:start
+Bracket edge F10:side:c2#2|F2:top
+Bracket edge F12:side:c1#1|F12:side:c1#2~1 [geometric]
+Bracket edge F12:side:c1#1|F12:side:c1#2~2 [geometric]
+Bracket edge F12:side:c1#1|F2:side:l3
+Bracket edge F12:side:c1#1|F4:side:l1
+Bracket edge F12:side:c1#2|F2:side:l3
+Bracket edge F12:side:c1#2|F4:side:l1
+Bracket edge F12:side:c2#1|F12:side:c2#2~1 [geometric]
+Bracket edge F12:side:c2#1|F12:side:c2#2~2 [geometric]
+Bracket edge F12:side:c2#1|F2:side:l3
+Bracket edge F12:side:c2#1|F4:side:l1
+Bracket edge F12:side:c2#2|F2:side:l3
+Bracket edge F12:side:c2#2|F4:side:l1
+Bracket edge F13:blend:F2:side:l1|F2:side:l2|F2:side:l1
+Bracket edge F13:blend:F2:side:l1|F2:side:l2|F2:side:l2
+Bracket edge F13:blend:F2:side:l1|F2:side:l2|F2:start
+Bracket edge F13:blend:F2:side:l1|F2:side:l2|F2:top
+Bracket edge F13:blend:F2:side:l1|F2:side:l4|F2:side:l1
+Bracket edge F13:blend:F2:side:l1|F2:side:l4|F2:side:l4
+Bracket edge F13:blend:F2:side:l1|F2:side:l4|F2:start
+Bracket edge F13:blend:F2:side:l1|F2:side:l4|F2:top
+Bracket edge F2:side:l1|F2:start
+Bracket edge F2:side:l1|F2:top
+Bracket edge F2:side:l2|F2:side:l3
+Bracket edge F2:side:l2|F2:start
+Bracket edge F2:side:l2|F2:top
+Bracket edge F2:side:l2|F4:side:l1
+Bracket edge F2:side:l2|F4:top
+Bracket edge F2:side:l2|F5:blend:F2:top|F4:side:l1#[F2:side:l2,F8:top]
+Bracket edge F2:side:l3|F2:side:l4
+Bracket edge F2:side:l3|F2:start
+Bracket edge F2:side:l3|F4:top
+Bracket edge F2:side:l4|F2:start
+Bracket edge F2:side:l4|F2:top
+Bracket edge F2:side:l4|F4:side:l1
+Bracket edge F2:side:l4|F4:top
+Bracket edge F2:side:l4|F5:blend:F2:top|F4:side:l1#[F2:side:l4,F8:bottom]
+Bracket edge F2:top|F5:blend:F2:top|F4:side:l1#[F2:side:l2,F8:top]
+Bracket edge F2:top|F5:blend:F2:top|F4:side:l1#[F2:side:l4,F8:bottom]
+Bracket edge F2:top|F8:bottom
+Bracket edge F2:top|F8:side:l2
+Bracket edge F2:top|F8:top
+Bracket edge F4:side:l1|F4:top
+Bracket edge F4:side:l1|F5:blend:F2:top|F4:side:l1#[F2:side:l2,F8:top]
+Bracket edge F4:side:l1|F5:blend:F2:top|F4:side:l1#[F2:side:l4,F8:bottom]
+Bracket edge F4:side:l1|F8:bottom
+Bracket edge F4:side:l1|F8:side:l2
+Bracket edge F4:side:l1|F8:top
+Bracket edge F5:blend:F2:top|F4:side:l1#[F2:side:l2,F8:top]|F8:top
+Bracket edge F5:blend:F2:top|F4:side:l1#[F2:side:l4,F8:bottom]|F8:bottom
+Bracket edge F8:bottom|F8:side:l2
+Bracket edge F8:side:l2|F8:top
+ref InnerFillet (5) edge 0 `F2:top|F4:side:l1` -> Bracket edge F2:top|F4:side:l1
+ref FrontChamfer (13) edge 0 `F2:side:l1|F2:side:l2` -> Bracket edge F2:side:l1|F2:side:l2
+ref FrontChamfer (13) edge 1 `F2:side:l1|F2:side:l4` -> Bracket edge F2:side:l1|F2:side:l4

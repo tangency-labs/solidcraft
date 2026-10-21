@@ -1,0 +1,47 @@
+# regressions/oblique_cut_of_cylinder: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Tool: 8 faces, 18 edges
+Tool face F2:bottom
+Tool face F2:side:a1
+Tool face F2:side:l1
+Tool face F2:side:l2
+Tool face F2:side:l3
+Tool face F2:side:l4
+Tool face F2:top
+Tool face F4:side:l1
+Tool edge F2:bottom|F2:side:l1
+Tool edge F2:bottom|F2:side:l2
+Tool edge F2:bottom|F2:side:l3
+Tool edge F2:bottom|F4:side:l1
+Tool edge F2:side:a1|F2:side:l1
+Tool edge F2:side:a1|F2:side:l4
+Tool edge F2:side:a1|F2:top
+Tool edge F2:side:a1|F4:side:l1
+Tool edge F2:side:l1|F2:side:l2
+Tool edge F2:side:l1|F2:top
+Tool edge F2:side:l1|F4:side:l1
+Tool edge F2:side:l2|F2:side:l3
+Tool edge F2:side:l2|F2:top
+Tool edge F2:side:l3|F2:side:l4
+Tool edge F2:side:l3|F2:top
+Tool edge F2:side:l3|F4:side:l1
+Tool edge F2:side:l4|F2:top
+Tool edge F2:side:l4|F4:side:l1
+body ClipBody: 6 faces, 12 edges
+ClipBody face F4:bottom
+ClipBody face F4:side:l1
+ClipBody face F4:side:l2
+ClipBody face F4:side:l3
+ClipBody face F4:side:l4
+ClipBody face F4:top
+ClipBody edge F4:bottom|F4:side:l1
+ClipBody edge F4:bottom|F4:side:l2
+ClipBody edge F4:bottom|F4:side:l3
+ClipBody edge F4:bottom|F4:side:l4
+ClipBody edge F4:side:l1|F4:side:l2
+ClipBody edge F4:side:l1|F4:side:l4
+ClipBody edge F4:side:l1|F4:top
+ClipBody edge F4:side:l2|F4:side:l3
+ClipBody edge F4:side:l2|F4:top
+ClipBody edge F4:side:l3|F4:side:l4
+ClipBody edge F4:side:l3|F4:top
+ClipBody edge F4:side:l4|F4:top

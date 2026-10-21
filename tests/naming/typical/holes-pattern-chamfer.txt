@@ -1,0 +1,139 @@
+# typical/holes-pattern-chamfer: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 40 faces, 92 edges
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:side:l3
+Body1 face F2:side:l4
+Body1 face F2:start
+Body1 face F2:top
+Body1 face F3:bore:side:0
+Body1 face F3:bore:side:0@F4.1
+Body1 face F3:bore:side:0@F4.2
+Body1 face F3:bore:side:0@F4.3
+Body1 face F3:bore:side:0@F4.4
+Body1 face F3:bore:side:0@F4.5
+Body1 face F3:bore:side:1
+Body1 face F3:bore:side:1@F4.1
+Body1 face F3:bore:side:1@F4.2
+Body1 face F3:bore:side:1@F4.3
+Body1 face F3:bore:side:1@F4.4
+Body1 face F3:bore:side:1@F4.5
+Body1 face F3:cbore:base
+Body1 face F3:cbore:base@F4.1
+Body1 face F3:cbore:base@F4.2
+Body1 face F3:cbore:base@F4.3
+Body1 face F3:cbore:base@F4.4
+Body1 face F3:cbore:base@F4.5
+Body1 face F3:cbore:side:0
+Body1 face F3:cbore:side:0@F4.1
+Body1 face F3:cbore:side:0@F4.2
+Body1 face F3:cbore:side:0@F4.3
+Body1 face F3:cbore:side:0@F4.4
+Body1 face F3:cbore:side:0@F4.5
+Body1 face F3:cbore:side:1
+Body1 face F3:cbore:side:1@F4.1
+Body1 face F3:cbore:side:1@F4.2
+Body1 face F3:cbore:side:1@F4.3
+Body1 face F3:cbore:side:1@F4.4
+Body1 face F3:cbore:side:1@F4.5
+Body1 face F5:blend:F2:side:l1|F2:top
+Body1 face F5:blend:F2:side:l2|F2:top
+Body1 face F5:blend:F2:side:l3|F2:top
+Body1 face F5:blend:F2:side:l4|F2:top
+Body1 edge F2:side:l1|F2:side:l2
+Body1 edge F2:side:l1|F2:side:l4
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l1|F5:blend:F2:side:l1|F2:top
+Body1 edge F2:side:l2|F2:side:l3
+Body1 edge F2:side:l2|F2:start
+Body1 edge F2:side:l2|F5:blend:F2:side:l2|F2:top
+Body1 edge F2:side:l3|F2:side:l4
+Body1 edge F2:side:l3|F2:start
+Body1 edge F2:side:l3|F5:blend:F2:side:l3|F2:top
+Body1 edge F2:side:l4|F2:start
+Body1 edge F2:side:l4|F5:blend:F2:side:l4|F2:top
+Body1 edge F2:start|F3:bore:side:0
+Body1 edge F2:start|F3:bore:side:0@F4.1
+Body1 edge F2:start|F3:bore:side:0@F4.2
+Body1 edge F2:start|F3:bore:side:0@F4.3
+Body1 edge F2:start|F3:bore:side:0@F4.4
+Body1 edge F2:start|F3:bore:side:0@F4.5
+Body1 edge F2:start|F3:bore:side:1
+Body1 edge F2:start|F3:bore:side:1@F4.1
+Body1 edge F2:start|F3:bore:side:1@F4.2
+Body1 edge F2:start|F3:bore:side:1@F4.3
+Body1 edge F2:start|F3:bore:side:1@F4.4
+Body1 edge F2:start|F3:bore:side:1@F4.5
+Body1 edge F2:top|F3:cbore:side:0
+Body1 edge F2:top|F3:cbore:side:0@F4.1
+Body1 edge F2:top|F3:cbore:side:0@F4.2
+Body1 edge F2:top|F3:cbore:side:0@F4.3
+Body1 edge F2:top|F3:cbore:side:0@F4.4
+Body1 edge F2:top|F3:cbore:side:0@F4.5
+Body1 edge F2:top|F3:cbore:side:1
+Body1 edge F2:top|F3:cbore:side:1@F4.1
+Body1 edge F2:top|F3:cbore:side:1@F4.2
+Body1 edge F2:top|F3:cbore:side:1@F4.3
+Body1 edge F2:top|F3:cbore:side:1@F4.4
+Body1 edge F2:top|F3:cbore:side:1@F4.5
+Body1 edge F2:top|F5:blend:F2:side:l1|F2:top
+Body1 edge F2:top|F5:blend:F2:side:l2|F2:top
+Body1 edge F2:top|F5:blend:F2:side:l3|F2:top
+Body1 edge F2:top|F5:blend:F2:side:l4|F2:top
+Body1 edge F3:bore:side:0@F4.1|F3:bore:side:1@F4.1~1 [geometric]
+Body1 edge F3:bore:side:0@F4.1|F3:bore:side:1@F4.1~2 [geometric]
+Body1 edge F3:bore:side:0@F4.1|F3:cbore:base@F4.1
+Body1 edge F3:bore:side:0@F4.2|F3:bore:side:1@F4.2~1 [geometric]
+Body1 edge F3:bore:side:0@F4.2|F3:bore:side:1@F4.2~2 [geometric]
+Body1 edge F3:bore:side:0@F4.2|F3:cbore:base@F4.2
+Body1 edge F3:bore:side:0@F4.3|F3:bore:side:1@F4.3~1 [geometric]
+Body1 edge F3:bore:side:0@F4.3|F3:bore:side:1@F4.3~2 [geometric]
+Body1 edge F3:bore:side:0@F4.3|F3:cbore:base@F4.3
+Body1 edge F3:bore:side:0@F4.4|F3:bore:side:1@F4.4~1 [geometric]
+Body1 edge F3:bore:side:0@F4.4|F3:bore:side:1@F4.4~2 [geometric]
+Body1 edge F3:bore:side:0@F4.4|F3:cbore:base@F4.4
+Body1 edge F3:bore:side:0@F4.5|F3:bore:side:1@F4.5~1 [geometric]
+Body1 edge F3:bore:side:0@F4.5|F3:bore:side:1@F4.5~2 [geometric]
+Body1 edge F3:bore:side:0@F4.5|F3:cbore:base@F4.5
+Body1 edge F3:bore:side:0|F3:bore:side:1~1 [geometric]
+Body1 edge F3:bore:side:0|F3:bore:side:1~2 [geometric]
+Body1 edge F3:bore:side:0|F3:cbore:base
+Body1 edge F3:bore:side:1@F4.1|F3:cbore:base@F4.1
+Body1 edge F3:bore:side:1@F4.2|F3:cbore:base@F4.2
+Body1 edge F3:bore:side:1@F4.3|F3:cbore:base@F4.3
+Body1 edge F3:bore:side:1@F4.4|F3:cbore:base@F4.4
+Body1 edge F3:bore:side:1@F4.5|F3:cbore:base@F4.5
+Body1 edge F3:bore:side:1|F3:cbore:base
+Body1 edge F3:cbore:base@F4.1|F3:cbore:side:0@F4.1
+Body1 edge F3:cbore:base@F4.1|F3:cbore:side:1@F4.1
+Body1 edge F3:cbore:base@F4.2|F3:cbore:side:0@F4.2
+Body1 edge F3:cbore:base@F4.2|F3:cbore:side:1@F4.2
+Body1 edge F3:cbore:base@F4.3|F3:cbore:side:0@F4.3
+Body1 edge F3:cbore:base@F4.3|F3:cbore:side:1@F4.3
+Body1 edge F3:cbore:base@F4.4|F3:cbore:side:0@F4.4
+Body1 edge F3:cbore:base@F4.4|F3:cbore:side:1@F4.4
+Body1 edge F3:cbore:base@F4.5|F3:cbore:side:0@F4.5
+Body1 edge F3:cbore:base@F4.5|F3:cbore:side:1@F4.5
+Body1 edge F3:cbore:base|F3:cbore:side:0
+Body1 edge F3:cbore:base|F3:cbore:side:1
+Body1 edge F3:cbore:side:0@F4.1|F3:cbore:side:1@F4.1~1 [geometric]
+Body1 edge F3:cbore:side:0@F4.1|F3:cbore:side:1@F4.1~2 [geometric]
+Body1 edge F3:cbore:side:0@F4.2|F3:cbore:side:1@F4.2~1 [geometric]
+Body1 edge F3:cbore:side:0@F4.2|F3:cbore:side:1@F4.2~2 [geometric]
+Body1 edge F3:cbore:side:0@F4.3|F3:cbore:side:1@F4.3~1 [geometric]
+Body1 edge F3:cbore:side:0@F4.3|F3:cbore:side:1@F4.3~2 [geometric]
+Body1 edge F3:cbore:side:0@F4.4|F3:cbore:side:1@F4.4~1 [geometric]
+Body1 edge F3:cbore:side:0@F4.4|F3:cbore:side:1@F4.4~2 [geometric]
+Body1 edge F3:cbore:side:0@F4.5|F3:cbore:side:1@F4.5~1 [geometric]
+Body1 edge F3:cbore:side:0@F4.5|F3:cbore:side:1@F4.5~2 [geometric]
+Body1 edge F3:cbore:side:0|F3:cbore:side:1~1 [geometric]
+Body1 edge F3:cbore:side:0|F3:cbore:side:1~2 [geometric]
+Body1 edge F5:blend:F2:side:l1|F2:top|F5:blend:F2:side:l2|F2:top
+Body1 edge F5:blend:F2:side:l1|F2:top|F5:blend:F2:side:l4|F2:top
+Body1 edge F5:blend:F2:side:l2|F2:top|F5:blend:F2:side:l3|F2:top
+Body1 edge F5:blend:F2:side:l3|F2:top|F5:blend:F2:side:l4|F2:top
+ref Hole1 (3) face 0 `F2:top` -> Body1 face F2:top
+ref Chamfer1 (5) edge 0 `F2:side:l1|F2:top` -> Body1 edge F2:side:l1|F2:top
+ref Chamfer1 (5) edge 1 `F2:side:l2|F2:top` -> Body1 edge F2:side:l2|F2:top
+ref Chamfer1 (5) edge 2 `F2:side:l3|F2:top` -> Body1 edge F2:side:l3|F2:top
+ref Chamfer1 (5) edge 3 `F2:side:l4|F2:top` -> Body1 edge F2:side:l4|F2:top

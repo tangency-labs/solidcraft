@@ -1,0 +1,78 @@
+# samples/bolted-flange: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Flange: 21 faces, 54 edges
+Flange face F2:side:c1#1 [geometric]
+Flange face F2:side:c1#2 [geometric]
+Flange face F2:start [geometric]
+Flange face F2:top [geometric]
+Flange face F4:side:c1#1 [geometric]
+Flange face F4:side:c1#2 [geometric]
+Flange face F4:top [geometric]
+Flange face F6:side:c1#1 [geometric]
+Flange face F6:side:c1#2 [geometric]
+Flange face F8:side:c1#1
+Flange face F8:side:c1#2
+Flange face F8:side:c1@F9.1#1
+Flange face F8:side:c1@F9.1#2
+Flange face F8:side:c1@F9.2#1
+Flange face F8:side:c1@F9.2#2
+Flange face F8:side:c1@F9.3#1
+Flange face F8:side:c1@F9.3#2
+Flange face F8:side:c1@F9.4#1
+Flange face F8:side:c1@F9.4#2
+Flange face F8:side:c1@F9.5#1
+Flange face F8:side:c1@F9.5#2
+Flange edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Flange edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Flange edge F2:side:c1#1|F2:start [geometric]
+Flange edge F2:side:c1#1|F2:top [geometric]
+Flange edge F2:side:c1#2|F2:start [geometric]
+Flange edge F2:side:c1#2|F2:top [geometric]
+Flange edge F2:start|F6:side:c1#1 [geometric]
+Flange edge F2:start|F6:side:c1#2 [geometric]
+Flange edge F2:start|F8:side:c1#1 [geometric]
+Flange edge F2:start|F8:side:c1#2 [geometric]
+Flange edge F2:start|F8:side:c1@F9.1#1 [geometric]
+Flange edge F2:start|F8:side:c1@F9.1#2 [geometric]
+Flange edge F2:start|F8:side:c1@F9.2#1 [geometric]
+Flange edge F2:start|F8:side:c1@F9.2#2 [geometric]
+Flange edge F2:start|F8:side:c1@F9.3#1 [geometric]
+Flange edge F2:start|F8:side:c1@F9.3#2 [geometric]
+Flange edge F2:start|F8:side:c1@F9.4#1 [geometric]
+Flange edge F2:start|F8:side:c1@F9.4#2 [geometric]
+Flange edge F2:start|F8:side:c1@F9.5#1 [geometric]
+Flange edge F2:start|F8:side:c1@F9.5#2 [geometric]
+Flange edge F2:top|F4:side:c1#1 [geometric]
+Flange edge F2:top|F4:side:c1#2 [geometric]
+Flange edge F2:top|F8:side:c1#1 [geometric]
+Flange edge F2:top|F8:side:c1#2 [geometric]
+Flange edge F2:top|F8:side:c1@F9.1#1 [geometric]
+Flange edge F2:top|F8:side:c1@F9.1#2 [geometric]
+Flange edge F2:top|F8:side:c1@F9.2#1 [geometric]
+Flange edge F2:top|F8:side:c1@F9.2#2 [geometric]
+Flange edge F2:top|F8:side:c1@F9.3#1 [geometric]
+Flange edge F2:top|F8:side:c1@F9.3#2 [geometric]
+Flange edge F2:top|F8:side:c1@F9.4#1 [geometric]
+Flange edge F2:top|F8:side:c1@F9.4#2 [geometric]
+Flange edge F2:top|F8:side:c1@F9.5#1 [geometric]
+Flange edge F2:top|F8:side:c1@F9.5#2 [geometric]
+Flange edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Flange edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Flange edge F4:side:c1#1|F4:top [geometric]
+Flange edge F4:side:c1#2|F4:top [geometric]
+Flange edge F4:top|F6:side:c1#1 [geometric]
+Flange edge F4:top|F6:side:c1#2 [geometric]
+Flange edge F6:side:c1#1|F6:side:c1#2~1 [geometric]
+Flange edge F6:side:c1#1|F6:side:c1#2~2 [geometric]
+Flange edge F8:side:c1#1|F8:side:c1#2~1 [geometric]
+Flange edge F8:side:c1#1|F8:side:c1#2~2 [geometric]
+Flange edge F8:side:c1@F9.1#1|F8:side:c1@F9.1#2~1 [geometric]
+Flange edge F8:side:c1@F9.1#1|F8:side:c1@F9.1#2~2 [geometric]
+Flange edge F8:side:c1@F9.2#1|F8:side:c1@F9.2#2~1 [geometric]
+Flange edge F8:side:c1@F9.2#1|F8:side:c1@F9.2#2~2 [geometric]
+Flange edge F8:side:c1@F9.3#1|F8:side:c1@F9.3#2~1 [geometric]
+Flange edge F8:side:c1@F9.3#1|F8:side:c1@F9.3#2~2 [geometric]
+Flange edge F8:side:c1@F9.4#1|F8:side:c1@F9.4#2~1 [geometric]
+Flange edge F8:side:c1@F9.4#1|F8:side:c1@F9.4#2~2 [geometric]
+Flange edge F8:side:c1@F9.5#1|F8:side:c1@F9.5#2~1 [geometric]
+Flange edge F8:side:c1@F9.5#1|F8:side:c1@F9.5#2~2 [geometric]
+ref Hub (3) plane `F2:cap:high:7413f52a973aff7f96f4640d0279843de057931afd8c2eb678e06607c9d37214` on Flange (extrude_cap) -> healthy: Flange faces F2:top

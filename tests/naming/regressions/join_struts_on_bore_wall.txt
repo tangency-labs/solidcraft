@@ -1,0 +1,111 @@
+# regressions/join_struts_on_bore_wall: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Frame: 31 faces, 78 edges
+Frame face F1:+x
+Frame face F1:+y
+Frame face F1:+z
+Frame face F1:-x
+Frame face F1:-y
+Frame face F1:-z
+Frame face F2:side#1#[F1:+x,F3:+z,F4:-y]
+Frame face F2:side#1#[F1:+x,F3:-z]
+Frame face F2:side#1#[F1:+x,F4:+y]
+Frame face F2:side#1#[F1:-x,F3:-x]#1 [geometric]
+Frame face F2:side#1#[F1:-x,F3:-x]#2 [geometric]
+Frame face F2:side#1#[F1:-x]#1 [geometric]
+Frame face F2:side#1#[F1:-x]#2 [geometric]
+Frame face F2:side#1#[F1:-x]#3 [geometric]
+Frame face F2:side#2#[F1:+x,F3:+z]
+Frame face F2:side#2#[F1:+x,F3:-z,F4:+y]
+Frame face F2:side#2#[F1:+x,F4:-y]
+Frame face F2:side#2#[F1:-x,F3:-x]#1 [geometric]
+Frame face F2:side#2#[F1:-x,F3:-x]#2 [geometric]
+Frame face F2:side#2#[F1:-x]#1 [geometric]
+Frame face F2:side#2#[F1:-x]#2 [geometric]
+Frame face F2:side#2#[F1:-x]#3 [geometric]
+Frame face F3:+z#[F4:+y]
+Frame face F3:+z#[F4:-y]
+Frame face F3:-x
+Frame face F3:-z#[F4:+y]
+Frame face F3:-z#[F4:-y]
+Frame face F4:+y#[F3:+z]
+Frame face F4:+y#[F3:-z]
+Frame face F4:-y#[F3:+z]
+Frame face F4:-y#[F3:-z]
+Frame edge F1:+x|F1:+y
+Frame edge F1:+x|F1:+z
+Frame edge F1:+x|F1:-y
+Frame edge F1:+x|F1:-z
+Frame edge F1:+x|F2:side#1#[F1:+x,F3:+z,F4:-y]
+Frame edge F1:+x|F2:side#1#[F1:+x,F3:-z]
+Frame edge F1:+x|F2:side#1#[F1:+x,F4:+y]
+Frame edge F1:+x|F2:side#2#[F1:+x,F3:+z]
+Frame edge F1:+x|F2:side#2#[F1:+x,F3:-z,F4:+y]
+Frame edge F1:+x|F2:side#2#[F1:+x,F4:-y]
+Frame edge F1:+x|F3:+z#[F4:+y]
+Frame edge F1:+x|F3:+z#[F4:-y]
+Frame edge F1:+x|F3:-z#[F4:+y]
+Frame edge F1:+x|F3:-z#[F4:-y]
+Frame edge F1:+x|F4:+y#[F3:+z]
+Frame edge F1:+x|F4:+y#[F3:-z]
+Frame edge F1:+x|F4:-y#[F3:+z]
+Frame edge F1:+x|F4:-y#[F3:-z]
+Frame edge F1:+y|F1:+z
+Frame edge F1:+y|F1:-x
+Frame edge F1:+y|F1:-z
+Frame edge F1:+z|F1:-x
+Frame edge F1:+z|F1:-y
+Frame edge F1:-x|F1:-y
+Frame edge F1:-x|F1:-z
+Frame edge F1:-x|F2:side#1#[F1:-x,F3:-x]#1 [geometric]
+Frame edge F1:-x|F2:side#1#[F1:-x,F3:-x]#2 [geometric]
+Frame edge F1:-x|F2:side#1#[F1:-x]#1 [geometric]
+Frame edge F1:-x|F2:side#1#[F1:-x]#2 [geometric]
+Frame edge F1:-x|F2:side#1#[F1:-x]#3 [geometric]
+Frame edge F1:-x|F2:side#2#[F1:-x,F3:-x]#1 [geometric]
+Frame edge F1:-x|F2:side#2#[F1:-x,F3:-x]#2 [geometric]
+Frame edge F1:-x|F2:side#2#[F1:-x]#1 [geometric]
+Frame edge F1:-x|F2:side#2#[F1:-x]#2 [geometric]
+Frame edge F1:-x|F2:side#2#[F1:-x]#3 [geometric]
+Frame edge F1:-y|F1:-z
+Frame edge F2:side#1#[F1:+x,F3:+z,F4:-y]|F2:side#1#[F1:-x]#2 [geometric]
+Frame edge F2:side#1#[F1:+x,F3:+z,F4:-y]|F3:+z#[F4:-y]
+Frame edge F2:side#1#[F1:+x,F3:+z,F4:-y]|F4:-y#[F3:+z]
+Frame edge F2:side#1#[F1:+x,F3:-z]|F2:side#1#[F1:-x]#3 [geometric]
+Frame edge F2:side#1#[F1:+x,F3:-z]|F2:side#2#[F1:+x,F4:-y]
+Frame edge F2:side#1#[F1:+x,F3:-z]|F3:-z#[F4:-y]
+Frame edge F2:side#1#[F1:+x,F4:+y]|F2:side#1#[F1:-x]#1 [geometric]
+Frame edge F2:side#1#[F1:+x,F4:+y]|F2:side#2#[F1:+x,F3:+z]
+Frame edge F2:side#1#[F1:+x,F4:+y]|F4:+y#[F3:+z]
+Frame edge F2:side#1#[F1:-x,F3:-x]#1|F2:side#1#[F1:-x]#1 [geometric]
+Frame edge F2:side#1#[F1:-x,F3:-x]#1|F2:side#1#[F1:-x]#2 [geometric]
+Frame edge F2:side#1#[F1:-x,F3:-x]#1|F3:-x [geometric]
+Frame edge F2:side#1#[F1:-x,F3:-x]#2|F2:side#1#[F1:-x]#2 [geometric]
+Frame edge F2:side#1#[F1:-x,F3:-x]#2|F2:side#1#[F1:-x]#3 [geometric]
+Frame edge F2:side#1#[F1:-x,F3:-x]#2|F3:-x [geometric]
+Frame edge F2:side#1#[F1:-x]#1|F2:side#2#[F1:-x]#3 [geometric]
+Frame edge F2:side#1#[F1:-x]#3|F2:side#2#[F1:-x]#1 [geometric]
+Frame edge F2:side#2#[F1:+x,F3:+z]|F2:side#2#[F1:-x]#3 [geometric]
+Frame edge F2:side#2#[F1:+x,F3:+z]|F3:+z#[F4:+y]
+Frame edge F2:side#2#[F1:+x,F3:-z,F4:+y]|F2:side#2#[F1:-x]#2 [geometric]
+Frame edge F2:side#2#[F1:+x,F3:-z,F4:+y]|F3:-z#[F4:+y]
+Frame edge F2:side#2#[F1:+x,F3:-z,F4:+y]|F4:+y#[F3:-z]
+Frame edge F2:side#2#[F1:+x,F4:-y]|F2:side#2#[F1:-x]#1 [geometric]
+Frame edge F2:side#2#[F1:+x,F4:-y]|F4:-y#[F3:-z]
+Frame edge F2:side#2#[F1:-x,F3:-x]#1|F2:side#2#[F1:-x]#1 [geometric]
+Frame edge F2:side#2#[F1:-x,F3:-x]#1|F2:side#2#[F1:-x]#2 [geometric]
+Frame edge F2:side#2#[F1:-x,F3:-x]#1|F3:-x [geometric]
+Frame edge F2:side#2#[F1:-x,F3:-x]#2|F2:side#2#[F1:-x]#2 [geometric]
+Frame edge F2:side#2#[F1:-x,F3:-x]#2|F2:side#2#[F1:-x]#3 [geometric]
+Frame edge F2:side#2#[F1:-x,F3:-x]#2|F3:-x [geometric]
+Frame edge F3:+z#[F4:+y]|F3:-x
+Frame edge F3:+z#[F4:+y]|F4:+y#[F3:+z]
+Frame edge F3:+z#[F4:-y]|F3:-x
+Frame edge F3:+z#[F4:-y]|F4:-y#[F3:+z]
+Frame edge F3:-x|F3:-z#[F4:+y]
+Frame edge F3:-x|F3:-z#[F4:-y]
+Frame edge F3:-x|F4:+y#[F3:+z]
+Frame edge F3:-x|F4:+y#[F3:-z]
+Frame edge F3:-x|F4:-y#[F3:+z]
+Frame edge F3:-x|F4:-y#[F3:-z]
+Frame edge F3:-z#[F4:+y]|F4:+y#[F3:-z]
+Frame edge F3:-z#[F4:-y]|F4:-y#[F3:-z]

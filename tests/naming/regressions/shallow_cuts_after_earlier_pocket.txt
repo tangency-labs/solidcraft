@@ -1,0 +1,70 @@
+# regressions/shallow_cuts_after_earlier_pocket: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Plate: 20 faces, 47 edges
+Plate face F1:+x
+Plate face F1:+y
+Plate face F1:+z
+Plate face F1:-x
+Plate face F1:-y
+Plate face F1:-z
+Plate face F2:blend:F1:+z|F1:-y
+Plate face F4:bottom#[F4:side:c1]
+Plate face F4:bottom#[F4:side:c2]
+Plate face F4:side:c1#[F1:+z,F6:side:l1]
+Plate face F4:side:c1#[F6:bottom]
+Plate face F4:side:c2#[F1:+z,F6:side:l1]
+Plate face F4:side:c2#[F6:bottom]
+Plate face F6:bottom
+Plate face F6:side:l1#[F4:side:c1,F4:side:c2]
+Plate face F6:side:l1#[F4:side:c1,F6:side:l4]
+Plate face F6:side:l1#[F4:side:c2,F6:side:l2]
+Plate face F6:side:l2
+Plate face F6:side:l3
+Plate face F6:side:l4
+Plate edge F1:+x|F1:+y
+Plate edge F1:+x|F1:+z
+Plate edge F1:+x|F1:-y
+Plate edge F1:+x|F1:-z
+Plate edge F1:+x|F2:blend:F1:+z|F1:-y
+Plate edge F1:+y|F1:+z
+Plate edge F1:+y|F1:-x
+Plate edge F1:+y|F1:-z
+Plate edge F1:+z|F1:-x
+Plate edge F1:+z|F2:blend:F1:+z|F1:-y
+Plate edge F1:+z|F4:side:c1#[F1:+z,F6:side:l1]
+Plate edge F1:+z|F4:side:c2#[F1:+z,F6:side:l1]
+Plate edge F1:+z|F6:side:l1#[F4:side:c1,F4:side:c2]
+Plate edge F1:+z|F6:side:l1#[F4:side:c1,F6:side:l4]
+Plate edge F1:+z|F6:side:l1#[F4:side:c2,F6:side:l2]
+Plate edge F1:+z|F6:side:l2
+Plate edge F1:+z|F6:side:l3
+Plate edge F1:+z|F6:side:l4
+Plate edge F1:-x|F1:-y
+Plate edge F1:-x|F1:-z
+Plate edge F1:-x|F2:blend:F1:+z|F1:-y
+Plate edge F1:-y|F1:-z
+Plate edge F1:-y|F2:blend:F1:+z|F1:-y
+Plate edge F4:bottom#[F4:side:c1]|F4:side:c1#[F1:+z,F6:side:l1]
+Plate edge F4:bottom#[F4:side:c1]|F4:side:c1#[F6:bottom]
+Plate edge F4:bottom#[F4:side:c2]|F4:side:c2#[F1:+z,F6:side:l1]
+Plate edge F4:bottom#[F4:side:c2]|F4:side:c2#[F6:bottom]
+Plate edge F4:side:c1#[F1:+z,F6:side:l1]|F4:side:c1#[F6:bottom]~1 [geometric]
+Plate edge F4:side:c1#[F1:+z,F6:side:l1]|F4:side:c1#[F6:bottom]~2 [geometric]
+Plate edge F4:side:c1#[F1:+z,F6:side:l1]|F6:side:l1#[F4:side:c1,F4:side:c2]
+Plate edge F4:side:c1#[F1:+z,F6:side:l1]|F6:side:l1#[F4:side:c1,F6:side:l4]
+Plate edge F4:side:c1#[F6:bottom]|F6:bottom
+Plate edge F4:side:c2#[F1:+z,F6:side:l1]|F4:side:c2#[F6:bottom]~1 [geometric]
+Plate edge F4:side:c2#[F1:+z,F6:side:l1]|F4:side:c2#[F6:bottom]~2 [geometric]
+Plate edge F4:side:c2#[F1:+z,F6:side:l1]|F6:side:l1#[F4:side:c1,F4:side:c2]
+Plate edge F4:side:c2#[F1:+z,F6:side:l1]|F6:side:l1#[F4:side:c2,F6:side:l2]
+Plate edge F4:side:c2#[F6:bottom]|F6:bottom
+Plate edge F6:bottom|F6:side:l1#[F4:side:c1,F4:side:c2]
+Plate edge F6:bottom|F6:side:l1#[F4:side:c1,F6:side:l4]
+Plate edge F6:bottom|F6:side:l1#[F4:side:c2,F6:side:l2]
+Plate edge F6:bottom|F6:side:l2
+Plate edge F6:bottom|F6:side:l3
+Plate edge F6:bottom|F6:side:l4
+Plate edge F6:side:l1#[F4:side:c1,F6:side:l4]|F6:side:l4
+Plate edge F6:side:l1#[F4:side:c2,F6:side:l2]|F6:side:l2
+Plate edge F6:side:l2|F6:side:l3
+Plate edge F6:side:l3|F6:side:l4
+ref Rim (2) edge 0 `F1:+z|F1:-y` -> Plate edge F1:+z|F1:-y
