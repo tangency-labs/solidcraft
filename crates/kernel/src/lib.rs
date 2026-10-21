@@ -240,6 +240,18 @@ pub enum KernelError {
 
 pub type Result<T> = std::result::Result<T, KernelError>;
 
+/// The native kernel call running right now (SMLib, with the `smlib` feature), for crash reports.
+pub fn native_call_in_flight() -> Option<String> {
+    #[cfg(feature = "smlib")]
+    {
+        solidcraft_smlib::current_call()
+    }
+    #[cfg(not(feature = "smlib"))]
+    {
+        None
+    }
+}
+
 thread_local! {
     static GUARDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
