@@ -14,17 +14,39 @@ fn kernel() -> String {
     std::env::var("SOLIDCRAFT_BOOLEANS").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| "default".into())
 }
 
+/// How many cases a chain of `base` recipes may go through (a ladder case builds on the one
+/// before it, which builds on the one before that).
+const MAX_BASE_DEPTH: usize = 32;
+
 /// The case's commands: a script as is, or an oracle recipe translated. In a string, `$CASE` is
 /// the case directory (input files such as `input.step`) and `$OUT` a scratch directory for files
-/// the case writes (an export), outside the repository.
+/// the case writes (an export), outside the repository. A script with `"base": "<case
+/// directory>"` (relative to this case's directory) runs that case's commands first: a ladder
+/// case starts from the previous tier's finished part without copying its commands.
 fn script(dir: &str, out: &str, recipe: &Value) -> Result<Value, String> {
+    script_at(dir, out, recipe, 0)
+}
+
+fn script_at(dir: &str, out: &str, recipe: &Value, depth: usize) -> Result<Value, String> {
     let s = if recipe.get("commands").is_some() || recipe.is_array() { recipe.clone() } else { recipe::to_script(recipe)? };
     let text = serde_json::to_string(&s).map_err(|e| e.to_string())?;
     let inner = |p: &str| -> Result<String, String> {
         let j = serde_json::to_string(p).map_err(|e| e.to_string())?;
         Ok(j.get(1..j.len().saturating_sub(1)).unwrap_or("").to_string())
     };
-    serde_json::from_str(&text.replace("$CASE", &inner(dir)?).replace("$OUT", &inner(out)?)).map_err(|e| e.to_string())
+    let own: Value = serde_json::from_str(&text.replace("$CASE", &inner(dir)?).replace("$OUT", &inner(out)?)).map_err(|e| e.to_string())?;
+    let Some(base) = recipe.get("base").and_then(Value::as_str) else { return Ok(own) };
+    if depth >= MAX_BASE_DEPTH {
+        return Err(format!("`base` chain deeper than {MAX_BASE_DEPTH} cases"));
+    }
+    let base_dir = std::path::Path::new(dir).join(base).to_string_lossy().to_string();
+    let base_script = read_json(&format!("{base_dir}/recipe.json"))
+        .and_then(|r| script_at(&base_dir, out, &r, depth + 1))
+        .map_err(|e| format!("base {base}: {e}"))?;
+    let list = |v: &Value| v.get("commands").or(Some(v)).and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut commands = list(&base_script);
+    commands.extend(list(&own));
+    Ok(json!({"commands": commands}))
 }
 
 /// A scratch directory for one case's output files.
@@ -62,6 +84,13 @@ fn check_case(dir: &str) -> Value {
         }
     };
     out["sources"] = want["sources"].clone();
+    // A capability SolidCraft doesn't have yet (no command or parameter for it): recorded as a
+    // case so the gap is visible, never run against a stand-in.
+    if let Some(missing) = want["missing"].as_str() {
+        out["status"] = json!("unsupported");
+        out["error"] = json!(format!("not supported yet: {missing}"));
+        return out;
+    }
     let commands = match scratch(&area, &name).and_then(|o| read_json(&format!("{dir}/recipe.json")).and_then(|r| script(dir, &o, &r))) {
         Ok(s) => s,
         Err(e) => {
@@ -88,7 +117,10 @@ fn check_case(dir: &str) -> Value {
     let refused = outcome == "refused";
     let may_refuse = refused || outcome == "solid_or_refused";
     let mut s = solidcraft_engine::Session::default();
+    let clock = std::time::Instant::now();
     let ran = s.run_script(&commands);
+    // The commands' own time, without process start or grading: the ladder's timing golden.
+    out["seconds"] = json!(clock.elapsed().as_secs_f64());
     match (ran, may_refuse) {
         (Err(e), _) if crashed(&e.to_string()) => {
             out["status"] = json!("crash");
@@ -159,6 +191,11 @@ fn check_case(dir: &str) -> Value {
     let got = totals(&json!({"bodies": bodies}));
     let (edges, vertices): (u64, u64) =
         bodies.iter().fold((0, 0), |(e, v), b| (e + b["edges"].as_u64().unwrap_or(0), v + b["vertices"].as_u64().unwrap_or(0)));
+    // What the kernel made, graded or not: the ladder's golden records it per kernel.
+    out["measured"] = json!({
+        "body_count": got.body_count, "faces": got.faces, "edges": edges, "vertices": vertices,
+        "volume_mm3": got.volume, "area_mm2": got.area,
+    });
     let has = |k: &str| want.get(k).is_some_and(|v| !v.is_null());
     let rel = want["tolerance"]["rel"].as_f64().unwrap_or(REL_TOL);
     let diag = |b: ([f64; 3], [f64; 3])| ((b.1[0] - b.0[0]).powi(2) + (b.1[1] - b.0[1]).powi(2) + (b.1[2] - b.0[2]).powi(2)).sqrt();
@@ -226,4 +263,43 @@ pub fn run(args: &[String]) -> Result<(), String> {
     report(args, &results);
     let bad = results.iter().filter(|r| matches!(r["status"].as_str(), Some("fail" | "crash"))).count();
     if bad > 0 { Err(format!("{bad} kernel case(s) failed")) } else { Ok(()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn case_dir(root: &std::path::Path, name: &str, recipe: &Value) -> String {
+        let d = root.join(name);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("recipe.json"), recipe.to_string()).unwrap();
+        d.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn base_commands_run_first_through_the_chain() {
+        let root = std::env::temp_dir().join(format!("kernel-cases-base-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        case_dir(&root, "a", &json!({"commands": [{"command": "a", "params": {"file": "$OUT/a.step"}}]}));
+        case_dir(&root, "b", &json!({"base": "../a", "commands": [{"command": "b"}]}));
+        let c = case_dir(&root, "c", &json!({"base": "../b", "commands": [{"command": "c", "params": {"file": "$CASE/x"}}]}));
+        let r = read_json(&format!("{c}/recipe.json")).unwrap();
+        let s = script(&c, "/scratch", &r).unwrap();
+        let ids: Vec<&str> = s["commands"].as_array().unwrap().iter().map(|c| c["command"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(s["commands"][2]["params"]["file"], json!(format!("{c}/x")));
+        // `$OUT` is the running case's scratch directory, in its bases too.
+        assert_eq!(s["commands"][0]["params"]["file"], json!("/scratch/a.step"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_base_cycle_is_an_error_not_a_hang() {
+        let root = std::env::temp_dir().join(format!("kernel-cases-cycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let a = case_dir(&root, "a", &json!({"base": "../a", "commands": []}));
+        let r = read_json(&format!("{a}/recipe.json")).unwrap();
+        assert!(script(&a, "/scratch", &r).unwrap_err().contains("deeper than"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
