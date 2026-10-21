@@ -917,8 +917,38 @@ fn take_attempt() -> bool {
 ///
 /// The result carries its exact history ([`Body::history`]) over the operands `[a, b]`,
 /// whichever way it was made, or none where a step it took does not report one.
+///
+/// Truck runs it unless [`crate::BOOLEANS_ENV`] picks SMLib ([`crate::boolean_backend`]).
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || boolean_untimed(a, b, op))
+    crate::profile::timed(crate::profile::Kind::Boolean, || match crate::boolean_backend()? {
+        crate::BooleanBackend::Truck => boolean_untimed(a, b, op),
+        crate::BooleanBackend::Smlib => smlib_boolean(a, b, op),
+    })
+}
+
+/// [`boolean`] through SMLib, its result given the operands' roles as truck's is.
+#[cfg(feature = "smlib")]
+fn smlib_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    let r = guard("SMLib boolean", || crate::boolean_backend::smlib_boolean(a, b, op));
+    with_operand_roles(a, b, op, r)
+}
+
+#[cfg(not(feature = "smlib"))]
+fn smlib_boolean(_: &Body, _: &Body, _: BoolOp) -> Result<Option<Body>> {
+    Err(KernelError::Invalid("not supported yet: this build has no SMLib".into()))
+}
+
+/// A boolean's result with what its operands' faces stood for carried over: regularization
+/// protection and the planar construction and shell roles on supports it kept.
+fn with_operand_roles(a: &Body, b: &Body, op: BoolOp, r: Result<Option<Body>>) -> Result<Option<Body>> {
+    let r = r.map(|result| result.map(|body| body.inherit_regularization_protection(a).inherit_regularization_protection(b)));
+    match op {
+        BoolOp::Cut => r.and_then(|result| result.map(|body| body.with_preserved_boolean_planar_sources(a, b, true)).transpose()),
+        BoolOp::Union => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
+        // Every face of an intersection lies on one operand's face, as a union's does: the same
+        // roles carry over (#565).
+        BoolOp::Intersect => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
+    }
 }
 
 fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
@@ -1012,7 +1042,7 @@ fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, Bool
             )),
         };
     }
-    r = finished(a, b, op, r);
+    r = with_operand_roles(a, b, op, r);
     // A retry's result is held to what the operation can do at all; one that fails is refused
     // rather than returned wrong (issue #616).
     if (!diagnostics.events.is_empty() || diagnostics.truncated)

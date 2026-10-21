@@ -34,6 +34,7 @@ use solidcraft_geom::Vec3;
 use solidcraft_geom::brep as b;
 
 use crate::flat::{self, *};
+use crate::history::Order;
 use crate::import::Arrays;
 use crate::{Brep, Result, error, ffi, init};
 
@@ -85,6 +86,15 @@ impl Brep {
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
         native(&arrays)
+    }
+
+    /// [`Brep::to_native`], with where each of SMLib's faces and edges went in the record's
+    /// canonical order: what [`crate::history::Raw::history`] renumbers this body's history with.
+    /// SMLib's export lists faces and edges in the body's own order (`SmBrep::GetFaces`,
+    /// `GetEdges`), the order its history uses.
+    pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
+        let arrays = self.arrays().map_err(ExportError::Smlib)?;
+        native_ordered(&arrays).map(|(brep, _, order)| (brep, order))
     }
 }
 
@@ -576,6 +586,11 @@ struct Edge {
 
 /// The schema 4 B-rep of SMLib's flat arrays: mapped, renumbered canonically and validated.
 pub fn native(arrays: &Arrays) -> Res<(b::Brep, Report)> {
+    native_ordered(arrays).map(|(brep, report, _)| (brep, report))
+}
+
+/// [`native`], with the canonical place of each array face and edge.
+fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     let flat = View(arrays);
     let mut report = Report::default();
     if arrays.ints.values().map(Vec::len).chain(arrays.reals.values().map(Vec::len)).any(|n| n > flat::MAX_LEN) {
@@ -787,7 +802,7 @@ pub fn native(arrays: &Arrays) -> Res<(b::Brep, Report)> {
     }
     let shells: Vec<Vec<(u32, bool)>> = order.iter().filter_map(|s| shells.get(*s as usize).cloned()).collect();
 
-    canonical(Parts { faces, edges, shells, regions }, n_vertices, flat, tolerance).map(|brep| (brep, report))
+    canonical(Parts { faces, edges, shells, regions }, n_vertices, flat, tolerance).map(|(brep, order)| (brep, report, order))
 }
 
 /// The mapped records before renumbering.
@@ -800,8 +815,9 @@ struct Parts {
 
 /// The record in canonical order: faces in first appearance through the shells, edges through
 /// the faces (a face whose first oriented face is reversed walked backwards), vertices through
-/// the edges and then the vertex loops, with each face's pcurves; validated.
-fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res<b::Brep> {
+/// the edges and then the vertex loops, with each face's pcurves; validated. With it, the
+/// canonical index of each array face and edge.
+fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res<(b::Brep, Order)> {
     let Parts { faces, edges, shells, regions } = parts;
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
@@ -933,7 +949,11 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
     brep.validate().map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
-    Ok(brep)
+    let placed = |new: &[Option<u32>]| {
+        new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
+    };
+    let order = Order { faces: placed(&face_new)?, edges: placed(&edge_new)? };
+    Ok((brep, order))
 }
 
 /// A face's pcurves, edge loop by edge loop, from the plain-record routine on the face's

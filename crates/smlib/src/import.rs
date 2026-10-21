@@ -84,6 +84,8 @@ fn z_axis(f: &b::Frame) -> [f64; 3] {
 /// rules (SMLib then skips its healer); otherwise SMLib heals it on import.
 pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     brep.validate().map_err(|e| Unsupported::Invalid(e.0))?;
+    let brep = revolved::analytic(brep)?;
+    let brep = brep.as_ref();
     let mut a = Arrays::default();
 
     // Regions and shells. Each region gets its own copy of each shell it lists.
@@ -480,6 +482,8 @@ fn curve(a: &mut Arrays, c: &b::Curve) -> R<()> {
     }
     Ok(())
 }
+
+mod revolved;
 
 #[cfg(test)]
 mod tests;

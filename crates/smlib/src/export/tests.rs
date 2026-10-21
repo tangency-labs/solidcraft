@@ -58,6 +58,29 @@ mod native_tests {
         }
     }
 
+    /// A tagged body's own history, renumbered with its export's order on both sides, is the
+    /// identity in canonical order: the order says where each SMLib face and edge went.
+    #[test]
+    fn the_export_order_renumbers_a_history_into_the_record() {
+        for (name, s, _) in primitives() {
+            let t = s.tagged(0).unwrap();
+            let (record, order) = t.to_native_ordered().unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!((order.faces.len(), order.edges.len()), (record.faces.len(), record.edges.len()), "{name}");
+            let h = t.history().unwrap().history(std::slice::from_ref(&order), &order).unwrap();
+            for (i, f) in h.faces.iter().enumerate() {
+                assert_eq!(f.origins, vec![solidcraft_geom::brep::history::FaceOrigin::Face { operand: 0, face: i }], "{name}: face {i}");
+            }
+            for (i, e) in h.edges.iter().enumerate() {
+                assert_eq!(e.origins, vec![solidcraft_geom::brep::history::EdgeOrigin::Edge { operand: 0, edge: i }], "{name}: edge {i}");
+                // The faces it bounds, as the record's uses say.
+                let mut faces: Vec<usize> = record.edges[i].uses.iter().map(|u| u.face as usize).collect();
+                faces.sort();
+                faces.dedup();
+                assert_eq!(e.faces, faces, "{name}: edge {i}");
+            }
+        }
+    }
+
     #[test]
     fn recognised_edges_are_on_smlibs_curves() {
         let cyl = Brep::make_cylinder([0.0; 3], 5.0, 10.0).unwrap().to_native().unwrap();
