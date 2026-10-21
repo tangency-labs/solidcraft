@@ -1827,7 +1827,8 @@ fn a_sketch_coil_refuses_profiles_it_cannot_sweep() {
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
-    assert!(s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).is_err(), "runs into itself");
+    let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).unwrap_err().to_string();
+    assert!(e.contains("runs into itself"), "{e}");
 }
 
 #[test]
@@ -1895,10 +1896,32 @@ fn a_sketch_coil_never_panics_on_hostile_parameters() {
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
+    // A valid profile coil, so that each hostile value reaches the parameter it attacks.
+    let with = |k: &str, v: Value| {
+        let mut p = json!({"sketch": "Section", "revolutions": 3, "pitch": 8});
+        p[k] = v;
+        p
+    };
     for hostile in [json!(true), json!(-1), json!(1e308), json!("nope"), json!([]), json!([0, 0, 0]), json!({"type": "indices"})] {
         for k in ["sketch", "profiles", "pitch", "revolutions"] {
-            let result = s.execute("solid.coil", &json!({k: hostile.clone()}));
+            let result = s.execute("solid.coil", &with(k, hostile.clone()));
             assert!(!matches!(result, Err(crate::EngineError::Internal(..))), "{k} {hostile} panicked: {result:?}");
         }
+    }
+    // Profile selections reach the parser and the evaluator: no index, shape or point may panic.
+    for profiles in [
+        json!([]),
+        json!([0]),
+        json!([999]),
+        json!([-1]),
+        json!(1e308),
+        json!("nope"),
+        json!({"type": "indices"}),
+        json!([{"point": [1]}]),
+        json!([[]]),
+        json!([{"curves": 7}]),
+    ] {
+        let result = s.execute("solid.coil", &with("profiles", profiles.clone()));
+        assert!(!matches!(result, Err(crate::EngineError::Internal(..))), "profiles {profiles} panicked: {result:?}");
     }
 }
