@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#978"
+ ],
+ "what": "a 90 degree inside flange of radius 1 on an edge that has a ledge beside it exactly as tall as the flange's setback (3 mm): sew failed with a degenerate edge",
+ "source": "invariants",
+ "method": "T = 2, flange R = 1: setback R + T = 3 and the ledge (x 97..100, y 0..3) is exactly that tall, so the trim line runs along the ledge's top; the right answer is one valid closed body (the ledge goes with the setback strip), with no graded volume because the flange's extent along the ledge has no single reading",
+ "body_count": 1
+}
