@@ -3,7 +3,7 @@
 // Wraps the SmBSplineCurve members of source/SMLib/src/SmBSplineCurveNLib.cpp owned by the unit:
 // ApproximateArc (sm_ApproxCircArc), ApproximateRationalCurve, CreateHelixSegment, both
 // CreateExtendedCurve overloads, CreateInterpolatingCurve, DampenKnotSpacing, DegreeReduction,
-// InsertOneKnot, SetIntersectionCurveThroughPoint (without UV curves), EquallySpacedPoints,
+// InsertOneKnot, SetIntersectionCurveThroughPoint (with B-spline UV trim surfaces), EquallySpacedPoints,
 // InsertKnots, InterpolatePoints, MakeCurvesCompatible, DeformToEndPointTargets,
 // ReparametrizeWithArcLength, Scale(double), ScaleKnotVector, SyncronizeKnotsOfCurves and Trim.
 //
@@ -17,10 +17,12 @@
 
 #include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
+#include <SmBSplineSurface.h>
 #include <SmContext.h>
 #include <SmCurveTypes.h>
 #include <SmExtent1d.h>
 #include <SmNurbsCrv.h>
+#include <SmNurbsSrf.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
 #include <SmVector2d.h>
@@ -79,6 +81,32 @@ SmBSplineCurve* read_curve(Rd& rd, const SmContext& ctx)
     SmBSplineCurve* c = new (ctx) SmBSplineCurve(read_nurb(rd), dim, FALSE);
     c->SetOutOfBoundsEnabled(oob ? TRUE : FALSE);
     return c;
+}
+
+// Reads `n m p q r s cpts u v` into a surface from sm_AllocateNurbSurface (validated by the
+// ffi wrapper).
+gw_SURFACE* read_surface_nurb(Rd& rd)
+{
+    gw_INDEX n = (gw_INDEX)rd.idx();
+    gw_INDEX m = (gw_INDEX)rd.idx();
+    gw_DEGREE p = (gw_DEGREE)rd.idx();
+    gw_DEGREE q = (gw_DEGREE)rd.idx();
+    gw_INDEX r = (gw_INDEX)rd.idx();
+    gw_INDEX s = (gw_INDEX)rd.idx();
+    gw_SURFACE* sur = sm_AllocateNurbSurface(n, m, p, q, r, s);
+    for (gw_INDEX i = 0; i <= n; i++)
+        for (gw_INDEX j = 0; j <= m; j++)
+        {
+            sur->net->Pw[i][j].x = rd.num();
+            sur->net->Pw[i][j].y = rd.num();
+            sur->net->Pw[i][j].z = rd.num();
+            sur->net->Pw[i][j].w = rd.num();
+        }
+    for (gw_INDEX i = 0; i <= r; i++)
+        sur->knu->U[i] = rd.num();
+    for (gw_INDEX i = 0; i <= s; i++)
+        sur->knv->U[i] = rd.num();
+    return sur;
 }
 
 void put_state(std::vector<double>& o, const SmBSplineCurve* c)
@@ -327,6 +355,18 @@ void curve_op(int32_t op, Rd& rd, const SmContext& ctx, SmBSplineCurve* c, std::
         SmTArray<SmBSplineCurve*> uvc;
         SmTArray<const SmSurface*> srf;
         SmTArray<SmVector2d*> uvp;
+        int64_t nuv = rd.idx();
+        std::vector<SmVector2d> uv_pts((size_t)nuv);
+        for (int64_t i = 0; i < nuv; i++)
+        {
+            uvc.Add(read_curve(rd, ctx));
+            srf.Add(new (ctx) SmBSplineSurface(read_surface_nurb(rd), FALSE, NULL));
+            bool has_uv = rd.flag();
+            double u = rd.num();
+            double v = rd.num();
+            uv_pts[(size_t)i] = SmVector2d(u, v);
+            uvp.Add(has_uv ? &uv_pts[(size_t)i] : NULL);
+        }
         SmBoolean modified = FALSE;
         SmStatus s = c->SetIntersectionCurveThroughPoint(knot, p, has_t ? &t : NULL, uvc, srf, uvp,
                                                          modified, pct);
@@ -335,6 +375,12 @@ void curve_op(int32_t op, Rd& rd, const SmContext& ctx, SmBSplineCurve* c, std::
         {
             o.push_back(modified ? 1.0 : 0.0);
             o.push_back(knot);
+        }
+        for (ULONG i = 0; i < uvc.GetSize(); i++)
+        {
+            put_state(o, uvc[i]);
+            delete uvc[i];
+            delete srf[i];
         }
         break;
     }

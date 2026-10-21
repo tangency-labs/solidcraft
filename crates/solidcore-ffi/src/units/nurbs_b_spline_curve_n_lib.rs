@@ -20,7 +20,7 @@
 //! | `Dampen`      | `DampenKnotSpacing`              | `factor mult`                                |
 //! | `DegRed`      | `DegreeReduction`                | `tol max`                                    |
 //! | `InsOne`      | `InsertOneKnot`                  | `knot times`                                 |
-//! | `Through`     | `SetIntersectionCurveThroughPoint` (no UV curves) | `knot P[3] has_t T[3] pct`  |
+//! | `Through`     | `SetIntersectionCurveThroughPoint` | `knot P[3] has_t T[3] pct nuv`, per UV curve: curve block, surface `n m p q r s cpts u v`, `has_uv u v` |
 //! | `Even`        | `EquallySpacedPoints`            | `t0 t1 n tol`                                |
 //! | `InsKnots`    | `InsertKnots`                    | `nk K[nk]`                                   |
 //! | `InterpPts`   | `InterpolatePoints` (static)     | points `has_params np U[np] deg has_ts Ts[3] has_te Te[3] closed par` |
@@ -36,7 +36,8 @@
 //! `0..=2` (`SM_CP_*` / `SM_IT_*`), the tangent types `0..=2` (`SM_IV_*`). The output is
 //! the op status (`0` = `SM_SUCCESS`, else the `SmStatus`), the op's outputs, then for
 //! curve ops the state of `this`. Ops creating a curve output, on success, a flag and
-//! (when set) the new curve's state; `Through` outputs `modified new_knot` on success;
+//! (when set) the new curve's state; `Through` outputs `modified new_knot` on success, then the state of
+//! every UV curve (always);
 //! `Even` `count`, the points and the parameters; `Trim` the interval after the call
 //! (always); `Compat` / `Sync` the state of every curve (always). A state is `dim oob
 //! borrowed knot_type form has_nurb [n p m cpts knots]`.
@@ -48,7 +49,7 @@
 //! interior multiplicity at most `p`), finite bounded parameters, and per op the
 //! restrictions documented on [`validate_op`].
 
-use crate::validate::{bad, euclid};
+use crate::validate::{bad, check_knots, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
@@ -67,6 +68,8 @@ pub const MAX_REL_DIST: f64 = 64.0;
 pub const MIN_G2_FRACTION: f64 = 1e-3;
 /// Smallest parameter range relative to the knot magnitude.
 pub const MIN_REL_RANGE: f64 = 1e-6;
+/// Most UV trim curves of a `Through` call.
+pub const MAX_UV_CURVES: usize = 4;
 /// Largest number of span splits of `Dampen` (simulated before the call).
 pub const MAX_DAMPEN_SPLITS: usize = 4000;
 /// Largest number of turns of `Helix`.
@@ -309,6 +312,152 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
     curve(rd)
 }
 
+/// Whether `SetIntersectionCurveThroughPoint` on `c` surely takes a case that moves an
+/// existing knot (cases 2, 3, 5, 6, 7) rather than inserting one (cases 1, 4, 8); `c`
+/// must be a non-rational piecewise C0 cubic (exactly triple interior knots).
+/// With UV curves the inserting cases build each new UV curve from
+/// `(gw_CURVE *)&sNewUVCrv[ii]`, the address of an array slot holding a pointer, and
+/// crash (`plan/upstream-issues.md`). Conservative: every span and end node the
+/// parameter could select must satisfy the move test (`min_dist / span < pct`, the
+/// projection of the through point on the outward end tangent within `(-0.01 *
+/// chord, 0.01)`, the chord being at most upstream's sampled span length), with a
+/// relative margin.
+fn through_moves_knot(c: &CurveInfo, knot: f64, through: [f64; 3], pct: f64) -> bool {
+    let p = c.p;
+    let m = c.knots.len().saturating_sub(1);
+    let inner = c.knots.get(p + 1..m.saturating_sub(p)).unwrap_or(&[]);
+    let c0 = p == 3
+        && !c.rational
+        && inner.len() % 3 == 0
+        && inner
+            .chunks(3)
+            .all(|w| matches!(w, [a, _, b] if a == b));
+    if !c0 {
+        return false; // not clearly a piecewise C0 cubic: not worth the risk
+    }
+    let u = c.unique_knots();
+    let segs = u.len().saturating_sub(1);
+    if segs == 0 || c.pts.len() != 3 * segs + 1 {
+        return false;
+    }
+    let (Some(&u_first), Some(&u_last)) = (u.first(), u.last()) else {
+        return false;
+    };
+    let spans: Vec<usize> = if knot < u_first {
+        vec![0]
+    } else if knot > u_last {
+        vec![segs - 1]
+    } else {
+        (0..segs)
+            .filter(|&j| matches!((u.get(j), u.get(j + 1)), (Some(&a), Some(&b)) if a <= knot && knot <= b))
+            .collect()
+    };
+    if spans.is_empty() {
+        return false;
+    }
+    let pt = |i: usize| c.pts.get(i).copied();
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let margin = 1e-6;
+    spans.iter().all(|&j| {
+        let (Some(&u0), Some(&u1)) = (u.get(j), u.get(j + 1)) else {
+            return false;
+        };
+        let size = u1 - u0;
+        let (d0, d1) = ((knot - u0).abs(), (knot - u1).abs());
+        // nodes the comparison `|k - u0| < |k - u1|` could pick
+        let mut nodes = Vec::new();
+        if d0 <= d1 * (1.0 + margin) {
+            nodes.push(false);
+        }
+        if d0 * (1.0 + margin) >= d1 {
+            nodes.push(true);
+        }
+        let (Some(c_lo), Some(c_hi)) = (pt(3 * j), pt(3 * j + 3)) else {
+            return false;
+        };
+        let chord = dist(c_lo, c_hi);
+        nodes.iter().all(|&top| {
+            let (min_dist, idx) = if top { (d1, 3 * j + 3) } else { (d0, 3 * j) };
+            // left-side end tangent at the node, outward
+            let tan = match (top, idx) {
+                (false, 0) => pt(1).zip(pt(0)).map(|(b, a)| sub(a, b)),
+                (false, i) => pt(i - 1).zip(pt(i)).map(|(b, a)| sub(b, a)),
+                (true, i) => pt(i).zip(pt(i - 1)).map(|(a, b)| sub(a, b)),
+            };
+            let (Some(tan), Some(node)) = (tan, pt(idx)) else {
+                return false;
+            };
+            let len = dot(tan, tan).sqrt();
+            if len < 1e-9 * (1.0 + chord) {
+                return false;
+            }
+            let proj = dot(tan, sub(through, node)) / len;
+            let slack = margin * (1.0 + dist(through, node) + chord);
+            min_dist / size < pct * (1.0 - margin)
+                && proj > -0.01 * chord + slack
+                && proj < 0.01 - slack
+        })
+    })
+}
+
+/// One UV trim curve of `Through`: a curve block of dimension 2 sharing the degree,
+/// control point count and knots of `this` (upstream edits its knots and control
+/// points at the indices of `this`), a surface `n m p q r s cpts u v` (well-formed,
+/// clamped, finite, positive weights) and `has_uv u v` with the UV point inside the
+/// surface's domain.
+fn uv_trim_curve(rd: &mut Reader<'_>, this: &CurveInfo) -> Result<(), FfiError> {
+    if rd.index(8)? != 2 {
+        return Err(bad("through point: UV curve dimension must be 2"));
+    }
+    rd.flag()?;
+    let uv = curve(rd)?;
+    if uv.p != this.p || uv.pts.len() != this.pts.len() || uv.knots != this.knots {
+        return Err(bad("through point: UV curve must share the knots of the curve"));
+    }
+    let n = rd.index(MAX_INDEX)?;
+    let m = rd.index(MAX_INDEX)?;
+    let p = rd.index(MAX_DEGREE)?;
+    let q = rd.index(MAX_DEGREE)?;
+    let r = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
+    let s = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
+    if p == 0 || p > n || q == 0 || q > m || r != n + p + 1 || s != m + q + 1 {
+        return Err(bad(
+            "surface: need 1 <= p <= n, 1 <= q <= m, r = n+p+1, s = m+q+1",
+        ));
+    }
+    if (n + 1) * (m + 1) > MAX_INDEX {
+        return Err(bad("surface: too many control points"));
+    }
+    let net = rd.take(4 * (n + 1) * (m + 1))?;
+    let (cpts, _) = net.as_chunks::<4>();
+    let rational = cpts.first().is_some_and(|c| c[3] != NOW);
+    for &[x, y, z, w] in cpts {
+        if (w != NOW) != rational || z == NOZ {
+            return Err(bad("surface: mixed rationality or 2D control point"));
+        }
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() || !w.is_finite() {
+            return Err(bad("surface: non-finite control point"));
+        }
+        if rational && w <= 0.0 {
+            return Err(bad("surface: non-positive weight"));
+        }
+        if euclid([x, y, z, w]).iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+            return Err(bad("surface: Euclidean point out of range"));
+        }
+    }
+    let u = rd.finites(r + 1)?;
+    let v = rd.finites(s + 1)?;
+    let (u0, u1) = check_knots(&u, p, "surface u")?;
+    let (v0, v1) = check_knots(&v, q, "surface v")?;
+    let has_uv = rd.flag()?;
+    let (pu, pv) = (rd.finite()?, rd.finite()?);
+    if has_uv && (!(u0..=u1).contains(&pu) || !(v0..=v1).contains(&pv)) {
+        return Err(bad("through point: UV point outside the surface domain"));
+    }
+    Ok(())
+}
+
 /// Data points for the NLib fits: consecutive points distinct.
 fn distinct(pts: &[[f64; 3]]) -> Result<(), FfiError> {
     if pts.windows(2).any(|w| matches!(w, [a, b] if a == b)) {
@@ -410,7 +559,8 @@ const CONT_CINFINITY: usize = 13;
 /// - `InsKnots`: refinement knots that keep every multiplicity at most the degree.
 /// - `Compat` / `Sync`: `1..=MAX_CURVES` curves, `tol >= 0` (`> 0` for `Sync`).
 /// - `Trim`: `b - a` at least `1e-6` (relative to the knot magnitude).
-/// - `Through`: a parameter within one range of the curve, `0 <= pct <= 0.5`.
+/// - `Through`: a parameter within one range of the curve, `0 <= pct <= 0.5`; at most
+///   `MAX_UV_CURVES` UV curves, each checked by `uv_trim_curve`.
 fn validate_op(op: Op, rd: &mut Reader<'_>, this: Option<&CurveInfo>) -> Result<(), FfiError> {
     let this_or = || this.ok_or_else(|| bad("op needs a curve"));
     match op {
@@ -564,13 +714,23 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, this: Option<&CurveInfo>) -> Result<
         Op::Through => {
             let c = this_or()?;
             let knot = rd.finite()?;
-            rd.vec3()?;
+            let through = rd.vec3()?;
             rd.flag()?;
             rd.vec3()?;
             let pct = rd.finite()?;
             let (a, b) = c.range();
             if knot < a - (b - a) || knot > b + (b - a) || !(0.0..=0.5).contains(&pct) {
                 return Err(bad("through point: parameter or span percent out of range"));
+            }
+            let nuv = rd.index(MAX_UV_CURVES)?;
+            for _ in 0..nuv {
+                uv_trim_curve(rd, c)?;
+            }
+            if nuv > 0 && !through_moves_knot(c, knot, through, pct) {
+                return Err(bad(
+                    "through point: UV curves only where an existing knot moves (upstream \
+                     reads a pointer array as a curve when it inserts a knot)",
+                ));
             }
         }
         Op::Even => {

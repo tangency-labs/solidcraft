@@ -17,6 +17,7 @@
 #include <SmCurveBoundedSurface.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmHyperbola.h>
 #include <SmExtent3d.h>
 #include <SmFace.h>
 #include <SmGeomUtility.h>
@@ -37,6 +38,9 @@
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 #include <nurbs.h>
+
+#include <cmath>
+#include <stdexcept>
 
 #include <vector>
 
@@ -154,8 +158,30 @@ SmBSplineCurve* read_curve(Rd& rd, const SmContext& ctx)
     return new (ctx) SmBSplineCurve(cur, 3, FALSE);
 }
 
+// An `SmHyperbola` whose constructor made a finite NURB. The constructor ignores a
+// failing `MakeNurb` (`SE`), leaving `m_pNurb` NULL or NaN for semi axes too large or too
+// small next to the centre's coordinates, which every later use dereferences (the FFI
+// cannot predict the rounding): such an input is refused as a harness error.
+SmBSplineCurve* checked_hyperbola(SmHyperbola* h)
+{
+    const gw_CURVE* cur = h->GetGwNurbPointer();
+    bool ok = cur != NULL && cur->pol != NULL;
+    for (gw_INDEX i = 0; ok && i <= cur->pol->n; i++)
+    {
+        const gw_CPOINT& p = cur->pol->Pw[i];
+        ok = std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && std::isfinite(p.w);
+    }
+    if (!ok)
+    {
+        delete h;
+        throw std::invalid_argument("hyperbola generator: no finite NURB");
+    }
+    return h;
+}
+
 // A generator `kind ...` (layout of the surf_of_revolution_p1 shim): 0 a B-spline curve,
-// 1 a line `a[3] b[3]` (its NURB made), 2 a circle `c[3] x[3] y[3] d0 d1 r`.
+// 1 a line `a[3] b[3]` (its NURB made), 2 a circle `c[3] x[3] y[3] d0 d1 r`, 3 a
+// hyperbola `c[3] x[3] y[3] d0 d1 a b`.
 SmBSplineCurve* read_gen(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
@@ -168,6 +194,17 @@ SmBSplineCurve* read_gen(Rd& rd, const SmContext& ctx)
         SmLine* l = new (ctx) SmLine(a, b, 3, &ctx);
         l->GetOrCreateGwNurbPointer();
         return l;
+    }
+    if (kind == 3)
+    {
+        SmPoint3d c = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double d0 = rd.num();
+        double d1 = rd.num();
+        double a = rd.num();
+        double b = rd.num();
+        return checked_hyperbola(new (ctx) SmHyperbola(c, x, y, SmExtent1d(d0, d1), a, b, 3, &ctx));
     }
     SmPoint3d c = rd.vec();
     SmVector3d x = rd.vec();

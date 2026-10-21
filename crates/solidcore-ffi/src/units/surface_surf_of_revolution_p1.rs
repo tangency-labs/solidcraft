@@ -28,10 +28,12 @@
 //! positive weights or all non-rational, non-decreasing knots with end multiplicity
 //! `p + 1` and interior multiplicity at most `p`), non-degenerate lines, circles with a
 //! positive radius, independent axes and an angular domain inside `[-360, 360]` at most
-//! 360 long, finite rotation axes (`CreateCanonical` makes a zero one `(0, 0, 1)`),
-//! independent unit placement axes for the constructor (a longer Y axis leaves
-//! `IsOnPlane`'s output uninitialised), ordered domains, finite parameters and
-//! derivative orders up to 3.
+//! 360 long, hyperbolas with positive semi axes and a STEP domain inside `[-10, 10]`
+//! (the shims also refuse, as a C++ exception, a hyperbola whose constructor left no
+//! finite NURB: `SmHyperbola` ignores a failing `MakeNurb`), finite rotation axes
+//! (`CreateCanonical` makes a zero one `(0, 0, 1)`), independent unit placement axes
+//! for the constructor (a longer Y axis leaves `IsOnPlane`'s output uninitialised),
+//! ordered domains, finite parameters and derivative orders up to 3.
 
 use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
@@ -105,6 +107,21 @@ pub enum Gen {
         d: [f64; 2],
         /// Radius.
         r: f64,
+    },
+    /// `SmHyperbola(c, x, y, [d0, d1], a, b, 3)`.
+    Hyperbola {
+        /// Centre.
+        c: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// STEP domain (`|t| <= 10`).
+        d: [f64; 2],
+        /// Semi axis.
+        a: f64,
+        /// Semi imaginary axis.
+        b: f64,
     },
 }
 
@@ -443,6 +460,25 @@ fn push_gen(o: &mut Vec<f64>, g: &Gen) -> Result<(), FfiError> {
             o.extend_from_slice(x);
             o.extend_from_slice(y);
             o.extend([d0, d1, *r]);
+        }
+        Gen::Hyperbola { c, x, y, d, a, b } => {
+            // (the guard of the surface.surf_of_extrusion_p1 FFI: a bounded STEP domain
+            // keeps `cosh` finite, positive semi axes)
+            finite(c, "hyperbola")?;
+            axes(*x, *y, "hyperbola")?;
+            let [d0, d1] = *d;
+            finite(&[d0, d1], "hyperbola")?;
+            if !(d0 < d1 && d0 >= -10.0 && d1 <= 10.0) {
+                return Err(bad("hyperbola: domain"));
+            }
+            if !(a.is_finite() && *a > 1e-6 && b.is_finite() && *b > 1e-6) {
+                return Err(bad("hyperbola: semi axes"));
+            }
+            o.push(3.0);
+            o.extend_from_slice(c);
+            o.extend_from_slice(x);
+            o.extend_from_slice(y);
+            o.extend([d0, d1, *a, *b]);
         }
     }
     Ok(())

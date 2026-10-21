@@ -1210,7 +1210,7 @@ fn tiny_revolution(rng: &mut Rng) -> rev::SurfIn {
                 *bi = *ai + (*bi - *ai) * f;
             }
         }
-        rev::GenIn::BSpline(_) => {}
+        rev::GenIn::BSpline(_) | rev::GenIn::Hyperbola { .. } => {}
     }
     s
 }

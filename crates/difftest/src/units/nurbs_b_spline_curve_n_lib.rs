@@ -40,7 +40,10 @@ use solidcore::nurbs::b_spline_curve_n_lib::{HelixSpec, InValueType, TrimMode};
 use solidcore::nurbs::crv_adv::p1::CurveEnd;
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
-use solidcore::nurbs::math::{NOW, NOZ};
+use solidcore::geom::vector2d::Vec2;
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::math::{CPoint, NOW, NOZ};
+use solidcore::nurbs::srf_basic::Surface;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::SolidError;
 use solidcore_ffi::units::nurbs_b_spline_curve_n_lib::{self as ffi, Op};
@@ -105,6 +108,27 @@ struct This {
     #[serde(default)]
     oob: bool,
     crv: CrvIn,
+}
+
+/// An inline B-spline surface: control net as stored (`[x, y, z, w]`, rows in u),
+/// degrees, knots (`SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InlineSrf {
+    net: Vec<Vec<[f64; 4]>>,
+    p: usize,
+    q: usize,
+    u: Vec<f64>,
+    v: Vec<f64>,
+}
+
+/// A UV trim curve of the through-point edit: the 2D curve (sharing the knots of
+/// `this`), its surface and the optional UV point of the through point on it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UvIn {
+    crv: InlineCrv,
+    srf: InlineSrf,
+    #[serde(default)]
+    uvp: Option<[f64; 2]>,
 }
 
 /// A frame `[origin, x axis, y axis]` (`SetCanonical`).
@@ -174,6 +198,8 @@ enum OpIn {
         #[serde(default)]
         tan: Option<[f64; 3]>,
         pct: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        uv: Vec<UvIn>,
     },
     Even {
         t0: f64,
@@ -376,6 +402,26 @@ fn encode_crv(c: &InlineCrv, o: &mut Vec<f64>) {
     o.extend_from_slice(&c.u);
 }
 
+fn encode_srf(s: &InlineSrf, o: &mut Vec<f64>) {
+    let n = s.net.len().saturating_sub(1);
+    let m = s.net.first().map_or(0, Vec::len).saturating_sub(1);
+    o.extend([
+        n as f64,
+        m as f64,
+        s.p as f64,
+        s.q as f64,
+        s.u.len().saturating_sub(1) as f64,
+        s.v.len().saturating_sub(1) as f64,
+    ]);
+    for row in &s.net {
+        for c in row {
+            o.extend_from_slice(c);
+        }
+    }
+    o.extend_from_slice(&s.u);
+    o.extend_from_slice(&s.v);
+}
+
 fn encode_this(t: &This, o: &mut Vec<f64>) -> Result<(), HarnessError> {
     o.extend([t.dim as f64, flag(t.oob)]);
     encode_crv(&resolve(&t.crv)?, o);
@@ -453,11 +499,25 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
         OpIn::Dampen { factor, mult } => o.extend([*factor, *mult as f64]),
         OpIn::DegRed { tol, max } => o.extend([*tol, flag(*max)]),
         OpIn::InsOne { knot, times } => o.extend([*knot, *times as f64]),
-        OpIn::Through { knot, p, tan, pct } => {
+        OpIn::Through {
+            knot,
+            p,
+            tan,
+            pct,
+            uv,
+        } => {
             o.push(*knot);
             o.extend_from_slice(p);
             encode_opt3(*tan, &mut o);
             o.push(*pct);
+            o.push(uv.len() as f64);
+            for e in uv {
+                o.extend([2.0, 0.0]);
+                encode_crv(&e.crv, &mut o);
+                encode_srf(&e.srf, &mut o);
+                o.push(flag(e.uvp.is_some()));
+                o.extend_from_slice(&e.uvp.unwrap_or([0.0; 2]));
+            }
         }
         OpIn::Even { t0, t1, n, tol } => o.extend([*t0, *t1, *n as f64, *tol]),
         OpIn::InsKnots { knots } => {
@@ -617,6 +677,11 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
                 s.state(&format!("c{k}_"))?;
             }
         }
+        OpIn::Through { uv, .. } => {
+            for k in 0..uv.len() {
+                s.state(&format!("uv{k}_"))?;
+            }
+        }
         _ => {}
     }
     if i.this.is_some() {
@@ -645,6 +710,17 @@ fn to_curve(c: &InlineCrv) -> Result<Curve, HarnessError> {
     }
     cur.knots_mut().copy_from_slice(&c.u);
     Ok(cur)
+}
+
+fn to_surface(s: &InlineSrf) -> Result<BSplineSurface, HarnessError> {
+    let net = s
+        .net
+        .iter()
+        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .collect();
+    let sur = Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
+        .map_err(|e| harness(format!("surface: {e}")))?;
+    Ok(BSplineSurface::from_nurb(sur, false))
 }
 
 fn build_this(t: &This) -> Result<BSplineCurve, HarnessError> {
@@ -887,19 +963,7 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
         OpIn::Dampen { factor, mult } => c.dampen_knot_spacing(*factor, *mult)?,
         OpIn::DegRed { tol, max } => c.degree_reduction(*tol, *max)?,
         OpIn::InsOne { knot, times } => c.insert_one_knot(*knot, *times)?,
-        OpIn::Through { knot, p, tan, pct } => {
-            let mut k = *knot;
-            let modified = c.set_intersection_curve_through_point::<solidcore::nurbs::b_spline_surface::BSplineSurface>(&Kernel::default(),
-                &mut k,
-                v3(*p),
-                tan.map(v3),
-                &mut [],
-                &[],
-                &[],
-                *pct,
-            )?;
-            o.extend([flag(modified), k]);
-        }
+        OpIn::Through { .. } => return Err(harness("through: handled by rust_through").into()),
         OpIn::Even { t0, t1, n, tol } => {
             let (pts, prm) = c.equally_spaced_points(*t0, *t1, *n, *tol)?;
             o.push(pts.len() as f64);
@@ -973,6 +1037,56 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
         };
         let mut o = vec![st, ivl.min(), ivl.max()];
+        dump_state(&mut o, c);
+        return to_output(i, &o);
+    }
+
+    // through point: the UV curves are output whatever the status
+    if let (
+        OpIn::Through {
+            knot,
+            p,
+            tan,
+            pct,
+            uv,
+        },
+        Some(c),
+    ) = (&i.op, this.as_mut())
+    {
+        let mut uv_curves = uv
+            .iter()
+            .map(|e| Ok(BSplineCurve::from_nurb(to_curve(&e.crv)?, 2, false)))
+            .collect::<Result<Vec<_>, HarnessError>>()?;
+        let surfaces = uv
+            .iter()
+            .map(|e| to_surface(&e.srf))
+            .collect::<Result<Vec<_>, _>>()?;
+        let uv_points: Vec<Option<Vec2>> = uv
+            .iter()
+            .map(|e| e.uvp.map(|[a, b]| Vec2::new(a, b)))
+            .collect();
+        let mut k = *knot;
+        let mut o = match c.set_intersection_curve_through_point(
+            &Kernel::default(),
+            &mut k,
+            v3(*p),
+            tan.map(v3),
+            &mut uv_curves,
+            &surfaces,
+            &uv_points,
+            *pct,
+        ) {
+            Ok(modified) => vec![0.0, flag(modified), k],
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Ok(d);
+                }
+                vec![status(&e)]
+            }
+        };
+        for u in &uv_curves {
+            dump_state(&mut o, u);
+        }
         dump_state(&mut o, c);
         return to_output(i, &o);
     }
@@ -1219,6 +1333,7 @@ fn gen_curve_op(rng: &mut Rng) -> Inputs {
                     None
                 },
                 pct: *rng.choose(&[0.001, 0.1, 0.3]).unwrap_or(&0.001),
+                uv: Vec::new(),
             }
         }
         10 => OpIn::Scale {

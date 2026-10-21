@@ -637,6 +637,11 @@ pub(crate) fn scale_surf(s: &mut SurfIn, f: f64) {
             sc(c);
             *r *= f;
         }
+        GenIn::Hyperbola { c, a, b, .. } => {
+            sc(c);
+            *a *= f;
+            *b *= f;
+        }
     }
     match &mut s.build {
         BuildIn::Canonical { point, .. } => sc(point),
@@ -726,7 +731,7 @@ pub(crate) fn other_surf(rng: &mut Rng, s: &SurfOfRevolution, coaxial: bool) -> 
                 c.u.last().copied().unwrap_or(1.0),
             ],
             GenIn::Line { .. } => [0.0, 1.0],
-            GenIn::Circle { d, .. } => *d,
+            GenIn::Circle { d, .. } | GenIn::Hyperbola { d, .. } => *d,
         };
         let a = rng.uniform(-180.0, 180.0);
         BuildIn::Ctor {

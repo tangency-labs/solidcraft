@@ -1,0 +1,404 @@
+{
+ "cases": [
+  {
+   "name": "cylinder_offset_to_axis_minus",
+   "upstream_ref": "source/SMLib/src/SmOffsetSurface.cpp:1598 (coverage: crates/solidcore/src/surface/offset_surface.rs:1451)",
+   "inputs": {
+    "kind": "script",
+    "off": {
+     "d": -1.0,
+     "owns": true,
+     "sing": 0,
+     "allow": false,
+     "base": {
+      "revolution": {
+       "gen": {
+        "kind": "line",
+        "a": [
+         1,
+         0,
+         0
+        ],
+        "b": [
+         1,
+         0,
+         2
+        ]
+       },
+       "build": {
+        "mode": "canonical",
+        "point": [
+         0,
+         0,
+         0
+        ],
+        "axis": [
+         0,
+         0,
+         1
+        ]
+       }
+      }
+     }
+    },
+    "steps": [
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 1,
+      "hv": 1
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 2,
+      "hv": 0
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 0,
+      "hv": 2
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 1,
+      "hv": 1,
+      "nzt": false
+     },
+     {
+      "op": "normal",
+      "uv": "MID"
+     }
+    ]
+   }
+  },
+  {
+   "name": "sphere_offset_to_centre_minus",
+   "upstream_ref": "source/SMLib/src/SmOffsetSurface.cpp:1598 (coverage: crates/solidcore/src/surface/offset_surface.rs:1451)",
+   "inputs": {
+    "kind": "script",
+    "off": {
+     "d": -1.0,
+     "owns": true,
+     "sing": 0,
+     "allow": false,
+     "base": {
+      "revolution": {
+       "gen": {
+        "kind": "circle",
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "d": [
+         -1.5707963267948966,
+         1.5707963267948966
+        ],
+        "r": 1
+       },
+       "build": {
+        "mode": "canonical",
+        "point": [
+         0,
+         0,
+         0
+        ],
+        "axis": [
+         0,
+         0,
+         1
+        ]
+       }
+      }
+     }
+    },
+    "steps": [
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 1,
+      "hv": 1
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 2,
+      "hv": 0
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 0,
+      "hv": 2
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 1,
+      "hv": 1,
+      "nzt": false
+     },
+     {
+      "op": "normal",
+      "uv": "MID"
+     },
+     {
+      "op": "eval",
+      "uv": [
+       1.0,
+       0.3
+      ],
+      "hu": 1,
+      "hv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "hyperboloid_base_offset_script",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator, offset by SmOffsetSurface (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:193)",
+   "inputs": {
+    "kind": "script",
+    "off": {
+     "d": 0.25,
+     "owns": true,
+     "sing": 0,
+     "allow": false,
+     "base": {
+      "revolution": {
+       "gen": {
+        "kind": "hyperbola",
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "d": [
+         -1,
+         1
+        ],
+        "a": 1.0,
+        "b": 0.5
+       },
+       "build": {
+        "mode": "canonical",
+        "point": [
+         0,
+         0,
+         0
+        ],
+        "axis": [
+         0,
+         0,
+         1
+        ]
+       }
+      }
+     }
+    },
+    "steps": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "eval",
+      "uv": "MID",
+      "hu": 2,
+      "hv": 1
+     },
+     {
+      "op": "eval_pt",
+      "uv": "VMIN"
+     },
+     {
+      "op": "normal",
+      "uv": "VMAX"
+     },
+     {
+      "op": "knots",
+      "param": 1
+     },
+     {
+      "op": "max_anal"
+     },
+     {
+      "op": "bbox",
+      "dom": "NAT",
+      "want": [
+       true,
+       true,
+       true
+      ]
+     },
+     {
+      "op": "step_inv",
+      "dom": "NAT",
+      "p": "ON",
+      "tol": 1e-06
+     },
+     {
+      "op": "copy"
+     }
+    ]
+   }
+  },
+  {
+   "name": "hyperboloid_base_offset_edits",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator, offset by SmOffsetSurface (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:218)",
+   "inputs": {
+    "kind": "script",
+    "off": {
+     "d": -0.2,
+     "owns": true,
+     "sing": 0,
+     "allow": false,
+     "base": {
+      "revolution": {
+       "gen": {
+        "kind": "hyperbola",
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "d": [
+         -1,
+         1
+        ],
+        "a": 1.0,
+        "b": 0.5
+       },
+       "build": {
+        "mode": "canonical",
+        "point": [
+         0,
+         0,
+         0
+        ],
+        "axis": [
+         0,
+         0,
+         1
+        ]
+       }
+      }
+     }
+    },
+    "steps": [
+     {
+      "op": "reverse",
+      "param": 1
+     },
+     {
+      "op": "swap"
+     },
+     {
+      "op": "trim",
+      "dom": "SUB"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "create_offset",
+      "d": 0.1
+     },
+     {
+      "op": "base_offset",
+      "d": 0.1,
+      "tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "hyperboloid_base_read_db",
+   "upstream_ref": "source/SMLib/src/SmOffsetSurface.cpp:2197 (ReadFromDB) over an SmHyperbola-generated SmSurfOfRevolution (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "kind": "read_db",
+    "off": {
+     "d": 0.3,
+     "owns": true,
+     "sing": 0,
+     "allow": false,
+     "base": {
+      "revolution": {
+       "gen": {
+        "kind": "hyperbola",
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "d": [
+         -1,
+         1
+        ],
+        "a": 1.0,
+        "b": 0.5
+       },
+       "build": {
+        "mode": "canonical",
+        "point": [
+         0,
+         0,
+         0
+        ],
+        "axis": [
+         0,
+         0,
+         1
+        ]
+       }
+      }
+     }
+    },
+    "binary": false,
+    "version": 30
+   }
+  }
+ ]
+}

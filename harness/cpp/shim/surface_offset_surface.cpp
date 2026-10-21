@@ -26,6 +26,7 @@
 #include <SmDatabaseIO.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmHyperbola.h>
 #include <SmExtent3d.h>
 #include <SmLine.h>
 #include <SmNurbsCrv.h>
@@ -44,6 +45,7 @@
 
 #include <memory>
 #include <cmath>
+#include <stdexcept>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -105,6 +107,7 @@ enum : int32_t
     GK_BSPLINE = 0,
     GK_LINE = 1,
     GK_CIRCLE = 2,
+    GK_HYPERBOLA = 3,
 };
 enum : int32_t
 {
@@ -247,6 +250,27 @@ SmBSplineCurve* read_rev_bspline(Rd& rd, const SmContext& ctx)
     return new (ctx) SmBSplineCurve(cur, 3, FALSE);
 }
 
+// An `SmHyperbola` whose constructor made a finite NURB. The constructor ignores a
+// failing `MakeNurb` (`SE`), leaving `m_pNurb` NULL or NaN for semi axes too large or too
+// small next to the centre's coordinates, which every later use dereferences (the FFI
+// cannot predict the rounding): such an input is refused as a harness error.
+SmBSplineCurve* checked_hyperbola(SmHyperbola* h)
+{
+    const gw_CURVE* cur = h->GetGwNurbPointer();
+    bool ok = cur != NULL && cur->pol != NULL;
+    for (gw_INDEX i = 0; ok && i <= cur->pol->n; i++)
+    {
+        const gw_CPOINT& p = cur->pol->Pw[i];
+        ok = std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && std::isfinite(p.w);
+    }
+    if (!ok)
+    {
+        delete h;
+        throw std::invalid_argument("hyperbola generator: no finite NURB");
+    }
+    return h;
+}
+
 SmBSplineCurve* read_gen(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
@@ -270,6 +294,17 @@ SmBSplineCurve* read_gen(Rd& rd, const SmContext& ctx)
         double d1 = rd.num();
         double r = rd.num();
         return new (ctx) SmCircle(c, x, y, SmExtent1d(d0, d1), r, 3, &ctx);
+    }
+    case GK_HYPERBOLA:
+    {
+        SmPoint3d c = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double d0 = rd.num();
+        double d1 = rd.num();
+        double a = rd.num();
+        double b = rd.num();
+        return checked_hyperbola(new (ctx) SmHyperbola(c, x, y, SmExtent1d(d0, d1), a, b, 3, &ctx));
     }
     default: return NULL;
     }
