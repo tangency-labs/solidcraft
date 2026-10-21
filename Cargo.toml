@@ -19,6 +19,7 @@ solidcraft-geom = { path = "crates/geom" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-smlib = { path = "crates/smlib" }
+solidcraft-step = { path = "crates/step" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-gpu = { path = "crates/gpu" }
 solidcraft-doc = { path = "crates/doc" }
