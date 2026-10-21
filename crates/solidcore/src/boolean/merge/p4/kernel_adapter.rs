@@ -1573,8 +1573,8 @@ mod tests {
                         assert!(matches!(
                             cache,
                             Err(SolidError::Unported {
-                                upstream: "SmBrep::CalculateBoundingBox",
-                                unit: "query.brep",
+                                upstream: "SmBrep::GetBrepCache under caller notification keys",
+                                unit: "boolean.merge_p4",
                             })
                         ));
                         pair.set_vertex_point(

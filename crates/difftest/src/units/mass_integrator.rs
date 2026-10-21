@@ -346,9 +346,19 @@ fn geometry_rust(g: &Geometry) -> Output {
                         store: &store,
                         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
                     };
-                    props::brep_properties(
-                        &kernel,
-                        &Brep::new(),
+                    // As the shim: a wire edge over the curve interval in a fresh B-rep
+                    // (`CreateWireEdgeFromCurve`), then the B-rep's precise properties.
+                    let mut wire_kernel = Kernel::default();
+                    let mut brep = Brep::new_with_infinite_region()?;
+                    solidcore::topology::brep::p5::create_wire_edge_from_curve(
+                        &mut wire_kernel,
+                        &mut brep,
+                        c,
+                        ivl,
+                    )?;
+                    let p = props::brep_properties(
+                        &wire_kernel,
+                        &brep,
                         accuracy,
                         Vec3::new(ox, oy, oz),
                         props::MassPropertyBehavior {
@@ -357,7 +367,11 @@ fn geometry_rust(g: &Geometry) -> Output {
                         },
                         &attrs,
                     )?;
-                    return Err(SolidError::sm_err("unexpected brep dependency"));
+                    let mut out = vec![0.0, p.area, p.volume, p.mass];
+                    for m in p.moments {
+                        out.extend([m.x, m.y, m.z]);
+                    }
+                    return Ok(out);
                 }
                 let p = props::curve_properties(&kernel, &c, &ivl, accuracy, Vec3::new(ox, oy, oz), radius)?;
                 let mut out = vec![0.0, p.length, p.properties.area, p.properties.volume];

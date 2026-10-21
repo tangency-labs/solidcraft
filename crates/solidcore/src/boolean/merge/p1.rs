@@ -15,7 +15,7 @@
 //! | [`merge_vertex`] | `SmMerge::MergeVertex` |
 //! | [`boolean_post_process`] | `SmMerge::BooleanPostProcess` |
 //! | [`propagate_other_src_region_attribs`] | `SmMerge::PropagateOtherSrcRegionAttribs` |
-//! | [`temporary_brep_transform`], [`TemporaryBrepTransform`] | `SmTemporaryBrepTransform` (constructor/destructor) |
+//! | [`temporary_brep_transform`], [`TemporaryBrepShift`], [`TemporaryBrepTransform`] | `SmTemporaryBrepTransform` (constructor/destructor) |
 //!
 //! Deviations: option accessors are public fields; the context-only constructor's
 //! already-created intersector is supplied by its owner (its type belongs to
@@ -36,15 +36,17 @@
 use std::collections::BTreeMap;
 
 use crate::boolean::topology_intersector::p1::Relations;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::a_object::{self, BooleanOperation};
 use crate::geom::attribute::{ids, AttributeStore, ObjectKey};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::Context;
 use crate::geom::object::{NotifyOperation, ObjectRef};
+use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::Vec3;
+use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepQuery};
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell;
 use crate::topology::topology::{self as topo, Topology};
@@ -255,17 +257,59 @@ pub fn find_brep_region_of_other_face(
             .curve
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let Some(_point) =
+        let Some(point) =
             ignore_failure(curve.evaluate_point(k, edge.interval.evaluate(0.456789)))?
         else {
             continue;
         };
-        // Point classification uses tolerance 0.0, boundary intersections FALSE,
-        // a classification initialised with edge.tolerance and editing disabled.
-        // UNPORTED(query.brep): SmBrep::Point3DClassify
-        return unavailable("SmBrep::Point3DClassify", "query.brep");
+        // (the classification's construction tolerance, the edge's, is not read)
+        let Some(pc) = ignore_failure(classify_point_editing_disabled(
+            k,
+            &BrepQuery::default(),
+            brep,
+            point,
+            0.0,
+            false,
+        ))?
+        else {
+            continue;
+        };
+        // skip points that don't classify to a region
+        if pc.point_class() != PointClassType::Region {
+            continue;
+        }
+        // use the point's classified region as the input face's Brep region
+        return match pc.object() {
+            Some(EntityRef::Region(r)) => Ok(Some(r)),
+            _ => Err(SolidError::null_pointer(OP)),
+        };
     }
     Ok(None)
+}
+
+/// `pBrep->Point3DClassify(point, tolerance, boundary, sPC)` (unit `query.brep`) with
+/// `pBrep->m_bEditingEnabled` set to `FALSE` around it (`SmTemporaryChangeValue`), through
+/// `query`: the caller keeps one while `b` is not edited, and makes a fresh one after
+/// an edit (upstream's `CacheMakeOrValidate` rebuilds an invalidated cache). The
+/// operands' geometry is owned by their arena identities
+/// ([`crate::query::brep::BrepIdentity::default`]).
+///
+/// # Errors
+///
+/// Those of [`BrepQuery::point_3d_classify`].
+pub(crate) fn classify_point_editing_disabled(
+    k: &Kernel,
+    query: &BrepQuery<'_>,
+    b: &mut Brep,
+    point: Point3,
+    tolerance: f64,
+    boundary: bool,
+) -> Result<PointClassification<EntityRef>> {
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(false);
+    let result = query.point_3d_classify(k, b, point, tolerance, boundary);
+    b.set_editing_enabled(editing);
+    result
 }
 
 /// `pRegion->IsVoid()` as a C++ condition (`UNSURE` is non-zero, so true).
@@ -297,7 +341,7 @@ pub struct VertexCopy<'a> {
     /// Notification identity of each other-operand vertex.
     pub source_key: &'a dyn Fn(VertexId) -> ObjectRef,
     /// Notification identity of each primary topology entity, including newly created vertices and vertex uses.
-    pub destination_key: &'a dyn Fn(crate::EntityRef) -> ObjectRef,
+    pub destination_key: &'a dyn Fn(EntityRef) -> ObjectRef,
 }
 
 /// Reuse a mated primary vertex or create a shell vertex, relate it and notify
@@ -340,13 +384,19 @@ pub fn merge_vertex(
     if tolerance > vertex::tolerance(brep, dest)? {
         vertex::set_tolerance(brep, dest, tolerance, true, true)?;
     }
+    // Both vertices are SmTopology objects upstream; a record this crate has not made
+    // yet (a vertex the merge did not create) is the default one.
+    let source_ref = (copy.source_key)(source);
+    let dest_ref = (copy.destination_key)(EntityRef::Vertex(dest));
+    copy.records.entry(source_ref.key).or_default();
+    copy.records.entry(dest_ref.key).or_default();
     topo::notify(
         copy.records,
         copy.attributes,
         context,
         NotifyOperation::Copy,
-        (copy.source_key)(source),
-        Some((copy.destination_key)(crate::EntityRef::Vertex(dest))),
+        source_ref,
+        Some(dest_ref),
         None, // SM_NO_GET_BREP(pBrepVertex) is NULL in pinned SmTypes.h.
         None, // SM_NO_GET_BREP(pVertexInOther) is NULL as well.
     )?;
@@ -663,16 +713,85 @@ impl TemporaryBrepTransform {
     }
 }
 
-/// Begin the scoped origin shift used by manifold Booleans. Bounding boxes are
-/// not yet available on arena B-reps; fail before translating either operand.
-/// Once wired, the returned token must retain the inverse placement (or `None`
-/// when the center's squared length is at most 1e6) until the caller restores it.
+/// The squared distance from the origin past which [`temporary_brep_transform`] moves the
+/// operands' box center to the origin (upstream: "Arbitrary: > 1000").
+const MIN_SHIFT_CENTER_LENGTH_SQ: f64 = 1.0e6;
+
+/// The first half of `SmTemporaryBrepTransform(pTI)`, the scoped origin shift of
+/// manifold Booleans: the union of the operands' boxes (`brep` boxed in
+/// `primary_kernel`'s context, `other` in `other_kernel`'s; statuses ignored, a failure
+/// leaves the box initialised) gives a center; when its squared length exceeds `MIN_SHIFT_CENTER_LENGTH_SQ`
+/// the operands need the translation by `-center`. [`TemporaryBrepShift::apply`] is the
+/// second half (the boxes are computed before either operand moves, as upstream).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the boxes.
 pub fn temporary_brep_transform(
-    _brep: &mut Brep,
-    _other: &mut Brep,
-) -> Result<TemporaryBrepTransform> {
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    unavailable("SmBrep::CalculateBoundingBox", "query.brep")
+    primary_kernel: &Kernel,
+    other_kernel: &Kernel,
+    brep: &Brep,
+    other: &Brep,
+) -> Result<TemporaryBrepShift> {
+    // get parts bbox
+    let bbox1 = ignore_failure(qbrep::calculate_bounding_box(
+        primary_kernel,
+        brep,
+        BoundingBoxOptions::default(),
+    ))?
+    .unwrap_or_default();
+    let bbox2 = ignore_failure(qbrep::calculate_bounding_box(
+        other_kernel,
+        other,
+        BoundingBoxOptions::default(),
+    ))?
+    .unwrap_or_default();
+    let bbox = bbox1.union(&bbox2);
+
+    // when bbox is very large - translate its center to the origin
+    let center = bbox.evaluate(0.5, 0.5, 0.5);
+    let shift = (center.length_squared() > MIN_SHIFT_CENTER_LENGTH_SQ).then(|| -center);
+    Ok(TemporaryBrepShift { shift })
+}
+
+/// The translation [`temporary_brep_transform`] decided on (`m_bNeedsTranslation`,
+/// `-m_sCenter`).
+#[derive(Debug)]
+#[must_use = "apply the shift to the operands"]
+pub struct TemporaryBrepShift {
+    shift: Option<Vec3>,
+}
+
+impl TemporaryBrepShift {
+    /// The rest of `SmTemporaryBrepTransform(pTI)`: when a shift is needed, translates
+    /// the primary operand (`false`) then the other (`true`) through `transform`
+    /// (`Transform(sXfm)`: no scale, scaled tolerances; statuses ignored). The token
+    /// keeps the inverse translation for [`TemporaryBrepTransform::restore`].
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the transforms.
+    pub fn apply(
+        self,
+        brep: &mut Brep,
+        other: &mut Brep,
+        mut transform: impl FnMut(&mut Brep, bool, &Axis2Placement, Option<Vec3>, bool) -> Result<()>,
+    ) -> Result<TemporaryBrepTransform> {
+        let Some(shift) = self.shift else {
+            return Ok(TemporaryBrepTransform { inverse: None });
+        };
+        let mut xfm = Axis2Placement::IDENTITY;
+        xfm.translate(shift);
+        crate::error::ignore_status(transform(brep, false, &xfm, None, true))?;
+        crate::error::ignore_status(transform(other, true, &xfm, None, true))?;
+
+        // (the destructor negates the shift again)
+        let mut inverse = Axis2Placement::IDENTITY;
+        inverse.translate(-shift);
+        Ok(TemporaryBrepTransform {
+            inverse: Some(inverse),
+        })
+    }
 }
 
 #[cfg(test)]

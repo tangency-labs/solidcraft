@@ -155,8 +155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "make_faceuse_square_to_make_face",
@@ -167,8 +167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "make_faceuse_circle_region_given",
@@ -420,10 +420,10 @@
   "cases_passed": 32,
   "cases_total": 45,
   "deferred_by_unit": {
-    "query.brep": 2,
     "surface.surface_p2": 1,
     "topology.brep_p1": 1,
     "topology.brep_p3": 3,
+    "topology.brep_p6": 2,
     "topology.brep_p9": 1,
     "topology.face_p2": 1,
     "topology.face_p4": 4

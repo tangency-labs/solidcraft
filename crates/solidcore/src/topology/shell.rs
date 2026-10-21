@@ -57,6 +57,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::context::{with_mark_lock, ALL_MARKS};
 use crate::geom::object::Shape;
 use crate::kernel::Kernel;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::proto_topology::p1::owning_topology;
 use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::{
@@ -888,19 +889,6 @@ pub struct ShellRaySectorAttempt {
 /// Actual geometry and owner context needed by shell ray queries.
 /// No global owner registry or duplicate geometry metadata is introduced.
 pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjects<O> {
-    /// Default B-rep bounding box when no radius was supplied.
-    fn shell_ray_bounds(
-        &self,
-        _kernel: &Kernel,
-        _brep: crate::topology::BrepId,
-    ) -> Result<crate::geom::extent3d::Extent3d> {
-        // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-        Err(SolidError::unported(
-            "SmBrep::CalculateBoundingBox",
-            "query.brep",
-        ))
-    }
-
     /// The shape of the shell's boundary faces (`SmShape(sBreps, sFaces, ...)`).
     /// Worlds that cannot build the real shape (a harness without the B-rep's cached
     /// geometry) defer here instead of failing later.
@@ -908,18 +896,51 @@ pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjec
         Shape::new(&[], faces, &[], &[])
     }
 
+    /// The topology entity behind a handle the shape solve returned (a vertex, edge
+    /// or face of the B-rep), as `LocalCurveSector` reads its classification.
+    fn class_entity(&self, object: O) -> Option<crate::EntityRef>;
+
     /// Classify the incoming line segment at its known intersection
-    /// (`pBrep->LocalCurveSector`). The world over the B-rep cache (`query.brep`)
-    /// overrides this with [`crate::topology::brep::p2::local_curve_sector`], which needs
-    /// the B-rep and an entity classification this generic default does not have.
-    fn shell_ray_sector(&self, _request: ShellRaySector<'_, O>) -> ShellRaySectorAttempt {
-        // UNPORTED(query.brep): ShellRayWorld over the B-rep cache (SmBrep::LocalCurveSector)
-        ShellRaySectorAttempt {
-            status: Err(SolidError::unported(
-                "SmShell::RayFire world over the B-rep cache (SmBrep::LocalCurveSector)",
-                "query.brep",
-            )),
-            region_update: None,
+    /// (`pBrep->LocalCurveSector(curve, ivl, orientation, sPC, pRegion)`, unit
+    /// `topology.brep_p2`): [`crate::topology::brep::p2::local_curve_sector`] on `brep`
+    /// (the sectoring may add missing UV trim curves, as upstream's `const` method does),
+    /// the classification's objects mapped by [`ShellRayWorld::class_entity`]. A failure
+    /// leaves the region unchanged.
+    fn shell_ray_sector(
+        &self,
+        kernel: &Kernel,
+        brep: &mut Brep,
+        request: ShellRaySector<'_, O>,
+    ) -> ShellRaySectorAttempt
+    where
+        O: crate::intersect::point_class::ClassObject,
+    {
+        let sector = (|| {
+            let hit = request.classification.map_objects(&mut |o| {
+                self.class_entity(o).ok_or(SolidError::invalid_input(
+                    "topology::shell::ShellRayWorld::shell_ray_sector",
+                    "intersection without a topology entity",
+                ))
+            })?;
+            let curve = crate::curve::curve::Curve::from(request.curve.clone());
+            crate::topology::brep::p2::local_curve_sector(
+                kernel,
+                brep,
+                &curve,
+                &request.interval,
+                request.orientation,
+                &hit,
+            )
+        })();
+        match sector {
+            Ok(region) => ShellRaySectorAttempt {
+                status: Ok(()),
+                region_update: Some(region),
+            },
+            Err(e) => ShellRaySectorAttempt {
+                status: Err(e),
+                region_update: None,
+            },
         }
     }
 }
@@ -929,7 +950,7 @@ pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjec
 /// Missing geometry queries are explicit dependency errors.
 pub fn ray_fire<O, W>(
     kernel: &mut Kernel,
-    brep: &Brep,
+    brep: &mut Brep,
     brep_id: crate::topology::BrepId,
     shell_id: ShellId,
     world: &W,
@@ -952,8 +973,8 @@ where
             radius
         } else {
             shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
-            world
-                .shell_ray_bounds(kernel, brep_id)?
+            // pBrep->CalculateBoundingBox(sBBox) (unit `query.brep`, default arguments)
+            qbrep::calculate_bounding_box(kernel, brep, BoundingBoxOptions::default())?
                 .sphere_bound()
                 .radius
         };
@@ -1049,13 +1070,17 @@ where
         let endpoint = input.start + direction * parameter;
         shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
         let curve = BSplineCurve::create_line_segment(3, input.start, endpoint)?;
-        let sector = world.shell_ray_sector(ShellRaySector {
-            brep: brep_id,
-            curve: &curve,
-            interval: curve.natural_interval(),
-            orientation: OrientType::Opposite,
-            classification: &state.classification,
-        });
+        let sector = world.shell_ray_sector(
+            &*kernel,
+            brep,
+            ShellRaySector {
+                brep: brep_id,
+                curve: &curve,
+                interval: curve.natural_interval(),
+                orientation: OrientType::Opposite,
+                classification: &state.classification,
+            },
+        );
         if let Some(region) = sector.region_update {
             state.region = region;
         }

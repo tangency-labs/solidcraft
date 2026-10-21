@@ -563,8 +563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0020",
@@ -739,8 +739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0037",
@@ -947,8 +947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0057",
@@ -987,8 +987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0061",
@@ -1027,8 +1027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0065",
@@ -1255,8 +1255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0088",
@@ -1339,8 +1339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0096",
@@ -1399,8 +1399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -1479,8 +1479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0109",
@@ -1863,8 +1863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0145",
@@ -2399,8 +2399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0196",
@@ -2471,8 +2471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0203",
@@ -2595,8 +2595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0215",
@@ -2755,8 +2755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0230",
@@ -2851,8 +2851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -2871,8 +2871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0241",
@@ -2919,8 +2919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0245",
@@ -2947,8 +2947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::StitchFaces",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0248",
@@ -3037,8 +3037,7 @@
   "cases_total": 291,
   "deferred_by_unit": {
     "blend.fillet_executive_p1": 46,
-    "query.brep": 18,
-    "topology.brep_p4": 111
+    "topology.brep_p4": 129
   },
   "max_rel_err": 0.0,
   "pass": true,

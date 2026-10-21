@@ -2986,45 +2986,33 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "ray_default_bound_vertex",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.shell/ray-fire.json#144 (upstream SmShell.cpp:592 RayFire default Brep.CalculateBoundingBox)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "ray_default_bound_wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.shell/ray-fire.json#145 (upstream SmShell.cpp:592 RayFire default Brep.CalculateBoundingBox)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "ray_default_bound_face",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.shell/ray-fire.json#146 (upstream SmShell.cpp:592 RayFire default Brep.CalculateBoundingBox)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_Mouse.smb_147",
@@ -3036,7 +3024,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_Mouse.smb_148",
@@ -3048,7 +3036,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_Mouse.smb_149",
@@ -3060,7 +3048,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_Mouse.smb_150",
@@ -3072,7 +3060,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_box_with_large_fillet.smb_151",
@@ -3084,7 +3072,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_box_with_large_fillet.smb_152",
@@ -3096,7 +3084,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_box_with_large_fillet.smb_153",
@@ -3108,7 +3096,7 @@
     {
       "deferred": {
         "symbol": "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-        "unit": "query.brep"
+        "unit": "harness:shell-ray-world"
       },
       "max_rel_err": 0.0,
       "name": "ray_closed_box_with_large_fillet.smb_154",
@@ -7360,13 +7348,13 @@
     }
   ],
   "cases_both_errored": 9,
-  "cases_deferred": 15,
+  "cases_deferred": 12,
   "cases_failed": 0,
-  "cases_passed": 896,
+  "cases_passed": 899,
   "cases_total": 911,
   "deferred_by_unit": {
     "curve.crv_on_surf": 2,
-    "query.brep": 11,
+    "harness:shell-ray-world": 8,
     "topology.edge": 2
   },
   "max_rel_err": 0.0,

@@ -70,8 +70,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_0",
@@ -82,8 +82,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_1",
@@ -94,8 +94,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_2",
@@ -106,8 +106,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_3",
@@ -162,74 +162,51 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "binary_operator_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#17",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "binary_operator_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#18",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "binary_operator_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#19",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "binary_operator_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#20",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "binary_operator_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#21",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "binary_operator_6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#22",
       "values_compared": 0
     },
@@ -264,33 +241,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#26",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#27",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_2",
@@ -300,98 +269,67 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#29",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#30",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#31",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#32",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#33",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#34",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "nonmanifold_9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#35",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "nonmanifold_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#36",
       "values_compared": 0
     },
@@ -862,21 +800,17 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#10",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_1",
@@ -886,45 +820,33 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#12",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#13",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#14",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_5",
@@ -934,45 +856,33 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#16",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#17",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family1_8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#18",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_9",
@@ -1102,21 +1012,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#30",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_1",
@@ -1126,98 +1032,67 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#32",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#33",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#34",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#35",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#36",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#37",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "vg_family3_8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#38",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "vg_family3_9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/valgrind-sample.json#39",
       "values_compared": 0
     },
@@ -1375,14 +1250,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058091",
       "values_compared": 0
     },
@@ -1620,16 +1492,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0028",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058115",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "max_rel_err": 0.0,
@@ -1660,14 +1528,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0032",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058119",
       "values_compared": 0
     },
@@ -1766,8 +1631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -1861,16 +1726,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0054",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058141",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "both_errored": true,
@@ -1938,8 +1799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0062",
@@ -1959,8 +1820,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0064",
@@ -2020,8 +1881,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0070",
@@ -2052,8 +1913,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0073",
@@ -2063,40 +1924,28 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058161",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0075",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058162",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0076",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058163",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -2120,8 +1969,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0079",
@@ -2355,8 +2204,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0105",
@@ -2379,8 +2228,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0107",
@@ -2423,8 +2272,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0111",
@@ -2434,21 +2283,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0112",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058199",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0113",
@@ -2591,8 +2436,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0128",
@@ -2603,8 +2448,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0129",
@@ -2635,8 +2480,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0132",
@@ -2679,16 +2524,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0137",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058224",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -2772,16 +2613,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0147",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058234",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "deferred": {
@@ -2804,16 +2641,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0150",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058237",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "both_errored": true,
@@ -2826,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0152",
@@ -2862,8 +2695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0156",
@@ -3008,21 +2841,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0172",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058259",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0173",
@@ -3042,8 +2871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0175",
@@ -3212,8 +3041,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0192",
@@ -3366,16 +3195,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0209",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058296",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -3386,40 +3211,28 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058298",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0212",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058299",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0213",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058300",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "both_errored": true,
@@ -3529,16 +3342,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0226",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058313",
-      "values_compared": 0
+      "values_compared": 20
     },
     {
       "both_errored": true,
@@ -3582,16 +3391,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058319",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "both_errored": true,
@@ -3640,21 +3445,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0238",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058325",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -3731,8 +3532,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0247",
@@ -3821,15 +3622,18 @@
       "values_compared": 0
     }
   ],
-  "cases_both_errored": 63,
-  "cases_deferred": 165,
+  "cases_both_errored": 68,
+  "cases_deferred": 114,
   "cases_failed": 0,
-  "cases_passed": 222,
+  "cases_passed": 273,
   "cases_total": 387,
   "deferred_by_unit": {
     "boolean.topology_intersector_p2": 48,
-    "query.brep": 80,
-    "topology.brep_p3": 37
+    "topology.brep_p1": 13,
+    "topology.brep_p3": 37,
+    "topology.brep_p4": 6,
+    "topology.face_p3": 4,
+    "topology.vertex": 6
   },
   "max_rel_err": 0.0,
   "pass": true,

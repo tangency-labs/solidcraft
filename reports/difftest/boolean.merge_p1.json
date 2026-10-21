@@ -846,16 +846,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "temporary_shift",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/helpers.json#103 (upstream source/SMLib/src/SmMerge.cpp)",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -923,8 +919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "analytic face surface in the B-rep export",
+        "unit": "harness:analytic-geometry-export"
       },
       "max_rel_err": 0.0,
       "name": "regions_file_sphere.smb",
@@ -1382,16 +1378,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0008",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314517",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -1402,16 +1394,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314519",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -1498,16 +1486,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0021",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314530",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -1519,8 +1503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Transform",
+        "unit": "topology.brep_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0023",
@@ -1666,16 +1650,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0040",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314549",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -1766,16 +1746,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0052",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314561",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -1798,16 +1774,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0055",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314564",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -1883,8 +1855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Transform",
+        "unit": "topology.brep_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0065",
@@ -1998,16 +1970,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0079",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314588",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -2018,28 +1986,20 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0081",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314590",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0082",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314591",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -2102,16 +2062,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314599",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -2155,14 +2111,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 42,
+  "cases_deferred": 31,
   "cases_failed": 0,
-  "cases_passed": 206,
+  "cases_passed": 217,
   "cases_total": 248,
   "deferred_by_unit": {
     "boolean.topology_intersector_p3": 4,
+    "harness:analytic-geometry-export": 1,
     "intersect.surface_drop_lib_p3": 18,
-    "query.brep": 14,
+    "topology.brep_p5": 2,
     "topology.face_p2": 6
   },
   "max_rel_err": 0.0,

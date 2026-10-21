@@ -4390,14 +4390,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "probe_piecewise_empty",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/offset.offset_executive_p1/probe.json#10",
       "values_compared": 0
     },
@@ -9665,14 +9661,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 315,
+  "cases_deferred": 314,
   "cases_failed": 0,
-  "cases_passed": 732,
+  "cases_passed": 733,
   "cases_rejected": 1,
   "cases_total": 1048,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 1,
-    "query.brep": 1,
     "topology.brep_p3": 312,
     "topology.brep_p4": 1
   },

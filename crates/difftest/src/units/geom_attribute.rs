@@ -398,7 +398,10 @@ fn kind(a: &Attribute) -> i64 {
     match a.value() {
         AttributeValue::None
         | AttributeValue::PolyToEuVu { .. }
-        | AttributeValue::PolyEdgeToVertexUse { .. } => KIND_PLAIN,
+        | AttributeValue::PolyEdgeToVertexUse { .. }
+        | AttributeValue::DecimateVertex(_)
+        | AttributeValue::QuadricVertex(_)
+        | AttributeValue::QuadricEdge(_) => KIND_PLAIN,
         AttributeValue::Generic { .. } => KIND_GENERIC,
         AttributeValue::Long(_) => KIND_LONG,
         AttributeValue::Pointer(_) => KIND_POINTER,
@@ -916,7 +919,10 @@ impl RustRun {
             match a.value() {
                 AttributeValue::None
                 | AttributeValue::PolyToEuVu { .. }
-                | AttributeValue::PolyEdgeToVertexUse { .. } => {}
+                | AttributeValue::PolyEdgeToVertexUse { .. }
+                | AttributeValue::DecimateVertex(_)
+                | AttributeValue::QuadricVertex(_)
+                | AttributeValue::QuadricEdge(_) => {}
                 AttributeValue::Generic {
                     longs,
                     doubles,

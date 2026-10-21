@@ -325,6 +325,7 @@ pub fn boolean_trees(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::context::MarkType;
 
     const ALL: [BooleanOperation; 11] = [
         BooleanOperation::Unknown,
@@ -383,6 +384,15 @@ mod tests {
         assert!(matches!(e, SolidError::InvalidInput { .. }));
     }
 
+    /// Whether `call` reached the merge engine: it takes a mark (`SmNewMarkAndLock`),
+    /// which the API's input validation never does. (On the empty operands of these
+    /// tests its outcome is not compared with upstream.)
+    fn reaches_merge<T>(k: &mut Kernel, call: impl FnOnce(&mut Kernel) -> Result<T>) -> bool {
+        let next = k.context.current_mark(MarkType::NoMark);
+        let _ = call(k);
+        k.context.current_mark(MarkType::NoMark) != next
+    }
+
     #[test]
     fn valid_operands_reach_the_merge() {
         let mut k = Kernel::default();
@@ -392,18 +402,32 @@ mod tests {
             }
             // The merge is built with a computed tolerance; the empty operands are not
             // manifold solids, and NonManifoldBoolean runs merge_p4's ManifoldBoolean on
-            // the constructed engine, which stops at `SmBrep::CalculateBoundingBox`.
-            let e = boolean(&mut k, Brep::new(), Brep::new(), op).unwrap_err();
-            assert_eq!(unported_unit(&e), "query.brep", "{op:?}");
+            // the constructed engine.
+            assert!(
+                reaches_merge(&mut k, |k| boolean(k, Brep::new(), Brep::new(), op)),
+                "{op:?}"
+            );
         }
-        for e in [
-            boolean_union(&mut k, Brep::new(), Brep::new()).unwrap_err(),
-            boolean_difference(&mut k, Brep::new(), Brep::new()).unwrap_err(),
-            boolean_intersection(&mut k, Brep::new(), Brep::new()).unwrap_err(),
-            boolean_merge(&mut k, Brep::new(), Brep::new()).unwrap_err(),
-        ] {
-            assert_eq!(unported_unit(&e), "query.brep");
-        }
+        assert!(reaches_merge(&mut k, |k| boolean_union(
+            k,
+            Brep::new(),
+            Brep::new()
+        )));
+        assert!(reaches_merge(&mut k, |k| boolean_difference(
+            k,
+            Brep::new(),
+            Brep::new()
+        )));
+        assert!(reaches_merge(&mut k, |k| boolean_intersection(
+            k,
+            Brep::new(),
+            Brep::new()
+        )));
+        assert!(reaches_merge(&mut k, |k| boolean_merge(
+            k,
+            Brep::new(),
+            Brep::new()
+        )));
     }
 
     #[test]
@@ -417,11 +441,14 @@ mod tests {
         }
         for op in ALL {
             let mut breps = vec![Brep::new(); 3];
-            let e = merge_breps(&mut k, &mut breps, op).unwrap_err();
             if merge_breps_kernel_operation(op).is_some() {
-                // The merge is constructed; ManifoldBoolean stops at query.brep.
-                assert_eq!(unported_unit(&e), "query.brep", "{op:?}");
+                // The merge is constructed and runs.
+                assert!(
+                    reaches_merge(&mut k, |k| merge_breps(k, &mut breps, op)),
+                    "{op:?}"
+                );
             } else {
+                let e = merge_breps(&mut k, &mut breps, op).unwrap_err();
                 assert!(matches!(e, SolidError::InvalidInput { .. }), "{op:?}");
                 assert_eq!(breps.len(), 3);
             }
@@ -435,9 +462,10 @@ mod tests {
         assert_eq!(unported_unit(&e), "topology.brep_p3");
         let mut breps = vec![Some(Brep::new()), Some(Brep::new())];
         let tree = vec![0, 1, -1];
-        let e = boolean_trees(&mut k, &mut breps, &tree).unwrap_err();
-        // The merge is constructed; ManifoldBoolean stops at query.brep.
-        assert_eq!(unported_unit(&e), "query.brep");
+        // The merge is constructed and runs.
+        assert!(reaches_merge(&mut k, |k| boolean_trees(
+            k, &mut breps, &tree
+        )));
     }
     #[test]
     fn tree_api_preserves_defined_null_outputs_and_failure_slots() {

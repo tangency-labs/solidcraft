@@ -6,8 +6,9 @@
 //! A case is one API call (`api` plus its arguments). Operands are boxes
 //! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); those constructors stop at
 //! `SmPrimitiveCreation` (unit `primitive.primitive_creation_p1`, not ported yet), so
-//! the Rust side passes empty B-reps:
-//! every path that reads an operand is deferred anyway. Both sides produce `status`
+//! the Rust side passes empty B-reps. A call that reaches the merge engine reads them:
+//! it takes a mark (`SmNewMarkAndLock`), which input validation never does, so a Rust
+//! call that advanced the kernel's mark counter is deferred whatever it returned. Both sides produce `status`
 //! (`0` = `SM_SUCCESS`, else the `SmStatus`: `1007` `SM_ERR_INVALID_INPUT`; `-1` on the
 //! Rust side for an error upstream cannot produce) and `record` (the op's outputs after
 //! the status, see the FFI module).
@@ -24,6 +25,7 @@ use serde_json::Value;
 use solidcore::boolean::api_brep as api;
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
+use solidcore::geom::context::MarkType;
 use solidcore::kernel::Kernel;
 use solidcore::topology::Brep;
 use solidcore::SolidError;
@@ -260,6 +262,15 @@ fn err_output(e: &SolidError) -> Output {
     })
 }
 
+/// The deferral of a call that reached the merge engine, which reads the operands.
+fn stand_in_operands() -> Output {
+    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::CreateBox / CreateSphere
+    Output::deferred(
+        "primitive.primitive_creation_p1",
+        "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+    )
+}
+
 /// The record of a successful call cannot be produced yet (every success path goes
 /// through `SmMerge`).
 fn unexpected_success() -> Result<Output, HarnessError> {
@@ -268,30 +279,41 @@ fn unexpected_success() -> Result<Output, HarnessError> {
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = Kernel::default();
+    let next_mark = k.context.current_mark(MarkType::NoMark);
+    let out = rust_call(&mut k, i);
+    // (the stand-ins only stand in for operands nothing reads, whatever the call did)
+    if k.context.current_mark(MarkType::NoMark) == next_mark {
+        out
+    } else {
+        Ok(stand_in_operands())
+    }
+}
+
+fn rust_call(k: &mut Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let two = |r: solidcore::Result<()>| match r {
         Ok(()) => unexpected_success(),
         Err(e) => Ok(err_output(&e)),
     };
     match i {
         Inputs::Boolean { operation, .. } => {
-            two(api::boolean(&mut k, Brep::new(), Brep::new(), op(*operation)?).map(|_| ()))
+            two(api::boolean(k, Brep::new(), Brep::new(), op(*operation)?).map(|_| ()))
         }
         Inputs::Union { .. } => {
-            two(api::boolean_union(&mut k, Brep::new(), Brep::new()).map(|_| ()))
+            two(api::boolean_union(k, Brep::new(), Brep::new()).map(|_| ()))
         }
         Inputs::Difference { .. } => {
-            two(api::boolean_difference(&mut k, Brep::new(), Brep::new()).map(|_| ()))
+            two(api::boolean_difference(k, Brep::new(), Brep::new()).map(|_| ()))
         }
         Inputs::Intersection { .. } => {
-            two(api::boolean_intersection(&mut k, Brep::new(), Brep::new()).map(|_| ()))
+            two(api::boolean_intersection(k, Brep::new(), Brep::new()).map(|_| ()))
         }
         Inputs::Merge { .. } => {
-            two(api::boolean_merge(&mut k, Brep::new(), Brep::new()).map(|_| ()))
+            two(api::boolean_merge(k, Brep::new(), Brep::new()).map(|_| ()))
         }
         Inputs::WithOptions {
             operation, flags, ..
         } => two(api::boolean_with_options(
-            &mut k,
+            k,
             Brep::new(),
             Brep::new(),
             op(*operation)?,
@@ -303,7 +325,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             operation,
         } => {
             let mut v = breps(list.len());
-            match api::merge_breps(&mut k, &mut v, op(*operation)?) {
+            match api::merge_breps(k, &mut v, op(*operation)?) {
                 Ok(_) => unexpected_success(),
                 Err(e) if e.is_unported() => Ok(err_output(&e)),
                 Err(e) => {
@@ -320,7 +342,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             breps2,
             operation,
         } => two(api::boolean_lists(
-            &mut k,
+            k,
             &breps(breps1.len()),
             &[],
             &breps(breps2.len()),
@@ -330,7 +352,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         .map(|_| ())),
         Inputs::Trees { breps: list, tree } => {
             let mut v = breps(list.len()).into_iter().map(Some).collect();
-            match api::boolean_trees(&mut k, &mut v, tree) {
+            match api::boolean_trees(k, &mut v, tree) {
                 Ok(()) if v.is_empty() => {
                     Ok(Output::new().int("status", 0).ints("record", vec![0]))
                 }

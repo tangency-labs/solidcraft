@@ -44,8 +44,9 @@
 //! and 0/0/1/2/2); otherwise the fixture is rejected before selector resolution.
 //! Unprojected shell/region counts and arbitrary size/tolerance cutoffs are not guards.
 //! No topology is globally sorted. No arbitrary returned-Brep shape equivalence
-//! is claimed: a newly reachable non-deferred result/temporary fails closed until
-//! an output adapter is implemented, rather than guessing its missing metadata.
+//! is claimed: a Rust call that returns a result B-rep or leaves an offset temporary
+//! is deferred ([`HARNESS_RESULT_ADAPTER`]) until an output adapter is implemented,
+//! rather than guessing its missing metadata.
 //! Static/member shell lists currently support source faces only; nullable and
 //! foreign lists are exercised through the API's origin-qualified interface.
 //! Positive B-rep tolerances avoid the unported automatic `SetTolerance` path;
@@ -1519,6 +1520,11 @@ fn register_notification_brep(
     }
 }
 
+/// The deferral label of a Rust call that returned a B-rep or kept an offset temporary
+/// (reachable since `query.brep`'s box is ported): the scaffolded inputs are not
+/// native-equivalent, so the result needs an output adapter before it can be compared.
+const HARNESS_RESULT_ADAPTER: &str = "harness:offset-result-adapter";
+
 fn rust_output(input: &Inputs) -> RResult<Output> {
     validate(input)?;
     let mut kernel = Kernel::default();
@@ -1640,7 +1646,12 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
             .as_ref()
             .is_some_and(|exec| exec.offset_brep().is_some())
     {
-        return Err(bad("newly reachable non-deferred result/temporary needs a full Rust output adapter; not shape parity").into());
+        // (the scaffolded inputs are not native-equivalent: comparing the returned
+        // B-rep needs the output adapter this runner does not have yet)
+        return Ok(Output::deferred(
+            HARNESS_RESULT_ADAPTER,
+            "returned offset B-rep / temporary (no Rust output adapter)",
+        ));
     }
     let state = exec.as_ref().map(executive_state);
     let selected_after = observe_selections(&keys, source.as_ref(), foreign.as_ref());

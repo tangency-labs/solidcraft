@@ -66,81 +66,57 @@
       "values_compared": 149
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op0-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#0",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op0-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#1",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op0-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#2",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op0-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#3",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op0-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#4",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op0-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#5",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-kind3-contexts0",
@@ -151,8 +127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-kind3-contexts1",
@@ -162,57 +138,41 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op1-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#8",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op1-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#9",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op1-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#10",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op1-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#11",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-kind2-contexts0",
@@ -223,8 +183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-kind2-contexts1",
@@ -235,8 +195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-kind3-contexts0",
@@ -247,8 +207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-kind3-contexts1",
@@ -258,33 +218,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op2-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#16",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op2-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#17",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "op2-kind1-contexts0",
@@ -295,8 +247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "op2-kind1-contexts1",
@@ -307,8 +259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteEdge",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "op2-kind2-contexts0",
@@ -319,8 +271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteEdge",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "op2-kind2-contexts1",
@@ -331,8 +283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-kind3-contexts0",
@@ -343,8 +295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-kind3-contexts1",
@@ -354,81 +306,57 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op3-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#24",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op3-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#25",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op3-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#26",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op3-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#27",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op3-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#28",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op3-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#29",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-kind3-contexts0",
@@ -439,8 +367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-kind3-contexts1",
@@ -450,57 +378,41 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op4-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#32",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op4-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#33",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op4-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#34",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op4-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#35",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-kind2-contexts0",
@@ -511,8 +423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-kind2-contexts1",
@@ -523,8 +435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-kind3-contexts0",
@@ -535,8 +447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-kind3-contexts1",
@@ -546,57 +458,41 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op5-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#40",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op5-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#41",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op5-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#42",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op5-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#43",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-kind2-contexts0",
@@ -607,8 +503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-kind2-contexts1",
@@ -619,8 +515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-kind3-contexts0",
@@ -631,8 +527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-kind3-contexts1",
@@ -642,81 +538,57 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op6-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#48",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op6-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#49",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op6-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#50",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op6-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#51",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op6-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#52",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op6-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#53",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-kind3-contexts0",
@@ -727,8 +599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-kind3-contexts1",
@@ -738,81 +610,57 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op7-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#56",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op7-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#57",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op7-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#58",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op7-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#59",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op7-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#60",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op7-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#61",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-kind3-contexts0",
@@ -823,8 +671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-kind3-contexts1",
@@ -834,81 +682,57 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op8-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#64",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op8-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#65",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op8-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#66",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op8-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#67",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op8-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#68",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op8-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#69",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-kind3-contexts0",
@@ -919,8 +743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-kind3-contexts1",
@@ -930,81 +754,57 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op9-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#72",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op9-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#73",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op9-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#74",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op9-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#75",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op9-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#76",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op9-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#77",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-kind3-contexts0",
@@ -1015,8 +815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-kind3-contexts1",
@@ -1026,81 +826,57 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-kind0-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#80",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-kind0-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#81",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-kind1-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#82",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-kind1-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#83",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-kind2-contexts0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#84",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-kind2-contexts1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#85",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-kind3-contexts0",
@@ -1111,8 +887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-kind3-contexts1",
@@ -1299,8 +1075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-same-wire",
@@ -1311,8 +1087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-reverse-wire",
@@ -1323,8 +1099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-cross-wire",
@@ -1335,8 +1111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-touch-wire",
@@ -1347,8 +1123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-half-tol-gap",
@@ -1359,8 +1135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-at-tol-gap",
@@ -1371,8 +1147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op0-twice-tol-gap",
@@ -1383,8 +1159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-overlap-sheets",
@@ -1395,8 +1171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-equal-sheets",
@@ -1407,8 +1183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op0-tiny-wire",
@@ -1419,8 +1195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op0-far-translation",
@@ -1431,8 +1207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-option0",
@@ -1443,8 +1219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-option1",
@@ -1455,8 +1231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-option2",
@@ -1467,8 +1243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-option3",
@@ -1479,8 +1255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op0-option4",
@@ -1491,8 +1267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-same-wire",
@@ -1503,8 +1279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-reverse-wire",
@@ -1515,8 +1291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-cross-wire",
@@ -1527,8 +1303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-touch-wire",
@@ -1539,8 +1315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-half-tol-gap",
@@ -1551,8 +1327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-at-tol-gap",
@@ -1563,8 +1339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op1-twice-tol-gap",
@@ -1575,8 +1351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-overlap-sheets",
@@ -1587,8 +1363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-equal-sheets",
@@ -1599,8 +1375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op1-tiny-wire",
@@ -1611,8 +1387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op1-far-translation",
@@ -1623,8 +1399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-option0",
@@ -1635,8 +1411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-option1",
@@ -1647,8 +1423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-option2",
@@ -1659,8 +1435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-option3",
@@ -1671,8 +1447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op1-option4",
@@ -1683,8 +1459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-same-wire",
@@ -1695,8 +1471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-reverse-wire",
@@ -1707,8 +1483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-cross-wire",
@@ -1719,8 +1495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-touch-wire",
@@ -1731,8 +1507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-half-tol-gap",
@@ -1743,8 +1519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-at-tol-gap",
@@ -1755,8 +1531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op2-twice-tol-gap",
@@ -1767,8 +1543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-overlap-sheets",
@@ -1779,8 +1555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-equal-sheets",
@@ -1791,8 +1567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op2-tiny-wire",
@@ -1803,8 +1579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op2-far-translation",
@@ -1815,8 +1591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-option0",
@@ -1827,8 +1603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-option1",
@@ -1839,8 +1615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-option2",
@@ -1851,8 +1627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-option3",
@@ -1863,8 +1639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op2-option4",
@@ -1875,8 +1651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-same-wire",
@@ -1887,8 +1663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-reverse-wire",
@@ -1899,8 +1675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-cross-wire",
@@ -1911,8 +1687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-touch-wire",
@@ -1923,8 +1699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-half-tol-gap",
@@ -1935,8 +1711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-at-tol-gap",
@@ -1947,8 +1723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op3-twice-tol-gap",
@@ -1959,8 +1735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-overlap-sheets",
@@ -1971,8 +1747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-equal-sheets",
@@ -1983,8 +1759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op3-tiny-wire",
@@ -1995,8 +1771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op3-far-translation",
@@ -2007,8 +1783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-option0",
@@ -2019,8 +1795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-option1",
@@ -2031,8 +1807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-option2",
@@ -2043,8 +1819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-option3",
@@ -2055,8 +1831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op3-option4",
@@ -2067,8 +1843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-same-wire",
@@ -2079,8 +1855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-reverse-wire",
@@ -2091,8 +1867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-cross-wire",
@@ -2103,8 +1879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-touch-wire",
@@ -2115,8 +1891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-half-tol-gap",
@@ -2127,8 +1903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-at-tol-gap",
@@ -2139,8 +1915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op4-twice-tol-gap",
@@ -2151,8 +1927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-overlap-sheets",
@@ -2163,8 +1939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-equal-sheets",
@@ -2175,8 +1951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op4-tiny-wire",
@@ -2187,8 +1963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op4-far-translation",
@@ -2199,8 +1975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-option0",
@@ -2211,8 +1987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-option1",
@@ -2223,8 +1999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-option2",
@@ -2235,8 +2011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-option3",
@@ -2247,8 +2023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op4-option4",
@@ -2259,8 +2035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-same-wire",
@@ -2271,8 +2047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-reverse-wire",
@@ -2283,8 +2059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-cross-wire",
@@ -2295,8 +2071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-touch-wire",
@@ -2307,8 +2083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-half-tol-gap",
@@ -2319,8 +2095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-at-tol-gap",
@@ -2331,8 +2107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op5-twice-tol-gap",
@@ -2343,8 +2119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-overlap-sheets",
@@ -2355,8 +2131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-equal-sheets",
@@ -2367,8 +2143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op5-tiny-wire",
@@ -2379,8 +2155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op5-far-translation",
@@ -2391,8 +2167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-option0",
@@ -2403,8 +2179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-option1",
@@ -2415,8 +2191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-option2",
@@ -2427,8 +2203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-option3",
@@ -2439,8 +2215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op5-option4",
@@ -2451,8 +2227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-same-wire",
@@ -2463,8 +2239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-reverse-wire",
@@ -2475,8 +2251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-cross-wire",
@@ -2487,8 +2263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-touch-wire",
@@ -2499,8 +2275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-half-tol-gap",
@@ -2511,8 +2287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-at-tol-gap",
@@ -2523,8 +2299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op6-twice-tol-gap",
@@ -2535,8 +2311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-overlap-sheets",
@@ -2547,8 +2323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-equal-sheets",
@@ -2559,8 +2335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op6-tiny-wire",
@@ -2571,8 +2347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op6-far-translation",
@@ -2583,8 +2359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-option0",
@@ -2595,8 +2371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-option1",
@@ -2607,8 +2383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-option2",
@@ -2619,8 +2395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-option3",
@@ -2631,8 +2407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op6-option4",
@@ -2643,8 +2419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-same-wire",
@@ -2655,8 +2431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-reverse-wire",
@@ -2667,8 +2443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-cross-wire",
@@ -2679,8 +2455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-touch-wire",
@@ -2691,8 +2467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-half-tol-gap",
@@ -2703,8 +2479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-at-tol-gap",
@@ -2715,8 +2491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op7-twice-tol-gap",
@@ -2727,8 +2503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-overlap-sheets",
@@ -2739,8 +2515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-equal-sheets",
@@ -2751,8 +2527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op7-tiny-wire",
@@ -2763,8 +2539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op7-far-translation",
@@ -2775,8 +2551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-option0",
@@ -2787,8 +2563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-option1",
@@ -2799,8 +2575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-option2",
@@ -2811,8 +2587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-option3",
@@ -2823,8 +2599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op7-option4",
@@ -2835,8 +2611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-same-wire",
@@ -2847,8 +2623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-reverse-wire",
@@ -2859,8 +2635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-cross-wire",
@@ -2871,8 +2647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-touch-wire",
@@ -2883,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-half-tol-gap",
@@ -2895,8 +2671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-at-tol-gap",
@@ -2907,8 +2683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op8-twice-tol-gap",
@@ -2919,8 +2695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-overlap-sheets",
@@ -2931,8 +2707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-equal-sheets",
@@ -2943,8 +2719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op8-tiny-wire",
@@ -2955,8 +2731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op8-far-translation",
@@ -2967,8 +2743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-option0",
@@ -2979,8 +2755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-option1",
@@ -2991,8 +2767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-option2",
@@ -3003,8 +2779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-option3",
@@ -3015,8 +2791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op8-option4",
@@ -3027,8 +2803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-same-wire",
@@ -3039,8 +2815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-reverse-wire",
@@ -3051,8 +2827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-cross-wire",
@@ -3063,8 +2839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-touch-wire",
@@ -3075,8 +2851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-half-tol-gap",
@@ -3087,8 +2863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-at-tol-gap",
@@ -3099,8 +2875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetVertex",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "op9-twice-tol-gap",
@@ -3111,8 +2887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-overlap-sheets",
@@ -3123,8 +2899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-equal-sheets",
@@ -3135,8 +2911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "op9-tiny-wire",
@@ -3147,8 +2923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op9-far-translation",
@@ -3159,8 +2935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-option0",
@@ -3171,8 +2947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-option1",
@@ -3183,8 +2959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-option2",
@@ -3195,8 +2971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-option3",
@@ -3207,8 +2983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op9-option4",
@@ -3218,93 +2994,65 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-same-wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#270",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-reverse-wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#271",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-cross-wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#272",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-touch-wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#273",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-half-tol-gap",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#274",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-at-tol-gap",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#275",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-twice-tol-gap",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#276",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-overlap-sheets",
@@ -3315,8 +3063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-equal-sheets",
@@ -3326,21 +3074,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "op10-tiny-wire",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p4/manifold.json#279",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "op10-far-translation",
@@ -3351,8 +3095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-option0",
@@ -3363,8 +3107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-option1",
@@ -3375,8 +3119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-option2",
@@ -3387,8 +3131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-option3",
@@ -3399,8 +3143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::FaceIntersect",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "op10-option4",
@@ -3425,8 +3169,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmVertex::GetPoint",
+        "unit": "topology.vertex"
       },
       "max_rel_err": 0.0,
       "name": "gen0000",
@@ -3437,8 +3181,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0001",
@@ -3449,8 +3193,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0002",
@@ -3461,8 +3205,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -3473,8 +3217,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -3484,40 +3228,28 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645100167085173459",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645100167085173460",
-      "values_compared": 0
+      "values_compared": 156
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645100167085173461",
-      "values_compared": 0
+      "values_compared": 150
     },
     {
       "inputs": {
@@ -3539,8 +3271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0009",
@@ -3550,33 +3282,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645100167085173464",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0011",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645100167085173465",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0012",
@@ -3605,8 +3329,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0014",
@@ -3617,8 +3341,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -3629,13 +3353,18 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 278,
+  "cases_deferred": 209,
   "cases_failed": 0,
-  "cases_passed": 30,
+  "cases_passed": 99,
   "cases_rejected": 3,
   "cases_total": 311,
   "deferred_by_unit": {
-    "query.brep": 278
+    "topology.brep_p1": 19,
+    "topology.brep_p3": 6,
+    "topology.brep_p4": 4,
+    "topology.edge": 70,
+    "topology.face_p3": 99,
+    "topology.vertex": 11
   },
   "max_rel_err": 0.0,
   "pass": true,

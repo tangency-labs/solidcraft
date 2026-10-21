@@ -1778,7 +1778,9 @@ pub fn squeeze_face(
     *output = SqueezedFace::default();
     require_editing(editing_enabled)?;
     b.face(face)?;
-    lock_bounding_box(b)?;
+    // `SmLockBrepBox`: unlocks when it goes out of scope, whatever the result
+    let mut lock = crate::topology::brep::p1::LockBrepBox::new(k, b)?;
+    let b = lock.brep();
     let result = (|| {
         let tolerance = stitch_tolerance.unwrap_or_else(|| {
             crate::geom::tol::xsect_tol_3d_from_zones(k, b.tolerance(), b.tolerance())
@@ -1891,19 +1893,9 @@ pub fn squeeze_face(
             Ok(())
         }
     })();
-    // Upstream unlocks in a destructor; an unlock failure never hides `result`.
-    let unlocked = unlock_bounding_box(b);
-    result.and(unlocked)
+    result
 }
 
-fn lock_bounding_box(_b: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p1): SmLockBrepBox::SmLockBrepBox
-    missing("SmLockBrepBox::SmLockBrepBox", "topology.brep_p1")
-}
-fn unlock_bounding_box(_b: &mut Brep) -> Result<()> {
-    // UNPORTED(topology.brep_p1): SmLockBrepBox::~SmLockBrepBox
-    missing("SmLockBrepBox::~SmLockBrepBox", "topology.brep_p1")
-}
 fn shell_size(b: &Brep, shell: ShellId) -> Result<usize> {
     crate::topology::shell::shell_list_size(b, shell)
 }

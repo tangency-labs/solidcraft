@@ -26,16 +26,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "empty_brep_build_deferred",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_cache/cache.json#3 (upstream source/SMLib/src/SmBrepCache.cpp:187,411 (fixed BuildTrees/ReSizeTrees regression))",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -5311,17 +5307,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 1,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 662,
+  "cases_passed": 663,
   "cases_total": 663,
-  "deferred_by_unit": {
-    "query.brep": 1
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "topology.brep_cache"
 }

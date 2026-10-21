@@ -507,6 +507,230 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "v_neg_plain_build",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#0 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 357
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_plain_eval_lo",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#1 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_plain_eval_hi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#2 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_plain_to_nurbs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#3 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_plain_to_step",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#4 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_plain_iso_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#5 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_plain_rebuild",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#6 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 358
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_build",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#7 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 357
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_eval_lo",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#8 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_eval_hi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#9 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_to_nurbs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#10 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_to_step",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#11 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_iso_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#12 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_neg_io_swap_rebuild",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#13 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 358
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_build",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#14 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 357
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_eval_lo",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#15 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_eval_hi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#16 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_to_nurbs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#17 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_to_step",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#18 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_iso_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#19 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_plain_rebuild",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#20 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 358
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_build",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#21 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 357
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_eval_lo",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#22 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_eval_hi",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#23 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 5
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_to_nurbs",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#24 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_to_step",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#25 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_iso_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#26 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "v_zero_io_swap_rebuild",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.torus/negative_v_start.json#27 (upstream tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0))",
+      "values_compared": 358
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -4509,8 +4733,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 563,
-  "cases_total": 563,
+  "cases_passed": 591,
+  "cases_total": 591,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

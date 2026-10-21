@@ -87,6 +87,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
 use crate::topology::brep::p6;
@@ -1791,18 +1792,21 @@ fn merge_curves_world(
     _curves_3d: &[Curve],
     _uv_curves: &[Curve],
 ) -> Result<(CacheMergeWorld, Vec<CacheHandle>, Vec<CacheHandle>)> {
-    // UNPORTED(query.brep): MergeCurvesObjects world over the B-rep cache
+    // DISPATCH GAP: SmBrep::MergeCurvesOnSurface is ported
+    // (`topology::brep::p2::merge_curves_on_surface`, topology.brep_p2 partial; no
+    // UNPORTED marker), but its classification world over the B-rep cache (handles for
+    // the 3D and UV curves next to the cached B-rep geometry) is not built here.
     Err(SolidError::Unported {
         upstream: "SmBrep::MergeCurvesOnSurface classification world over the B-rep cache",
-        unit: "query.brep",
+        unit: "topology.brep_p2",
     })
 }
 
 /// `MergeCurvesOnSurface(*pSurf, dTol, s3DCurves, &sUVCurves, sNewFaces, sCurveEdges,
 /// bUseProjection)` with the header defaults for the rest (no intersection surface,
 /// `bUVSpaceOkay = TRUE`): [`crate::topology::brep::p2::merge_curves_on_surface`]
-/// through the B-rep cache's classification world, which only `query.brep` provides
-/// ([`merge_curves_world`]). Called here (`SmBrep.cpp:25074`, default
+/// through the B-rep cache's classification world ([`merge_curves_world`], not built
+/// yet). Called here (`SmBrep.cpp:25074`, default
 /// `bUseProjection = FALSE`) and by `blend.hcr` (`SmHCR.cpp:1229`, `TRUE`).
 pub(crate) fn merge_curves_on_surface(
     k: &mut Kernel,
@@ -1854,14 +1858,6 @@ fn face_vertices(b: &Brep, f: FaceId) -> Result<Vec<VertexId>> {
 /// `SmFace::GetEdges(rEdges)` (unit `topology.face_p4`; default arguments).
 fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
     crate::topology::face::p4::edges(b, f, None, false, None)
-}
-
-fn brep_bounding_box(_k: &Kernel, _b: &Brep) -> Result<Extent3d> {
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    Err(SolidError::Unported {
-        upstream: "SmBrep::CalculateBoundingBox",
-        unit: "query.brep",
-    })
 }
 
 /// `sm_GetPointFromSol(sSol, start)` ([`crate::topology::brep::p2::point_from_solution`]).
@@ -2042,7 +2038,7 @@ fn faces_to_delete(
             let shape = Shape::new(&[], &[(env.brep_id, face)], &edge_keys, &vertex_keys)?;
 
             // Find a ray to determine which face needs to be kept or deleted
-            let bbox = brep_bounding_box(k, b)?;
+            let bbox = qbrep::calculate_bounding_box(k, b, BoundingBoxOptions::default())?;
             let sphere = bbox.sphere_bound();
             let param = line_closest_point(reference, direction, sphere.center);
             let projected_center = reference + direction * param;

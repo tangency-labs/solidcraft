@@ -3,8 +3,8 @@
   "cases": [
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_solid",
@@ -47,8 +47,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_shell_0.001_1",
@@ -59,8 +59,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_shell_0.001_0",
@@ -71,8 +71,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_shell_0.1_1",
@@ -83,8 +83,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_shell_0.1_0",
@@ -104,8 +104,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_do_0",
@@ -116,8 +116,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_do_1e-06",
@@ -128,8 +128,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_do_0.001",
@@ -140,8 +140,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0_do_0.1",
@@ -412,8 +412,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_solid",
@@ -456,8 +456,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_shell_0.001_1",
@@ -468,8 +468,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_shell_0.001_0",
@@ -480,8 +480,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_shell_0.1_1",
@@ -492,8 +492,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_shell_0.1_0",
@@ -504,8 +504,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_do_0",
@@ -516,8 +516,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_do_1e-06",
@@ -528,8 +528,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_do_0.001",
@@ -540,8 +540,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-07_do_0.1",
@@ -812,8 +812,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_solid",
@@ -856,8 +856,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_shell_0.001_1",
@@ -868,8 +868,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_shell_0.001_0",
@@ -880,8 +880,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_shell_0.1_1",
@@ -892,8 +892,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_shell_0.1_0",
@@ -904,8 +904,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_do_0",
@@ -916,8 +916,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_do_1e-06",
@@ -928,8 +928,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_do_0.001",
@@ -940,8 +940,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap1e-05_do_0.1",
@@ -1212,8 +1212,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_solid",
@@ -1255,33 +1255,25 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_shell_0.001_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#123 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_shell_0.001_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#124 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_shell_0.1_1",
@@ -1292,8 +1284,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_shell_0.1_0",
@@ -1303,33 +1295,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_do_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#127 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_do_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#128 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_do_0.001",
@@ -1340,8 +1324,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.001_do_0.1",
@@ -1575,16 +1559,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_solid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#157 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoSolid)",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -1619,33 +1599,25 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_shell_0.001_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#162 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_shell_0.001_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#163 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_shell_0.1_1",
@@ -1656,8 +1628,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_shell_0.1_0",
@@ -1667,45 +1639,33 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_do_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#166 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_do_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#167 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_do_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#168 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_gap0.05_do_0.1",
@@ -1932,8 +1892,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_solid",
@@ -1976,8 +1936,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_shell_0.001_1",
@@ -1988,8 +1948,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_shell_0.001_0",
@@ -2000,8 +1960,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_shell_0.1_1",
@@ -2012,8 +1972,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_shell_0.1_0",
@@ -2024,8 +1984,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_do_0",
@@ -2036,8 +1996,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_do_1e-06",
@@ -2048,8 +2008,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_do_0.001",
@@ -2060,8 +2020,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "pair_reversed_do_0.1",
@@ -2335,16 +2295,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "tjunction_solid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#235 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoSolid)",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2380,8 +2336,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_shell_0.001_1",
@@ -2392,8 +2348,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_shell_0.001_0",
@@ -2404,8 +2360,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_shell_0.1_1",
@@ -2416,8 +2372,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_shell_0.1_0",
@@ -2428,8 +2384,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_do_0",
@@ -2440,8 +2396,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_do_1e-06",
@@ -2452,8 +2408,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_do_0.001",
@@ -2464,8 +2420,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_do_0.1",
@@ -2683,16 +2639,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_solid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#274 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoSolid)",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2728,8 +2680,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_shell_0.001_1",
@@ -2740,8 +2692,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_shell_0.001_0",
@@ -2752,8 +2704,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_shell_0.1_1",
@@ -2764,8 +2716,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_shell_0.1_0",
@@ -2775,33 +2727,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_do_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#283 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_do_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#284 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_do_0.001",
@@ -2812,8 +2756,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tjunction_gap_do_0.1",
@@ -3040,8 +2984,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_solid",
@@ -3084,8 +3028,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_shell_0.001_1",
@@ -3096,8 +3040,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_shell_0.001_0",
@@ -3108,8 +3052,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_shell_0.1_1",
@@ -3120,8 +3064,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_shell_0.1_0",
@@ -3132,8 +3076,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_do_0",
@@ -3144,8 +3088,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_do_1e-06",
@@ -3156,8 +3100,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_do_0.001",
@@ -3168,8 +3112,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "grid2x2_do_0.1",
@@ -3444,8 +3388,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_solid",
@@ -3488,8 +3432,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_shell_0.001_1",
@@ -3500,8 +3444,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_shell_0.001_0",
@@ -3512,8 +3456,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_shell_0.1_1",
@@ -3524,8 +3468,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_shell_0.1_0",
@@ -3536,8 +3480,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_do_0",
@@ -3548,8 +3492,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_do_1e-06",
@@ -3560,8 +3504,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_do_0.001",
@@ -3572,8 +3516,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "tiny_pair_do_0.1",
@@ -3843,16 +3787,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_solid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#391 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoSolid)",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -3887,100 +3827,68 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_shell_0.001_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#396 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_shell_0.001_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#397 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_shell_0.1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#398 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_shell_0.1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#399 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_do_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#400 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_do_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#401 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_do_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#402 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "single_do_0.1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#403 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmAdvancedStitch)",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -4192,8 +4100,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_solid",
@@ -4235,57 +4143,41 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_shell_0.001_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#435 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_shell_0.001_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#436 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_shell_0.1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#437 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_shell_0.1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#438 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_do_0",
@@ -4296,8 +4188,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_do_1e-06",
@@ -4308,8 +4200,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_do_0.001",
@@ -4320,8 +4212,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_do_0.1",
@@ -4540,8 +4432,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_small_solid",
@@ -4583,57 +4475,41 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_small_shell_0.001_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#474 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_small_shell_0.001_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#475 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_small_shell_0.1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#476 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_small_shell_0.1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p2/constructed.json#477 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_small_do_0",
@@ -4644,8 +4520,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_small_do_1e-06",
@@ -4656,8 +4532,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_small_do_0.001",
@@ -4668,8 +4544,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_small_do_0.1",
@@ -5244,8 +5120,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -5264,8 +5140,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0010",
@@ -5296,8 +5172,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -5316,8 +5192,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -5328,13 +5204,13 @@
     }
   ],
   "cases_both_errored": 1,
-  "cases_deferred": 219,
+  "cases_deferred": 188,
   "cases_failed": 0,
-  "cases_passed": 337,
+  "cases_passed": 368,
   "cases_total": 556,
   "deferred_by_unit": {
-    "query.brep": 121,
-    "topology.brep_p1": 98
+    "topology.brep_p1": 178,
+    "topology.brep_p9": 10
   },
   "max_rel_err": 0.0,
   "pass": true,

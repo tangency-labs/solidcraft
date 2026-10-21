@@ -10,7 +10,7 @@
 //!
 //! | Rust                                          | Upstream                                    |
 //! |-----------------------------------------------|---------------------------------------------|
-//! | [`calculate_tight_bounding_box`]              | `SmFace::CalculateTightBoundingBox`         |
+//! | [`calculate_tight_bounding_box`], [`calculate_tight_bounding_box_into`] | `SmFace::CalculateTightBoundingBox` |
 //! | [`face_classify_uv_line`]                     | `sm_FaceClassifyUVLine` (file static)       |
 //! | [`find_and_classify_loop_bisector`], [`LoopBisector`] | `sms_FindAndClassifyLoopBisector`   |
 //! | [`sector_classify_curve_on`], [`SectorEdgeuse`], [`SectorClassifyInput`], [`SectorClass`] | `SmFace::SectorClassifyCurveOn` |
@@ -325,6 +325,25 @@ fn surface_bounding_box(
 /// global solves and point classifications.
 pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
     let mut face_bbox = Extent3d::new();
+    calculate_tight_bounding_box_into(k, b, f, &mut face_bbox)?;
+    Ok(face_bbox)
+}
+
+/// [`calculate_tight_bounding_box`] into the caller's `face_bbox` (`rFaceBBox`), for
+/// callers that ignore the status: as upstream, the box of the vertices and edges is
+/// written before the surface's part is computed, so a failure there leaves that box;
+/// a failure before it (vertices, edge boxes) leaves `face_bbox` as it was.
+///
+/// # Errors
+///
+/// Those of [`calculate_tight_bounding_box`].
+pub fn calculate_tight_bounding_box_into(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    out: &mut Extent3d,
+) -> Result<()> {
+    let mut face_bbox = Extent3d::new();
 
     let surface = face_surface(b, f, OP_TIGHT)?;
     let face_zone_tol_3d = zone_tol3d(k, b.face(f)?.tolerance);
@@ -347,17 +366,20 @@ pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<E
         face_bbox = face_bbox.union(&e_bbox);
     } // end loop on Edges
 
+    // Set output to what we have so far.
+    *out = face_bbox;
+
     // Now the surface.
     // If it's a plane, then we're done.
     if surface_is_planar(k, b, f, surface, EFF_ZERO)? {
-        return Ok(face_bbox);
+        return Ok(());
     }
 
     // First check the approximate box.
     let uv_domain = b.face(f)?.uv_domain;
     let srf_bbox = surface_bounding_box(k, b, f, surface, &uv_domain)?;
     if srf_bbox.is_contained_by(&face_bbox, 0.0) {
-        return Ok(face_bbox);
+        return Ok(());
     }
 
     // Unfortunately, we can't just call the surface method with our domain,
@@ -426,7 +448,8 @@ pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<E
     face_bbox = face_bbox.union(&srf_bbox);
 
     // End copy of Surface::CalculateTightBoundingBox():
-    Ok(face_bbox)
+    *out = face_bbox;
+    Ok(())
 }
 
 /// `SmSurfaceEval::Pos()`: the position, also when the evaluation failed (then what

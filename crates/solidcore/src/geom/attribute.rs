@@ -541,6 +541,12 @@ pub enum AttributeValue {
         /// `m_pVertexuse`.
         vertexuse: Option<ObjectKey>,
     },
+    /// `SmDecimateVertexAttr` (unit `query.brep`, [`crate::query::brep`]).
+    DecimateVertex(crate::query::brep::DecimateVertexData),
+    /// `SmQuadricVertexAttr` (unit `query.brep`, [`crate::query::brep`]).
+    QuadricVertex(crate::query::brep::QuadricVertexData),
+    /// `SmQuadricEdgeAttr` (unit `query.brep`, [`crate::query::brep`]).
+    QuadricEdge(crate::query::brep::QuadricEdgeData),
 }
 
 /// An attribute: an id naming its purpose, a [`Behavior`], the list of objects
@@ -657,7 +663,9 @@ impl Attribute {
     ///
     /// As upstream, `SmLongAttribute`, `SmVector3dAttribute` and `SmColorAttribute`
     /// copies get [`Behavior::Copy`] whatever the original's behaviour; the other
-    /// classes keep it.
+    /// classes keep it. The decimation attributes copy everything but their sort
+    /// index, which restarts at `0` ([`crate::query::brep::DecimateVertexData::make_copy`],
+    /// [`crate::query::brep::QuadricEdgeData::make_copy`]).
     #[must_use]
     pub fn make_copy(&self) -> Self {
         let id = self.id;
@@ -665,6 +673,16 @@ impl Attribute {
             AttributeValue::Long(v) => Self::long(id, *v, Behavior::Copy),
             AttributeValue::Vector3d(v) => Self::vector3d(id, *v, Behavior::Copy),
             AttributeValue::Color(v) => Self::color(id, *v, Behavior::Copy),
+            AttributeValue::DecimateVertex(d) => Self::with_value(
+                id,
+                self.behavior,
+                AttributeValue::DecimateVertex(d.make_copy()),
+            ),
+            AttributeValue::QuadricEdge(d) => Self::with_value(
+                id,
+                self.behavior,
+                AttributeValue::QuadricEdge(d.make_copy()),
+            ),
             other => Self::with_value(id, self.behavior, other.clone()),
         }
     }
@@ -706,7 +724,10 @@ impl Attribute {
         match self.value {
             AttributeValue::None
             | AttributeValue::PolyToEuVu { .. }
-            | AttributeValue::PolyEdgeToVertexUse { .. } => type_code::ATTRIBUTE,
+            | AttributeValue::PolyEdgeToVertexUse { .. }
+            | AttributeValue::DecimateVertex(_)
+            | AttributeValue::QuadricVertex(_)
+            | AttributeValue::QuadricEdge(_) => type_code::ATTRIBUTE,
             AttributeValue::Generic { .. } => type_code::GENERIC,
             AttributeValue::Long(_) => type_code::LONG,
             AttributeValue::Pointer(_) | AttributeValue::MergeRegion(_) => type_code::POINTER,
@@ -722,7 +743,10 @@ impl Attribute {
         match self.value {
             AttributeValue::None
             | AttributeValue::PolyToEuVu { .. }
-            | AttributeValue::PolyEdgeToVertexUse { .. } => "SmAttribute_TYPE",
+            | AttributeValue::PolyEdgeToVertexUse { .. }
+            | AttributeValue::DecimateVertex(_)
+            | AttributeValue::QuadricVertex(_)
+            | AttributeValue::QuadricEdge(_) => "SmAttribute_TYPE",
             AttributeValue::Generic { .. } => "SmGenericAttribute_TYPE",
             AttributeValue::Long(_) => "SmLongAttribute_TYPE",
             AttributeValue::Pointer(_) | AttributeValue::MergeRegion(_) => {
@@ -743,7 +767,10 @@ impl Attribute {
         let own: &[i64] = match self.value {
             AttributeValue::None
             | AttributeValue::PolyToEuVu { .. }
-            | AttributeValue::PolyEdgeToVertexUse { .. } => &[],
+            | AttributeValue::PolyEdgeToVertexUse { .. }
+            | AttributeValue::DecimateVertex(_)
+            | AttributeValue::QuadricVertex(_)
+            | AttributeValue::QuadricEdge(_) => &[],
             AttributeValue::Generic { .. } => &[type_code::GENERIC],
             AttributeValue::Long(_) => &[type_code::LONG],
             AttributeValue::Pointer(_) => &[type_code::POINTER],

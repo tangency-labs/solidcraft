@@ -97,7 +97,10 @@ use solidcore::topology::proto_topology::p1::ProtoTopology;
 use solidcore::topology::proto_topology::{ProtoBrep, ProtoGeometry, ProtoTopologyManager};
 use solidcore::topology::topology::Topology;
 use solidcore::topology::vertex as vx;
-use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId};
+use solidcore::query::brep::{BrepIdentity, BrepQuery};
+use solidcore::topology::{
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId,
+};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::boolean_topology_intersector_p1::{self as ffi, Op};
 use solidcore_ffi::units::boolean_topology_intersector_p2 as ffi2;
@@ -609,6 +612,8 @@ const K_VERTEXUSE: u8 = 12;
 /// The UV trim curve stored on an edge use (or its mate), by the edge use's index
 /// (Rust side only, resolved by `ClassGeometry::curve`).
 const K_TRIM_CURVE: u8 = 13;
+/// A region (classification results).
+const K_REGION: u8 = 14;
 
 /// An object handle: the B-rep (`2` for the curve stores, `-1` for the intersector),
 /// the kind and the index. Ordered as the shim sorts (`brep`, `kind`, `index`). A
@@ -673,6 +678,7 @@ impl ClassObject for H {
             K_EDGEUSE => ClassObjectKind::Edgeuse,
             K_VERTEXUSE => ClassObjectKind::Vertexuse,
             K_LOOP => ClassObjectKind::Loop,
+            K_REGION => ClassObjectKind::Region,
             _ => ClassObjectKind::Other,
         }
     }
@@ -795,7 +801,11 @@ const fn fid(h: H) -> FaceId {
 }
 
 impl Two {
-    pub(crate) fn new(a: Brep, b: Option<Brep>) -> Self {
+    pub(crate) fn new(mut a: Brep, mut b: Option<Brep>) -> Self {
+        own_geometry(&mut a, 0);
+        if let Some(b) = b.as_mut() {
+            own_geometry(b, 1);
+        }
         let env = [NotifyEnv::new(Some(&a)), NotifyEnv::new(b.as_ref())];
         Self {
             breps: [Some(a), b],
@@ -879,6 +889,7 @@ impl Two {
             EntityRef::Face(f) => Some(hd(b, K_FACE, f.index())),
             EntityRef::Loop(l) => Some(hd(b, K_LOOP, l.index())),
             EntityRef::Edgeuse(eu) => Some(hd(b, K_EDGEUSE, eu.index())),
+            EntityRef::Region(r) => Some(hd(b, K_REGION, r.index())),
             _ => None,
         }
     }
@@ -1073,6 +1084,35 @@ impl ProtoBrep<H> for Two {
             .map(|e| hd(v1.b, K_EDGE, e.index()))
             .collect())
     }
+    fn brep_point_3d_classify(
+        &mut self,
+        k: &Kernel,
+        brep: H,
+        point: Point3,
+        tolerance: f64,
+        boundary_intersections: bool,
+    ) -> solidcore::Result<PointClassification<H>> {
+        let operand = brep.b;
+        let slot = usize::try_from(operand).map_err(|_| invalid("bad B-rep"))?;
+        let keys = |object: CacheObject| query_key(slot, object);
+        let no_owner = |_: ObjectRef| None;
+        let identity = BrepIdentity {
+            brep_id: BrepId::from_index(slot as u32),
+            keys: &keys,
+            owner_of: &no_owner,
+        };
+        let pc = BrepQuery::new(identity).point_3d_classify(
+            k,
+            self.brep_m(brep)?,
+            point,
+            tolerance,
+            boundary_intersections,
+        )?;
+        pc.map_objects(&mut |e| {
+            Self::entity_h(operand, e).ok_or_else(|| invalid("classification object without a handle"))
+        })
+    }
+
     fn face_curve_on_classify(
         &self,
         k: &Kernel,
@@ -1674,11 +1714,45 @@ fn glue_key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
+/// Gives the imported B-rep in operand `slot` the geometry owners a native B-rep has
+/// (each curve its edge and the B-rep, each surface its face), under the identities the
+/// B-rep cache is built with ([`query_key`]): the cache indexes only owned geometry.
+fn own_geometry(b: &mut Brep, slot: usize) {
+    let edges: Vec<_> = b.edges().ids().collect();
+    for e in edges {
+        if let Some(curve) = b.edge_mut(e).ok().and_then(|x| x.curve.as_mut()) {
+            let _ = curve.set_owner(
+                Some(query_key(slot, CacheObject::Edge(e))),
+                Some(query_key(slot, CacheObject::Brep)),
+            );
+        }
+    }
+    let faces: Vec<_> = b.faces().ids().collect();
+    for f in faces {
+        if let Some(surface) = b.face_mut(f).ok().and_then(|x| x.surface.as_mut()) {
+            let _ = surface.set_owner(Some(query_key(slot, CacheObject::Face(f))));
+        }
+    }
+}
+
+/// Object identities for cache construction: face/edge identities are the
+/// notification keys (`glue_key_of`), the B-rep identity is its operand slot.
+fn query_key(slot: usize, object: CacheObject) -> ObjectRef {
+    match object {
+        CacheObject::Brep => ObjectRef {
+            type_code: BREP_TYPE,
+            key: ObjectKey(slot as u64),
+        },
+        CacheObject::Edge(e) | CacheObject::Curve(e) => glue_key_of(EntityRef::Edge(e)),
+        CacheObject::Face(f) | CacheObject::Surface(f) => glue_key_of(EntityRef::Face(f)),
+        _ => arena_identity(object),
+    }
+}
+
 impl TopologyObjects<H> for Two {
     /// The B-rep's cache (`SmBrep::GetBrepCache`), built from the B-rep on first use (the
-    /// C++ topology solver builds it on demand) with this adapter's handles. The build
-    /// starts with `SmBrep::CalculateBoundingBox` (unit `query.brep`), so until that
-    /// lands the solves needing a cache defer there.
+    /// C++ topology solver builds it on demand) with this adapter's handles, keyed by
+    /// [`query_key`]. The build starts with `SmBrep::CalculateBoundingBox` (`query.brep`).
     fn brep_cache(&self, brep: H) -> solidcore::Result<&BrepCache<H>> {
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
         let cell = self.caches.get(slot).ok_or_else(|| invalid("bad B-rep"))?;
@@ -1710,7 +1784,7 @@ impl TopologyObjects<H> for Two {
                 CacheObject::Brep => brep_h(bi),
                 _ => hd(bi, K_NULL as u8, 0),
             },
-            &arena_identity,
+            &|object| query_key(slot, object),
         )?;
         let _ = cell.set(cache);
         cell.get().ok_or_else(|| invalid("B-rep cache not stored"))

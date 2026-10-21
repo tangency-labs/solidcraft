@@ -181,15 +181,16 @@ enum Input {
 
 // ---- the imported B-rep -----------------------------------------------------------------
 
-/// The case's B-rep imported from the C++ export, with each face's primary face use.
-struct Model {
-    path: String,
-    block: Vec<f64>,
-    brep: Brep,
-    types: ImportTypes,
+/// The case's B-rep imported from the C++ export, with each face's primary face use
+/// (shared with the `query.brep` runner).
+pub(crate) struct Model {
+    pub(crate) path: String,
+    pub(crate) block: Vec<f64>,
+    pub(crate) brep: Brep,
+    pub(crate) types: ImportTypes,
 }
 
-fn model(brep: &Value) -> Result<Model, HarnessError> {
+pub(crate) fn model(brep: &Value) -> Result<Model, HarnessError> {
     let (path, block) = fixture_input(brep.clone())?;
     let export = graph::eval(graph::Op::Export, &path, &block)
         .map_err(|e| harness(format!("c++ export: {e}")))?;
@@ -244,7 +245,7 @@ const HARNESS_ANALYTIC_IMPORT: &str = "harness:analytic-geometry-export";
 
 /// The deferral of a case that reads a face surface or edge curve the import holds only
 /// as its B-spline part (see the module docs).
-fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<Output> {
+pub(crate) fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<Output> {
     for f in faces {
         let st = m
             .types
@@ -295,7 +296,7 @@ fn face_and_edges(b: &Brep, f: FaceId) -> (Vec<FaceId>, Vec<EdgeId>) {
 }
 
 /// Every face and edge of the B-rep.
-fn everything(b: &Brep) -> (Vec<FaceId>, Vec<EdgeId>) {
+pub(crate) fn everything(b: &Brep) -> (Vec<FaceId>, Vec<EdgeId>) {
     (
         b.faces().iter().map(|(id, _)| id).collect(),
         b.edges().iter().map(|(id, _)| id).collect(),
@@ -471,8 +472,9 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
     ]
 }
 
-/// No geometry behind the B-rep handles (only the stored gap is read).
-struct NoGeometry;
+/// No geometry behind the B-rep handles (only the stored gap is read; shared with the
+/// `query.brep` runner).
+pub(crate) struct NoGeometry;
 
 impl solidcore::intersect::point_class::ClassGeometry<EntityRef> for NoGeometry {
     fn curve(&self, _o: EntityRef) -> Option<&Curve> {
@@ -729,7 +731,7 @@ const EXACT_FILES: [&str; 7] = [
     "plane_square.smb",
 ];
 
-fn gen_face_brep(rng: &mut Rng) -> BrepIn {
+pub(crate) fn gen_face_brep(rng: &mut Rng) -> BrepIn {
     if rng.chance(0.7) {
         BrepIn::File {
             file: (*rng.choose(&EXACT_FILES).unwrap_or(&"plane_square.smb")).to_string(),

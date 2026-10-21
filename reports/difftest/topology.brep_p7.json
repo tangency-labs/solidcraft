@@ -799,8 +799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "glue_disk.smb_9",
@@ -1755,8 +1755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "glue_surf_sphere150.smb_9",
@@ -2851,10 +2851,10 @@
     "cpp-guard:ub-165": 3,
     "curve.crv_on_surf": 2,
     "curve.curve_p6": 2,
-    "query.brep": 2,
     "surface.surface_p2": 8,
     "topology.brep_p3": 36,
     "topology.brep_p4": 1,
+    "topology.brep_p6": 2,
     "topology.brep_p9": 2,
     "topology.face_p2": 22
   },

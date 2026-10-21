@@ -1174,16 +1174,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "real_box_with_large_fillet_infinite_region",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/real_files.json#54 (upstream source/SMLib/src/SmBrep.cpp:8004-8582)",
-      "values_compared": 0
+      "values_compared": 242
     },
     {
       "max_rel_err": 0.0,
@@ -5487,14 +5483,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 3,
+  "cases_deferred": 2,
   "cases_failed": 0,
-  "cases_passed": 681,
+  "cases_passed": 682,
   "cases_total": 684,
   "deferred_by_unit": {
     "intersect.surface_drop_curve": 1,
-    "intersect.surface_drop_lib_p3": 1,
-    "query.brep": 1
+    "intersect.surface_drop_lib_p3": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

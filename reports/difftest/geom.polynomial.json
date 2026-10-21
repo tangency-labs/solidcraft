@@ -15319,7 +15319,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=12755644330057303547",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -40479,7 +40479,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=12755644330057306692",
-      "values_compared": 1
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,

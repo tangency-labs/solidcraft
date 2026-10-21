@@ -56,6 +56,7 @@ use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
 use crate::topology::edge::{NotifyEnv, NotifyState};
@@ -1300,12 +1301,28 @@ fn split_closed(
             [region(old_region), region(old_region), region(new_region)],
         ))
     })?;
-    // CalculateBoundingBox, infinite-region testing, classification of residual
-    // faces/wires/shells and empty-shell/region cleanup follow.
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
+
+    // We will use this bbox a few times times.
+    // just need a rough bound for the radius of the brep.
+    let brep_bbox = qbrep::calculate_bounding_box(
+        k,
+        brep,
+        BoundingBoxOptions {
+            approx: true,
+            tight: false,
+            expand_by_zone_tol_3d: true,
+        },
+    )?;
+    let _brep_sphere = brep_bbox.sphere_bound();
+
+    // OMITTED SmBrep.cpp:27966-28583 (this unit's own remainder, not a callee):
+    // infinite-region testing (FindAndSetInfiniteRegion), the inner-shell choice
+    // (IsInnerShell), redistribution of faces, wires and shells joined only by
+    // vertices (SmShell::RayFire) and empty-shell/region cleanup. See
+    // plan/findings.md (topology.brep_p6).
     Err(SolidError::unported(
-        "SmBrep::CalculateBoundingBox",
-        "query.brep",
+        "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "topology.brep_p6",
     ))
 }
 
@@ -1384,11 +1401,13 @@ mod tests {
             true,
             first,
         );
+        // the B-rep box is ported (query.brep); the split stops where this unit's port
+        // ends (the OMITTED remainder after CalculateBoundingBox)
         assert!(matches!(
             result,
             Err(SolidError::Unported {
-                upstream: "SmBrep::CalculateBoundingBox",
-                unit: "query.brep",
+                unit: "topology.brep_p6",
+                ..
             })
         ));
         // the new region got its (default) SmTopology record
@@ -1420,7 +1439,7 @@ mod tests {
         assert_eq!(attempt.region, Some(RegionId::from_index(11)));
         for error in [
             SolidError::invalid_input(OP, "typed resolver required"),
-            SolidError::unported("SmBrep::CalculateBoundingBox", "query.brep"),
+            SolidError::unported("SmBrep::TestClosureSplitRegion", "topology.brep_p6"),
         ] {
             assert_eq!(
                 finish_split_attempt(partial(), Err(error.clone())).unwrap_err(),

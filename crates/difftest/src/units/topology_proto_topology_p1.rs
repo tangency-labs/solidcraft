@@ -1402,6 +1402,22 @@ impl ProtoBrep<H> for Pool {
             "query.face_p2",
         ))
     }
+
+    fn brep_point_3d_classify(
+        &mut self,
+        _k: &Kernel,
+        _brep: H,
+        _point: Point3,
+        _tolerance: f64,
+        _boundary_intersections: bool,
+    ) -> solidcore::Result<PointClassification<H>> {
+        // The pool's handles name no B-rep (the native side classifies against real
+        // ones), so the classification is a harness limitation.
+        Err(SolidError::unported(
+            "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+            "harness:proto-topology-pool",
+        ))
+    }
 }
 
 fn class_kind_of(k: i64) -> ClassObjectKind {

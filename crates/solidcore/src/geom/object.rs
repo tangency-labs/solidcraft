@@ -392,9 +392,11 @@ impl Shape {
         // Compute the union of all of the extents of the input objects; the first
         // upstream call of each list needs an unported topology query.
         if !breps.is_empty() {
-            // UNPORTED(query.brep): SmBrep::CalculateBoundingBox (the B-rep keys here
-            // name no Brep; SmBrep::GetInfiniteRegion / GetVertices / GetEdges / GetFaces
-            // are ported in topology::brep::p1)
+            // DISPATCH GAP: SmBrep::CalculateBoundingBox is ported
+            // (`query::brep::calculate_bounding_box`, query.brep partial; no UNPORTED
+            // marker), but it takes the `Brep`, which these B-rep keys do not name.
+            // SmBrep::GetInfiniteRegion / GetVertices / GetEdges / GetFaces are ported in
+            // topology::brep::p1.
             return Err(SolidError::Unported {
                 upstream: "SmBrep::CalculateBoundingBox",
                 unit: "query.brep",

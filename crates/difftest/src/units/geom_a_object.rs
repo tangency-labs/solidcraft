@@ -919,7 +919,13 @@ impl RustRun {
                 let target = self.obj(a2)?.r.type_code;
                 let old = self.cache_arg(a3)?;
                 let made = if target == a_object::BREP_TYPE && old.is_none() {
-                    self.new_brep_cache().map(Some)
+                    // A successful build ends with `SetCacheObj(pBrepCache)` on `this`.
+                    self.new_brep_cache().map(|c| {
+                        if let Some(o) = self.objs.get_mut(a1 as usize) {
+                            o.a.set_cache_obj(Some(c));
+                        }
+                        Some(c)
+                    })
                 } else {
                     a_object::sag_cache_make_or_validate(ct, target, old)
                 };

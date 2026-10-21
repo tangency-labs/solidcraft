@@ -592,7 +592,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             // the shim's guard: the doubling from a tolerance at or below zero cannot
             // end (HANG-24); same test on the same box diagonal (`tol < dist / 200`
             // excludes a NaN tolerance, so `!(tol > 0)` is `tol <= 0` here)
-            let (tol, dist) = match st::solid_stitch_start(b) {
+            let (tol, dist) = match st::solid_stitch_start(k, b) {
                 Ok(start) => start,
                 Err(e) => return failed(e),
             };

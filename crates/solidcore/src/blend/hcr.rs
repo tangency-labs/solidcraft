@@ -91,6 +91,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::volume::Volume;
 use crate::topology::{edge, edgeuse, vertex, vertexuse};
@@ -218,16 +219,6 @@ fn find_and_set_infinite_region(brep: &mut Brep) -> Result<()> {
         SM_VS_INFINITEREGION_SWAP,
         None,
     )
-}
-
-/// `SmBrep::CalculateBoundingBox` (unit `query.brep`).
-fn brep_bounding_box(brep: &Brep) -> Result<Extent3d> {
-    let _ = brep;
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    Err(SolidError::unported(
-        "SmBrep::CalculateBoundingBox",
-        "query.brep",
-    ))
 }
 
 /// `SmBrep::GetInfiniteRegion` (unit `topology.brep_p1`).
@@ -517,7 +508,12 @@ impl Hcr {
         ignore_status(transform_brep(&mut scene, &vt))?;
         ignore_status(find_and_set_infinite_region(&mut scene))?; // [B23]
                                                                   // its status is ignored upstream (the box then stays empty)
-        let scene_box = ignored(brep_bounding_box(&scene))?.unwrap_or_else(Extent3d::new);
+        let scene_box = ignored(qbrep::calculate_bounding_box(
+            k,
+            &scene,
+            BoundingBoxOptions::default(),
+        ))?
+        .unwrap_or_else(Extent3d::new);
         Ok(Self::from_scene(k, scene, view_transform, scene_box, opts))
     }
 

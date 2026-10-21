@@ -13023,7 +13023,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=7577090626449491313",
-      "values_compared": 9
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,

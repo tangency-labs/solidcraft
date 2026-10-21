@@ -3,8 +3,8 @@
   "cases": [
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_stitch_into_solid",
@@ -14,33 +14,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_stitch_into_shell",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#1 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmStitchIntoShell)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_unify_normals",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#2 (upstream tests/SM_API_test/src/TestSmBrep.cpp TestSmUnifyNormals)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "box_advanced_stitch",
@@ -202,16 +194,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "box_unify_member",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#22",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -583,8 +571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap0_unify",
@@ -947,8 +935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap1e-4_unify",
@@ -1307,8 +1295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_gap5e-3_unify",
@@ -1319,8 +1307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_flipped_unify",
@@ -1331,8 +1319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "two_squares_flipped_unify_api",
@@ -2668,15 +2656,16 @@
     }
   ],
   "cases_both_errored": 1,
-  "cases_deferred": 66,
+  "cases_deferred": 63,
   "cases_failed": 0,
-  "cases_passed": 234,
+  "cases_passed": 237,
   "cases_total": 300,
   "deferred_by_unit": {
     "harness:analytic-geometry-export": 1,
-    "query.brep": 10,
+    "intersect.surface_drop_lib_p3": 5,
     "topology.brep_p1": 5,
     "topology.brep_p4": 1,
+    "topology.brep_p9": 2,
     "topology.face_p2": 49
   },
   "max_rel_err": 0.0,

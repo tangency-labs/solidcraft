@@ -42,6 +42,8 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
+use crate::query::brep::{BrepIdentity, BrepQuery};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edge;
 use crate::topology::vertex;
@@ -116,8 +118,12 @@ where
         };
         let bounds = match supplied_box {
             Some(bounds) => bounds,
-            None => crate::error::ignored(brep_bounds(b))?
-                .unwrap_or_else(crate::geom::extent3d::Extent3d::new),
+            None => crate::error::ignored(qbrep::calculate_bounding_box(
+                k,
+                b,
+                BoundingBoxOptions::default(),
+            ))?
+            .unwrap_or_else(crate::geom::extent3d::Extent3d::new),
         };
         let ray_start = bounds.max() + (bounds.max() - bounds.min()) * 0.5;
         let mut direction = Vec3::new(1.0, 1.0, 1.0);
@@ -199,8 +205,11 @@ where
             if !success {
                 let edge_id = best_edge.ok_or_else(|| SolidError::null_pointer(OP))?;
                 let record = b.edge(edge_id)?;
-                let curve = required(record.curve.as_ref(), "ray target edge without curve")?;
-                let point = curve.evaluate_point(k, record.interval.evaluate(0.789))?;
+                // (a copy: the ray fires may add UV trim curves to the B-rep)
+                let curve =
+                    required(record.curve.as_ref(), "ray target edge without curve")?.clone();
+                let interval = record.interval;
+                let point = curve.evaluate_point(k, interval.evaluate(0.789))?;
                 let attempt = crate::topology::shell::ray_fire(
                     k,
                     b,
@@ -218,7 +227,7 @@ where
                 let success = ray_success(&attempt.status)?;
                 state = attempt.state;
                 if !success {
-                    let point = curve.evaluate_point(k, record.interval.evaluate(0.189))?;
+                    let point = curve.evaluate_point(k, interval.evaluate(0.189))?;
                     let start = bounds.min() - (bounds.max() - bounds.min()) * 0.5;
                     let attempt = crate::topology::shell::ray_fire(
                         k,
@@ -292,16 +301,24 @@ where
                 }
             }
             direction = ray_direction(direction)?;
-            if !brep_ray_fire(b, ray_start, direction, tolerance, &mut state)? {
+            // (the rays solve on one cache: nothing edits the B-rep in between)
+            let query = BrepQuery::new(BrepIdentity::arena(brep_id));
+            let mut fire = |b: &mut Brep, start: Point3, direction: Vec3| {
+                brep_ray_fire(k, &query, b, start, direction, tolerance, &mut state)
+            };
+            if !fire(b, ray_start, direction)? {
                 // Native retries use edges[0], not the closest sampled edge.
                 let edge_id = *required(edges.first(), "missing first ray edge")?;
                 let record = b.edge(edge_id)?;
-                let curve = required(record.curve.as_ref(), "ray target edge without curve")?;
-                let point = curve.evaluate_point(k, record.interval.evaluate(0.789))?;
-                if !brep_ray_fire(b, ray_start, point - ray_start, tolerance, &mut state)? {
-                    let point = curve.evaluate_point(k, record.interval.evaluate(0.189))?;
+                // (a copy: the ray fires may add UV trim curves to the B-rep)
+                let curve =
+                    required(record.curve.as_ref(), "ray target edge without curve")?.clone();
+                let interval = record.interval;
+                let point = curve.evaluate_point(k, interval.evaluate(0.789))?;
+                if !fire(b, ray_start, point - ray_start)? {
+                    let point = curve.evaluate_point(k, interval.evaluate(0.189))?;
                     let start = bounds.min() - (bounds.max() - bounds.min()) * 0.5;
-                    if !brep_ray_fire(b, start, point - start, tolerance, &mut state)? {
+                    if !fire(b, start, point - start)? {
                         return Err(SolidError::sm_err(OP));
                     }
                 }
@@ -323,31 +340,36 @@ fn brep_edges(b: &Brep) -> Result<Vec<EdgeId>> {
     crate::topology::brep::p1::edges(b, None)
 }
 
-fn brep_bounds(b: &Brep) -> Result<crate::geom::extent3d::Extent3d> {
-    let _ = b;
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    Err(SolidError::unported(
-        "SmBrep::CalculateBoundingBox",
-        "query.brep",
-    ))
-}
-
+/// `this->RayFire(start, direction, tolerance, pRegion, sPC)` (unit `topology.brep_p2`)
+/// on `query`'s cache: `Ok(true)` with the region in `state` on success, `Ok(false)` on
+/// an ordinary failure (the caller tries its next ray). The intersection is not read
+/// after the ray fires, so `state.classification` stays as it was.
 fn brep_ray_fire<O>(
-    b: &Brep,
+    k: &Kernel,
+    query: &BrepQuery<'_>,
+    b: &mut Brep,
     start: Point3,
     direction: Vec3,
     tolerance: f64,
     state: &mut crate::topology::shell::ShellRayState<O>,
 ) -> Result<bool> {
-    let _ = (b, start, direction, tolerance, state);
-    // UNPORTED(query.brep): SmBrep::RayFire over the B-rep cache. The port
-    // (`topology::brep::p2::ray_fire`) solves on the SM_OC_BREP cache world and first
-    // needs CalculateBoundingBox; both belong to query.brep, as for
-    // ShellRayWorld::shell_ray_sector.
-    Err(SolidError::unported(
-        "SmBrep::RayFire (B-rep cache world)",
-        "query.brep",
-    ))
+    let BrepIdentity {
+        brep_id,
+        keys,
+        owner_of,
+    } = query.identity();
+    let fired = query.cache(k, b).and_then(|cache| {
+        crate::topology::brep::p2::ray_fire(
+            k, b, brep_id, cache, keys, owner_of, start, direction, tolerance, None,
+        )
+    });
+    match crate::error::ignored(fired)? {
+        Some(hit) => {
+            state.region = hit.region;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
 }
 
 fn ray_direction(direction: Vec3) -> Result<Vec3> {

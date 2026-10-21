@@ -431,8 +431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "cube_faces_6",
@@ -651,8 +651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "zero_loop",
@@ -663,8 +663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "zero_then_loop",
@@ -4199,8 +4199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-09_0",
@@ -4211,8 +4211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-09_1",
@@ -4223,8 +4223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-09_16",
@@ -4235,8 +4235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-06_0",
@@ -4247,8 +4247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-06_1",
@@ -4259,8 +4259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
+        "unit": "topology.brep_p6"
       },
       "max_rel_err": 0.0,
       "name": "plane_edgeless_1e-06_16",
@@ -4970,8 +4970,8 @@
   "deferred_by_unit": {
     "curve.crv_on_surf": 2,
     "intersect.surface_drop_lib_p3": 37,
-    "query.brep": 9,
-    "topology.brep_p3": 18
+    "topology.brep_p3": 18,
+    "topology.brep_p6": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

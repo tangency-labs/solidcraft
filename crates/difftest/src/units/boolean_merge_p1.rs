@@ -25,6 +25,9 @@ use solidcore::SolidError;
 use solidcore_ffi::units::{boolean_merge_p1 as ffi, topology_vertexuse as fixture};
 use std::collections::BTreeMap;
 
+/// The op of `find_brep_region_of_other_face` (`SmMerge::FindBrepRegionOfOtherFace`).
+const OP_FIND_REGION: u8 = 5;
+
 /// Differential runner for `boolean.merge_p1`.
 pub struct Runner;
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -869,7 +872,7 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
             }
             append_events(&context, &mut out)?;
         }
-        5 => {
+        OP_FIND_REGION => {
             let f = FaceuseId::from_index(u32::from(a) % other.faceuses().len() as u32);
             out.push(
                 port::find_brep_region_of_other_face(
@@ -897,17 +900,16 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &Brep) -> Result<Vec<f64>, SolidErr
         7 => {
             let mut other = other.clone();
             // The native probe constructs and immediately destroys its shift.
-            port::temporary_brep_transform(b, &mut other)?.restore(
-                Some(b),
-                Some(&mut other),
-                |_brep, _is_other, _xfm, _scale, _scale_tolerance| {
-                    // UNPORTED(topology.brep_p5): SmBrep::Transform
-                    Err(SolidError::unported(
-                        "SmBrep::Transform",
-                        "topology.brep_p5",
-                    ))
-                },
-            )?;
+            let transform = |_: &mut Brep, _: bool, _: &_, _: Option<_>, _: bool| {
+                // UNPORTED(topology.brep_p5): SmBrep::Transform
+                Err(SolidError::unported(
+                    "SmBrep::Transform",
+                    "topology.brep_p5",
+                ))
+            };
+            port::temporary_brep_transform(&k, &k, b, &other)?
+                .apply(b, &mut other, transform)?
+                .restore(Some(b), Some(&mut other), transform)?;
         }
         8 | 9 => {
             let sec = EdgeuseId::from_index(u32::from(a) % b.edgeuses().len() as u32);
@@ -997,7 +999,19 @@ impl UnitDiff for Runner {
             fixture::eval(fixture::Op::Export, &path, &block)
         })
         .map_err(|e| harness(e.to_string()))?;
-        let (mut b, _) = import(&raw)?;
+        let (mut b, exact) = import(&raw)?;
+        // Op 5 without mates classifies points against `b` (SmBrep::Point3DClassify;
+        // with mates every edge is mated, so the radial sectors decide): a face surface
+        // the export carries only as its B-spline part would be classified against other
+        // geometry than the C++ one (the harness limitation of `query.face_p1`).
+        let [_, mates, _] = i.args;
+        let mated = mates != 0;
+        if i.op == OP_FIND_REGION && !mated && exact.iter().any(|&e| !e) {
+            return Ok(Output::deferred(
+                "harness:analytic-geometry-export",
+                "analytic face surface in the B-rep export",
+            ));
+        }
         let (other_path, other_block) = other_block(&i)?;
         let other_raw =
             crate::export_memo::export("topology_vertexuse", &[&other_path], &other_block, || {

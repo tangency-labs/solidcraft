@@ -442,33 +442,25 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "primary_wire_classify_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#55 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "primary_shell_vertex_classify_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#56 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteEdge",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "primary_wire_classify_op2",
@@ -479,8 +471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "primary_shell_vertex_classify_op2",
@@ -490,57 +482,41 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "primary_wire_classify_op3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#59 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "primary_shell_vertex_classify_op3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#60 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "primary_wire_classify_op10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#61 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "primary_shell_vertex_classify_op10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#62 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op1",
@@ -550,69 +526,49 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#64 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#65 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#66 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#67 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#68 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op4",
@@ -622,21 +578,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#70 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op5",
@@ -646,21 +598,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#72 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op6",
@@ -670,112 +618,76 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#74 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#75 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#76 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#77 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#78 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#79 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#80 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_wire_classify_op10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#81 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "other_shell_vertex_classify_op10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#82 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -898,28 +810,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "partial_marks_classification",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#98 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "partial_other_marks_classification",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p5/branches.json#99 (upstream source/SMLib/src/SmMerge.cpp:7239 (branch case); tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire construction))",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -1114,16 +1018,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645101266596801665",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -1166,16 +1066,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645101266596801671",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -1251,12 +1147,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 32,
+  "cases_deferred": 6,
   "cases_failed": 0,
-  "cases_passed": 108,
+  "cases_passed": 134,
   "cases_total": 140,
   "deferred_by_unit": {
-    "query.brep": 32
+    "topology.brep_p3": 4,
+    "topology.brep_p4": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

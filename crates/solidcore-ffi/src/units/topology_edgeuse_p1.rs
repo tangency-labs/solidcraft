@@ -15,6 +15,8 @@
 //! | `4 n points(x y z)*n validate_only init_gaps` | actual `MakeShellVertex` calls (0..64 vertices) |
 //! | `5 has_face [surface u0 v0 u1 v1] networks validate_only init_gaps` | an optional face (as kind 2) and `networks` (0..=3) copies of the wire network in one B-rep |
 //! | `6 surface u0 v0 u1 v1 validate_only init_gaps` | as kind 2 on a B-spline surface, every edge curve then an `SmCrvOnSurf` over its UV trim curve |
+//! | `7 origin(x y z) length width height validate_only init_gaps` | the closed box solid of `SmApiCreateBox` (`SmPrimitiveCreation::CreateBox`; origin coordinates up to `1e4`, sizes in `1e-3..=1e4`) |
+//! | `8 nv (x y z tol)*nv ne (x0 y0 z0 x1 y1 z1 tol)*ne validate_only init_gaps` | `MakeShellVertex` points and `CreateWireEdgeFromCurve` line segments, each with `SetTolerance(tol, FALSE, FALSE)` (up to [`MAX_POINTS`] vertices and [`MAX_LINES`] segments, tolerances in `0..=1e3`, segments longer than `1e-9`) |
 //!
 //! A surface block is `0 oob form n m p q r s cpts(x y z w) u v` (`SmBSplineSurface`) or
 //! `1 O[3] N[3]` (`SmPlane(O, N)`); a curve block `dim n p m cpts(x y z w) knots`
@@ -66,6 +68,10 @@ pub const MAX_DEGREE: usize = 5;
 pub const MAX_COORD: f64 = 1.0e300;
 /// Largest number of curves for `Seam` and of target loops for `FuQuery`.
 pub const MAX_LIST: usize = 64;
+/// Largest vertex count of a kind 8 block.
+pub const MAX_POINTS: usize = 600;
+/// Largest segment count of a kind 8 block.
+pub const MAX_LINES: usize = 150;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,7 +333,7 @@ pub(crate) fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result
 }
 
 fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
-    match rd.index(6)? {
+    match rd.index(8)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -362,6 +368,39 @@ fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_lim
             let count = rd.index(MAX_LIST)?;
             for _ in 0..count {
                 rd.vec3()?;
+            }
+        }
+        8 => {
+            let tol = |rd: &mut Reader<'_>| -> Result<(), FfiError> {
+                if !(0.0..=1e3).contains(&rd.finite()?) {
+                    return Err(bad("points/lines: tolerance out of range"));
+                }
+                Ok(())
+            };
+            for _ in 0..rd.index(MAX_POINTS)? {
+                rd.vec3()?;
+                tol(rd)?;
+            }
+            for _ in 0..rd.index(MAX_LINES)? {
+                let a = rd.vec3()?;
+                let b = rd.vec3()?;
+                let d = a.iter().zip(&b).map(|(p, q)| (q - p) * (q - p)).sum::<f64>();
+                if d.sqrt() <= 1e-9 {
+                    return Err(bad("points/lines: degenerate segment"));
+                }
+                tol(rd)?;
+            }
+        }
+        7 => {
+            for _ in 0..3 {
+                if rd.finite()?.abs() > 1e4 {
+                    return Err(bad("box: origin too far"));
+                }
+            }
+            for _ in 0..3 {
+                if !(1e-3..=1e4).contains(&rd.finite()?) {
+                    return Err(bad("box: size out of range"));
+                }
             }
         }
         _ => {}

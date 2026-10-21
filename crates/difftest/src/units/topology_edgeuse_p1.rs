@@ -137,6 +137,14 @@ pub(crate) enum BrepIn {
         face: Option<FaceIn>,
         networks: usize,
     },
+    /// The closed box solid of `SmApiCreateBox` (planes and lines; fixtures only).
+    Box { origin: [f64; 3], size: [f64; 3] },
+    /// Isolated vertices `[x, y, z, tol]` and wire line segments `[x0, y0, z0, x1, y1,
+    /// z1, tol]`, each set to its tolerance (fixtures and other units' generators).
+    Points {
+        vertices: Vec<[f64; 4]>,
+        lines: Vec<[f64; 7]>,
+    },
 }
 
 /// The face of a [`BrepIn::Mixed`] B-rep (as [`BrepIn::Face`]).
@@ -305,6 +313,21 @@ pub(crate) fn brep_block_of(
                 v.extend(face.dom);
             }
             v.push(*networks as f64);
+        }
+        BrepIn::Box { origin, size } => {
+            v.push(7.0);
+            v.extend(origin);
+            v.extend(size);
+        }
+        BrepIn::Points { vertices, lines } => {
+            v.extend([8.0, vertices.len() as f64]);
+            for p in vertices {
+                v.extend(p);
+            }
+            v.push(lines.len() as f64);
+            for l in lines {
+                v.extend(l);
+            }
         }
     }
     v.push(flag(validate_only));

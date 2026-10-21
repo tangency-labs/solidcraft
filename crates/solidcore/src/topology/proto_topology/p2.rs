@@ -157,6 +157,23 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
         do_point_classify: bool,
         cc: &mut CurveClassification<O>,
     ) -> Result<bool>;
+    /// `SmBrep::Point3DClassify(point, tolerance, bDoBoundaryIntersections, sPC)` of the
+    /// B-rep `brep` names, read by `topology.proto_topology_p3`: the B-rep owner
+    /// implements it with `query::brep::BrepQuery::point_3d_classify` on its B-rep and
+    /// maps the classification's objects to its handles.
+    ///
+    /// # Errors
+    ///
+    /// Those of `point_3d_classify`; [`SolidError::InvalidInput`] for a handle that
+    /// names no B-rep or an object without a handle.
+    fn brep_point_3d_classify(
+        &mut self,
+        k: &Kernel,
+        brep: O,
+        point: Point3,
+        tolerance: f64,
+        boundary_intersections: bool,
+    ) -> Result<PointClassification<O>>;
 }
 
 /// The handle the curve point solves name (only the solution count and values are
@@ -2188,6 +2205,16 @@ mod tests {
             _cc: &mut CurveClassification<H>,
         ) -> Result<bool> {
             Ok(false)
+        }
+        fn brep_point_3d_classify(
+            &mut self,
+            _k: &Kernel,
+            _brep: H,
+            _point: Point3,
+            _tolerance: f64,
+            _boundary_intersections: bool,
+        ) -> Result<PointClassification<H>> {
+            Err(SolidError::invalid_input("test geometry", "no B-reps"))
         }
     }
 

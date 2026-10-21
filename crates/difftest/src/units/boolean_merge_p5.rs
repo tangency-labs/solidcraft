@@ -119,6 +119,8 @@ pub(crate) fn import(
     f: &solidcore_ffi::units::topology_topology_traverser::Fixture,
 ) -> Result<Brep, HarnessError> {
     let (mut b, _) = shared::import(&f.graph)?;
+    // (the B-rep cache of Point3DClassify's boundary solve reads geometry owners)
+    crate::util::own_arena_geometry(&mut b);
     for (i, list) in f.vertexuses.iter().enumerate() {
         b.vertex_mut(VertexId::from_index(i as u32))
             .map_err(|e| err(&e))?

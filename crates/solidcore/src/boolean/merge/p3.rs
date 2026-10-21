@@ -887,6 +887,7 @@ mod tests {
     struct Trace {
         pairs: Vec<(Option<i64>, Option<i64>)>,
         fail: bool,
+        unported: bool,
         observed: Option<(bool, u64, BooleanOperation)>,
     }
     impl BooleanDriver for Trace {
@@ -920,6 +921,9 @@ mod tests {
             self.observed = Some((*manifold, *lamina, operation));
             if self.fail {
                 return Err(SolidError::invalid_input(OP, "test driver failure"));
+            }
+            if self.unported {
+                return Err(SolidError::unported("test driver", "test.unit"));
             }
             let a = a.take().unwrap();
             let b = b.take().unwrap();
@@ -1056,10 +1060,27 @@ mod tests {
             }
         ));
         assert_eq!(input, [None, None, Some(3)]);
+        // an Unported failure passes through unmapped
+        let mut driver = Trace {
+            unported: true,
+            ..Trace::default()
+        };
+        let mut input = vec![Some(1), Some(2)];
+        let error = boolean_trees(&mut k, &mut input, &[0, 1, -1], None, &mut driver).unwrap_err();
+        assert!(error.is_unported());
+        // the real engine's ordinary failure (empty operands) is mapped too
         let mut driver = DependencyMerge::default();
         let mut input = vec![Some(Brep::new()), Some(Brep::new())];
         let error = boolean_trees(&mut k, &mut input, &[0, 1, -1], None, &mut driver).unwrap_err();
-        assert!(error.is_unported());
+        assert!(matches!(
+            error,
+            SolidError::Upstream {
+                code: crate::error::SM_ERR,
+                ..
+            }
+        ));
+        assert_eq!(input.len(), 2);
+        assert!(input.iter().all(Option::is_none));
     }
     #[test]
     fn dependency_merge_runs_manifold_boolean_on_a_constructed_engine() {
@@ -1093,8 +1114,7 @@ mod tests {
             state,
             attributes: AttributeStore::default(),
         });
-        // merge_p4 checks both operands (NER), then waits on query.brep for
-        // the temporary origin shift before touching either operand.
+        // merge_p4 checks both operands (NER) before touching either.
         let (result, ..) = call(&mut driver, &mut k, None);
         assert!(matches!(
             result,
@@ -1103,21 +1123,16 @@ mod tests {
                 ..
             })
         ));
+        // The union of two empty operands completes: the primary becomes the result.
         let (result, primary, other) = call(&mut driver, &mut k, Some(Brep::new()));
-        assert!(matches!(
-            result,
-            Err(SolidError::Unported {
-                upstream: "SmBrep::CalculateBoundingBox",
-                unit: "query.brep",
-            })
-        ));
-        assert!(primary && other);
-        assert_eq!(driver.engine().unwrap().state.other_components.len(), 1);
+        assert!(matches!(result, Ok(Some(ref b)) if b.faces().is_empty()));
+        assert!(!primary && other);
         let engine = driver.into_engine().unwrap();
         assert_eq!(engine.intersector.intersect_lamina_edges(), 1);
         assert_eq!(engine.intersector.merge.options, options);
         assert_eq!(engine.state.other_components.len(), 1);
-        assert!(!engine.state.intersection_loop_closed);
+        // the run starts its intersection loop state afresh
+        assert!(engine.state.intersection_loop_closed);
     }
     #[test]
     fn construct_builds_the_engine_manifold_boolean_runs_on() {
@@ -1137,7 +1152,8 @@ mod tests {
             Some(true)
         );
         assert!(engine.state.intersection_loop_closed);
-        // The constructed engine reaches merge_p4, which waits on query.brep.
+        // The constructed engine runs merge_p4's ManifoldBoolean to completion on the
+        // empty operands.
         let result = non_manifold_boolean(
             &mut k,
             &mut driver,
@@ -1147,13 +1163,7 @@ mod tests {
             &mut 0,
             BooleanOperation::Union,
         );
-        assert!(matches!(
-            result,
-            Err(SolidError::Unported {
-                upstream: "SmBrep::CalculateBoundingBox",
-                unit: "query.brep",
-            })
-        ));
+        assert!(result.is_ok(), "{result:?}");
         let mut none = None;
         let error = DependencyMerge::default()
             .construct(&mut k, &mut none, &mut other, 1e-3, 0.0, None)

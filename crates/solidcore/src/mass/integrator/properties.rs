@@ -28,6 +28,7 @@ use crate::geom::extent3d::Extent3d;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::face::p2::{
     OdeArea, PrecisePropertyLayout, PPF_ALL, PPF_AREA, PPF_AREA_FIRST_MOMENTS,
@@ -350,13 +351,6 @@ pub fn boundary_properties(
     Ok(result)
 }
 
-fn brep_box(_b: &Brep) -> Result<Extent3d> {
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    Err(SolidError::unported(
-        "SmBrep::CalculateBoundingBox",
-        "query.brep",
-    ))
-}
 fn face_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
     crate::query::face::p1::calculate_bounding_box(k, b, f, false)
 }
@@ -398,7 +392,7 @@ pub fn brep_properties(
     behavior: MassPropertyBehavior,
     attributes: &PropertyAttributes<'_>,
 ) -> Result<PreciseProperties> {
-    let bbox = brep_box(b)?;
+    let bbox = qbrep::calculate_bounding_box(k, b, BoundingBoxOptions::default())?;
     let size = bbox.size();
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
@@ -600,7 +594,7 @@ pub fn brep_volume(
     attributes: &PropertyAttributes<'_>,
 ) -> Result<f64> {
     valid_api_number(accuracy)?;
-    let bbox = brep_box(b)?;
+    let bbox = qbrep::calculate_bounding_box(k, b, BoundingBoxOptions::default())?;
     Ok(brep_properties(
         k,
         b,

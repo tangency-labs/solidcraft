@@ -779,8 +779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op4",
@@ -791,8 +791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op5",
@@ -803,8 +803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op6",
@@ -815,8 +815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op7",
@@ -827,8 +827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op8",
@@ -875,8 +875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op13",
@@ -894,16 +894,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "face_kind4_op15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.api_queries/queries.json#108",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -939,8 +935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op19",
@@ -1007,8 +1003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op4",
@@ -1019,8 +1015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op5",
@@ -1031,8 +1027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op6",
@@ -1043,8 +1039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op7",
@@ -1055,8 +1051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op8",
@@ -1103,8 +1099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op13",
@@ -1122,16 +1118,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "face_kind5_op15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.api_queries/queries.json#131",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1167,8 +1159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op19",
@@ -1227,8 +1219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op4",
@@ -1239,8 +1231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op5",
@@ -1251,8 +1243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op6",
@@ -1263,8 +1255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op7",
@@ -1275,8 +1267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op8",
@@ -1323,8 +1315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op13",
@@ -1342,16 +1334,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "face_kind6_op15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.api_queries/queries.json#153",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1383,8 +1371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op19",
@@ -1779,8 +1767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "upstream_box10_op4",
@@ -1819,8 +1807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "upstream_box10_op13",
@@ -2011,8 +1999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "rational_kind8_op19",
@@ -2235,8 +2223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "spherical_band_op19",
@@ -2623,8 +2611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_separate_scale1_op7",
@@ -2635,8 +2623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_separate_scale1_op8",
@@ -2647,8 +2635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_face_touch_scale1_op7",
@@ -2659,8 +2647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_face_touch_scale1_op8",
@@ -2671,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_edge_touch_scale1_op7",
@@ -2683,8 +2671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_edge_touch_scale1_op8",
@@ -2695,8 +2683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_corner_touch_scale1_op7",
@@ -2707,8 +2695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_corner_touch_scale1_op8",
@@ -2719,8 +2707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_interpenetrating_scale1_op7",
@@ -2731,8 +2719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_interpenetrating_scale1_op8",
@@ -2743,8 +2731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_a_contains_b_scale1_op7",
@@ -2755,8 +2743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_a_contains_b_scale1_op8",
@@ -2767,8 +2755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_b_contains_a_scale1_op7",
@@ -2779,8 +2767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_b_contains_a_scale1_op8",
@@ -2791,8 +2779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_coincident_scale1_op7",
@@ -2803,8 +2791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_coincident_scale1_op8",
@@ -2815,8 +2803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_separate_scale16_op7",
@@ -2827,8 +2815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_separate_scale16_op8",
@@ -2839,8 +2827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_face_touch_scale16_op7",
@@ -2851,8 +2839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_face_touch_scale16_op8",
@@ -2863,8 +2851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_edge_touch_scale16_op7",
@@ -2875,8 +2863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_edge_touch_scale16_op8",
@@ -2887,8 +2875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_corner_touch_scale16_op7",
@@ -2899,8 +2887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_corner_touch_scale16_op8",
@@ -2911,8 +2899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_interpenetrating_scale16_op7",
@@ -2923,8 +2911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_interpenetrating_scale16_op8",
@@ -2935,8 +2923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_a_contains_b_scale16_op7",
@@ -2947,8 +2935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_a_contains_b_scale16_op8",
@@ -2959,8 +2947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_b_contains_a_scale16_op7",
@@ -2971,8 +2959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_b_contains_a_scale16_op8",
@@ -2983,8 +2971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_coincident_scale16_op7",
@@ -2995,8 +2983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "relationship_coincident_scale16_op8",
@@ -3263,8 +3251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_separated_op7",
@@ -3275,8 +3263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_separated_op8",
@@ -3287,8 +3275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_separated_reverse_op7",
@@ -3299,8 +3287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_separated_reverse_op8",
@@ -3311,8 +3299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_touch_op7",
@@ -3323,8 +3311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_touch_op8",
@@ -3335,8 +3323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_cross_op7",
@@ -3347,8 +3335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_cross_op8",
@@ -3359,8 +3347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_inside_op7",
@@ -3371,8 +3359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_inside_op8",
@@ -3383,8 +3371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_inside_reverse_op7",
@@ -3395,8 +3383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_brep_distance_inside_reverse_op8",
@@ -3574,14 +3562,10 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337066",
       "values_compared": 0
     },
@@ -3595,8 +3579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0002",
@@ -3606,21 +3590,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337069",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -3675,8 +3655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0010",
@@ -3710,16 +3690,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337080",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3739,8 +3715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0017",
@@ -3783,8 +3759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0022",
@@ -3803,8 +3779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0024",
@@ -3815,8 +3791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -3834,21 +3810,17 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337093",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0028",
@@ -3859,8 +3831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0029",
@@ -3870,16 +3842,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0030",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337096",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3938,14 +3906,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0037",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337103",
       "values_compared": 0
     },
@@ -3967,8 +3931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0040",
@@ -3987,8 +3951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0042",
@@ -4023,8 +3987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmEdge::GetInterval",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0046",
@@ -4059,8 +4023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -4070,16 +4034,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0051",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337117",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -4110,16 +4070,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0055",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337121",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4138,14 +4094,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0058",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337124",
       "values_compared": 0
     },
@@ -4187,8 +4139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0063",
@@ -4206,16 +4158,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0065",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337131",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -4230,16 +4178,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337133",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4286,16 +4230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0073",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337139",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -4319,8 +4259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -4399,8 +4339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0085",
@@ -4418,26 +4358,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337153",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0088",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337154",
       "values_compared": 0
     },
@@ -4450,16 +4382,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337156",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -4487,8 +4415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0094",
@@ -4499,8 +4427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0095",
@@ -4527,8 +4455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -4610,14 +4538,10 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0108",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337174",
       "values_compared": 0
     },
@@ -4638,16 +4562,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337177",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -4718,16 +4638,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0120",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337186",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4738,14 +4654,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0122",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337188",
       "values_compared": 0
     },
@@ -4778,16 +4690,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0126",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337192",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4847,8 +4755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -4899,8 +4807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0140",
@@ -4934,21 +4842,17 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0144",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337210",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0145",
@@ -4991,8 +4895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0149",
@@ -5010,14 +4914,10 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0151",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337217",
       "values_compared": 0
     },
@@ -5038,16 +4938,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0154",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337220",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -5066,26 +4962,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0157",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337223",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0158",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337224",
       "values_compared": 0
     },
@@ -5106,16 +4994,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0161",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337227",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -5175,8 +5059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0169",
@@ -5242,21 +5126,17 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0177",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337243",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0178",
@@ -5282,26 +5162,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0181",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337247",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0182",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337248",
       "values_compared": 0
     },
@@ -5319,8 +5191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -5338,21 +5210,17 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337252",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0187",
@@ -5378,28 +5246,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0190",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337256",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0191",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337257",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -5443,8 +5303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -5471,8 +5331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0200",
@@ -5482,28 +5342,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0201",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337267",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0202",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337268",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -5515,8 +5367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0204",
@@ -5527,8 +5379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0205",
@@ -5591,8 +5443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0212",
@@ -5610,14 +5462,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337280",
       "values_compared": 0
     },
@@ -5631,8 +5479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0216",
@@ -5690,16 +5538,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337288",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -5711,8 +5555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0224",
@@ -5735,8 +5579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0226",
@@ -5778,16 +5622,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0231",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337297",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -5818,28 +5658,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0235",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337301",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0236",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337302",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -5890,16 +5722,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0243",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337309",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -5926,14 +5754,10 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337313",
       "values_compared": 0
     },
@@ -5955,8 +5779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0250",
@@ -5998,21 +5822,17 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0255",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337321",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0256",
@@ -6046,16 +5866,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0260",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337326",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6075,8 +5891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0263",
@@ -6095,8 +5911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0265",
@@ -6106,28 +5922,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0266",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337332",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0267",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337333",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6162,14 +5970,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0272",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337338",
       "values_compared": 0
     },
@@ -6187,8 +5991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0274",
@@ -6207,8 +6011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0276",
@@ -6251,8 +6055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0281",
@@ -6279,8 +6083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0284",
@@ -6290,21 +6094,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0285",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337351",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0286",
@@ -6315,8 +6115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0287",
@@ -6371,8 +6171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0293",
@@ -6411,8 +6211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0297",
@@ -6423,8 +6223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0298",
@@ -6435,8 +6235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0299",
@@ -6454,14 +6254,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337367",
       "values_compared": 0
     },
@@ -6486,16 +6282,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337370",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6506,16 +6298,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0306",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337372",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6526,28 +6314,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0308",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337374",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0309",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337375",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -6574,16 +6354,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0312",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337378",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6594,14 +6370,10 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0314",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337380",
       "values_compared": 0
     },
@@ -6614,16 +6386,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337382",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -6634,16 +6402,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0318",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337384",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6662,45 +6426,33 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0321",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337387",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0322",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337388",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0323",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337389",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0324",
@@ -6711,8 +6463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0325",
@@ -6746,21 +6498,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0329",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337395",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0330",
@@ -6771,8 +6519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0331",
@@ -6791,8 +6539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0333",
@@ -6802,16 +6550,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0334",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337400",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6843,8 +6587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0338",
@@ -6891,8 +6635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0343",
@@ -6918,16 +6662,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0346",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337412",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6946,21 +6686,17 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0349",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337415",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0350",
@@ -6979,8 +6715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0352",
@@ -7051,8 +6787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0360",
@@ -7134,16 +6870,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0369",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337435",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7154,14 +6886,10 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0371",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337437",
       "values_compared": 0
     },
@@ -7186,16 +6914,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0374",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337440",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -7251,8 +6975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0381",
@@ -7294,16 +7018,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0386",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337452",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -7315,8 +7035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0388",
@@ -7366,14 +7086,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0394",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337460",
       "values_compared": 0
     },
@@ -7491,8 +7207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0408",
@@ -7546,16 +7262,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337479",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -7575,8 +7287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0416",
@@ -7587,8 +7299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0417",
@@ -7599,8 +7311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0418",
@@ -7618,16 +7330,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0420",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337486",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -7663,8 +7371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0425",
@@ -7674,14 +7382,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0426",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337492",
       "values_compared": 0
     },
@@ -7747,8 +7451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0434",
@@ -7766,14 +7470,10 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0436",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337502",
       "values_compared": 0
     },
@@ -7799,8 +7499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0439",
@@ -7819,8 +7519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0441",
@@ -7839,8 +7539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0443",
@@ -7851,8 +7551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0444",
@@ -7919,8 +7619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0451",
@@ -7931,8 +7631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0452",
@@ -7966,16 +7666,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0456",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337522",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8002,40 +7698,28 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0460",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337526",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0461",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337527",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0462",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337528",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8094,14 +7778,10 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0470",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337536",
       "values_compared": 0
     },
@@ -8115,8 +7795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0472",
@@ -8142,21 +7822,17 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0475",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337541",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0476",
@@ -8190,16 +7866,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0480",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337546",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8211,8 +7883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0482",
@@ -8223,8 +7895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0483",
@@ -8243,8 +7915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0485",
@@ -8263,8 +7935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0487",
@@ -8283,8 +7955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0489",
@@ -8310,14 +7982,10 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0492",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337558",
       "values_compared": 0
     },
@@ -8355,8 +8023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0497",
@@ -8367,8 +8035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0498",
@@ -8402,33 +8070,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0502",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337568",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0503",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337569",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0504",
@@ -8447,8 +8107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0506",
@@ -8467,8 +8127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0508",
@@ -8479,8 +8139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0509",
@@ -8499,8 +8159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0511",
@@ -8511,8 +8171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0512",
@@ -8547,8 +8207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0516",
@@ -8575,8 +8235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0519",
@@ -8615,8 +8275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0523",
@@ -8626,21 +8286,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0524",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337590",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0525",
@@ -8678,21 +8334,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0529",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337595",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0530",
@@ -8703,8 +8355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0531",
@@ -8714,16 +8366,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0532",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337598",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8742,16 +8390,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0535",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337601",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8787,8 +8431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0540",
@@ -8798,21 +8442,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0541",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337607",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0542",
@@ -8863,8 +8503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0548",
@@ -8874,14 +8514,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0549",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337615",
       "values_compared": 0
     },
@@ -8895,8 +8531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0551",
@@ -8923,8 +8559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0554",
@@ -8958,26 +8594,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0558",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337624",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0559",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337625",
       "values_compared": 0
     },
@@ -8991,8 +8619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0561",
@@ -9010,16 +8638,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0563",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337629",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -9102,14 +8726,10 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0573",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337639",
       "values_compared": 0
     },
@@ -9159,8 +8779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0579",
@@ -9179,8 +8799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0581",
@@ -9198,16 +8818,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0583",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337649",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -9218,14 +8834,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337651",
       "values_compared": 0
     },
@@ -9290,38 +8902,26 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0593",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337659",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0594",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337660",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0595",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337661",
       "values_compared": 0
     },
@@ -9363,8 +8963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0600",
@@ -9383,8 +8983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0602",
@@ -9443,8 +9043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0609",
@@ -9470,26 +9070,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0612",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337678",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0613",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337679",
       "values_compared": 0
     },
@@ -9519,8 +9111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0617",
@@ -9538,33 +9130,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0619",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337685",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0620",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337686",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0621",
@@ -9595,8 +9179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0624",
@@ -9607,8 +9191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0625",
@@ -9626,21 +9210,17 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0627",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337693",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0628",
@@ -9703,8 +9283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0635",
@@ -9715,8 +9295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0636",
@@ -9758,21 +9338,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0641",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337707",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0642",
@@ -9782,16 +9358,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0643",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337709",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -9803,8 +9375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0645",
@@ -9815,8 +9387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0646",
@@ -9827,8 +9399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0647",
@@ -9839,8 +9411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0648",
@@ -9871,8 +9443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0651",
@@ -9914,14 +9486,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0656",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337722",
       "values_compared": 0
     },
@@ -9954,16 +9522,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0660",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337726",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10042,33 +9606,25 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0670",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337736",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0671",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337737",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0672",
@@ -10115,8 +9671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0677",
@@ -10127,8 +9683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0678",
@@ -10139,8 +9695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0679",
@@ -10223,8 +9779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0688",
@@ -10242,14 +9798,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0690",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337756",
       "values_compared": 0
     },
@@ -10283,8 +9835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0694",
@@ -10295,8 +9847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0695",
@@ -10338,14 +9890,10 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0700",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337766",
       "values_compared": 0
     },
@@ -10382,14 +9930,10 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0705",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337771",
       "values_compared": 0
     },
@@ -10442,14 +9986,10 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0712",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337778",
       "values_compared": 0
     },
@@ -10495,8 +10035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0718",
@@ -10527,8 +10067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0721",
@@ -10575,8 +10115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0726",
@@ -10586,21 +10126,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0727",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337793",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0728",
@@ -10626,16 +10162,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337797",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10662,14 +10194,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0735",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337801",
       "values_compared": 0
     },
@@ -10683,8 +10211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0737",
@@ -10703,8 +10231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0739",
@@ -10722,21 +10250,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0741",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337807",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0742",
@@ -10747,8 +10271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0743",
@@ -10767,8 +10291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmCurve::GetNaturalInterval",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0745",
@@ -10786,16 +10310,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0747",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337813",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10899,8 +10419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0760",
@@ -10918,16 +10438,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0762",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337828",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10963,8 +10479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0767",
@@ -10990,16 +10506,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0770",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337836",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -11018,28 +10530,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0773",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337839",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateTightBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0774",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337840",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -11098,28 +10602,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0781",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337847",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
-      },
       "max_rel_err": 0.0,
       "name": "gen0782",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2348217451497337848",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -11147,8 +10643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0786",
@@ -11159,8 +10655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0787",
@@ -11171,8 +10667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0788",
@@ -11215,8 +10711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0793",
@@ -11279,16 +10775,19 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 413,
+  "cases_deferred": 287,
   "cases_failed": 0,
-  "cases_passed": 790,
+  "cases_passed": 916,
   "cases_total": 1203,
   "deferred_by_unit": {
     "curve.crv_on_surf": 10,
+    "curve.curve_p2": 110,
     "curve.curve_p6": 31,
+    "geom.tol": 48,
     "intersect.surface_drop_lib_p3": 28,
-    "query.brep": 335,
-    "topology.face_p2": 9
+    "query.face_p1": 31,
+    "topology.edge": 1,
+    "topology.face_p2": 28
   },
   "max_rel_err": 0.0,
   "pass": true,

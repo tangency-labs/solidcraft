@@ -39,8 +39,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_minus_sphere",
@@ -51,8 +51,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op0",
@@ -63,8 +63,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op1",
@@ -75,8 +75,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op2",
@@ -87,8 +87,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op3",
@@ -99,8 +99,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op4",
@@ -111,8 +111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op5",
@@ -123,8 +123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op6",
@@ -135,8 +135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op7",
@@ -147,8 +147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op8",
@@ -159,8 +159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "boolean_box_sphere_op10",
@@ -171,8 +171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "with_options_difference",
@@ -191,8 +191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "with_options_keep_other",
@@ -203,8 +203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "with_options_cookie_cutter",
@@ -287,8 +287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_union",
@@ -299,8 +299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_intersection",
@@ -311,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_difference",
@@ -323,8 +323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_merge",
@@ -335,8 +335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_three_union",
@@ -347,8 +347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_breps_three_difference",
@@ -359,8 +359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "census_difference_cavity",
@@ -371,8 +371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "census_union_disjoint",
@@ -383,8 +383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "intersection_overlap",
@@ -395,8 +395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_nested",
@@ -475,8 +475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "trees_union",
@@ -487,8 +487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "trees_two_trees",
@@ -515,8 +515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0001",
@@ -527,8 +527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0002",
@@ -547,8 +547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -559,8 +559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0005",
@@ -591,8 +591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -635,8 +635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -647,8 +647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0014",
@@ -659,8 +659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -679,8 +679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0017",
@@ -731,8 +731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0023",
@@ -775,8 +775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0028",
@@ -795,8 +795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0030",
@@ -815,8 +815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -827,8 +827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0033",
@@ -839,8 +839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0034",
@@ -851,8 +851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0035",
@@ -863,8 +863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0036",
@@ -875,8 +875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0037",
@@ -931,8 +931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -943,8 +943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0044",
@@ -971,8 +971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0047",
@@ -983,8 +983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0048",
@@ -995,8 +995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0049",
@@ -1007,8 +1007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -1019,8 +1019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0051",
@@ -1055,8 +1055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0055",
@@ -1075,8 +1075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0057",
@@ -1087,8 +1087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0058",
@@ -1099,8 +1099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0059",
@@ -1111,8 +1111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0060",
@@ -1139,8 +1139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0063",
@@ -1167,8 +1167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0066",
@@ -1211,8 +1211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0071",
@@ -1223,8 +1223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0072",
@@ -1243,8 +1243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0074",
@@ -1263,8 +1263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -1275,8 +1275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0077",
@@ -1287,8 +1287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0078",
@@ -1315,8 +1315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0081",
@@ -1335,8 +1335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0083",
@@ -1363,8 +1363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0086",
@@ -1407,8 +1407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0091",
@@ -1419,8 +1419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0092",
@@ -1431,8 +1431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0093",
@@ -1499,8 +1499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -1519,8 +1519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0103",
@@ -1539,8 +1539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0105",
@@ -1587,8 +1587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0110",
@@ -1599,8 +1599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0111",
@@ -1635,8 +1635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0115",
@@ -1663,8 +1663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0118",
@@ -1743,8 +1743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0127",
@@ -1755,8 +1755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0128",
@@ -1775,8 +1775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0130",
@@ -1815,8 +1815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -1839,8 +1839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0136",
@@ -1919,8 +1919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0145",
@@ -1967,8 +1967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0150",
@@ -1995,8 +1995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0153",
@@ -2007,8 +2007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0154",
@@ -2019,8 +2019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0155",
@@ -2047,8 +2047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0158",
@@ -2075,8 +2075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0161",
@@ -2087,8 +2087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0162",
@@ -2139,8 +2139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0168",
@@ -2203,8 +2203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0175",
@@ -2215,8 +2215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0176",
@@ -2251,8 +2251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0180",
@@ -2263,8 +2263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0181",
@@ -2311,8 +2311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0186",
@@ -2355,8 +2355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -2367,8 +2367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0192",
@@ -2403,8 +2403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0196",
@@ -2415,8 +2415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -2455,8 +2455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0201",
@@ -2535,8 +2535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0210",
@@ -2595,8 +2595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0216",
@@ -2615,8 +2615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0218",
@@ -2627,8 +2627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0219",
@@ -2639,8 +2639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0220",
@@ -2651,8 +2651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0221",
@@ -2663,8 +2663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0222",
@@ -2675,8 +2675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0223",
@@ -2687,8 +2687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0224",
@@ -2767,8 +2767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0233",
@@ -2779,8 +2779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0234",
@@ -2791,8 +2791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0235",
@@ -2831,8 +2831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+        "unit": "primitive.primitive_creation_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -2848,8 +2848,7 @@
   "cases_passed": 151,
   "cases_total": 287,
   "deferred_by_unit": {
-    "primitive.primitive_creation_p1": 1,
-    "query.brep": 114,
+    "primitive.primitive_creation_p1": 115,
     "topology.brep_p3": 21
   },
   "max_rel_err": 0.0,

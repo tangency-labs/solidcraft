@@ -311,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "returned offset B-rep / temporary (no Rust output adapter)",
+        "unit": "harness:offset-result-adapter"
       },
       "max_rel_err": 0.0,
       "name": "extended_trimmed_line_wire",
@@ -355,8 +355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "returned offset B-rep / temporary (no Rust output adapter)",
+        "unit": "harness:offset-result-adapter"
       },
       "max_rel_err": 0.0,
       "name": "empty_extended_still_stitches",
@@ -1144,8 +1144,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "SmBrep::ShrinkGeometry",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "large_tolerance_wire_above_boundary",
@@ -1660,8 +1660,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "returned offset B-rep / temporary (no Rust output adapter)",
+        "unit": "harness:offset-result-adapter"
       },
       "max_rel_err": 0.0,
       "name": "gen0048",
@@ -2196,8 +2196,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "returned offset B-rep / temporary (no Rust output adapter)",
+        "unit": "harness:offset-result-adapter"
       },
       "max_rel_err": 0.0,
       "name": "gen0102",
@@ -3104,8 +3104,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "returned offset B-rep / temporary (no Rust output adapter)",
+        "unit": "harness:offset-result-adapter"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -3332,8 +3332,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::CalculateBoundingBox",
-        "unit": "query.brep"
+        "symbol": "returned offset B-rep / temporary (no Rust output adapter)",
+        "unit": "harness:offset-result-adapter"
       },
       "max_rel_err": 0.0,
       "name": "gen0214",
@@ -3614,10 +3614,10 @@
   "cases_rejected": 17,
   "cases_total": 322,
   "deferred_by_unit": {
+    "harness:offset-result-adapter": 6,
     "offset.offset_executive_p2": 100,
-    "query.brep": 7,
     "topology.brep_p3": 47,
-    "topology.brep_p4": 10
+    "topology.brep_p4": 11
   },
   "max_rel_err": 0.0,
   "pass": true,

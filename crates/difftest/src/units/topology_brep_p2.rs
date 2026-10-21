@@ -43,7 +43,7 @@ use solidcore::surface::surface_cache::p1::SurfaceCacheOptions;
 use solidcore::surface::trim_srf_cache::TrimSrfCache;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p2 as bp2;
-use solidcore::topology::brep_cache::{BrepCache, CacheObject};
+use solidcore::topology::brep_cache::CacheObject;
 use solidcore::topology::edge::NotifyEnv;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{
@@ -833,10 +833,17 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             let dir = Vec3::new(arg(3)?, arg(4)?, arg(5)?);
             let tol = tol::zone_tol3d(k, arg(6)?);
             let limit = (arg(7)? != 0.0).then_some(arg(8)?);
-            let cache = must(BrepCache::new(solidcore::geom::a_object::BREP_TYPE))?;
+            // the cache SmBrep::RayFire's solve builds (CacheMakeOrValidate), over the
+            // geometry owners of a native B-rep
+            crate::util::own_arena_geometry(b);
+            let kk: &Kernel = k;
+            let cache = must(solidcore::topology::brep_cache::make_brep_cache(
+                kk,
+                solidcore::topology::brep_cache::CacheSource::Brep(&*b),
+                &solidcore::topology::brep_cache::arena_identity,
+            ))?;
             let keys = |o: CacheObject| solidcore::topology::brep_cache::arena_identity(o);
             let owners = |_: ObjectRef| None;
-            let kk: &Kernel = k;
             let (s, r) = status(bp2::ray_fire(
                 kk,
                 b,

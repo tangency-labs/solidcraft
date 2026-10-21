@@ -255,8 +255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0031",
@@ -2255,8 +2255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0270",
@@ -2535,8 +2535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0303",
@@ -2659,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0318",
@@ -2855,8 +2855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0341",
@@ -2995,8 +2995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0357",
@@ -4435,8 +4435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0525",
@@ -4851,8 +4851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0573",
@@ -5115,8 +5115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0605",
@@ -5127,8 +5127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0606",
@@ -5163,8 +5163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0610",
@@ -5531,8 +5531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0654",
@@ -5803,8 +5803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0686",
@@ -6635,8 +6635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0785",
@@ -7007,8 +7007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0829",
@@ -7199,8 +7199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0852",
@@ -7335,8 +7335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0868",
@@ -7831,8 +7831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0926",
@@ -8195,8 +8195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0969",
@@ -8379,8 +8379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen0990",
@@ -8511,8 +8511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1006",
@@ -9631,8 +9631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1141",
@@ -11279,8 +11279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1338",
@@ -11439,8 +11439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1356",
@@ -11519,8 +11519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1365",
@@ -11891,8 +11891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1409",
@@ -11963,8 +11963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1417",
@@ -12267,8 +12267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1452",
@@ -13011,8 +13011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1540",
@@ -13211,8 +13211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1562",
@@ -13547,8 +13547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1603",
@@ -13659,8 +13659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1616",
@@ -13983,8 +13983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1654",
@@ -14563,8 +14563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1723",
@@ -14699,8 +14699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1739",
@@ -14891,8 +14891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1762",
@@ -14927,8 +14927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1766",
@@ -15015,8 +15015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1776",
@@ -15859,8 +15859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1874",
@@ -16091,8 +16091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen1901",
@@ -17131,8 +17131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2024",
@@ -17359,8 +17359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2050",
@@ -17831,8 +17831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2105",
@@ -17975,8 +17975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2121",
@@ -18887,8 +18887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2226",
@@ -19887,8 +19887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2343",
@@ -20411,8 +20411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2405",
@@ -20679,8 +20679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2436",
@@ -21003,8 +21003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2475",
@@ -21199,8 +21199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2498",
@@ -21299,8 +21299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2510",
@@ -21939,8 +21939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2587",
@@ -21959,8 +21959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2589",
@@ -22011,8 +22011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2595",
@@ -22195,8 +22195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2615",
@@ -22299,8 +22299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2627",
@@ -22491,8 +22491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2650",
@@ -23275,8 +23275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2741",
@@ -23471,8 +23471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2763",
@@ -24047,8 +24047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2832",
@@ -24139,8 +24139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2843",
@@ -24203,8 +24203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2850",
@@ -24395,8 +24395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2873",
@@ -24507,8 +24507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2886",
@@ -24655,8 +24655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2903",
@@ -25079,8 +25079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2952",
@@ -25427,8 +25427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "gen2993",
@@ -25491,8 +25491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "edge_proto_p3_split_intersect",
@@ -25503,8 +25503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "edge_proto_p3_split_edge_definition",
@@ -25515,8 +25515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Point3DClassify",
-        "unit": "query.brep"
+        "symbol": "SmBrep::Point3DClassify (the proto topology pool holds no B-rep)",
+        "unit": "harness:proto-topology-pool"
       },
       "max_rel_err": 0.0,
       "name": "edge_proto_p3_split_proto_edge",
@@ -25612,7 +25612,7 @@
   "cases_passed": 2638,
   "cases_total": 3013,
   "deferred_by_unit": {
-    "query.brep": 70,
+    "harness:proto-topology-pool": 70,
     "topology.edge": 95,
     "topology.face_p2": 94,
     "topology.vertex": 116

@@ -116,7 +116,6 @@ use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
-use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol;
@@ -131,6 +130,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition, SurfaceKind};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
@@ -656,7 +656,12 @@ pub fn is_degenerate(k: &Kernel, b: &Brep, tol_3d: f64) -> Result<bool> {
     // status is ignored: a failure leaves the default box)
     // CalculateBoundingBox(sBBox): header defaults bApprox = FALSE, bTight = FALSE,
     // bExpandByZoneTol3d = TRUE
-    let bbox = ignored(brep_bounding_box(b, false, false, true))?.unwrap_or_default();
+    let bbox = ignored(qbrep::calculate_bounding_box(
+        k,
+        b,
+        BoundingBoxOptions::default(),
+    ))?
+    .unwrap_or_default();
     Ok(bbox.is_point_sized(tol_3d))
 }
 
@@ -1318,19 +1323,15 @@ pub struct LockBrepBox<'b> {
 }
 
 impl<'b> LockBrepBox<'b> {
-    /// `SmLockBrepBox(pBrep)`.
+    /// `SmLockBrepBox(pBrep)`: `LockBoundingBox()` (default `bTight = FALSE`), whose
+    /// status the constructor cannot report (a failure leaves the box unlocked).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmBrep::LockBoundingBox` is unit `query.brep`.
+    /// [`SolidError::Unported`] from the box computation.
     pub fn new(k: &Kernel, brep: &'b mut Brep) -> Result<Self> {
-        let _ = k;
-        // UNPORTED(query.brep): SmBrep::LockBoundingBox
-        let _unlocked = Self { brep };
-        Err(SolidError::unported(
-            "SmBrep::LockBoundingBox",
-            "query.brep",
-        ))
+        ignore_status(crate::query::brep::lock_bounding_box(k, brep, false))?;
+        Ok(Self { brep })
     }
 
     /// The locked B-rep.
@@ -1342,8 +1343,7 @@ impl<'b> LockBrepBox<'b> {
 
 impl Drop for LockBrepBox<'_> {
     fn drop(&mut self) {
-        // UNPORTED(query.brep): SmBrep::UnLockBoundingBox (nothing to unlock until
-        // `new` can lock)
+        crate::query::brep::unlock_bounding_box(self.brep);
     }
 }
 
@@ -1409,22 +1409,6 @@ fn shell_region(b: &Brep, shell: ShellId) -> Result<Option<RegionId>> {
 /// claims a mark).
 fn shell_mated_shells(k: &mut Kernel, b: &Brep, shell: ShellId) -> Result<Vec<ShellId>> {
     b.shell(shell)?.mated_shells(k, b)
-}
-
-/// `SmBrep::CalculateBoundingBox(rBox, bApprox, bTight, bExpandByZoneTol3d)` (unit
-/// `query.brep`).
-fn brep_bounding_box(
-    b: &Brep,
-    approx: bool,
-    tight: bool,
-    expand_by_zone_tol_3d: bool,
-) -> Result<Extent3d> {
-    let _ = (b, approx, tight, expand_by_zone_tol_3d);
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    Err(SolidError::unported(
-        "SmBrep::CalculateBoundingBox",
-        "query.brep",
-    ))
 }
 
 /// `SmEdgeuse::GetOrCreateUVTrimCurve(rpUVTrimCurve, pdOptDistToSurf, pdOptDeviation,
