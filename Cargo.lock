@@ -4418,6 +4418,7 @@ version = "0.18.1"
 dependencies = [
  "cc",
  "log",
+ "serde_json",
  "solidcraft-geom",
 ]
 

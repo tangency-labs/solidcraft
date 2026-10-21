@@ -30,3 +30,6 @@ solidcraft-geom = { workspace = true }
 
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -181,6 +181,7 @@ pub use calls::*;
 
 pub mod check;
 pub mod history;
+pub mod measure;
 
 /// Where [`set_log`] sends SMLib's log lines.
 #[cfg(feature = "native")]
