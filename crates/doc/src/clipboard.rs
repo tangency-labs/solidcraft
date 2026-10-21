@@ -105,7 +105,13 @@ fn remap_plane(p: &mut PlaneRef, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<Str
         return Err(crate::DocError::Invalid("clone plane reference depth exceeded".into()));
     }
     match p {
-        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1)?,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1)?,
+        PlaneRef::AtAngle { base, line, .. } => {
+            remap_plane(base, ids, bodies, depth + 1)?;
+            if let Some(g) = line {
+                remap_geo(g, ids, bodies, depth + 1)?;
+            }
+        }
         PlaneRef::Face { name, anchor, .. } => {
             if let Some(name) = name {
                 *name = remap_topology(name, ids, bodies);
@@ -196,6 +202,9 @@ impl crate::Feature {
                     checked_geo(r, 0)?;
                 }
             }
+            K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -256,6 +265,9 @@ impl crate::Feature {
                     remap_geo(r, ids, bodies, 0)?;
                 }
             }
+            K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => remap_geo(geo, ids, bodies, 0)?,
             _ => {}
         }
         Ok(())
@@ -276,7 +288,13 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
         return Err(crate::DocError::Invalid("copy reference nesting exceeds 64".into()));
     }
     match p {
-        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
+        PlaneRef::AtAngle { base, line, .. } => {
+            checked_plane(base, depth + 1)?;
+            if let Some(g) = line {
+                checked_geo(g, depth + 1)?;
+            }
+        }
         PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;

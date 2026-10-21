@@ -394,7 +394,13 @@ impl PlaneRef {
         }
         match self {
             Self::Construction { name } => f(Ref::Feature(name)),
-            Self::Offset { base, .. } | Self::AtAngle { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
+            Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
+            Self::AtAngle { base, line, .. } => {
+                base.walk_feature_refs(f, depth + 1);
+                if let Some(g) = line {
+                    g.walk_feature_refs(f, depth + 1);
+                }
+            }
             Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs(f, depth + 1);
                 b.walk_feature_refs(f, depth + 1);
@@ -415,7 +421,13 @@ impl PlaneRef {
         }
         match self {
             Self::Construction { name } => f(Ref::Feature(name)),
-            Self::Offset { base, .. } | Self::AtAngle { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
+            Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
+            Self::AtAngle { base, line, .. } => {
+                base.walk_feature_refs_mut(f, depth + 1);
+                if let Some(g) = line {
+                    g.walk_feature_refs_mut(f, depth + 1);
+                }
+            }
             Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs_mut(f, depth + 1);
                 b.walk_feature_refs_mut(f, depth + 1);
@@ -522,6 +534,23 @@ impl Walk for AxisDef {
         plane_exprs_mut(self.refs_mut(), f)
     }
     construct_geometry!();
+}
+
+/// A feature's own reference to the model (a revolve's or circular pattern's axis on an edge or
+/// round face): walked like a construction axis's.
+impl Walk for GeoRef {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        plane_exprs(vec![self], f)
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        plane_exprs_mut(vec![self], f)
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        f(Geo::Construct(self))
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        f(Geo::Construct(self))
+    }
 }
 
 impl Walk for PointDef {

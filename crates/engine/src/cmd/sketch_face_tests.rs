@@ -391,7 +391,13 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
     let id = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind else { panic!("not sketch") };
-    *plane = solidcraft_doc::PlaneRef::AtAngle { base: Box::new(plane.clone()), axis_origin: Vec3::ZERO, axis_dir: Vec3::X, angle: "90 deg".into() };
+    *plane = solidcraft_doc::PlaneRef::AtAngle {
+        base: Box::new(plane.clone()),
+        axis_origin: Vec3::ZERO,
+        axis_dir: Vec3::X,
+        angle: "90 deg".into(),
+        line: None,
+    };
     s.refresh();
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();
     run(&mut s, "parameters.change", json!({"name":height,"expression":"20 mm"}));
