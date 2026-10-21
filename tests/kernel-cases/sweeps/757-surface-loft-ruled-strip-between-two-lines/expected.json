@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#757",
+  "tangency-labs/solidcraft#847"
+ ],
+ "what": "a surface loft between the line (0,0,0)-(10,0,0) and the line (0,0,20)-(10,6,20): a ruled (bilinear) strip",
+ "source": "analytic",
+ "method": "S(u,v) = (1-v)(10u,0,0) + v(10u,6u,20): S_u = (10, 6v, 0), S_v = (0, 6u, 20), S_u x S_v = (120 v, -200, 60 u); A = double integral over the unit square of sqrt(14400 v^2 + 40000 + 3600 u^2) = 214.2336 (Gauss-Legendre, 48 points each way). One face, open (valid false).",
+ "valid": false,
+ "area_mm2": 214.23356244227966,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   10,
+   6,
+   20
+  ]
+ }
+}
