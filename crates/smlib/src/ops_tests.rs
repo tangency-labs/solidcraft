@@ -275,3 +275,17 @@ fn a_variable_round_follows_its_law() {
     assert!(c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.5, 1.0, 1.0], &[3.0, 1.0]).is_err());
     assert!(matches!(c.fillet_variable([90.0, 90.0, 90.0], 0.1, [0.0; 3], 1, &knots, &[3.0, 1.0]), Err(Error::NoMatch { .. })));
 }
+
+#[test]
+fn imprint_cuts_faces_where_a_tool_meets_them() {
+    // A box half sunk into the cube cuts the four side faces it crosses and the top it lies in.
+    let cube = cube(20.0);
+    let tool = Brep::make_box([5.0, -1.0, 10.0], [10.0, 22.0, 15.0]).unwrap();
+    let cut = cube.imprint(&tool).unwrap().unwrap();
+    assert!(cut.counts().unwrap()[0] > 6);
+    assert!((cut.volume(1e-7).unwrap() - 8000.0).abs() < 1e-6);
+    assert_eq!(cube.counts().unwrap()[0], 6);
+    // A tool that misses cuts nothing.
+    let far = Brep::make_box([50.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    assert!(cube.imprint(&far).unwrap().is_none());
+}

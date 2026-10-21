@@ -62,6 +62,18 @@ impl Brep {
         }
     }
 
+    /// `self` with each face `tool` meets cut along the intersection, the pieces kept as faces of
+    /// one body: `None` when the tool meets no face. Tagged operands give the pieces' history
+    /// (each piece is a split of the face it was cut from).
+    pub fn imprint(&self, tool: &Brep) -> Result<Option<Brep>> {
+        init()?;
+        match ffi::ops::imprint(&self.0, &tool.0) {
+            Ok(h) => Ok(Some(Brep(h))),
+            Err(ffi::ops::ERR_NO_CUT) => Ok(None),
+            Err(s) => Err(error(s)),
+        }
+    }
+
     /// The number of separate solid regions (voids not counted).
     pub fn solid_count(&self) -> Result<usize> {
         ffi::ops::solid_count(&self.0).map(|n| usize::try_from(n).unwrap_or(0)).map_err(error)
