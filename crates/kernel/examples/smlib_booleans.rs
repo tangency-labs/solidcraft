@@ -46,6 +46,7 @@ mod run {
     use solidcraft_geom::brep::history::{Change, EdgeOrigin, History};
     use solidcraft_kernel::fuzz::{Shape, boolean_shapes};
     use solidcraft_kernel::{BoolOp, boolean, measure};
+    use solidcraft_smlib::MEASURE_ACCURACY;
     use solidcraft_smlib::history::Order;
 
     const OPS: [BoolOp; 3] = [BoolOp::Union, BoolOp::Intersect, BoolOp::Cut];
@@ -155,7 +156,7 @@ mod run {
             Ok(None) => o.empty = true,
             Ok(Some(r)) => {
                 let counts = r.counts().map_err(|e| e.to_string());
-                let volume = r.volume(1e-6).map_err(|e| e.to_string());
+                let volume = r.mass_properties(MEASURE_ACCURACY).map(|m| m.volume).map_err(|e| e.to_string());
                 let history = r
                     .history()
                     .map_err(|e| e.to_string())
@@ -178,16 +179,11 @@ mod run {
     /// starts from, through their schema 4 records imported into SMLib (`smlib_body`), so both
     /// kernels get the same input whatever the axis. Spheres and tori are SMLib's own primitives
     /// (about +Z, like truck's): the import doesn't take truck's revolved surfaces yet. The
-    /// boolean arrives with the operation shims (smlib_ops.cpp); until then it answers "not
-    /// supported yet" and the report counts the case as not run on SMLib.
+    /// boolean is SMLib's own (`Brep::boolean`, through smlib_ops.cpp).
     mod side {
         use solidcraft_kernel::BoolOp;
         use solidcraft_kernel::fuzz::Shape;
-        use solidcraft_smlib::Brep;
-
-        fn not_yet(what: &str) -> String {
-            format!("not supported yet: {what} through the SMLib C API")
-        }
+        use solidcraft_smlib::{BooleanOp, Brep};
 
         pub fn shape(s: &Shape) -> Result<Brep, String> {
             match s {
@@ -200,12 +196,13 @@ mod run {
         }
 
         /// `a op b`; `None` when the result is empty.
-        pub fn boolean(_a: &Brep, _b: &Brep, op: BoolOp) -> Result<Option<Brep>, String> {
-            Err(not_yet(match op {
-                BoolOp::Union => "union",
-                BoolOp::Intersect => "intersection",
-                BoolOp::Cut => "cut",
-            }))
+        pub fn boolean(a: &Brep, b: &Brep, op: BoolOp) -> Result<Option<Brep>, String> {
+            let op = match op {
+                BoolOp::Union => BooleanOp::Union,
+                BoolOp::Intersect => BooleanOp::Intersect,
+                BoolOp::Cut => BooleanOp::Subtract,
+            };
+            a.boolean(b, op).map_err(|e| e.to_string())
         }
     }
 
