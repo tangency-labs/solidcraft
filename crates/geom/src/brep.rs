@@ -198,7 +198,8 @@ pub enum Surface {
     /// `CYLINDRICAL_SURFACE`).
     Cylinder { frame: Frame, radius: f64 },
     /// `origin + v z + r(v) (cos u x + sin u y)`, `r(v) = radius_at_origin + v tan(half_angle)`,
-    /// v ≥ the apex's height (STEP `CONICAL_SURFACE`).
+    /// on the side of the apex where r(v) ≥ 0: above it for a positive half angle, below it for
+    /// a negative one (a cone narrowing along z, as SMLib makes them) (STEP `CONICAL_SURFACE`).
     Cone { frame: Frame, radius_at_origin: f64, half_angle: f64 },
     /// `origin + radius (cos v (cos u x + sin u y) + sin v z)`: u the longitude, v the latitude
     /// in [-π/2, π/2] (STEP `SPHERICAL_SURFACE`).
@@ -319,7 +320,9 @@ fn surface_natural(s: &Surface) -> [Natural; 2] {
         Surface::Plane { .. } | Surface::PlaneThrough { .. } => [UNBOUNDED; 2],
         Surface::Cylinder { .. } => [Natural::Periodic, UNBOUNDED],
         Surface::Cone { radius_at_origin, half_angle, .. } => {
-            [Natural::Periodic, Natural::Range(-radius_at_origin / half_angle.tan(), f64::INFINITY)]
+            let apex = -radius_at_origin / half_angle.tan();
+            let v = if *half_angle > 0. { Natural::Range(apex, f64::INFINITY) } else { Natural::Range(f64::NEG_INFINITY, apex) };
+            [Natural::Periodic, v]
         }
         Surface::Sphere { .. } => [Natural::Periodic, Natural::Range(-FRAC_PI_2, FRAC_PI_2)],
         Surface::Torus { .. } => [Natural::Periodic; 2],
@@ -432,7 +435,7 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
         Surface::Cone { frame: f, radius_at_origin, half_angle } => {
             frame(f, budget)?;
             numbers([*radius_at_origin, *half_angle])?;
-            require(*radius_at_origin >= 0. && *half_angle >= 1e-12 && *half_angle < std::f64::consts::FRAC_PI_2, "cone dimensions")
+            require(*radius_at_origin >= 0. && half_angle.abs() >= 1e-12 && half_angle.abs() < std::f64::consts::FRAC_PI_2, "cone dimensions")
         }
         Surface::Torus { frame: f, major_radius, minor_radius } => {
             frame(f, budget)?;

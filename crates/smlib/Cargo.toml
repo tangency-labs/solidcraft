@@ -1,0 +1,31 @@
+[package]
+name = "solidcraft-smlib"
+description = "SolidCraft: NVIDIA's SMLib B-rep kernel (tangency-labs/smlib, Apache-2.0), statically linked behind its C API, with a safe Rust wrapper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+links = "smlib"
+
+# The workspace lints, except unsafe_code: denied, not forbidden, so that src/ffi.rs can allow it.
+# Calling a C library has no safe API. Keep the rest in sync with [workspace.lints].
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+
+[features]
+# Compile and link SMLib. Off, the crate builds without a C++ toolchain or the SMLib sources, and
+# every call returns `Error::NotBuilt`, so workspace-wide builds and checks need neither.
+native = []
+
+[dependencies]
+log = { workspace = true }
+
+[build-dependencies]
+cc = { version = "1.2", features = ["parallel"] }

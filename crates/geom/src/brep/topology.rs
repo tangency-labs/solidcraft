@@ -45,10 +45,15 @@ pub(super) fn check(b: &Brep) -> Result<()> {
     let mut outer_of = vec![0u32; b.shells.len()];
     let infinite = b.regions.first().ok_or(Invalid("region count"))?;
     require(!infinite.void, "the infinite region is a void")?;
+    // The last region (numbered from 1) that listed each shell: a repeat within one region shows
+    // in one lookup, so the check stays linear however many shells and regions there are.
+    let mut last_region = vec![0usize; b.shells.len()];
     for (r, region) in b.regions.iter().enumerate() {
         require(region.shells.len() <= b.shells.len(), "region shells")?;
         for (k, &s) in region.shells.iter().enumerate() {
-            require(!region.shells.get(..k).is_some_and(|before| before.contains(&s)), "shell listed twice in a region")?;
+            let last = last_region.get_mut(s as usize).ok_or(Invalid("region shell reference"))?;
+            require(*last != r + 1, "shell listed twice in a region")?;
+            *last = r + 1;
             let n = listed.get_mut(s as usize).ok_or(Invalid("region shell reference"))?;
             *n += 1;
             if r > 0 && k == 0 {

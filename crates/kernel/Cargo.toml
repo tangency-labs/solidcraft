@@ -8,8 +8,14 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Link NVIDIA's SMLib (tangency-labs/smlib) into the kernel; needs a C++ toolchain and
+# scripts/fetch-smlib.sh (ADR 0002).
+smlib = ["dep:solidcraft-smlib", "solidcraft-smlib/native"]
+
 [dependencies]
 solidcraft-geom = { workspace = true }
+solidcraft-smlib = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
