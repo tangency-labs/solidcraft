@@ -52,8 +52,11 @@ shells with opposite `forward`. `forward` means the face's normal in that shell 
 its surface's natural normal, ∂S/∂u × ∂S/∂v. In a closed shell, normals point out
 of the material.
 
-**Loops.** A face's first loop is its outer loop and is an edge loop. A vertex
-loop (a pole, a collapsed boundary) is only ever an inner loop. Loops are stored
+**Loops.** A face has one outer loop and any number of inner ones, in the
+producer's order: truck lists some holes before the outer loop, and an SMLib
+import puts the outer loop first, as SMLib requires. The first loop is an edge
+loop. A vertex loop (a pole, a collapsed boundary) is only ever an inner loop.
+Orientation tells outer from inner. Loops are stored
 relative to the surface's natural normal, whichever side a shell uses: seen from
 that normal, the outer loop runs counter-clockwise and inner loops clockwise.
 This lets one face sit in two shells without contradicting itself. An edge loop
@@ -82,7 +85,7 @@ paint and persistent names. The same holds for edges and vertices.
 1. Regions: the infinite region, then bounded regions in the producer's order.
 2. Shells and faces in order of first appearance, walking regions → shells →
    oriented faces.
-3. Edges in order of first appearance, walking faces → loops (outer first) →
+3. Edges in order of first appearance, walking faces → loops (in stored order) →
    oriented edges, then wire edges walking shells. A face whose first oriented
    face is reversed is walked backwards: each of its loops from its last
    oriented edge to its first. That is how a reversed face is traversed.

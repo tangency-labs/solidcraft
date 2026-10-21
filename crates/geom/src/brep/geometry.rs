@@ -172,7 +172,7 @@ impl Brep {
                                 }
                             }
                         }
-                        // The area the loop encloses, its sign by its place (outer first). Where
+                        // The signed area the loop encloses (positive for the outer loop). Where
                         // uses meet at a pole the ring runs straight along the pole's line.
                         let at = Record::Loop { face, r#loop };
                         let mut ring: Vec<[f64; 2]> = Vec::with_capacity(edges.len().saturating_mul(AREA_SAMPLES));
