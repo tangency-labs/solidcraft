@@ -1,5 +1,6 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_fillet`,
-//! `smlib_chamfer`, `smlib_shell`, `smlib_brep_solid_count`; the fork's `capi/src/smlib_ops.cpp`),
+//! `smlib_chamfer`, `smlib_shell`, `smlib_offset_faces`, `smlib_thicken`,
+//! `smlib_brep_solid_count`; the fork's `capi/src/smlib_ops.cpp`),
 //! declared by hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
 
@@ -14,6 +15,7 @@ use super::{ERR_ARG, OK, RawBrep, new_brep};
 pub const ERR_NOT_SOLID: i32 = -1100;
 pub const ERR_PICK_NONE: i32 = -1101;
 pub const ERR_PICK_AMBIGUOUS: i32 = -1102;
+pub const ERR_NO_ROOM: i32 = -1103;
 
 pub const BOOLEAN_UNION: i32 = 0;
 pub const BOOLEAN_SUBTRACT: i32 = 1;
@@ -25,6 +27,7 @@ pub enum Pick {
     Fillet,
     Chamfer,
     Shell,
+    OffsetFaces,
 }
 
 /// A failed selection operation: the status, and the index of the point that selected nothing
@@ -65,6 +68,16 @@ unsafe extern "C" {
         out: *mut *mut RawBrep,
         out_failed_point: *mut i64,
     ) -> i32;
+    fn smlib_offset_faces(
+        brep: *const RawBrep,
+        points: *const f64,
+        n_points: i64,
+        tolerance: f64,
+        distance: f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
+    ) -> i32;
+    fn smlib_thicken(brep: *const RawBrep, thickness: f64, symmetric: i32, out: *mut *mut RawBrep) -> i32;
 }
 
 #[cfg(feature = "native")]
@@ -89,6 +102,7 @@ pub fn pick_op(kind: Pick, b: &Handle, points: &[[f64; 3]], tolerance: f64, size
         Pick::Fillet => smlib_fillet,
         Pick::Chamfer => smlib_chamfer,
         Pick::Shell => smlib_shell,
+        Pick::OffsetFaces => smlib_offset_faces,
     };
     let flat = points.as_ptr().cast::<f64>();
     let mut failed = -1i64;
@@ -96,6 +110,16 @@ pub fn pick_op(kind: Pick, b: &Handle, points: &[[f64; 3]], tolerance: f64, size
         let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
         (s, at)
     })
+}
+
+#[cfg(feature = "native")]
+pub fn thicken(b: &Handle, thickness: f64, symmetric: bool) -> Result<Handle, i32> {
+    new_brep(|out| unsafe { smlib_thicken(b.raw(), thickness, i32::from(symmetric), out) })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn thicken(_: &Handle, _: f64, _: bool) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
 }
 
 #[cfg(not(feature = "native"))]

@@ -44,6 +44,8 @@ pub enum Error {
     NoMatch { point: usize },
     /// Selection point `point` is equally near to two edges (faces).
     Ambiguous { point: usize },
+    /// An inward offset (a shell's wall, faces moved in) leaves no room inside the body.
+    NoRoom,
     /// A C++ exception (most likely out of memory) was caught at the boundary.
     Exception,
     /// The C API is a different version from the one this crate was written against.
@@ -64,6 +66,7 @@ impl std::fmt::Display for Error {
             Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
+            Error::NoRoom => write!(f, "the offset leaves no room inside the body"),
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Version(v) => write!(f, "SMLib C API version {v}, expected {}", ffi::ABI_VERSION),
             Error::NotBuilt => write!(f, "not supported yet: this build has no SMLib"),
@@ -81,6 +84,7 @@ fn error(s: i32) -> Error {
         ffi::ERR_ARG | ffi::ERR_BUFFER => Error::Argument,
         ffi::ERR_EMPTY => Error::Empty,
         ffi::ops::ERR_NOT_SOLID => Error::NotSolid,
+        ffi::ops::ERR_NO_ROOM => Error::NoRoom,
         ffi::ERR_EXCEPTION => Error::Exception,
         ffi::NOT_BUILT => Error::NotBuilt,
         s => Error::Status(s),
