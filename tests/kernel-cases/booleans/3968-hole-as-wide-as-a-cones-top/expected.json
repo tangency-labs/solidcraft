@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3968"
+  ],
+  "what": "a hole of diameter 10 drilled into the top of a truncated cone whose top is also diameter 10 (the hole wall meets the cone at the top rim)",
+  "source": "analytic",
+  "method": "truncated cone r=15 at the base, r=5 at z=20: V = pi*20/3*(15^2+15*5+5^2) = 6806.78; the flat-bottomed hole r=5, 10 deep from the top lies inside the cone (the cone is wider below z=20): minus pi*25*10 = 785.40. V = 6021.38. Faces: base, cone, hole wall, hole floor = 4",
+  "body_count": 1,
+  "volume_mm3": 6021.3859,
+  "faces": 4
+}

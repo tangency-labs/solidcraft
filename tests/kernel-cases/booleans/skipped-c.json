@@ -1,0 +1,306 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#3404",
+  "why": "needs a user's design (plate with a tab profile) that can't be rebuilt: the report names only the failing join extrude"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3405",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3406",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('there is no body to cut or intersect' on a cut extrude from an enclosure face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3411",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (join of three bodies, 'Union: no result')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3426",
+  "why": "UI only: the extrude preview's initial direction on a picked face, no wrong geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3427",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3428",
+  "why": "other area: crashes (kernel panic in a cut with an imported STEP bolt; the STEP file is from a parts library and can't be rebuilt)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3448",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (join extrude of two profiles, 'Union: no result', cylinders)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3479",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (rectangular pattern of a chamfer and an extrude: 'no edge near ...')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3496",
+  "why": "other area: import (a mesh body: booleans need a solid, 'mesh bodies can only be moved, measured and exported')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3498",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('there is no body to cut or intersect' on a cut extrude from an enclosure face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3514",
+  "why": "other area: sketch (a sketch rectangular pattern, over-constrain error from the sketch solver, no solid geometry)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3518",
+  "why": "other area: shell (split of a user's body by a plane, 'Intersect: no result')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3531",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3539",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (thin extrude of a curve, join)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3547",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (cut through an extruded spline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3563",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3578",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (join of a revolve with a chamfered box: the description is too vague to rebuild)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3586",
+  "why": "other area: sketch (a sketch rectangular pattern, over-constrain error from the sketch solver, no solid geometry)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3598",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (a fake edge left after an extrude chain on a chamfer)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3602",
+  "why": "other area: shell (split of a user's body by a plane, 'Intersect: no result')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3607",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3608",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (circular pattern of an extrude feature, cut 'no result')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3632",
+  "why": "UI only: sketch mirror about an origin axis is not offered in the sketch tool, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3634",
+  "why": "UI only: hole tool auto-switching to multi-hole mode"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3645",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3648",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3649",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (join extrude refusing for zero-thickness edge contact; the contact is not described, see #3841 for the circular-edge case)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3656",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3657",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3667",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3680",
+  "why": "other area: sheet metal (a hole in sheet-metal material is refused)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3707",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3709",
+  "why": "no geometry: a video of cutting a bolt in another CAD tool, no model or command"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3725",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3727",
+  "why": "UI only: sketch.pattern.circular was run with no sketch being edited"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3732",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (French report: Combine cut keeping the tool gives nothing, parts are named Equerre and Rallonge2)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3734",
+  "why": "not geometry: the failing step is a profile that is not closed in the user's sketch"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3741",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('lumps: ...' error on a cut or join in a user's design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3753",
+  "why": "other area: fillets (a chamfer inside a circular pattern is too large for the edge, 'grow the part'; the pattern itself is not at fault)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3757",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('lumps: ...' error on a cut or join in a user's design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3767",
+  "why": "not geometry: a face lineage refusal ('no supported stable semantic lineage') on a user's body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3777",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3785",
+  "why": "not geometry: feature request (pattern along a closed path around a rounded rectangle)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3787",
+  "why": "other area: import (a mesh body: booleans need a solid, 'mesh bodies can only be moved, measured and exported')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3789",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3791",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3793",
+  "why": "no geometry: a screenshot only, the report gives no command or model"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3803",
+  "why": "other area: UI only (pattern of a sketch feature is not offered: 'Sketch2 cannot be patterned')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3808",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('there is no body to cut or intersect' on a cut extrude from an enclosure face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3811",
+  "why": "UI only: the pattern dialog's axis picker ('Axis1' is not X, Y, Z or {origin, dir})"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3823",
+  "why": "not geometry: an expression error (`e` is not a parameter)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3824",
+  "why": "other area: threads (a threaded hole needs a cylindrical face: 'no cylindrical face there to thread')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3843",
+  "why": "UI only: the pattern dialog's axis picker ('Axis1' is not X, Y, Z or {origin, dir})"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3844",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (holes of an extrude cut, `flange_thickenss` parameter, not visible in the final result)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3865",
+  "why": "UI only: shift-click multiple selection in the Combine dialog"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3866",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('lumps: ...' error on a cut or join in a user's design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3869",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry ('lumps: ...' error on a cut or join in a user's design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3879",
+  "why": "other area: import (the extrude acts on an imported object's orientation / a STEP file's face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3904",
+  "why": "UI only: selecting several non-coplanar profiles in Extrude (which profiles the dialog accepts), no wrong geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3926",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (extrude cut from a face of a user's body)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3932",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3948",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3961",
+  "why": "UI only: should hidden bodies be left out of a cut: a visibility policy, the cut itself is right"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3975",
+  "why": "not geometry: feature request (rework of the hole tool's positioning)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3978",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4017",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4036",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4041",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry (extrude cut 'up to' another body: 'nothing lies between the profile and the To object')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4042",
+  "why": "UI only: sketch mirror about an origin axis is not offered in the sketch tool, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4070",
+  "why": "not geometry: hole not created, the report gives only the sketch point id"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4075",
+  "why": "needs a user's design that can't be rebuilt synthetically: the report gives only the failing command, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4077",
+  "why": "UI only: sketch mirror about an origin axis is not offered in the sketch tool, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4098",
+  "why": "not geometry: documentation of the taper sign (a positive taper makes the walls lean outward); the behaviour is not wrong"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4111",
+  "why": "UI only: Press/Pull opens Extrude on a selection with no planar face or profile"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4124",
+  "why": "other area: import (the extrude acts on an imported object's orientation / a STEP file's face)"
+ }
+]

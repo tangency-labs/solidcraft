@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3604",
+    "tangency-labs/solidcraft#3613"
+  ],
+  "what": "cut of a box by a swept G2 corner-removal tool along a projected edge chain (left-rear corner; the symmetric front-left chain works)",
+  "source": "invariants",
+  "method": "no closed form for the free-form tool: the tool lies on the box's bottom edge and overlaps it, so the cut must succeed with one valid closed solid (the tool is consumed). No volume is graded",
+  "body_count": 1
+}

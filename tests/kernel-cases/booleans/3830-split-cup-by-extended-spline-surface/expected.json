@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3830"
+  ],
+  "what": "split a thin-walled cup (shell of a d30 cylinder) with a surface body: an extruded spline surface, extended at both ends",
+  "source": "analytic",
+  "method": "cup = cylinder r15 h30 shelled 1 mm inward with its top removed: V = pi*15^2*30 - pi*14^2*29 = 3349.04. The surface crosses the whole cup from above its rim to below its floor, so it splits the cup in two; splitting only divides material: two valid bodies whose volumes add up to 3349.04",
+  "body_count": 2,
+  "volume_mm3": 3348.938
+}
