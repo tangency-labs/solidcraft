@@ -66,6 +66,10 @@ pub(super) fn workers() -> usize {
 fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
+        Source::Item { item, units } if smlib_backend() => {
+            let (part, read) = smlib_part(ex, *item, *units)?;
+            (Arc::new(part), Some(read))
+        }
         Source::Item { item, units } => {
             let cx = Ctx { ex, len: units.len, ang: units.ang, tol: units.tol, snap: units.snap };
             let out = guard("step brep", || brep::read_item(&cx, *item).map_err(KernelError::Failed))
@@ -89,6 +93,49 @@ fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     })
     .map(|(body, missing)| Made { body, missing, part, read })
     .map_err(|e| Failure { read: false, msg: e.to_string() })
+}
+
+/// Whether solids are read into SMLib ([`crate::backend`]). A setting this build can't honour
+/// reads them on neither kernel: [`smlib_part`] then says why.
+fn smlib_backend() -> bool {
+    !matches!(crate::backend(), Ok(crate::Backend::Truck))
+}
+
+/// A solid item read with the STEP reader into its schema 4 record, then into SMLib (healed
+/// where SMLib's check refuses it as given), and brought back as a body: the part SMLib made of
+/// the file. A solid the reader or SMLib refuses is not imported, with the reason; there is no
+/// other kernel to fall back on.
+#[cfg(feature = "smlib")]
+pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
+    crate::backend().map_err(|e| Failure { read: true, msg: e.to_string() })?;
+    let context =
+        solidcraft_step::units::Context { units: solidcraft_step::read::Units { len: units.len, ang: units.ang }, uncertainty: units.uncertainty };
+    let solid = solidcraft_step::topology::read_solid(ex, item, context).map_err(|msg| Failure { read: true, msg })?;
+    let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
+    let (brep, smlib_order) = crate::native::smlib_record_ordered(&solid.brep).map_err(failed)?;
+    let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
+    // The file face of each body face: SMLib's face i is the record's `smlib_order` face and the
+    // body's `body_order` face (an empty order is the same one).
+    let (Some(smlib_order), Some(body_order)) = (smlib_order, body_order) else {
+        return Err(Failure { read: false, msg: "not supported yet: SMLib renumbered the solid's faces".into() });
+    };
+    let at = |order: &[usize], i: usize| if order.is_empty() { Some(i) } else { order.get(i).copied() };
+    let faces = brep.counts().map_err(|e| failed(KernelError::Failed(format!("SMLib: {e}"))))?[0];
+    let mut face_origin = vec![0u64; body.face_count()];
+    for i in 0..faces {
+        let file_face = at(&smlib_order.faces, i).and_then(|r| solid.face_origin.get(r)).copied();
+        match (at(&body_order.faces, i).and_then(|b| face_origin.get_mut(b)), file_face) {
+            (Some(slot), Some(f)) => *slot = f,
+            _ => return Err(Failure { read: false, msg: "not supported yet: SMLib renumbered the solid's faces".into() }),
+        }
+    }
+    let part = Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin };
+    Ok((part, solid.notes))
+}
+
+#[cfg(not(feature = "smlib"))]
+pub(super) fn smlib_part(_: &Exchange, _: u64, _: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
+    Err(Failure { read: true, msg: crate::backend().err().map_or_else(|| "this build has no SMLib".into(), |e| e.to_string()) })
 }
 
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow
