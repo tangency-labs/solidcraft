@@ -274,6 +274,53 @@ fn a_variable_round_follows_its_law() {
     assert_close(volume(&back), volume(&r), 1e-7, "reversed");
     assert!(c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.5, 1.0, 1.0], &[3.0, 1.0]).is_err());
     assert!(matches!(c.fillet_variable([90.0, 90.0, 90.0], 0.1, [0.0; 3], 1, &knots, &[3.0, 1.0]), Err(Error::NoMatch { .. })));
+    // A quadratic law with control radii 4, 1, 4: r(t) = 4(1 − t)² + 2t(1 − t) + 4t².
+    let law = |t: f64| 4.0 * (1.0 - t).powi(2) + 2.0 * t * (1.0 - t) + 4.0 * t * t;
+    let n = 4000;
+    let r2 = (0..n).map(|i| law((i as f64 + 0.5) / n as f64).powi(2)).sum::<f64>() / n as f64;
+    let quad = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 2, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[4.0, 1.0, 4.0]).unwrap();
+    shot(&quad, "variable-quadratic");
+    assert_close(volume(&quad), 8000.0 - q * 20.0 * r2, 1e-5, "quadratic law");
+    // Down to zero at the far end: the round closes to the edge's end point.
+    let zero = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[4.0, 0.0]).unwrap();
+    shot(&zero, "variable-to-zero");
+    assert_close(volume(&zero), 8000.0 - q * 20.0 * 16.0 / 3.0, 1e-5, "down to zero");
+    // A law with a corner (4 → 2 → 4, straight on both halves): SMLib's section fit runs across
+    // the corner and misses it, so it is refused; the same points joined smoothly (C1 cubic
+    // pieces, as RadiusSpline::through makes them) are built.
+    let corner = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 2.0, 4.0]);
+    assert_eq!(corner.unwrap_err(), Error::Unsupported);
+    let smooth_knots = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
+    let smooth = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 3, &smooth_knots, &[4.0, 10.0 / 3.0, 2.0, 2.0, 2.0, 10.0 / 3.0, 4.0]);
+    shot(&smooth.unwrap(), "variable-smooth-4-2-4");
+}
+
+/// Unequal chamfers of a cube's top edge y = 20: 5 back along the face facing `first` most and 2
+/// along the other take away a triangle 5 × 2 / 2 along the 20 mm edge, either way round; 5 at
+/// 30° to the first face is 5 and 5 tan 30°.
+#[test]
+fn chamfers_with_two_setbacks() {
+    let c = cube(20.0);
+    let top = [[10.0, 20.0, 20.0]];
+    let up = c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(2.0), [0.0, 0.0, 1.0]).unwrap();
+    shot(&up, "chamfer-5-2");
+    assert_close(volume(&up), 8000.0 - 5.0 * 20.0, 1e-9, "5 and 2");
+    let flipped = c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(2.0), [0.0, 0.0, -1.0]).unwrap();
+    assert_close(volume(&flipped), volume(&up), 1e-9, "flipped");
+    // Which face took the 5: the removed prism's centroid lies a third of each setback in from
+    // the edge, so the result's centroid moves away from it.
+    let centroid = |b: &Brep| b.mass_properties(ACC).unwrap().centroid;
+    let left = |dy: f64, dz: f64| [10.0, (8000.0 * 10.0 - 100.0 * (20.0 - dy / 3.0)) / 7900.0, (8000.0 * 10.0 - 100.0 * (20.0 - dz / 3.0)) / 7900.0];
+    for (b, want, what) in [(&up, left(5.0, 2.0), "5 along the top"), (&flipped, left(2.0, 5.0), "5 down the side")] {
+        let got = centroid(b);
+        assert!((0..3).all(|i| (got[i] - want[i]).abs() < 1e-6), "{what}: centroid {got:?}, want {want:?}");
+    }
+    let angle = c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Angle(30f64.to_radians()), [0.0, 0.0, 1.0]).unwrap();
+    shot(&angle, "chamfer-5-at-30");
+    assert_close(volume(&angle), 8000.0 - 5.0 * 5.0 * 30f64.to_radians().tan() / 2.0 * 20.0, 1e-9, "5 at 30 degrees");
+    assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Angle(4.0), [0.0, 0.0, 1.0]).unwrap_err(), Error::Argument);
+    assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(2.0), [0.0; 3]).unwrap_err(), Error::Argument);
+    assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(-2.0), [0.0, 0.0, 1.0]).unwrap_err(), Error::Argument);
 }
 
 #[test]

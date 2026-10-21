@@ -32,6 +32,15 @@ pub enum Blend {
     Chamfer,
 }
 
+/// The second side of [`Brep::chamfer_sides`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChamferSecond {
+    /// The setback along the other face.
+    Distance(f64),
+    /// The angle (radians) the chamfer makes with the first face.
+    Angle(f64),
+}
+
 /// Most points one selection may hold (the C API's limit).
 pub const MAX_POINTS: usize = 4096;
 
@@ -120,6 +129,22 @@ impl Brep {
             ffi::ops::ERR_PICK_AMBIGUOUS => Error::Ambiguous { point: 0 },
             s => error(s),
         })
+    }
+
+    /// The edges nearest to `edges` (each within `tolerance`), with their tangent chains, cut by
+    /// a chamfer `distance` back along the face whose outward normal leans most along `first`,
+    /// and by `second` on the other, with bevelled corners (setbacks measured at each edge's
+    /// midpoint).
+    pub fn chamfer_sides(&self, edges: &[[f64; 3]], tolerance: f64, distance: f64, second: ChamferSecond, first: [f64; 3]) -> Result<Brep> {
+        init()?;
+        if edges.is_empty() || edges.len() > MAX_POINTS {
+            return Err(Error::Argument);
+        }
+        let (value, angle) = match second {
+            ChamferSecond::Distance(d) => (d, false),
+            ChamferSecond::Angle(a) => (a, true),
+        };
+        ffi::ops::chamfer_sides(&self.0, edges, tolerance, distance, value, angle, &first).map(Brep).map_err(pick_error)
     }
 
     /// Hollowed to a wall of `thickness` (negative: inside the original surface, positive:
