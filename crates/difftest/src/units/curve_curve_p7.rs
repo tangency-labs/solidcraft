@@ -24,6 +24,11 @@
 //! intersection (`LocalCurveIntersect`, through `SmCCIntersectENFO::Evaluate`) and the
 //! property solves that reach `SmCurve::LocalPropertyAnalysis` (every span the property
 //! solver does not cull).
+//!
+//! Generated circle-derived curvature-extrema cases use noncircular ellipses: a
+//! circle's constant curvature otherwise makes the number of noise-selected extrema
+//! machine-dependent. The original flat-circle case remains a full native regression
+//! outside the canonical report corpus; no solver or comparison rule is changed.
 
 use std::collections::BTreeMap;
 
@@ -846,12 +851,26 @@ fn gen_circle(rng: &mut Rng, closed: bool) -> CurveIn {
 }
 
 fn gen_curve(rng: &mut Rng) -> CurveIn {
+    gen_curve_with_circle_origin(rng).0
+}
+
+fn gen_curve_with_circle_origin(rng: &mut Rng) -> (CurveIn, bool) {
     let s = if rng.chance(0.7) { 3.0 } else { 30.0 };
     match rng.below(10) {
-        0 => gen_circle(rng, false),
-        1 => gen_circle(rng, true),
-        2..=6 => CurveIn::Bspline(gen_bspline(rng, s)),
-        _ => CurveIn::Hermite(gen_hermite(rng, s)),
+        0 => (gen_circle(rng, false), true),
+        1 => (gen_circle(rng, true), true),
+        2..=6 => (CurveIn::Bspline(gen_bspline(rng, s)), false),
+        _ => (CurveIn::Hermite(gen_hermite(rng, s)), false),
+    }
+}
+
+// Generated circles have their X axis along global X. Stretching homogeneous X
+// by exactly two gives a noncircular rational ellipse without new random draws.
+fn stretch_circle_x(curve: &mut CurveIn) {
+    if let CurveIn::Bspline(bs) = curve {
+        for point in &mut bs.cpts {
+            point[0] *= 2.0;
+        }
     }
 }
 
@@ -1105,8 +1124,11 @@ fn gen_cci(k: &Kernel, rng: &mut Rng) -> CciIn {
 }
 
 fn gen_property(k: &Kernel, rng: &mut Rng) -> OpIn {
-    let curve = gen_curve(rng);
+    let (mut curve, from_circle) = gen_curve_with_circle_origin(rng);
     let prop = rng.below(29) as i32;
+    if from_circle && matches!(prop, 13 | 14) {
+        stretch_circle_x(&mut curve);
+    }
     let (a, bb) = range_of(&curve);
     let t = a + (bb - a) * rng.unit();
     let p = point_at(k, &curve, t);
@@ -1227,6 +1249,73 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Compare the complete ordered native result, including its solution count.
+    // Constant-curvature circles intentionally have no frozen extrema count.
+    fn assert_native_parity(op: &OpIn) -> (usize, f64) {
+        let native = cpp(op).unwrap();
+        let port = rust(op).unwrap();
+        for out in [&native, &port] {
+            assert!(out.error.is_none(), "{out:?}");
+            assert!(out.deferred.is_none(), "{out:?}");
+            assert!(out.rejected.is_none(), "{out:?}");
+            assert_eq!(out.ints.get("status"), Some(&vec![0]));
+            assert!(!out.values["out"].is_empty());
+        }
+        let comparison = crate::compare(&native, &port, &[]);
+        assert!(comparison.pass(), "{comparison:?}");
+        assert!(comparison.values_compared > 0);
+        (comparison.values_compared, native.values["out"][0])
+    }
+
+    #[test]
+    fn flat_circle_original_gen1409_retains_full_native_parity() {
+        let op: OpIn = serde_json::from_str(include_str!("../../tests/data/curve_p7_flat_circle.json")).unwrap();
+        assert!(assert_native_parity(&op).1 > 0.0);
+    }
+
+    #[test]
+    fn generated_ellipse_extrema_have_stable_report_shapes() {
+        // Frozen after replacing the seven circle-derived extrema inputs. CI on
+        // Linux must reproduce these macOS shapes AND compare every native value.
+        // No case may become rejected, deferred or error-only.
+        for (index, prop, expected_values) in [
+            (191, 14, 942), (510, 14, 981), (1409, 13, 929),
+            (1526, 13, 16), (1682, 13, 955), (2276, 14, 916), (2526, 14, 16),
+        ] {
+            let seed = CaseContext::seed_for("curve.curve_p7", index);
+            let input = Runner.generate(&mut Rng::new(seed)).unwrap();
+            let op: OpIn = serde_json::from_value(input).unwrap();
+            assert!(matches!(&op, OpIn::Property { prop: actual, .. } if *actual == prop));
+            assert_eq!(assert_native_parity(&op).0, expected_values, "gen{index:04}, seed {seed}");
+        }
+    }
+
+    #[test]
+    fn stretched_circle_has_known_nonconstant_curvature_and_native_extrema() {
+        // Semiaxes 4 and 2: rho_min = b*b/a = 1, rho_max = a*a/b = 8.
+        let circle = CurveIn::Circle(CircleIn {
+            center: [0.0; 3], x: [1.0, 0.0, 0.0], y: [0.0, 1.0, 0.0],
+            radius: 2.0, a0: 0.0, a1: 360.0, quintic: false,
+        });
+        let mut ellipse = resolve(&circle).unwrap();
+        stretch_circle_x(&mut ellipse);
+        let curve = build(&ellipse).unwrap();
+        let (a, b) = range_of(&ellipse);
+        for (fraction, expected) in [(0.0, 1.0), (0.25, 8.0), (0.5, 1.0), (0.75, 8.0)] {
+            let derivatives = curve.evaluate(&Kernel::default(), a + fraction * (b - a), 2, true, false).unwrap();
+            let speed = derivatives[1].length();
+            let radius = speed * speed * speed / derivatives[1].cross(derivatives[2]).length();
+            assert!((radius - expected).abs() <= 1e-9 * expected, "{radius} != {expected}");
+        }
+        for prop in [13, 14] {
+            let (_, solutions) = assert_native_parity(&OpIn::Property {
+                curve: ellipse.clone(), xf: Vec::new(), ivl: [a, b], prop, val: 0.0,
+                vecs: vec![[0.0; 3]; 3], tol: 1e-6, comb: true,
+            });
+            assert!(solutions > 0.0);
+        }
+    }
 
     /// Generated cases cover every op, with passing (not deferred) cases.
     #[test]
