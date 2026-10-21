@@ -1,7 +1,7 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_fillet`,
-//! `smlib_chamfer`, `smlib_shell`, `smlib_offset_faces`, `smlib_thicken`,
-//! `smlib_brep_solid_count`; the fork's `capi/src/smlib_ops.cpp`),
-//! declared by hand. Part of the FFI boundary, like its parent: called only through
+//! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_shell`, `smlib_offset_faces`,
+//! `smlib_thicken`, `smlib_brep_solid_count`; the fork's `capi/src/smlib_ops.cpp`), declared by
+//! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
 
 #![allow(unsafe_code)]
@@ -20,6 +20,11 @@ pub const ERR_NO_ROOM: i32 = -1103;
 pub const BOOLEAN_UNION: i32 = 0;
 pub const BOOLEAN_SUBTRACT: i32 = 1;
 pub const BOOLEAN_INTERSECT: i32 = 2;
+
+pub const BLEND_ROUND: i32 = 0;
+pub const BLEND_CURVATURE: i32 = 1;
+pub const BLEND_CHORD: i32 = 2;
+pub const BLEND_CHAMFER: i32 = 3;
 
 /// Which selection operation: the C functions share one signature.
 #[derive(Clone, Copy)]
@@ -58,6 +63,28 @@ unsafe extern "C" {
         distance: f64,
         out: *mut *mut RawBrep,
         out_failed_point: *mut i64,
+    ) -> i32;
+    fn smlib_blend(
+        brep: *const RawBrep,
+        kind: i32,
+        points: *const f64,
+        sizes: *const f64,
+        n_points: i64,
+        tolerance: f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
+    ) -> i32;
+    fn smlib_fillet_variable(
+        brep: *const RawBrep,
+        point: *const f64,
+        tolerance: f64,
+        start: *const f64,
+        degree: i32,
+        knots: *const f64,
+        n_knots: i64,
+        radii: *const f64,
+        n_radii: i64,
+        out: *mut *mut RawBrep,
     ) -> i32;
     fn smlib_shell(
         brep: *const RawBrep,
@@ -119,6 +146,49 @@ pub fn thicken(b: &Handle, thickness: f64, symmetric: bool) -> Result<Handle, i3
 
 #[cfg(not(feature = "native"))]
 pub fn thicken(_: &Handle, _: f64, _: bool) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+/// `smlib_blend`: `sizes` holds one size per point (the caller checks the lengths match).
+#[cfg(feature = "native")]
+pub fn blend(kind: i32, b: &Handle, points: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<Handle, PickError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
+    if sizes.len() != points.len() {
+        return Err((ERR_ARG, None));
+    }
+    let flat = points.as_ptr().cast::<f64>();
+    let mut failed = -1i64;
+    new_brep(|out| unsafe { smlib_blend(b.raw(), kind, flat, sizes.as_ptr(), n, tolerance, out, &mut failed) }).map_err(|s| {
+        let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+        (s, at)
+    })
+}
+
+/// `smlib_fillet_variable`.
+#[cfg(feature = "native")]
+pub fn fillet_variable(
+    b: &Handle,
+    point: &[f64; 3],
+    tolerance: f64,
+    start: &[f64; 3],
+    degree: i32,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<Handle, i32> {
+    let nk = i64::try_from(knots.len()).map_err(|_| ERR_ARG)?;
+    let nr = i64::try_from(radii.len()).map_err(|_| ERR_ARG)?;
+    new_brep(|out| unsafe {
+        smlib_fillet_variable(b.raw(), point.as_ptr(), tolerance, start.as_ptr(), degree, knots.as_ptr(), nk, radii.as_ptr(), nr, out)
+    })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn blend(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: f64) -> Result<Handle, PickError> {
+    Err((NOT_BUILT, None))
+}
+
+#[cfg(not(feature = "native"))]
+pub fn fillet_variable(_: &Handle, _: &[f64; 3], _: f64, _: &[f64; 3], _: i32, _: &[f64], _: &[f64]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 

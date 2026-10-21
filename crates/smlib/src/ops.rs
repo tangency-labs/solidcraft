@@ -17,6 +17,21 @@ pub enum BooleanOp {
     Intersect,
 }
 
+/// What [`Brep::blend`] makes of each selected edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blend {
+    /// A circular cross-section at a constant radius ([`Brep::fillet`]).
+    Round,
+    /// A curvature-continuous (G2) cross-section between the contact lines of the round of
+    /// that radius.
+    Curvature,
+    /// A circular cross-section of constant width from contact line to contact line: the size
+    /// is that width.
+    Chord,
+    /// An equal-distance chamfer ([`Brep::chamfer`]): the size is the setback along each face.
+    Chamfer,
+}
+
 /// Most points one selection may hold (the C API's limit).
 pub const MAX_POINTS: usize = 4096;
 
@@ -63,6 +78,36 @@ impl Brep {
     /// midpoint), with bevelled corners.
     pub fn chamfer(&self, edges: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
         self.pick_op(ffi::ops::Pick::Chamfer, edges, tolerance, distance, false)
+    }
+
+    /// The edges nearest to `edges` (each within `tolerance`), with their tangent chains, blended
+    /// as `kind`, edge i (and its chain) at `sizes[i]`.
+    pub fn blend(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<Brep> {
+        init()?;
+        if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
+            return Err(Error::Argument);
+        }
+        let kind = match kind {
+            Blend::Round => ffi::ops::BLEND_ROUND,
+            Blend::Curvature => ffi::ops::BLEND_CURVATURE,
+            Blend::Chord => ffi::ops::BLEND_CHORD,
+            Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
+        };
+        ffi::ops::blend(kind, &self.0, edges, sizes, tolerance).map(Brep).map_err(pick_error)
+    }
+
+    /// The one edge nearest to `edge` (within `tolerance`, no tangent chain) rounded with a radius
+    /// that varies along it: a clamped B-spline of `degree` (1 to 3) with `knots` and control
+    /// `radii` over the position along the edge, 0 at its end nearest `start` and 1 at the other
+    /// (the edge curve's parameter scaled to 0..1).
+    pub fn fillet_variable(&self, edge: [f64; 3], tolerance: f64, start: [f64; 3], degree: usize, knots: &[f64], radii: &[f64]) -> Result<Brep> {
+        init()?;
+        let degree = i32::try_from(degree).map_err(|_| Error::Argument)?;
+        ffi::ops::fillet_variable(&self.0, &edge, tolerance, &start, degree, knots, radii).map(Brep).map_err(|s| match s {
+            ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
+            ffi::ops::ERR_PICK_AMBIGUOUS => Error::Ambiguous { point: 0 },
+            s => error(s),
+        })
     }
 
     /// Hollowed to a wall of `thickness` (negative: inside the original surface, positive:
