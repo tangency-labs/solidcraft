@@ -1,0 +1,26 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4149"
+ ],
+ "what": "a modelled M10x1.5 internal thread, full length of the bore below a counterbore, in a cylinder with its rim rounded (stack overflow)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Cylinder D40 h=30; a 8.5 mm through hole with a D18 x 5 counterbore (hole volume pi(9^2 5 + 4.25^2 25) = 2690.9705); the top outer edge rounded R3: removed = 2 pi (R - xbar) A with A = r^2 (1 - pi/4) = 1.9314 and the removed corner's centroid xbar = r (5/6 - pi/4)/(1 - pi/4) = 0.6701 from the corner, so 234.5769. M10x1.5 over the 25 mm of the bore below the counterbore (16.667 turns, rho=4.25): the thread ends at the counterbore floor, so the last groove end may stop up to half a groove short of it; that is under 0.3 mm of pitch, below 4 mm3. V = 37699.1118 - 234.5769 - 2690.9705 - 16.667 x 13.26888 = 34552.4164 mm3. Tolerance 0.3%: faceted helix as for the other thread cases; that is 110 mm3 on this large body (the groove itself is 192 mm3), and the end effect and the faceting stay far below it.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 34552.4164,
+ "tolerance": {
+  "rel": 0.003
+ },
+ "bbox": {
+  "min": [
+   -20,
+   -20,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   30
+  ]
+ }
+}

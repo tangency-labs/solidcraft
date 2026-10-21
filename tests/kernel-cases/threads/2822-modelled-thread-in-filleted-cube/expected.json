@@ -1,0 +1,31 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2822"
+ ],
+ "what": "a modelled M3 thread in a hole through a block whose vertical edges are rounded (the fillets showed as black lines after the thread)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Cube 20x20x10 with its four vertical edges rounded R2: each removes (1 - pi/4) R^2 x 10 = 8.5841, total 34.3363. A 2.5 mm through hole (the M3 tap drill, rho=1.25) with M3 (P=0.5) over the whole 10 mm (20 turns): V = 4000 - 34.3363 - pi 1.25^2 10 - 20 x 0.43729 = 3907.8305 mm3. By symmetry COM = (10,10,5). Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 3907.8305,
+ "center_of_mass": [
+  10,
+  10,
+  5
+ ],
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   10
+  ]
+ }
+}
