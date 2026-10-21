@@ -486,6 +486,103 @@ fn intersection_curves_lie_on_both_surfaces() {
     }
 }
 
+/// A thread flank as a screw sweep leaves it: a spline strip winding twenty-two turns of pitch 1 about
+/// z, rising from radius 3 to radius 4 by half the pitch, so one turn lies 0.89 mm from the next,
+/// and its v = ½ line (its rows' midpoints on its u knots, so it lies on the strip).
+fn thread_flank() -> (Surface, Curve) {
+    helical_strip([3., 4.], 0.5, 0.5)
+}
+
+/// A spline strip winding twenty-two turns of pitch 1 about z from radius `r[0]` (v = 0) to `r[1]`
+/// (v = 1), rising by `rise` across, and its line at v = `at` (its rows' points there on its u
+/// knots, so it lies on the strip).
+fn helical_strip(r: [f64; 2], rise: f64, at: f64) -> (Surface, Curve) {
+    // Control points 7.3 to a turn (161 over 22 turns), so the knots fall at other angles on
+    // each turn.
+    const PER_TURN: f64 = 7.3;
+    let n = 161;
+    let helix = |r: f64, rise: f64| -> Vec<[f64; 3]> {
+        (0..n)
+            .map(|i| {
+                let a = TAU * i as f64 / PER_TURN;
+                [r * a.cos(), r * a.sin(), a / TAU + rise]
+            })
+            .collect()
+    };
+    let (inner, outer) = (helix(r[0], 0.), helix(r[1], rise));
+    let mut u_knots = vec![0.; 4];
+    u_knots.extend((1..n - 3).map(|k| k as f64 / (n - 3) as f64));
+    u_knots.extend([1.; 4]);
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: vec![0., 0., 1., 1.],
+        points: inner.iter().zip(&outer).map(|(a, b)| vec![*a, *b]).collect(),
+    };
+    let middle =
+        Curve::Spline { knots: u_knots, points: inner.iter().zip(&outer).map(|(a, b)| [0, 1, 2].map(|k| (1. - at) * a[k] + at * b[k])).collect() };
+    (surface, middle)
+}
+
+/// Edges along a surface winding several turns (the flank's middle line, from mid-turn to
+/// mid-turn, and a short run of it) get pcurves on their own turn, never the next one.
+#[test]
+fn edges_on_a_spline_winding_several_turns_stay_on_their_turn() {
+    let (surface, middle) = thread_flank();
+    for interval in [[0., 1.], [0.0625, 0.9375], [0.40625, 0.4375]] {
+        for tol in [1e-3, 1e-6] {
+            let pc = &pcurves(&surface, &one(&middle, interval), tol).unwrap()[0][0];
+            let e = lift_error(&surface, &middle, interval, pc);
+            assert!(e <= tol, "{interval:?} at {tol}: {e}");
+        }
+    }
+}
+
+/// A thread's root band, 0.93 of the pitch tall, its turns 0.07 mm apart: an edge along its lower
+/// rim (as where the root meets a shoulder) gets a pcurve on its own turn, though the rim of the
+/// turn below passes nearer some of the search's starts than its own turn does.
+#[test]
+fn an_edge_along_the_rim_of_a_band_winding_close_to_itself_stays_on_its_turn() {
+    let (surface, rim) = helical_strip([5., 5.], 0.93, 0.);
+    // Short edges starting every 1/64 of a turn round one turn.
+    for k in 0..64 {
+        let t0 = 0.5 + f64::from(k) / (64. * 22.);
+        let interval = [t0, t0 + 1. / 64.];
+        let pc = &pcurves(&surface, &one(&rim, interval), 2e-4).unwrap()[0][0];
+        let e = lift_error(&surface, &rim, interval, pc);
+        assert!(e <= 2e-4, "{interval:?}: {e}");
+    }
+}
+
+/// A curve that is smooth through a knot of full multiplicity (one smooth curve with the knot
+/// inserted three times, as SMLib's intersection curves come) gets a pcurve with one tangent
+/// there. Two pieces fitted apart meet at an angle in (u, v) (a tenth of a degree here, over the
+/// degree SMLib's check allows on a real thread), sharp where u runs hundreds of times as fast as
+/// v.
+#[test]
+fn a_smooth_curve_through_a_full_knot_gets_a_pcurve_with_a_tangent_there() {
+    let (surface, _) = thread_flank();
+    let s = SurfaceEval::new(&surface).unwrap();
+    // Along the flank as it winds, a third of a turn (u = t), weaving a little across it.
+    let [a, b] = [0.40625, 0.4234375];
+    let ts: Vec<f64> = (0..=12).map(|i| a + (b - a) * i as f64 / 12.).collect();
+    let v = |t: f64| 0.5 + 0.02 * (3. * TAU * (t - a) / (b - a)).sin();
+    let on: Vec<[f64; 3]> = ts.iter().map(|&t| s.point([t, v(t)]).unwrap()).map(|p| [p.x, p.y, p.z]).collect();
+    let c = crate::bspline::CurveN::interpolate(&ts, &on, 3).unwrap();
+    let k = 0.4167;
+    let (mut knots, mut ctrl) = (c.knots, c.ctrl.iter().map(|p| crate::bspline::HPoint::weighted(Vec3::from(*p), 1.)).collect::<Vec<_>>());
+    for _ in 0..3 {
+        (knots, ctrl) = crate::bspline::insert_knot(3, &knots, &ctrl, k).unwrap();
+    }
+    let weave = Curve::Spline { knots, points: ctrl.iter().map(|h| h.project().unwrap()).map(|p| [p.x, p.y, p.z]).collect() };
+    let pc = &pcurves(&surface, &one(&weave, [a, b]), 1e-3).unwrap()[0][0];
+    assert!(lift_error(&surface, &weave, [a, b], pc) <= 1e-3);
+    let h = 1e-7;
+    let (l, m, r) = (pc.eval(k - h).unwrap(), pc.eval(k).unwrap(), pc.eval(k + h).unwrap());
+    let (dl, dr) = ([m[0] - l[0], m[1] - l[1]], [r[0] - m[0], r[1] - m[1]]);
+    let cos = (dl[0] * dr[0] + dl[1] * dr[1]) / (dl[0].hypot(dl[1]) * dr[0].hypot(dr[1]));
+    assert!(cos > 1. - 1e-6, "the pcurve turns by {} degrees at the knot", cos.min(1.).acos().to_degrees());
+}
+
 /// Hostile records give errors, never a panic.
 #[test]
 fn hostile_records_give_errors() {

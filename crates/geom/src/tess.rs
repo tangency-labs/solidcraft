@@ -193,7 +193,31 @@ impl EvalCurve {
         if p == 0 || p > MAX_SPLINE_DEGREE || n <= p || self.knots.len() != n + p + 1 || !t.is_finite() {
             return None;
         }
-        let span = span_of(&self.knots, p, n, t);
+        self.eval_on(span_of(&self.knots, p, n, t), t)
+    }
+
+    /// The first derivative at `t` from either side: on the knot spans that end and start
+    /// there where `t` is a knot (the polynomials either side of it), else the derivative twice.
+    pub fn sides(&self, t: f64) -> Option<(Vec3, Vec3)> {
+        let p = self.degree;
+        let n = self.ctrl.len();
+        if p == 0 || p > MAX_SPLINE_DEGREE || n <= p || self.knots.len() != n + p + 1 || !t.is_finite() {
+            return None;
+        }
+        let right = span_of(&self.knots, p, n, t);
+        // The last non-empty span before `t`'s, when `t` is where it starts.
+        let left = match self.knots.get(right) {
+            Some(&k) if k == t => {
+                (p..right).rev().find(|&i| matches!((self.knots.get(i), self.knots.get(i + 1)), (Some(a), Some(b)) if a < b)).unwrap_or(right)
+            }
+            _ => right,
+        };
+        Some((self.eval_on(left, t)?.1, self.eval_on(right, t)?.1))
+    }
+
+    /// Point and first derivative at `t` of the polynomial on knot span `span`.
+    fn eval_on(&self, span: usize, t: f64) -> Option<(Vec3, Vec3)> {
+        let p = self.degree;
         let ders = basis_ders(&self.knots, span, p, t)?;
         let (mut a, mut da) = ([0.0; 4], [0.0; 4]);
         for (k, (n0, n1)) in ders[0].iter().zip(&ders[1]).take(p + 1).enumerate() {

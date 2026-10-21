@@ -99,7 +99,7 @@ impl List {
     }
 
     fn raw(&self) -> ffi::sweeps::List<'_> {
-        ffi::sweeps::List { kinds: &self.kinds, reals: &self.reals }
+        ffi::sweeps::List::new(&self.kinds, &self.reals)
     }
 }
 
