@@ -88,3 +88,66 @@ name = "android.app.lib_name"
 [[package.metadata.android.application.activity.intent_filter]]
 actions = ["android.intent.action.MAIN"]
 categories = ["android.intent.category.LAUNCHER"]
+
+# "Open with": the file browsers offer SolidCraft for the documents it reads. Android's chooser
+# matches a MIME type, never a file name, so this filter names the types the CAD formats travel
+# as — and the generic binary type the system falls back to for a format it cannot place (a
+# `.solidcraft` design, a `.3mf` mesh). The types must stay in step with `MIME_EXTS` in
+# src/saf.rs, which the manifest test checks.
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.VIEW"]
+categories = ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"]
+data = [
+  { scheme = "content" },
+  { scheme = "file" },
+  { mime_type = "application/octet-stream" },
+  { mime_type = "application/x-solidcraft" },
+  { mime_type = "model/step" },
+  { mime_type = "application/step" },
+  { mime_type = "application/x-step" },
+  { mime_type = "model/stl" },
+  { mime_type = "application/x-stl" },
+  { mime_type = "model/iges" },
+  { mime_type = "application/x-iges" },
+  { mime_type = "model/obj" },
+  { mime_type = "application/x-obj" },
+  { mime_type = "model/3mf" },
+  { mime_type = "model/gltf+json" },
+  { mime_type = "model/gltf-binary" },
+]
+
+# The same documents by their extension, for a browser that sends a type of its own (or one we
+# do not know): the path of a `content://` uri carries the document's name, and the host may be
+# any provider, hence the "*". A path is only looked at when the filter names a host, so this
+# filter names one.
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.VIEW"]
+categories = ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"]
+data = [
+  { scheme = "content" },
+  { host = "*" },
+  { mime_type = "*/*" },
+  { path_pattern = ".*\\.solidcraft" },
+  { path_pattern = ".*\\.step" },
+  { path_pattern = ".*\\.stp" },
+  { path_pattern = ".*\\.igs" },
+  { path_pattern = ".*\\.iges" },
+  { path_pattern = ".*\\.fcstd" },
+  { path_pattern = ".*\\.3dm" },
+  { path_pattern = ".*\\.3mf" },
+  { path_pattern = ".*\\.stl" },
+  { path_pattern = ".*\\.obj" },
+  { path_pattern = ".*\\.gltf" },
+  { path_pattern = ".*\\.glb" },
+]
+
+# A browser that sends the document without a type at all: only a filter without a type
+# matches such an intent.
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.VIEW"]
+categories = ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"]
+data = [{ scheme = "content" }, { scheme = "file" }]
+
+[dev-dependencies]
+# The manifest test reads this package's own metadata (the "Open with" intent filter).
+toml = { workspace = true }

@@ -15,6 +15,11 @@
 //! runs every frame afterwards and closes the loop: each temporary is copied to its document
 //! once, each mirror is copied over whenever the session has been clean since the last copy.
 //!
+//! The other way a document reaches the app is the file browser's "Open with": it sends an
+//! `ACTION_VIEW` intent, which the Java shim catches and leaves in a static field. [`Views`]
+//! reads that field, copies the document into the app's own store (the same copy an Open
+//! makes) and the shell opens it.
+//!
 //! Everything that needs no JNI — names, free paths, mime types, the mirror's bookkeeping —
 //! is plain Rust at the top of this module and covered by host tests.
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -29,6 +34,44 @@ const NAME_TRIES: usize = 100;
 /// The only principal type that satisfies the system picker's `*/*` filter whatever the
 /// command wants (Android forbids a MIME type of exactly `*`).
 pub(crate) const ANY_TYPE: &str = "*/*";
+
+/// The MIME types a file browser may send for the formats the engine reads, with the
+/// extension it reads each from. Android's chooser matches a type, never a file name, so
+/// these types are what make SolidCraft appear in "Open with": the manifest's intent filter
+/// names them all (the manifest test checks that), and the type tells the engine which
+/// format a document without an extension in its name is.
+pub(crate) const MIME_EXTS: [(&str, &str); 13] = [
+    ("application/x-solidcraft", "solidcraft"),
+    ("model/step", "step"),
+    ("application/step", "step"),
+    ("application/x-step", "step"),
+    ("model/stl", "stl"),
+    ("application/x-stl", "stl"),
+    ("model/iges", "iges"),
+    ("application/x-iges", "iges"),
+    ("model/obj", "obj"),
+    ("application/x-obj", "obj"),
+    ("model/3mf", "3mf"),
+    ("model/gltf+json", "gltf"),
+    ("model/gltf-binary", "glb"),
+];
+
+/// The generic type the system falls back to for a format it cannot place: a `.solidcraft`
+/// design and a `.3mf` mesh travel as it, and so does every other binary file. The manifest
+/// names it too, which the manifest test checks.
+#[cfg(test)]
+pub(crate) const GENERIC_TYPE: &str = "application/octet-stream";
+
+/// The extensions of the formats the engine reads — what `doc.open` takes: a design first (it
+/// is SolidCraft's own format), then the CAD formats. The manifest matches each by the
+/// document's name, which the manifest test checks.
+#[cfg(test)]
+pub(crate) const READABLE_EXTS: [&str; 12] = ["solidcraft", "step", "stp", "igs", "iges", "fcstd", "3dm", "3mf", "stl", "obj", "gltf", "glb"];
+
+/// The static field the Activity shim leaves a VIEW request in (`java/`): the document a file
+/// browser asked us to open. The name must stay in step with the shim, which the manifest
+/// test checks.
+pub(crate) const PENDING_VIEW: &str = "pendingView";
 
 /// Where a picked document belongs once the engine has written its bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,6 +239,38 @@ fn hex_byte(b: u8) -> Option<u8> {
     }
 }
 
+/// A document a VIEW intent asked us to open, as the Activity shim left it:
+/// `<count>|<type>|<uri>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ViewRequest {
+    /// The count of the request: every request is its own, even the same document twice.
+    pub count: u64,
+    /// The type the browser sent ("" when it sent none).
+    pub mime: String,
+    /// The document's uri.
+    pub uri: String,
+}
+
+/// The document a VIEW intent asked us to open, as the Activity shim left it:
+/// `<count>|<type>|<uri>`. The count makes every request its own — the same document twice
+/// is two requests — and the uri is everything behind the second `|`, so a uri may hold a
+/// `|` of its own. `None` when there is no request or it is malformed.
+pub(crate) fn parse_view_request(text: &str) -> Option<ViewRequest> {
+    let (count, rest) = text.split_once('|')?;
+    let count = count.parse::<u64>().ok()?;
+    let (mime, uri) = rest.split_once('|')?;
+    let uri = uri.trim();
+    (!uri.is_empty()).then(|| ViewRequest { count, mime: mime.trim().to_ascii_lowercase(), uri: uri.to_string() })
+}
+
+/// The extension the engine reads a MIME type from: the format a document without an
+/// extension in its name is in. `None` for a type that names no format of ours (the generic
+/// binary type says nothing).
+pub(crate) fn mime_ext(mime: &str) -> Option<&'static str> {
+    let mime = mime.trim().to_ascii_lowercase();
+    MIME_EXTS.iter().find(|(m, _)| *m == mime).map(|(_, ext)| *ext)
+}
+
 /// Whether the mirror of a linked design is behind its document: the session is clean, its
 /// path is that mirror (the user has not Save As'd elsewhere since), and the bytes have not
 /// been copied over since the last change (`revision` also moves when undo returns to the
@@ -338,23 +413,14 @@ mod imp {
         /// The path the completion hands back: the materialized copy (Open), the engine's
         /// mirror (Design) or the temporary the export is written to (Export).
         fn finish(&self, uri: &str) -> Option<String> {
-            let shown = query_display_name(&self.app, uri).or_else(|| display_from_uri(uri)).unwrap_or_else(|| self.name.clone());
+            let shown = shown_name(&self.app, uri, &self.name);
             match self.kind {
                 Kind::Open => {
                     // Designs land beside the autosaves (Save then keeps that copy current,
                     // as the web build keeps its downloads); everything else is imported.
                     // The copy keeps a usable extension: a provider that reports only a name
                     // (`1075`) would otherwise leave the engine unable to read the format.
-                    let ext = materialized_ext(&shown, uri, &self.exts);
-                    let name = with_ext(&shown, ext.as_deref());
-                    let sub = if solidcraft_engine::io::is_design_path(&name) { "designs" } else { "imports" };
-                    let dir = recovery::data_dir()?.join(sub);
-                    let path = free_path(&dir, &name, "imported")?;
-                    let bytes = read_uri(&self.app, uri, solidcraft_engine::io::MAX_DESIGN_BYTES).ok()?;
-                    if let Err(e) = std::fs::write(&path, &bytes) {
-                        log::error!("Android: could not copy the picked document to {}: {e}", path.display());
-                        return None;
-                    }
+                    let path = materialize(&self.app, uri, &shown, &self.exts).ok()?;
                     Some(path.to_string_lossy().into_owned())
                 }
                 Kind::Design => {
@@ -406,6 +472,94 @@ mod imp {
             let Some(uri) = uri else { return Poll::Ready(None) };
             Poll::Ready(this.finish(&uri))
         }
+    }
+
+    /// The documents the file browsers asked SolidCraft to open ("Open with"). The Activity
+    /// shim leaves them in a static field; the shell asks for the new ones now and then.
+    #[derive(Default)]
+    pub(crate) struct Views {
+        /// The count of the request already handled: an older request is not new again.
+        seen: u64,
+    }
+
+    /// What a new "Open with" request asked for.
+    pub(crate) enum View {
+        /// The document, copied into the app's own store.
+        Opened(PathBuf),
+        /// The document could not be read.
+        Failed(String),
+    }
+
+    impl Views {
+        /// The document a new "Open with" request asks for. `None` when no request arrived
+        /// since the last call.
+        pub(crate) fn take(&mut self, app: &AndroidApp) -> Option<View> {
+            let request = pending_view(app)?;
+            if request.count <= self.seen {
+                // The same request as last time (the shell looked again before the next
+                // document arrived).
+                return None;
+            }
+            self.seen = request.count;
+            let shown = shown_name(app, &request.uri, "");
+            // The name of the document says its format; the type the browser sent says it too,
+            // when the name carries no extension of its own.
+            let exts: Vec<String> = mime_ext(&request.mime).map(|e| vec![e.to_string()]).unwrap_or_default();
+            // A document whose name and uri carry no extension, and whose type names no format
+            // of ours, is a document whose format cannot be told: the engine would only say
+            // "unknown format" much later.
+            if materialized_ext(&shown, &request.uri, &exts).is_none() {
+                return Some(View::Failed("the document's format could not be told from its name".into()));
+            }
+            Some(match materialize(app, &request.uri, &shown, &exts) {
+                Ok(path) => View::Opened(path),
+                Err(why) => View::Failed(why),
+            })
+        }
+    }
+
+    /// The document a VIEW intent asked us to open: the Activity shim's `pendingView` field.
+    /// `None` when no request arrived.
+    fn pending_view(app: &AndroidApp) -> Option<ViewRequest> {
+        with_env(app, |env| -> jni::errors::Result<Option<ViewRequest>> {
+            let activity = activity(env, app);
+            // The Activity's own class: the field is static, and a native thread cannot find
+            // the class by name (its class loader is the system's).
+            let class = env.call_method(&activity, jni_str!("getClass"), jni_sig!("()Ljava/lang/Class;"), &[])?.l()?;
+            let class = JClass::cast_local(env, class)?;
+            let name = jni::strings::JNIString::new(PENDING_VIEW);
+            let value = env.get_static_field(&class, name.borrowed(), jni_sig!("Ljava/lang/String;"))?.l()?;
+            if value.is_null() {
+                return Ok(None);
+            }
+            let text = JString::cast_local(env, value)?.try_to_string(env)?;
+            Ok(parse_view_request(&text))
+        })
+        .ok()
+        .flatten()
+    }
+
+    /// The name a document provider shows for a document, as far as the uri itself says: the
+    /// provider's own name, else the uri's last segment, else `fallback`.
+    fn shown_name(app: &AndroidApp, uri: &str, fallback: &str) -> String {
+        query_display_name(app, uri).or_else(|| display_from_uri(uri)).unwrap_or_else(|| fallback.to_string())
+    }
+
+    /// A document of the system's, copied into the app's own store: designs beside the
+    /// autosaves, everything else into `imports/`. The copy keeps the extension the engine
+    /// reads the format from — a provider that reports only a name (`1075`) would otherwise
+    /// leave the engine unable to tell a design from a STEP file.
+    fn materialize(app: &AndroidApp, uri: &str, shown: &str, exts: &[String]) -> Result<PathBuf, String> {
+        let ext = materialized_ext(shown, uri, exts);
+        let name = with_ext(shown, ext.as_deref());
+        let sub = if solidcraft_engine::io::is_design_path(&name) { "designs" } else { "imports" };
+        let dir = recovery::data_dir().ok_or("the app has nowhere to keep the document")?.join(sub);
+        let path = free_path(&dir, &name, "imported").ok_or("the document has no usable name")?;
+        let bytes = read_uri(app, uri, solidcraft_engine::io::MAX_DESIGN_BYTES)?;
+        if let Err(e) = std::fs::write(&path, &bytes) {
+            return Err(format!("the document could not be copied: {e}"));
+        }
+        Ok(path)
     }
 
     /// Open the system's document screen. Everything that must happen on the Java main
@@ -715,7 +869,7 @@ mod imp {
 }
 
 #[cfg(target_os = "android")]
-pub(crate) use imp::{Picker, deliver};
+pub(crate) use imp::{Picker, View, Views, deliver};
 
 #[cfg(test)]
 mod tests {
@@ -843,5 +997,190 @@ mod tests {
         assert!(list.iter().any(|t| matches!(t, Target::Linked { mirror, synced: None, .. } if mirror == &PathBuf::from("/b.solidcraft"))));
         assert!(!list.iter().any(|t| matches!(t, Target::Linked { mirror, .. } if mirror == &PathBuf::from("/a.solidcraft"))));
         assert!(list.iter().any(|t| matches!(t, Target::OneShot { name, .. } if name == "x.step")));
+    }
+
+    /// The "Open with" intent filters of this package's own manifest: the ones the file
+    /// browsers match a document against.
+    fn view_filters() -> Vec<toml::Value> {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        let value: toml::Value = toml::from_str(&text).unwrap();
+        let activities = value
+            .get("package")
+            .and_then(|p| p.get("metadata"))
+            .and_then(|m| m.get("android"))
+            .and_then(|a| a.get("application"))
+            .and_then(|a| a.get("activity"))
+            .and_then(|a| a.as_array())
+            .unwrap();
+        activities
+            .iter()
+            .flat_map(|a| a.get("intent_filter").and_then(|f| f.as_array()).into_iter().flatten())
+            .filter(|f| {
+                f.get("actions").and_then(|a| a.as_array()).is_some_and(|a| a.iter().any(|v| v.as_str() == Some("android.intent.action.VIEW")))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// The `<data>` entries of the "Open with" filters: the schemes, the types and the name
+    /// patterns they take.
+    fn view_data(filters: &[toml::Value]) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
+        let data: Vec<&toml::Value> = filters.iter().flat_map(|f| f.get("data").and_then(|d| d.as_array()).into_iter().flatten()).collect();
+        let schemes = data.iter().filter_map(|d| d.get("scheme").and_then(|s| s.as_str())).collect();
+        let mimes = data.iter().filter_map(|d| d.get("mime_type").and_then(|m| m.as_str())).collect();
+        let patterns = data.iter().filter_map(|d| d.get("path_pattern").and_then(|m| m.as_str())).collect();
+        (schemes, mimes, patterns)
+    }
+
+    #[test]
+    fn the_manifest_offers_solidcraft_for_the_documents_it_reads() {
+        let filters = view_filters();
+        assert!(!filters.is_empty(), "the manifest has no \"Open with\" intent filter");
+        let (schemes, mimes, patterns) = view_data(&filters);
+        // The file browsers hand the document over as a content:// uri (a file:// one when
+        // they have no provider for it).
+        assert!(schemes.contains(&"content"), "the \"Open with\" filter takes no content:// document");
+        assert!(schemes.contains(&"file"), "the \"Open with\" filter takes no file:// document");
+        // Every type the browsers send for a format of ours is offered.
+        for (mime, _) in MIME_EXTS {
+            assert!(mimes.contains(&mime), "the \"Open with\" filter does not offer {mime}");
+        }
+        // The generic binary type is what a `.solidcraft` design travels as.
+        assert!(mimes.contains(&GENERIC_TYPE), "the \"Open with\" filter does not offer the generic binary type");
+        // Every format SolidCraft reads is matched by the document's name too, for a browser
+        // that sends a type of its own.
+        for ext in READABLE_EXTS {
+            let pattern = format!(".*\\.{ext}");
+            assert!(patterns.contains(&pattern.as_str()), "the \"Open with\" filter does not match a .{ext} by its name");
+        }
+    }
+
+    #[test]
+    fn the_shim_leaves_the_document_where_the_shell_looks_for_it() {
+        let shim = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("java/io/solidcraft/SolidcraftActivity.java");
+        let text = std::fs::read_to_string(&shim).unwrap();
+        assert!(text.contains(&format!("String {PENDING_VIEW}")), "the shim has no {PENDING_VIEW} field");
+        // A second document arrives at the running Activity, not in a new one.
+        assert!(text.contains("onNewIntent"), "the shim ignores a second document");
+        // The type the browser sent travels with the document: it names the format of a
+        // document whose own name carries no extension.
+        assert!(text.contains("intent.getType()"), "the shim drops the browser's type");
+    }
+
+    #[test]
+    fn a_view_request_carries_its_count_its_type_and_its_document() {
+        // The shim's field: a count, the browser's type and the document's uri.
+        let request = parse_view_request("1|model/step|content://documents/1").unwrap();
+        assert_eq!(request.count, 1);
+        assert_eq!(request.mime, "model/step");
+        assert_eq!(request.uri, "content://documents/1");
+        // The same document twice is two requests: the counts tell them apart.
+        assert_eq!(parse_view_request("2|model/step|content://documents/1").unwrap().count, 2);
+        // A browser that sends no type says so with an empty one.
+        let bare = parse_view_request("3||content://documents/1").unwrap();
+        assert_eq!(bare.mime, "");
+        assert_eq!(bare.uri, "content://documents/1");
+        // A uri may hold a '|' of its own: everything behind the second one is the uri.
+        assert_eq!(parse_view_request("4|model/step|content://x/a|b").unwrap().uri, "content://x/a|b");
+        // Nothing to open, or nothing that says what.
+        assert_eq!(parse_view_request(""), None);
+        assert_eq!(parse_view_request("4"), None);
+        assert_eq!(parse_view_request("|model/step|content://x"), None);
+        assert_eq!(parse_view_request("x|model/step|content://x"), None);
+        assert_eq!(parse_view_request("5|model/step|"), None);
+    }
+
+    #[test]
+    fn a_browsers_type_names_the_format_of_a_document_without_an_extension() {
+        // A provider that reports a bare name (a number) leaves the type as the only hint.
+        assert_eq!(mime_ext("model/step"), Some("step"));
+        assert_eq!(mime_ext("application/x-solidcraft"), Some("solidcraft"));
+        assert_eq!(mime_ext("MODEL/STL"), Some("stl"));
+        // The generic type says nothing: the name has to.
+        assert_eq!(mime_ext(GENERIC_TYPE), None);
+        assert_eq!(mime_ext("text/plain"), None);
+    }
+
+    /// The path of a uri, as the platform reads it: the part behind the host, percent-decoded.
+    fn uri_path(uri: &str) -> String {
+        let rest = uri.split_once("://").map(|(_, r)| r).unwrap_or(uri);
+        let path = match rest.split_once('/') {
+            Some((_, path)) => path,
+            None => "",
+        };
+        percent_decode(path)
+    }
+
+    /// Whether the platform's simple glob (`android.os.PatternMatcher`, SDK sources) matches.
+    /// Our patterns are all ".*" followed by an escaped suffix: the platform's ".*" swallows
+    /// the text up to its first dot, its escaped dot takes that dot, and the rest of the text
+    /// must be the suffix — the glob is not greedy, so "my.part.step" does not match
+    /// ".*\.step".
+    fn simple_glob(pattern: &str, text: &str) -> bool {
+        let Some(suffix) = pattern.strip_prefix(".*\\") else { return false };
+        match text.find('.') {
+            Some(dot) => text[dot..] == *suffix,
+            None => false,
+        }
+    }
+
+    /// Whether one "Open with" filter takes an intent, as the platform's
+    /// `android.content.IntentFilter` (SDK sources, android-36) decides it:
+    ///
+    /// - the scheme of the intent must be one the filter names;
+    /// - a filter that names types knows an intent whose type is one of them ("*/*" knows
+    ///   every type) and never an intent without a type; a filter that names no type takes
+    ///   an intent without a type and never one with a type;
+    /// - the path patterns are only looked at when the filter names a host.
+    fn filter_takes(filter: &toml::Value, mime: Option<&str>, uri: &str) -> bool {
+        let data: Vec<&toml::Value> = filter.get("data").and_then(|d| d.as_array()).into_iter().flatten().collect();
+        let schemes: Vec<&str> = data.iter().filter_map(|d| d.get("scheme").and_then(|s| s.as_str())).collect();
+        let types: Vec<&str> = data.iter().filter_map(|d| d.get("mime_type").and_then(|m| m.as_str())).collect();
+        let hosts: Vec<&str> = data.iter().filter_map(|d| d.get("host").and_then(|h| h.as_str())).collect();
+        let patterns: Vec<&str> = data.iter().filter_map(|d| d.get("path_pattern").and_then(|p| p.as_str())).collect();
+        // The scheme.
+        let scheme = uri.split(':').next().unwrap_or("");
+        if !schemes.contains(&scheme) {
+            return false;
+        }
+        // The type.
+        if types.is_empty() {
+            if mime.is_some() {
+                return false;
+            }
+        } else if !types.iter().any(|t| *t == "*/*" || Some(*t) == mime) {
+            return false;
+        }
+        // The path, but only when the filter names a host: the platform looks at the path
+        // only then.
+        if !hosts.is_empty() && !patterns.is_empty() {
+            let path = uri_path(uri);
+            if !patterns.iter().any(|p| simple_glob(p, &path)) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn the_open_with_filters_take_the_documents_the_browsers_send() {
+        let filters = view_filters();
+        let takes = |mime: Option<&str>, uri: &str| filters.iter().any(|f| filter_takes(f, mime, uri));
+        // A design the browser sends as the generic binary type (it knows no type for it).
+        assert!(takes(Some(GENERIC_TYPE), "content://com.android.providers.documents/document/primary%3ADownload%2Fplate.solidcraft"));
+        // A design the browser sends with our own type.
+        assert!(takes(Some("application/x-solidcraft"), "content://media/external/file/42"));
+        // A STEP file, with the type the world knows and with an alias of it.
+        assert!(takes(Some("model/step"), "content://x/document/1"));
+        assert!(takes(Some("application/x-step"), "content://x/document/1"));
+        // A STEP file the browser sends without a type: only a filter without a type takes it.
+        assert!(takes(None, "content://x/document/1"));
+        // A STEP file the browser sends with a type of its own: the document's name still
+        // gives the format away.
+        assert!(takes(Some("application/x-tgif"), "content://x/document/primary%3ADownload%2Fpart.step"));
+        // A file that is none of ours: SolidCraft stays out of the list.
+        assert!(!takes(Some("image/png"), "content://x/document/primary%3ADownload%2Fphoto.png"));
+        assert!(!takes(Some("image/png"), "content://x/document/1"));
     }
 }

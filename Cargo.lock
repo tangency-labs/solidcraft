@@ -4257,6 +4257,7 @@ dependencies = [
  "log",
  "solidcraft-engine",
  "solidcraft-ui-egui",
+ "toml",
  "winit",
 ]
 

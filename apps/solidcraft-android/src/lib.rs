@@ -11,8 +11,10 @@
 //! over Vulkan, egui-winit's touch and pinch input, and the system Back button as Escape.
 //! Files meet the system through [`saf`]: Open and Save As launch the Android document
 //! pickers, exports go through them too, and the shell copies the engine's bytes to the
-//! picked `content://` documents (bundled CJK fallback fonts and on-device screenshots are
-//! still follow-ups).
+//! picked `content://` documents. A document the user opens from the file browser ("Open
+//! with") arrives as an intent instead: the Activity shim catches it and the shell copies it
+//! into the app's own store before the engine opens it (bundled CJK fallback fonts and
+//! on-device screenshots are still follow-ups).
 //!
 //! The crate denies `unsafe` (the workspace forbids it) so that the few entry points that
 //! must reach Java — `android::android_main` (loaded by name) and the SAF JNI calls in
@@ -39,6 +41,8 @@ mod android {
     /// The settings are checked this often (seconds) and written when they changed; also on
     /// exit. `eframe` never calls `App::save` here — it has no `Storage` on Android.
     const PREFS_INTERVAL_SECS: f64 = 5.0;
+    /// How often the shell looks for a document the file browser asked us to open (seconds).
+    const VIEW_POLL_SECS: f64 = 0.25;
 
     /// What `android-activity` (through winit) calls on the Activity's main-loop thread. The
     /// NativeActivity glue looks this symbol up in the cdylib the Activity loads, so it must be
@@ -130,7 +134,7 @@ mod android {
             solidcraft_ui_egui::recovery_ui::start(&mut solve, &dir, std::time::Duration::from_secs_f64(every.min(1e9)));
         }
         solidcraft_engine::crash::phase("first frame");
-        Ok(Box::new(Shell { solve, app, targets, prefs_path, saved_prefs: loaded, prefs_at: 0.0 }))
+        Ok(Box::new(Shell { solve, app, targets, prefs_path, saved_prefs: loaded, prefs_at: 0.0, views: saf::Views::default(), view_at: 0.0 }))
     }
 
     /// The host services: the system document pickers of [`saf`]. `pick_save` branches on the
@@ -168,6 +172,10 @@ mod android {
         saved_prefs: Option<String>,
         /// `solve.now` of the last settings check.
         prefs_at: f64,
+        /// The documents the file browsers asked us to open ("Open with").
+        views: saf::Views,
+        /// `solve.now` of the last look for such a request.
+        view_at: f64,
     }
 
     impl Shell {
@@ -202,6 +210,20 @@ mod android {
             // Export temporaries and linked mirrors reach their picked `content://` documents
             // here (the engine writes plain paths only); quiet unless a copy fails.
             saf::deliver(&self.app, &self.targets, &mut self.solve);
+            // A document the user opened from the file browser arrives as an intent, not as a
+            // path: the Activity shim leaves it in a field the shell reads here, and the
+            // document is copied into the app's own store before the engine opens it.
+            if self.solve.now - self.view_at >= VIEW_POLL_SECS {
+                self.view_at = self.solve.now;
+                match self.views.take(&self.app) {
+                    Some(saf::View::Opened(path)) => {
+                        log::info!("Android: opening {} from the file browser", path.display());
+                        self.solve.open_path_async(&path.to_string_lossy());
+                    }
+                    Some(saf::View::Failed(why)) => self.solve.set_status(format!("Could not open the document: {why}"), true),
+                    None => {}
+                }
+            }
             if self.solve.quit_requested {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
