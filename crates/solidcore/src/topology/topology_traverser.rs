@@ -71,6 +71,17 @@ pub enum Entity {
 pub struct Marks(BTreeMap<Entity, Topology>);
 
 impl Marks {
+    /// Import the caller's persistent topology record before traversal.
+    pub fn set_record(&mut self, entity: Entity, record: Topology) {
+        self.0.insert(entity, record);
+    }
+
+    /// The updated topology record, including marks written before an error.
+    #[must_use]
+    pub fn record(&self, entity: Entity) -> Option<&Topology> {
+        self.0.get(&entity)
+    }
+
     /// Whether `entity` carries the kernel's current `mark` value.
     #[must_use]
     pub fn is_marked(&self, k: &Kernel, entity: Entity, mark: MarkType) -> bool {

@@ -285,7 +285,7 @@ impl TopologySweep {
                 continue;
             };
             let interval = curve.natural_interval();
-            let point = curve.evaluate_point(a.kernel(original.0)?, interval.max())?;
+            let point = curve.evaluate_point(a.kernel(region.0)?, interval.max())?;
             // bNewVtxNeeded is unconditionally TRUE in the active upstream code.
             let point0 = vertex::point(a.brep(original.0)?, original.1)?;
             let (_, start) = a.make_shell_vertex(region, point0)?;

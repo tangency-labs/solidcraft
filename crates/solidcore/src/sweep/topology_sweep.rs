@@ -29,6 +29,7 @@
 pub mod access;
 pub mod engine;
 pub mod geometry;
+pub mod store;
 
 use std::collections::BTreeMap;
 
