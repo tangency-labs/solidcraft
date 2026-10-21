@@ -2215,6 +2215,21 @@ mod tests {
     }
 
     #[test]
+    fn null_matrix_has_a_defined_full_type() {
+        // tangency-labs/smlib a05e288 (#370): N_InitRealMatrix left the type
+        // indeterminate, and N_RealMatrixIsNULL loads it; the fork sets NL_MT_FULL.
+        // The port's null matrix has that type, and the first N_CheckMemRealMatrix
+        // allocates it with the caller's type.
+        let mut a = RealMatrix::null();
+        assert_eq!(a.matrix_type(), MatrixType::Full);
+        assert!(a.is_null());
+        a.ensure(2, 3, MatrixType::Full, 1).unwrap();
+        assert!(!a.is_null());
+        assert_eq!(a.matrix_type(), MatrixType::Full);
+        assert_eq!(a.get(2, 3).unwrap(), 0.0);
+    }
+
+    #[test]
     fn cpoint_markers_propagate() {
         let a = CPoint::new(1.0, 2.0, NOZ, NOW);
         let b = CPoint::new(3.0, 4.0, 5.0, 2.0);
